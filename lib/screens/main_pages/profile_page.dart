@@ -549,7 +549,7 @@ class _ProfilePageState extends State<ProfilePage> {
                               ? '$deletedChatsCount deleted chat${deletedChatsCount > 1 ? 's' : ''}'
                               : 'View deleted chats',
                           onTap: () async {
-                            await Navigator.push(
+                            final result = await Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (context) => DeletedChatsPage(),
@@ -557,6 +557,12 @@ class _ProfilePageState extends State<ProfilePage> {
                             );
                             // Refresh count when returning
                             _loadDeletedChatsCount();
+
+                            // If a chat was restored, notify the parent to refresh
+                            if (result == true && mounted) {
+                              // Send a signal to refresh the chats page
+                              Navigator.pop(context, 'refresh_chats');
+                            }
                           },
                         ),
                       ],

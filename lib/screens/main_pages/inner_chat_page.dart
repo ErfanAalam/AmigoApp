@@ -406,9 +406,6 @@ class _InnerChatPageState extends State<InnerChatPage>
         'name': widget.conversation.userName,
         'profile_pic': widget.conversation.userProfilePic,
       };
-      debugPrint(
-        '👤 Cached user info for ${widget.conversation.userId}: ${widget.conversation.userName}',
-      );
     }
 
     // Cache current user info
@@ -776,14 +773,6 @@ class _InnerChatPageState extends State<InnerChatPage>
   Future<void> _loadInitialMessages() async {
     try {
       final conversationId = widget.conversation.conversationId;
-
-      final response = await _chatsServices.getConversationHistory(
-        conversationId: conversationId,
-        page: 1,
-        limit: 20,
-      );
-
-      print('response: ${response['data']['data']['members']}');
 
       // If we already have messages from cache, do smart sync
       if (_hasCheckedCache && _messages.isNotEmpty) {
@@ -1992,8 +1981,8 @@ class _InnerChatPageState extends State<InnerChatPage>
           'conversation_id': widget.conversation.conversationId,
         });
       }
-
       _optimisticMessageId--;
+
     } catch (e) {
       debugPrint('❌ Error sending message: $e');
 

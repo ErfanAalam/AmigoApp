@@ -230,6 +230,12 @@ class ApiService {
         'ip_address': (ipResult['ip']).toString(),
       };
 
+      final response = await authenticatedPost(
+        '/user/update-user',
+        data: data,
+      );
+      return response.data;
+
     } catch (e) {
       print('❌ Error updating user location and IP: $e');
     }
