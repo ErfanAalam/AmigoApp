@@ -71,25 +71,26 @@ class GroupsService {
   // Add member to group
   Future<Map<String, dynamic>> addMember(
     int conversationId,
-    int userId, {
+    List<int> userIds, {
     String role = 'member',
   }) async {
     try {
+      print('userIds: $userIds');
+      print('conversationId: $conversationId');
+      print('role: $role');
+
       final response = await _apiService.authenticatedPost(
-        '/chat/add-member',
+        '/chat/add-members',
         data: {
           'conversation_id': conversationId,
-          'user_id': userId,
+          'user_ids': userIds,
           'role': role,
         },
       );
 
-      return {
-        'success': response.statusCode == 200,
-        'statusCode': response.statusCode,
-        'data': response.data,
-        'message': 'Member added successfully',
-      };
+      print('response: $response');
+
+      return response.data;
     } on DioException catch (e) {
       return {
         'success': false,
@@ -115,15 +116,10 @@ class GroupsService {
     try {
       final response = await _apiService.authenticatedDelete(
         '/chat/remove-member',
-        queryParameters: {'conversation_id': conversationId, 'user_id': userId},
+        body: {'conversation_id': conversationId, 'user_id': userId},
       );
 
-      return {
-        'success': response.statusCode == 200,
-        'statusCode': response.statusCode,
-        'data': response.data,
-        'message': 'Member removed successfully',
-      };
+      return response.data;
     } on DioException catch (e) {
       return {
         'success': false,
@@ -183,7 +179,7 @@ class GroupsService {
   }) async {
     try {
       final response = await _apiService.authenticatedGet(
-        '/chat/ -conversation-history/$conversationId?page=$page&limit=$limit',
+        '/chat/get-conversation-history/$conversationId?page=$page&limit=$limit',
       );
 
       return {
@@ -235,6 +231,30 @@ class GroupsService {
         'success': false,
         'error': e.toString(),
         'message': 'Failed to delete group',
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> getGroupInfo(int conversationId) async {
+    try {
+      final response = await _apiService.authenticatedGet(
+        '/chat/get-group-info/$conversationId',
+      );
+
+      return response.data;
+    } on DioException catch (e) {
+      return {
+        'success': false,
+        'error': e.message,
+        'type': e.type.toString(),
+        'statusCode': e.response?.statusCode,
+        'message': 'Failed to get group info: ${e.message}',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Failed to get group info',
       };
     }
   }

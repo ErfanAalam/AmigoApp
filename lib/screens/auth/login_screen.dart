@@ -60,7 +60,7 @@ class _LoginScreenState extends material.State<LoginScreen> {
           content: material.Text('Please enter a valid phone number.'),
         ),
       );
-      return; 
+      return;
     }
 
     final response = await apiService.send_login_otp(_completePhoneNumber);
@@ -159,180 +159,441 @@ class _LoginScreenState extends material.State<LoginScreen> {
   @override
   material.Widget build(material.BuildContext context) {
     return material.Scaffold(
-      backgroundColor: material.Colors.white,
-      body: material.SafeArea(
-        child: material.Padding(
-          padding: const material.EdgeInsets.all(20.0),
-          child: material.Column(
-            mainAxisAlignment: material.MainAxisAlignment.center,
-            crossAxisAlignment: material.CrossAxisAlignment.stretch,
-            children: [
-              // App Logo/Title
-              const material.Icon(
-                material.Icons.chat_bubble_outline,
-                size: 80,
-                color: material.Colors.blue,
+      body: material.Container(
+        decoration: const material.BoxDecoration(
+          gradient: material.LinearGradient(
+            begin: material.Alignment.topLeft,
+            end: material.Alignment.bottomRight,
+            colors: [
+              material.Colors.teal,
+              material.Color.fromARGB(255, 10, 107, 97),
+            ],
+            stops: [0.0, 0.5],
+          ),
+        ),
+        child: material.SafeArea(
+          child: material.SingleChildScrollView(
+            padding: const material.EdgeInsets.symmetric(horizontal: 24.0),
+            child: material.ConstrainedBox(
+              constraints: material.BoxConstraints(
+                minHeight:
+                    material.MediaQuery.of(context).size.height -
+                    material.MediaQuery.of(context).padding.top -
+                    material.MediaQuery.of(context).padding.bottom,
               ),
-              const material.SizedBox(height: 20),
-              const material.Text(
-                'Welcome Back!',
-                textAlign: material.TextAlign.center,
-                style: material.TextStyle(
-                  fontSize: 28,
-                  fontWeight: material.FontWeight.bold,
-                  color: material.Colors.black87,
-                ),
-              ),
-              const material.SizedBox(height: 10),
-              material.Text(
-                !_isPhoneSubmitted
-                    ? 'Sign in to continue'
-                    : 'Enter the OTP sent to your phone',
-                textAlign: material.TextAlign.center,
-                style: material.TextStyle(
-                  fontSize: 16,
-                  color: material.Colors.grey[600],
-                ),
-              ),
-              const material.SizedBox(height: 40),
+              child: material.IntrinsicHeight(
+                child: material.Column(
+                  children: [
+                    const material.SizedBox(height: 60),
 
-              // Phone Number Field or OTP Field based on state
-              !_isPhoneSubmitted
-                  ? material.Row(
-                      children: [
-                        // Country Code Selector
-                        CountrySelectorButton(
-                          selectedCountry: _selectedCountry,
-                          onTap: _showCountrySelector,
+                    // App Logo Section
+                    material.Container(
+                      padding: const material.EdgeInsets.all(20),
+                      decoration: material.BoxDecoration(
+                        color: material.Colors.white.withOpacity(0.15),
+                        shape: material.BoxShape.circle,
+                        border: material.Border.all(
+                          color: material.Colors.white.withOpacity(0.3),
+                          width: 2,
                         ),
-                        const material.SizedBox(width: 12),
-                        // Phone Number Input
-                        material.Expanded(
-                          child: material.Container(
+                        boxShadow: [
+                          material.BoxShadow(
+                            color: material.Colors.black.withOpacity(0.1),
+                            blurRadius: 20,
+                            offset: const material.Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: const material.Icon(
+                        material.Icons.chat_bubble_rounded,
+                        size: 60,
+                        color: material.Colors.white,
+                      ),
+                    ),
+
+                    const material.SizedBox(height: 30),
+
+                    // App Name
+                    const material.Text(
+                      'Amigo Chat App',
+                      textAlign: material.TextAlign.center,
+                      style: material.TextStyle(
+                        fontSize: 32,
+                        fontWeight: material.FontWeight.bold,
+                        color: material.Colors.white,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+
+                    const material.SizedBox(height: 8),
+
+                    // Welcome Text
+                    material.Text(
+                      !_isPhoneSubmitted
+                          ? 'Connect with friends and family'
+                          : 'Enter verification code',
+                      textAlign: material.TextAlign.center,
+                      style: material.TextStyle(
+                        fontSize: 16,
+                        color: material.Colors.white.withOpacity(0.9),
+                        fontWeight: material.FontWeight.w400,
+                      ),
+                    ),
+
+                    const material.SizedBox(height: 50),
+
+                    // Main Card
+                    material.Container(
+                      padding: const material.EdgeInsets.all(32),
+                      decoration: material.BoxDecoration(
+                        color: material.Colors.white,
+                        borderRadius: material.BorderRadius.circular(24),
+                        boxShadow: [
+                          material.BoxShadow(
+                            color: material.Colors.black.withOpacity(0.1),
+                            blurRadius: 30,
+                            offset: const material.Offset(0, 15),
+                          ),
+                        ],
+                      ),
+                      child: material.Column(
+                        crossAxisAlignment: material.CrossAxisAlignment.stretch,
+                        children: [
+                          // Phone Number Field or OTP Field based on state
+                          !_isPhoneSubmitted
+                              ? material.Column(
+                                  crossAxisAlignment:
+                                      material.CrossAxisAlignment.start,
+                                  children: [
+                                    material.Text(
+                                      'Phone Number',
+                                      style: material.TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: material.FontWeight.w600,
+                                        color: material.Colors.grey[800],
+                                      ),
+                                    ),
+                                    const material.SizedBox(height: 8),
+                                    material.Row(
+                                      children: [
+                                        // Country Code Selector
+                                        material.Container(
+                                          decoration: material.BoxDecoration(
+                                            color: material.Colors.grey[50],
+                                            borderRadius: material
+                                                .BorderRadius.circular(16),
+                                            border: material.Border.all(
+                                              color: material.Colors.grey[200]!,
+                                            ),
+                                          ),
+                                          child: material.Material(
+                                            color: material.Colors.transparent,
+                                            child: material.InkWell(
+                                              onTap: _showCountrySelector,
+                                              borderRadius: material
+                                                  .BorderRadius.circular(16),
+                                              child: material.Padding(
+                                                padding:
+                                                    const material.EdgeInsets.symmetric(
+                                                      horizontal: 2,
+                                                      vertical: 8,
+                                                    ),
+                                                child: material.Row(
+                                                  mainAxisSize:
+                                                      material.MainAxisSize.min,
+                                                  children: [
+                                                    material.Text(
+                                                      _selectedCountry.flag,
+                                                      style:
+                                                          const material.TextStyle(
+                                                            fontSize: 20,
+                                                          ),
+                                                    ),
+                                                    const material.SizedBox(
+                                                      width: 8,
+                                                    ),
+                                                    material.Text(
+                                                      _selectedCountry.dialCode,
+                                                      style: material.TextStyle(
+                                                        fontSize: 16,
+                                                        fontWeight: material
+                                                            .FontWeight
+                                                            .w600,
+                                                        color: material
+                                                            .Colors
+                                                            .grey[800],
+                                                      ),
+                                                    ),
+                                                    const material.SizedBox(
+                                                      width: 4,
+                                                    ),
+                                                    material.Icon(
+                                                      material
+                                                          .Icons
+                                                          .keyboard_arrow_down,
+                                                      size: 20,
+                                                      color: material
+                                                          .Colors
+                                                          .grey[600],
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        const material.SizedBox(width: 12),
+                                        // Phone Number Input
+                                        material.Expanded(
+                                          child: material.Container(
+                                            decoration: material.BoxDecoration(
+                                              color: material.Colors.grey[50],
+                                              borderRadius: material
+                                                  .BorderRadius.circular(16),
+                                              border: material.Border.all(
+                                                color:
+                                                    material.Colors.grey[200]!,
+                                              ),
+                                            ),
+                                            child: material.Padding(
+                                              padding:
+                                                  const material.EdgeInsets.symmetric(
+                                                    horizontal: 6.0,
+                                                    vertical: 0,
+                                                  ),
+                                              child: material.TextField(
+                                                controller: _phoneController,
+                                                keyboardType: material
+                                                    .TextInputType
+                                                    .phone,
+                                                textInputAction: material
+                                                    .TextInputAction
+                                                    .done,
+                                                onChanged: (value) =>
+                                                    _updateCompletePhoneNumber(),
+                                                style: material.TextStyle(
+                                                  fontSize: 16,
+                                                  fontWeight:
+                                                      material.FontWeight.w500,
+                                                ),
+                                                decoration: material.InputDecoration(
+                                                  hintText:
+                                                      'Enter your phone number',
+                                                  hintStyle: material.TextStyle(
+                                                    color: material
+                                                        .Colors
+                                                        .grey[400],
+                                                    fontSize: 16,
+                                                  ),
+                                                  border:
+                                                      material.InputBorder.none,
+                                                  contentPadding:
+                                                      const material.EdgeInsets.symmetric(
+                                                        vertical: 10.0,
+                                                      ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                )
+                              : material.Column(
+                                  crossAxisAlignment:
+                                      material.CrossAxisAlignment.start,
+                                  children: [
+                                    material.Text(
+                                      'Verification Code',
+                                      style: material.TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: material.FontWeight.w600,
+                                        color: material.Colors.grey[800],
+                                      ),
+                                    ),
+                                    const material.SizedBox(height: 8),
+                                    material.Container(
+                                      decoration: material.BoxDecoration(
+                                        color: material.Colors.grey[50],
+                                        borderRadius:
+                                            material.BorderRadius.circular(16),
+                                        border: material.Border.all(
+                                          color: material.Colors.grey[200]!,
+                                        ),
+                                      ),
+                                      child: material.Padding(
+                                        padding:
+                                            const material.EdgeInsets.symmetric(
+                                              horizontal: 20.0,
+                                            ),
+                                        child: material.TextField(
+                                          controller: _otpController,
+                                          keyboardType:
+                                              material.TextInputType.number,
+                                          textAlign: material.TextAlign.center,
+                                          style: material.TextStyle(
+                                            fontSize: 20,
+                                            fontWeight:
+                                                material.FontWeight.w600,
+                                            letterSpacing: 4,
+                                          ),
+                                          decoration: material.InputDecoration(
+                                            hintText: '000000',
+                                            hintStyle: material.TextStyle(
+                                              color: material.Colors.grey[400],
+                                              fontSize: 20,
+                                              letterSpacing: 4,
+                                            ),
+                                            border: material.InputBorder.none,
+                                            contentPadding:
+                                                const material.EdgeInsets.symmetric(
+                                                  vertical: 18.0,
+                                                ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+
+                          const material.SizedBox(height: 32),
+
+                          // Login Button - changes based on state
+                          material.Container(
                             decoration: material.BoxDecoration(
-                              color: const material.Color(0xFFFAFAFA),
-                              borderRadius: material.BorderRadius.circular(10),
-                              border: material.Border.all(
-                                color: material.Colors.grey.shade300,
+                              gradient: const material.LinearGradient(
+                                colors: [
+                                  material.Colors.teal,
+                                  material.Colors.teal,
+                                ],
                               ),
+                              borderRadius: material.BorderRadius.circular(16),
+                              boxShadow: [
+                                material.BoxShadow(
+                                  color: const material.Color(
+                                    0xFF667eea,
+                                  ).withOpacity(0.3),
+                                  blurRadius: 20,
+                                  offset: const material.Offset(0, 10),
+                                ),
+                              ],
                             ),
-                            child: material.Padding(
-                              padding: const material.EdgeInsets.symmetric(
-                                horizontal: 16.0,
-                                vertical: 0.0,
-                              ),
-                              child: material.TextField(
-                                controller: _phoneController,
-                                keyboardType: material.TextInputType.phone,
-                                textInputAction: material.TextInputAction.done,
-                                onChanged: (value) =>
-                                    _updateCompletePhoneNumber(),
-                                decoration: const material.InputDecoration(
-                                  hintText: 'Phone Number',
-                                  border: material.InputBorder.none,
-                                  contentPadding: material.EdgeInsets.symmetric(
-                                    vertical: 15.0,
+                            child: material.Material(
+                              color: material.Colors.transparent,
+                              child: material.InkWell(
+                                onTap: _isLoading
+                                    ? null
+                                    : () {
+                                        !_isPhoneSubmitted
+                                            ? handlePhoneSubmit()
+                                            : handleOtpSubmit();
+                                      },
+                                borderRadius: material.BorderRadius.circular(
+                                  16,
+                                ),
+                                child: material.Padding(
+                                  padding: const material.EdgeInsets.symmetric(
+                                    vertical: 18,
+                                  ),
+                                  child: material.Row(
+                                    mainAxisAlignment:
+                                        material.MainAxisAlignment.center,
+                                    children: [
+                                      if (_isLoading)
+                                        const material.SizedBox(
+                                          height: 20,
+                                          width: 20,
+                                          child:
+                                              material.CircularProgressIndicator(
+                                                color: material.Colors.white,
+                                                strokeWidth: 2,
+                                              ),
+                                        )
+                                      else ...[
+                                        material.Text(
+                                          !_isPhoneSubmitted
+                                              ? 'Send OTP'
+                                              : 'Verify & Continue',
+                                          style: const material.TextStyle(
+                                            fontSize: 16,
+                                            fontWeight:
+                                                material.FontWeight.bold,
+                                            color: material.Colors.white,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                        const material.SizedBox(width: 8),
+                                        const material.Icon(
+                                          material.Icons.arrow_forward_rounded,
+                                          color: material.Colors.white,
+                                          size: 20,
+                                        ),
+                                      ],
+                                    ],
                                   ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
-                    )
-                  : material.Container(
-                      decoration: material.BoxDecoration(
-                        color: const material.Color(0xFFFAFAFA),
-                        borderRadius: material.BorderRadius.circular(10),
-                        border: material.Border.all(
-                          color: material.Colors.grey.shade300,
-                        ),
-                      ),
-                      child: material.Padding(
-                        padding: const material.EdgeInsets.symmetric(
-                          horizontal: 16.0,
-                          vertical: 0.0,
-                        ),
-                        child: material.TextField(
-                          controller: _otpController,
-                          keyboardType: material.TextInputType.number,
-                          decoration: const material.InputDecoration(
-                            labelText: 'Enter OTP',
-                            border: material.InputBorder.none,
-                            contentPadding: material.EdgeInsets.symmetric(
-                              vertical: 15.0,
-                            ),
+
+                          const material.SizedBox(height: 24),
+
+                          // Sign Up Link
+                          material.Row(
+                            mainAxisAlignment:
+                                material.MainAxisAlignment.center,
+                            children: [
+                              material.Text(
+                                "Don't have an account? ",
+                                style: material.TextStyle(
+                                  color: material.Colors.grey[600],
+                                  fontSize: 14,
+                                ),
+                              ),
+                              material.GestureDetector(
+                                onTap: () {
+                                  material.Navigator.push(
+                                    context,
+                                    material.MaterialPageRoute(
+                                      builder: (context) =>
+                                          const SignUpScreen(),
+                                    ),
+                                  );
+                                },
+                                child: material.Text(
+                                  'Sign Up',
+                                  style: material.TextStyle(
+                                    color: const material.Color(0xFF667eea),
+                                    fontWeight: material.FontWeight.bold,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
+                        ],
                       ),
                     ),
-              const material.SizedBox(height: 30),
 
-              // Login Button - changes based on state
-              material.ElevatedButton(
-                onPressed: _isLoading
-                    ? null
-                    : () {
-                        !_isPhoneSubmitted
-                            ? handlePhoneSubmit()
-                            : handleOtpSubmit();
-                      },
-                style: material.ElevatedButton.styleFrom(
-                  backgroundColor: material.Colors.blue,
-                  foregroundColor: material.Colors.white,
-                  padding: const material.EdgeInsets.symmetric(vertical: 15),
-                  shape: material.RoundedRectangleBorder(
-                    borderRadius: material.BorderRadius.circular(10),
-                  ),
-                ),
-                child: _isLoading
-                    ? const material.SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: material.CircularProgressIndicator(
-                          color: material.Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
-                    : material.Text(
-                        !_isPhoneSubmitted ? 'Get OTP' : 'Verify & Sign In',
-                        style: const material.TextStyle(
-                          fontSize: 16,
-                          fontWeight: material.FontWeight.bold,
-                        ),
-                      ),
-              ),
-              const material.SizedBox(height: 20),
+                    const material.Spacer(),
 
-              // Sign Up Link
-              material.Row(
-                mainAxisAlignment: material.MainAxisAlignment.center,
-                children: [
-                  material.Text(
-                    "Don't have an account? ",
-                    style: material.TextStyle(color: material.Colors.grey[600]),
-                  ),
-                  material.GestureDetector(
-                    onTap: () {
-                      // Navigate to sign up screen
-                      material.Navigator.push(
-                        context,
-                        material.MaterialPageRoute(
-                          builder: (context) => const SignUpScreen(),
-                        ),
-                      );
-                    },
-                    child: const material.Text(
-                      'Sign Up',
+                    // Footer
+                    material.Text(
+                      'By continuing, you agree to our Terms of Service\nand Privacy Policy',
+                      textAlign: material.TextAlign.center,
                       style: material.TextStyle(
-                        color: material.Colors.blue,
-                        fontWeight: material.FontWeight.bold,
+                        color: material.Colors.white.withOpacity(0.7),
+                        fontSize: 12,
+                        height: 1.4,
                       ),
                     ),
-                  ),
-                ],
+
+                    const material.SizedBox(height: 20),
+                  ],
+                ),
               ),
-            ],
+            ),
           ),
         ),
       ),

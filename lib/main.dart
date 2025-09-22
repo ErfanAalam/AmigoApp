@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart' as material;
+import 'package:provider/provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/main_screen.dart';
+import 'screens/call/in_call_screen.dart';
+import 'screens/call/incoming_call_screen.dart';
 import 'services/auth_service.dart';
 import 'services/cookie_service.dart';
 import 'services/websocket_service.dart';
-// import 'api/api_service.dart';
+import 'services/user_status_service.dart';
+import 'services/call_service.dart';
+import 'widgets/call_manager.dart';
+import 'api/api_service.dart';
+import 'utils/navigation_helper.dart';
 
 void main() async {
   material.WidgetsFlutterBinding.ensureInitialized();
@@ -16,10 +23,18 @@ void main() async {
   // Initialize WebSocket service (will be used in MyApp widget)
   WebSocketService();
 
+  // Initialize UserStatusService
+  UserStatusService();
+
   // Initialize API service (which uses the cookie service)
   // final apiService = ApiService();
 
-  material.runApp(MyApp());
+  material.runApp(
+    ChangeNotifierProvider<CallService>(
+      create: (_) => CallService()..initialize(),
+      child: CallEnabledApp(child: MyApp()),
+    ),
+  );
 }
 
 class MyApp extends material.StatefulWidget {
@@ -30,6 +45,8 @@ class MyApp extends material.StatefulWidget {
 class _MyAppState extends material.State<MyApp> {
   final AuthService _authService = AuthService();
   final WebSocketService _websocketService = WebSocketService();
+  final UserStatusService _userStatusService = UserStatusService();
+  final ApiService _apiService = ApiService();
   bool _isLoading = true;
   bool _isAuthenticated = false;
 
@@ -49,37 +66,49 @@ class _MyAppState extends material.State<MyApp> {
 
     // Connect to WebSocket if user is authenticated
     if (isAuthenticated) {
-      // Then try to connect
+      // Connect to WebSocket
       await _websocketService.connect();
+
+      // Update user location and IP after authentication check (app startup)
+      print(
+        '🔄 App startup: User is already authenticated, updating location and IP...',
+      );
+      _apiService.updateUserLocationAndIp();
     }
   }
 
   void _setupWebSocketListeners() {
     // Listen to WebSocket connection state changes
     _websocketService.connectionStateStream.listen((state) {
-      // WebSocket state changed
+      print('🔌 WebSocket connection state changed: $state');
+      if (state == WebSocketConnectionState.disconnected) {
+        // Clear all user online status when disconnected
+        _userStatusService.clearAllStatus();
+      }
     });
 
     // Listen to WebSocket messages
     _websocketService.messageStream.listen((message) {
-      // Handle incoming messages here
+      // Handle incoming messages here - let individual pages handle their specific messages
     });
 
     // Listen to WebSocket errors
     _websocketService.errorStream.listen((error) {
-      // Handle errors here
+      print('❌ WebSocket error in main app: $error');
     });
   }
 
   @override
   void dispose() {
     _websocketService.dispose();
+    _userStatusService.dispose();
     super.dispose();
   }
 
   @override
   material.Widget build(material.BuildContext context) {
     return material.MaterialApp(
+      navigatorKey: NavigationHelper.navigatorKey, // Use NavigationHelper's key
       title: 'Amigo Chat App',
       theme: material.ThemeData(
         primarySwatch: material.Colors.blue,
@@ -91,6 +120,10 @@ class _MyAppState extends material.State<MyApp> {
           : _isAuthenticated
           ? MainScreen()
           : LoginScreen(),
+      routes: {
+        '/call': (context) => const InCallScreen(),
+        '/incoming-call': (context) => const IncomingCallScreen(),
+      },
       debugShowCheckedModeBanner: false,
     );
   }

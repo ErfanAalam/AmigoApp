@@ -640,6 +640,55 @@ class MessageStorageService {
       );
     }
   }
+
+  /// Update message read/delivery status
+  Future<void> updateMessageStatus({
+    required int conversationId,
+    required int messageId,
+    bool? isDelivered,
+    bool? isRead,
+  }) async {
+    await _initPrefs();
+
+    try {
+      final messagesString = _prefs!.getString(
+        '${_messagesPrefix}$conversationId',
+      );
+      if (messagesString == null) return;
+
+      final List<dynamic> messagesJson = jsonDecode(messagesString);
+      final List<MessageModel> messages = messagesJson
+          .map((json) => MessageModel.fromJson(json as Map<String, dynamic>))
+          .toList();
+
+      // Find and update the message
+      final messageIndex = messages.indexWhere((msg) => msg.id == messageId);
+      if (messageIndex != -1) {
+        final currentMessage = messages[messageIndex];
+        final updatedMessage = currentMessage.copyWith(
+          isDelivered: isDelivered ?? currentMessage.isDelivered,
+          isRead: isRead ?? currentMessage.isRead,
+        );
+
+        messages[messageIndex] = updatedMessage;
+
+        // Save updated messages
+        final updatedMessagesJson = messages
+            .map((msg) => msg.toJson())
+            .toList();
+        final updatedMessagesString = jsonEncode(updatedMessagesJson);
+
+        await _prefs!.setString(
+          '${_messagesPrefix}$conversationId',
+          updatedMessagesString,
+        );
+      }
+    } catch (e) {
+      print(
+        '❌ Error updating message status for message $messageId in conversation $conversationId: $e',
+      );
+    }
+  }
 }
 
 /// Metadata about a cached conversation

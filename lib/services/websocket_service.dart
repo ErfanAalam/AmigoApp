@@ -144,7 +144,6 @@ class WebSocketService {
         return;
       }
 
-      print('📨 Received WebSocket message: $data');
       _messageController.add(data);
     } catch (e) {
       print('❌ Error parsing WebSocket message: $e');

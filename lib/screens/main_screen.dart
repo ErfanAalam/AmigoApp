@@ -3,6 +3,8 @@ import 'main_pages/chats_page.dart';
 import 'main_pages/groups_page.dart';
 import 'main_pages/contacts_page.dart';
 import 'main_pages/profile_page.dart';
+import 'main_pages/calls_page.dart';
+import '../widgets/call_banner.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({Key? key}) : super(key: key);
@@ -19,6 +21,7 @@ class _MainScreenState extends State<MainScreen> {
     ChatsPage(),
     GroupsPage(),
     ContactsPage(),
+    CallsPage(),
     ProfilePage(),
   ];
 
@@ -34,7 +37,14 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _currentPageIndex, children: _pages),
+      body: Column(
+        children: [
+          const CallBanner(),
+          Expanded(
+            child: IndexedStack(index: _currentPageIndex, children: _pages),
+          ),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         onDestinationSelected: (int index) {
           setState(() {
@@ -60,14 +70,14 @@ class _MainScreenState extends State<MainScreen> {
             label: 'Contacts',
           ),
           NavigationDestination(
-            selectedIcon: Icon(Icons.person_rounded, color: Colors.teal),
-            icon: Icon(Icons.person_outline, color: Colors.grey),
-            label: 'Profile',
-          ),
-          NavigationDestination(
             selectedIcon: Icon(Icons.call, color: Colors.teal),
             icon: Icon(Icons.call_outlined, color: Colors.grey),
             label: 'Calls',
+          ),
+          NavigationDestination(
+            selectedIcon: Icon(Icons.person_rounded, color: Colors.teal),
+            icon: Icon(Icons.person_outline, color: Colors.grey),
+            label: 'Profile',
           ),
         ],
       ),

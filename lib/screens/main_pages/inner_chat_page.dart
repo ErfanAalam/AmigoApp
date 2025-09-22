@@ -13,7 +13,11 @@ import '../../api/chats.services.dart';
 import '../../api/user.service.dart';
 import '../../services/message_storage_service.dart';
 import '../../services/websocket_service.dart';
+import '../../utils/chat_helpers.dart';
+import '../../utils/message_storage_helpers.dart';
 import '../../widgets/media_preview_widgets.dart';
+import '../../services/call_service.dart';
+import 'package:provider/provider.dart';
 
 class InnerChatPage extends StatefulWidget {
   final ConversationModel conversation;
@@ -57,6 +61,7 @@ class _InnerChatPageState extends State<InnerChatPage>
   Duration _customPosition = Duration.zero;
   int _optimisticMessageId = -1; // Negative IDs for optimistic messages
   final Set<int> _optimisticMessageIds = {}; // Track optimistic messages
+  bool _isDisposed = false; // Track if the page is being disposed
 
   // User info cache for sender names and profile pics
   final Map<int, Map<String, String?>> _userInfoCache = {};
@@ -75,6 +80,10 @@ class _InnerChatPageState extends State<InnerChatPage>
   // Reply message state
   MessageModel? _replyToMessageData;
   bool _isReplying = false;
+
+  // Sticky date separator state
+  String? _currentStickyDate;
+  bool _showStickyDate = false;
 
   // Typing animation controllers
   late AnimationController _typingAnimationController;
@@ -207,13 +216,22 @@ class _InnerChatPageState extends State<InnerChatPage>
           response['data'],
         );
 
-        final backendMessages = historyResponse.messages;
-        final backendCount = backendMessages.length;
+        // Process read status from members data
+        final membersData =
+            response['data']['data']['members'] as List<dynamic>? ?? [];
+        final backendMessagesWithReadStatus = _processReadStatusFromMembers(
+          historyResponse.messages,
+          membersData,
+        );
+
+        final backendCount = backendMessagesWithReadStatus.length;
 
         if (backendCount > cachedCount) {
           // Backend has more messages - add only the new ones
           // final newMessagesCount = backendCount - cachedCount;
-          final newMessages = backendMessages.skip(cachedCount).toList();
+          final newMessages = backendMessagesWithReadStatus
+              .skip(cachedCount)
+              .toList();
 
           // Add new messages to cache
           _conversationMeta = ConversationMeta.fromResponse(historyResponse);
@@ -228,34 +246,14 @@ class _InnerChatPageState extends State<InnerChatPage>
           if (mounted) {
             setState(() {
               _messages =
-                  backendMessages; // Show all messages including new ones
+                  backendMessagesWithReadStatus; // Show all messages including new ones
               _conversationMeta = ConversationMeta.fromResponse(
                 historyResponse,
               );
               _hasMoreMessages = historyResponse.hasNextPage;
             });
-
-            // Show a subtle notification for new messages (optional)
-            // if (newMessagesCount > 0) {
-            //   ScaffoldMessenger.of(context).showSnackBar(
-            //     SnackBar(
-            //       content: Text(
-            //         '$newMessagesCount new message${newMessagesCount > 1 ? 's' : ''}',
-            //       ),
-            //       duration: const Duration(seconds: 2),
-            //       behavior: SnackBarBehavior.floating,
-            //       backgroundColor: Colors.green[600],
-            //     ),
-            //   );
-            // }
           }
-
-          // debugPrint(
-          //   '🎉 Smart sync completed: Added $newMessagesCount new messages',
-          // );
         } else if (backendCount == cachedCount) {
-          // Same count - no new messages
-
           // Just update metadata in case pagination info changed
           _conversationMeta = ConversationMeta.fromResponse(historyResponse);
           await _storageService.saveMessages(
@@ -264,19 +262,17 @@ class _InnerChatPageState extends State<InnerChatPage>
             meta: _conversationMeta!,
           );
         } else {
-          // Backend has fewer messages (unlikely but handle it)
-
           // Replace cache with backend data
           _conversationMeta = ConversationMeta.fromResponse(historyResponse);
           await _storageService.saveMessages(
             conversationId: conversationId,
-            messages: backendMessages,
+            messages: backendMessagesWithReadStatus,
             meta: _conversationMeta!,
           );
 
           if (mounted) {
             setState(() {
-              _messages = backendMessages;
+              _messages = backendMessagesWithReadStatus;
               _conversationMeta = ConversationMeta.fromResponse(
                 historyResponse,
               );
@@ -295,6 +291,12 @@ class _InnerChatPageState extends State<InnerChatPage>
     // Get user ID first, then load messages
     // This ensures we can properly identify sender vs receiver messages
     await _getCurrentUserId();
+
+    // Notify server that user is active in this conversation
+    await _websocketService.sendMessage({
+      'type': 'active_in_conversation',
+      'conversation_id': widget.conversation.conversationId,
+    });
 
     // Initialize user info cache with conversation participant
     _initializeUserCache();
@@ -344,6 +346,9 @@ class _InnerChatPageState extends State<InnerChatPage>
 
         // Validate reply message storage
         _validateReplyMessages();
+
+        // Fix reply message sender names after loading from cache
+        _populateReplyMessageSenderNames();
       } else {
         if (mounted) {
           setState(() {
@@ -369,7 +374,7 @@ class _InnerChatPageState extends State<InnerChatPage>
     try {
       final response = await _userService.getUser();
       if (response['success'] == true && response['data'] != null) {
-        final userData = response['data']['data'] ?? response['data'];
+        final userData = response['data'] ?? response['data'];
         _currentUserId = _parseToInt(userData['id']);
       } else {
         _currentUserId = widget.conversation.userId;
@@ -418,42 +423,32 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   /// Load pinned message from storage
   Future<void> _loadPinnedMessageFromStorage() async {
-    try {
-      final conversationId = widget.conversation.conversationId;
-      final pinnedMessageId = await _storageService.getPinnedMessage(
-        conversationId,
-      );
+    final conversationId = widget.conversation.conversationId;
+    final pinnedMessageId =
+        await MessageStorageHelpers.loadPinnedMessageFromStorage(
+          conversationId,
+        );
 
-      if (pinnedMessageId != null && mounted) {
-        setState(() {
-          _pinnedMessageId = pinnedMessageId;
-        });
-        debugPrint('📌 Loaded pinned message $pinnedMessageId from storage');
-      }
-    } catch (e) {
-      debugPrint('❌ Error loading pinned message from storage: $e');
+    if (pinnedMessageId != null && mounted) {
+      setState(() {
+        _pinnedMessageId = pinnedMessageId;
+      });
     }
   }
 
   /// Load starred messages from storage
   Future<void> _loadStarredMessagesFromStorage() async {
-    try {
-      final conversationId = widget.conversation.conversationId;
-      final starredMessages = await _storageService.getStarredMessages(
-        conversationId,
-      );
-
-      if (starredMessages.isNotEmpty && mounted) {
-        setState(() {
-          _starredMessages.clear();
-          _starredMessages.addAll(starredMessages);
-        });
-        debugPrint(
-          '⭐ Loaded ${starredMessages.length} starred messages from storage',
+    final conversationId = widget.conversation.conversationId;
+    final starredMessages =
+        await MessageStorageHelpers.loadStarredMessagesFromStorage(
+          conversationId,
         );
-      }
-    } catch (e) {
-      debugPrint('❌ Error loading starred messages from storage: $e');
+
+    if (starredMessages.isNotEmpty && mounted) {
+      setState(() {
+        _starredMessages.clear();
+        _starredMessages.addAll(starredMessages);
+      });
     }
   }
 
@@ -517,10 +512,16 @@ class _InnerChatPageState extends State<InnerChatPage>
             )
             .toList();
 
+        debugPrint(
+          '🔍 Found ${replyMessagesInUI.length} reply messages in cache',
+        );
+
         // Validate each reply message
         for (final message in replyMessagesInUI) {
           if (message.replyToMessage != null) {
-            // Reply message is already available in the message object
+            debugPrint(
+              '✅ Reply message ${message.id} has complete reply data: "${message.replyToMessage!.body}" by ${message.replyToMessage!.senderName}',
+            );
           } else if (message.replyToMessageId != null) {
             // Try to find the referenced message in current messages
             MessageModel? referencedMessage;
@@ -551,6 +552,77 @@ class _InnerChatPageState extends State<InnerChatPage>
         debugPrint('❌ Error validating reply messages: $e');
       }
     });
+  }
+
+  /// Populate sender names for reply messages loaded from cache
+  void _populateReplyMessageSenderNames() {
+    if (_messages.isEmpty) return;
+
+    bool hasUpdates = false;
+    final updatedMessages = <MessageModel>[];
+
+    for (final message in _messages) {
+      if (message.replyToMessage != null &&
+          message.replyToMessage!.senderName.isEmpty) {
+        // Reply message exists but sender name is empty, populate it
+        final senderId = message.replyToMessage!.senderId;
+        final senderInfo = _getUserInfo(senderId);
+        final senderName = senderInfo['name'] ?? 'Unknown User';
+        final senderProfilePic = senderInfo['profile_pic'];
+
+        final updatedReplyMessage = MessageModel(
+          id: message.replyToMessage!.id,
+          body: message.replyToMessage!.body,
+          type: message.replyToMessage!.type,
+          senderId: message.replyToMessage!.senderId,
+          conversationId: message.replyToMessage!.conversationId,
+          createdAt: message.replyToMessage!.createdAt,
+          editedAt: message.replyToMessage!.editedAt,
+          metadata: message.replyToMessage!.metadata,
+          attachments: message.replyToMessage!.attachments,
+          deleted: message.replyToMessage!.deleted,
+          senderName: senderName,
+          senderProfilePic: senderProfilePic,
+          replyToMessage: message.replyToMessage!.replyToMessage,
+          replyToMessageId: message.replyToMessage!.replyToMessageId,
+        );
+
+        final updatedMessage = MessageModel(
+          id: message.id,
+          body: message.body,
+          type: message.type,
+          senderId: message.senderId,
+          conversationId: message.conversationId,
+          createdAt: message.createdAt,
+          editedAt: message.editedAt,
+          metadata: message.metadata,
+          attachments: message.attachments,
+          deleted: message.deleted,
+          senderName: message.senderName,
+          senderProfilePic: message.senderProfilePic,
+          replyToMessage: updatedReplyMessage,
+          replyToMessageId: message.replyToMessageId,
+        );
+
+        updatedMessages.add(updatedMessage);
+        hasUpdates = true;
+
+        debugPrint(
+          '🔧 Updated reply message sender name for message ${message.id}',
+        );
+      } else {
+        updatedMessages.add(message);
+      }
+    }
+
+    if (hasUpdates && mounted) {
+      setState(() {
+        _messages = updatedMessages;
+      });
+      debugPrint(
+        '✅ Updated ${updatedMessages.where((m) => m.replyToMessage != null).length} reply messages with sender names',
+      );
+    }
   }
 
   /// Get user info (name and profile pic) by user ID
@@ -584,13 +656,53 @@ class _InnerChatPageState extends State<InnerChatPage>
     return fallbackInfo;
   }
 
+  /// Update sticky date separator based on current scroll position
+  void _updateStickyDateSeparator() {
+    if (_messages.isEmpty || !_scrollController.hasClients) return;
+
+    // Calculate which message is currently visible at the top
+    final scrollOffset = _scrollController.offset;
+    final itemHeight = 100.0; // Approximate height per message
+    final visibleIndex = (scrollOffset / itemHeight).floor();
+
+    // Find the message that should show the sticky date
+    final messageIndex = _messages.length - 1 - visibleIndex;
+    if (messageIndex >= 0 && messageIndex < _messages.length) {
+      final currentMessage = _messages[messageIndex];
+      final currentDateString = ChatHelpers.getMessageDateString(
+        currentMessage.createdAt,
+      );
+
+      // Only update if the date has changed
+      if (_currentStickyDate != currentDateString) {
+        setState(() {
+          _currentStickyDate = currentDateString;
+          _showStickyDate = true;
+        });
+      }
+    }
+  }
+
   @override
   void dispose() {
+    if (_isDisposed) return; // Prevent multiple dispose calls
+    _isDisposed = true;
+
     _scrollController.dispose();
     _messageController.dispose();
     _websocketSubscription?.cancel();
     _typingAnimationController.dispose();
     _typingTimeout?.cancel();
+
+    // Send inactive message when actually disposing (leaving the page)
+    _websocketService
+        .sendMessage({
+          'type': 'inactive_in_conversation',
+          'conversation_id': widget.conversation.conversationId,
+        })
+        .catchError((e) {
+          debugPrint('❌ Error sending inactive_in_conversation: $e');
+        });
 
     // Dispose message animation controllers
     for (final controller in _messageAnimationControllers.values) {
@@ -638,9 +750,24 @@ class _InnerChatPageState extends State<InnerChatPage>
   }
 
   void _onScroll() {
-    if (_scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - 200) {
-      if (!_isLoadingMore && _hasMoreMessages) {
+    // Ensure we have a valid scroll position and the widget is still mounted
+    if (!mounted || !_scrollController.hasClients) return;
+
+    // Update sticky date separator
+    _updateStickyDateSeparator();
+
+    // With reverse: true, when scrolling to see older messages (scrolling "up" in the UI),
+    // we're actually scrolling towards maxScrollExtent
+    // Load older messages when we're near the top of the scroll (close to maxScrollExtent)
+    final scrollPosition = _scrollController.position.pixels;
+    final maxScrollExtent = _scrollController.position.maxScrollExtent;
+    final distanceFromTop = maxScrollExtent - scrollPosition;
+
+    if (distanceFromTop <= 200) {
+      if (!_isLoadingMore && _hasMoreMessages && _isInitialized) {
+        debugPrint(
+          '🔄 Triggering load more messages - Distance from top: $distanceFromTop',
+        );
         _loadMoreMessages();
       }
     }
@@ -649,9 +776,14 @@ class _InnerChatPageState extends State<InnerChatPage>
   Future<void> _loadInitialMessages() async {
     try {
       final conversationId = widget.conversation.conversationId;
-      debugPrint(
-        '🔄 Loading initial messages for conversation $conversationId',
+
+      final response = await _chatsServices.getConversationHistory(
+        conversationId: conversationId,
+        page: 1,
+        limit: 20,
       );
+
+      print('response: ${response['data']['data']['members']}');
 
       // If we already have messages from cache, do smart sync
       if (_hasCheckedCache && _messages.isNotEmpty) {
@@ -684,6 +816,9 @@ class _InnerChatPageState extends State<InnerChatPage>
               _errorMessage = null;
               _hasCheckedCache = true;
             });
+
+            // Debug message dates for troubleshooting
+            ChatHelpers.debugMessageDates(_messages);
           }
 
           // Check if cache is fresh
@@ -721,11 +856,7 @@ class _InnerChatPageState extends State<InnerChatPage>
           limit: 20,
         );
 
-        print('🌐 Server response received: ${response}');
-
         if (!mounted) return; // Prevent setState if widget is disposed
-
-        debugPrint('🌐 Server response received: ${response['success']}');
         if (response['success'] == true && response['data'] != null) {
           final historyResponse = ConversationHistoryResponse.fromJson(
             response['data'],
@@ -735,15 +866,23 @@ class _InnerChatPageState extends State<InnerChatPage>
           final processedMessages = historyResponse.messages;
           _conversationMeta = ConversationMeta.fromResponse(historyResponse);
 
+          // Process read status from members data
+          final membersData =
+              response['data']['data']['members'] as List<dynamic>? ?? [];
+          final messagesWithReadStatus = _processReadStatusFromMembers(
+            processedMessages,
+            membersData,
+          );
+
           // Save to cache
           await _storageService.saveMessages(
             conversationId: conversationId,
-            messages: historyResponse.messages, // Save in chronological order
+            messages: messagesWithReadStatus, // Save with read status
             meta: _conversationMeta!,
           );
 
           setState(() {
-            _messages = processedMessages;
+            _messages = messagesWithReadStatus;
             _hasMoreMessages = historyResponse.hasNextPage;
             _currentPage = 1;
             _isLoading = false;
@@ -751,16 +890,15 @@ class _InnerChatPageState extends State<InnerChatPage>
             _isInitialized = true;
           });
 
+          // Debug message dates for troubleshooting
+          ChatHelpers.debugMessageDates(_messages);
+
           // Validate pinned message and starred messages exist in loaded messages
           _validatePinnedMessage();
           _validateStarredMessages();
 
           // Validate reply message storage
           _validateReplyMessages();
-
-          debugPrint(
-            '🌐 Loaded ${processedMessages.length} messages from server and cached',
-          );
         } else {
           setState(() {
             _errorMessage = response['message'] ?? 'Failed to load messages';
@@ -797,56 +935,112 @@ class _InnerChatPageState extends State<InnerChatPage>
   Future<void> _loadMoreMessages() async {
     if (_isLoadingMore || !_hasMoreMessages || !mounted) return;
 
+    debugPrint(
+      '📚 Loading more messages - Page: ${_currentPage + 1}, Current messages: ${_messages.length}',
+    );
+
     setState(() {
       _isLoadingMore = true;
     });
 
     try {
       final conversationId = widget.conversation.conversationId;
+
+      debugPrint(
+        '🌐 Requesting conversation history - ConversationId: $conversationId, Page: ${_currentPage + 1}',
+      );
+
       final response = await _chatsServices.getConversationHistory(
         conversationId: conversationId,
         page: _currentPage + 1,
         limit: 20,
       );
 
+      debugPrint('📡 Response received: Success');
+
       if (!mounted) return;
 
       if (response['success'] == true && response['data'] != null) {
-        final historyResponse = ConversationHistoryResponse.fromJson(
-          response['data'],
-        );
-        // Keep chronological order for older messages
-        final newMessages = historyResponse.messages;
+        try {
+          final historyResponse = ConversationHistoryResponse.fromJson(
+            response['data'],
+          );
 
-        // Update conversation metadata
-        _conversationMeta = ConversationMeta.fromResponse(historyResponse);
+          // Process read status from members data
+          final membersData =
+              response['data']['data']['members'] as List<dynamic>? ?? [];
+          final newMessagesWithReadStatus = _processReadStatusFromMembers(
+            historyResponse.messages,
+            membersData,
+          );
 
-        // Add to cache (insert at beginning for older messages)
-        await _storageService.addMessagesToCache(
-          conversationId: conversationId,
-          newMessages: historyResponse.messages, // Save in chronological order
-          updatedMeta: _conversationMeta!,
-          insertAtBeginning: true,
-        );
+          // Update conversation metadata
+          _conversationMeta = ConversationMeta.fromResponse(historyResponse);
 
-        setState(() {
-          // Insert older messages at the beginning (chronologically)
-          _messages.insertAll(0, newMessages);
-          _hasMoreMessages = historyResponse.hasNextPage;
-          _currentPage++;
-          _isLoadingMore = false;
-        });
+          debugPrint(
+            '✅ Processed ${newMessagesWithReadStatus.length} new messages',
+          );
 
-        // Update the AnimatedList to reflect the new item count
-        // Since we're inserting at the beginning, we need to update the list
-        // The AnimatedList will handle the animation for existing items
-        if (_animatedListKey.currentState != null) {
-          // For pagination, we don't need to animate individual insertions
-          // Just rebuild the list with the new count
-          _animatedListKey.currentState!.setState(() {});
+          // Add to cache (insert at beginning for older messages)
+          await _storageService.addMessagesToCache(
+            conversationId: conversationId,
+            newMessages: newMessagesWithReadStatus, // Save with read status
+            updatedMeta: _conversationMeta!,
+            insertAtBeginning: true,
+          );
+
+          setState(() {
+            // Insert older messages at the beginning (chronologically)
+            _messages.insertAll(0, newMessagesWithReadStatus);
+            _hasMoreMessages = historyResponse.hasNextPage;
+            _currentPage++;
+            _isLoadingMore = false;
+          });
+
+          debugPrint(
+            '✅ Loaded ${newMessagesWithReadStatus.length} older messages. Total: ${_messages.length}, HasMore: $_hasMoreMessages',
+          );
+
+          // After loading older messages, maintain the user's current position
+          // Since we're adding messages at the beginning, we need to adjust scroll position
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_scrollController.hasClients &&
+                newMessagesWithReadStatus.isNotEmpty) {
+              // Calculate approximate height per message for smooth positioning
+              // This helps maintain the user's view position after loading older messages
+              final approximateMessageHeight = 60.0; // Estimate
+              final scrollAdjustment =
+                  newMessagesWithReadStatus.length * approximateMessageHeight;
+
+              // Adjust scroll position to account for new messages at the beginning
+              final currentPosition = _scrollController.position.pixels;
+              final newPosition = (currentPosition + scrollAdjustment).clamp(
+                0.0,
+                _scrollController.position.maxScrollExtent,
+              );
+
+              _scrollController.jumpTo(newPosition);
+            }
+          });
+        } catch (processingError) {
+          debugPrint(
+            '❌ Error processing message history response: $processingError',
+          );
+          if (mounted) {
+            setState(() {
+              _isLoadingMore = false;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Failed to process older messages. Please try again.',
+                ),
+                duration: Duration(seconds: 3),
+                backgroundColor: Colors.red[600],
+              ),
+            );
+          }
         }
-
-        debugPrint('📄 Loaded ${newMessages.length} more messages and cached');
       } else {
         if (mounted) {
           setState(() {
@@ -855,10 +1049,20 @@ class _InnerChatPageState extends State<InnerChatPage>
         }
       }
     } catch (e) {
+      debugPrint('❌ Error loading more messages: $e');
       if (mounted) {
         setState(() {
           _isLoadingMore = false;
         });
+
+        // Show a brief error message to the user without breaking the UI
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load older messages. Please try again.'),
+            duration: Duration(seconds: 3),
+            backgroundColor: Colors.red[600],
+          ),
+        );
       }
     }
   }
@@ -878,7 +1082,7 @@ class _InnerChatPageState extends State<InnerChatPage>
   /// Handle incoming WebSocket messages
   void _handleIncomingWebSocketMessage(Map<String, dynamic> message) {
     try {
-      debugPrint('📨 Received WebSocket message: $message');
+      print('🔍 WebSocket message: $message');
 
       // Check if this is a message for our conversation
       final messageConversationId =
@@ -902,22 +1106,115 @@ class _InnerChatPageState extends State<InnerChatPage>
         _handleMessageReply(message);
       } else if (messageType == 'media') {
         _handleIncomingMediaMessages(message);
+      } else if (messageType == 'message_delivery_receipt') {
+        _handleMessageDeliveryReceipt(message);
       }
     } catch (e) {
       debugPrint('❌ Error handling WebSocket message: $e');
     }
   }
 
-  void _handleMessageReply(Map<String, dynamic> message) {
-    print('🔍 Handling message reply: $message');
-    // Reply messages are handled through the regular message flow
-    // The reply data is embedded in the message data itself
-    _handleIncomingMessage(message);
+  void _handleMessageReply(Map<String, dynamic> message) async {
+    try {
+      debugPrint('📨 Received message_reply: $message');
+
+      final data = message['data'] as Map<String, dynamic>? ?? {};
+      final messageBody = data['new_message'] as String? ?? '';
+      final newMessageId = data['new_message_id'];
+      final userId = data['user_id'];
+      final conversationId = message['conversation_id'];
+      final messageIds = message['message_ids'] as List<dynamic>? ?? [];
+      final timestamp = message['timestamp'] as String?;
+      final optimisticId = data['optimistic_id'];
+
+      // Skip if this is not for our conversation
+      if (conversationId != widget.conversation.conversationId) {
+        return;
+      }
+
+      // Check if this is our own optimistic message being confirmed
+      if (_optimisticMessageIds.contains(optimisticId)) {
+        debugPrint('🔄 Replacing optimistic reply message with server message');
+        _replaceOptimisticMessage(optimisticId, message);
+        return;
+      }
+
+      // If this is our own message (sender), update the optimistic message in local storage
+      if (_currentUserId != null && userId == _currentUserId) {
+        debugPrint(
+          '🔄 Updating own reply message from optimistic ID to server ID in local storage',
+        );
+        await _updateOptimisticMessageInStorage(
+          optimisticId,
+          newMessageId,
+          message,
+        );
+        return;
+      }
+
+      // Get sender info
+      final senderInfo = _getUserInfo(userId);
+      final senderName = senderInfo['name'] ?? 'Unknown User';
+      final senderProfilePic = senderInfo['profile_pic'];
+
+      // Find the original message being replied to
+      MessageModel? replyToMessage;
+      int? replyToMessageId;
+
+      if (messageIds.isNotEmpty) {
+        final originalMessageId = _parseToInt(messageIds.first);
+        replyToMessageId = originalMessageId;
+
+        // Try to find the original message in our local messages
+        try {
+          replyToMessage = _messages.firstWhere(
+            (msg) => msg.id == originalMessageId,
+          );
+        } catch (e) {
+          debugPrint(
+            '⚠️ Original message not found in local messages: $originalMessageId',
+          );
+          // Create a placeholder if we don't have the original message
+          replyToMessage = null;
+        }
+      }
+
+      // Create the reply message
+      final replyMessage = MessageModel(
+        id: newMessageId ?? DateTime.now().millisecondsSinceEpoch,
+        body: messageBody,
+        type: 'text',
+        senderId: userId ?? 0,
+        conversationId: conversationId,
+        createdAt: timestamp ?? DateTime.now().toUtc().toIso8601String(),
+        deleted: false,
+        senderName: senderName,
+        senderProfilePic: senderProfilePic,
+        replyToMessage: replyToMessage,
+        replyToMessageId: replyToMessageId,
+      );
+
+      // Add message to UI immediately with animation
+      if (mounted) {
+        setState(() {
+          _messages.add(replyMessage);
+        });
+
+        _animateNewMessage(replyMessage.id);
+        _scrollToBottom();
+      }
+
+      // Store message asynchronously in local storage
+      _storeMessageAsync(replyMessage);
+
+      debugPrint('✅ Reply message processed and stored successfully');
+    } catch (e) {
+      debugPrint('❌ Error processing message_reply: $e');
+    }
   }
 
   /// Handle incoming message pin from WebSocket
   void _handleMessagePin(Map<String, dynamic> message) async {
-    print('🔍 Handling message pin: $message');
     final data = message['data'] as Map<String, dynamic>? ?? {};
     final messageId = data['message_id'] ?? data['messageId'];
     final action = data['action'] ?? 'pin';
@@ -939,13 +1236,10 @@ class _InnerChatPageState extends State<InnerChatPage>
       conversationId: conversationId,
       pinnedMessageId: newPinnedMessageId,
     );
-
-    print('📌 Updated pinned message from WebSocket: $_pinnedMessageId');
   }
 
   /// Handle incoming message star from WebSocket
   void _handleMessageStar(Map<String, dynamic> message) async {
-    print('🔍 Handling message star: $message');
     final data = message['data'] as Map<String, dynamic>? ?? {};
     final messagesIds = message['message_ids'] as List<int>? ?? [];
     final action = data['action'] ?? 'star';
@@ -974,11 +1268,176 @@ class _InnerChatPageState extends State<InnerChatPage>
           );
         }
       }
-      print(
-        '⭐ Updated ${messagesIds.length} starred messages from WebSocket in local storage',
-      );
     } catch (e) {
-      print('❌ Error updating starred messages from WebSocket in storage: $e');
+      debugPrint(
+        '❌ Error updating starred messages from WebSocket in storage: $e',
+      );
+    }
+  }
+
+  /// Build message status ticks (single/double) based on delivery and read status
+  Widget _buildMessageStatusTicks(MessageModel message) {
+    if (message.isRead) {
+      // Double blue tick - message is read
+      return Icon(Icons.done_all, size: 16, color: Colors.blue);
+    } else if (message.isDelivered) {
+      // Double grey tick - message is delivered but not read
+      return Icon(Icons.done_all, size: 16, color: Colors.white70);
+    } else {
+      // Single grey tick - message is sent but not delivered
+      return Icon(Icons.done, size: 16, color: Colors.white70);
+    }
+  }
+
+  /// Process read status from members data and update messages accordingly
+  List<MessageModel> _processReadStatusFromMembers(
+    List<MessageModel> messages,
+    List<dynamic> membersData,
+  ) {
+    if (membersData.isEmpty) return messages;
+
+    // Create a map for quick lookup of last read message IDs by user
+    final Map<int, int> userLastReadMessageIds = {};
+    final Map<int, int> userLastDeliveredMessageIds = {};
+
+    for (final member in membersData) {
+      final memberData = member as Map<String, dynamic>;
+      final userId = _parseToInt(memberData['user_id']);
+      final lastReadId = _parseToInt(memberData['last_read_message_id']);
+      final lastDeliveredId = _parseToInt(
+        memberData['last_delivered_message_id'],
+      );
+
+      if (userId > 0) {
+        userLastReadMessageIds[userId] = lastReadId;
+        userLastDeliveredMessageIds[userId] = lastDeliveredId;
+      }
+    }
+
+    // Update messages with read/delivery status
+    final updatedMessages = messages.map((message) {
+      bool isDelivered = false;
+      bool isRead = false;
+
+      // Check if this message is delivered or read by any user
+      for (final userId in userLastDeliveredMessageIds.keys) {
+        final lastDeliveredId = userLastDeliveredMessageIds[userId] ?? 0;
+        if (message.id <= lastDeliveredId) {
+          isDelivered = true;
+          break;
+        }
+      }
+
+      for (final userId in userLastReadMessageIds.keys) {
+        final lastReadId = userLastReadMessageIds[userId] ?? 0;
+        if (message.id <= lastReadId) {
+          isRead = true;
+          break;
+        }
+      }
+
+      return message.copyWith(isDelivered: isDelivered, isRead: isRead);
+    }).toList();
+
+    debugPrint(
+      '📖 Processed read status for ${updatedMessages.length} messages',
+    );
+    return updatedMessages;
+  }
+
+  /// Handle message delivery receipt from WebSocket
+  void _handleMessageDeliveryReceipt(Map<String, dynamic> messageData) async {
+    try {
+      debugPrint('📨 Received message_delivery_receipt: $messageData');
+
+      final data = messageData['data'] as Map<String, dynamic>? ?? {};
+      final messageId = data['message_id'];
+      final optimisticId = data['optimistic_id'];
+      final deliveredCount = data['delivered_count'] ?? 0;
+      final readCount = data['read_count'] ?? 0;
+      final readBy = data['read_by'] as List<dynamic>? ?? [];
+
+      if (messageId == null && optimisticId == null) return;
+
+      // Find the message in our list and update its status
+      // Check both message_id and optimistic_id
+      int messageIndex = -1;
+
+      if (messageId != null) {
+        messageIndex = _messages.indexWhere((msg) => msg.id == messageId);
+      }
+
+      // If not found by message_id, try optimistic_id
+      if (messageIndex == -1 && optimisticId != null) {
+        messageIndex = _messages.indexWhere((msg) {
+          // Check if optimistic_id in metadata matches
+          final msgOptimisticId = msg.metadata?['optimistic_id'];
+          if (msgOptimisticId != null) {
+            return msgOptimisticId.toString() == optimisticId.toString();
+          }
+          // Also check if message id matches optimistic_id (for cases where optimistic_id is the same as message_id)
+          return msg.id.toString() == optimisticId.toString();
+        });
+      }
+      if (messageIndex != -1) {
+        final currentMessage = _messages[messageIndex];
+        final actualMessageId = currentMessage.id;
+
+        // Update delivery and read status
+        final isDelivered = deliveredCount > 0;
+
+        // Message is read ONLY if:
+        // 1. read_count > 0 (server says it's read), OR
+        // 2. read_by array contains any user IDs (real read receipts from server)
+        final isRead = readCount > 0 || readBy.isNotEmpty;
+
+        if (mounted) {
+          setState(() {
+            // Update the current message
+            _messages[messageIndex] = currentMessage.copyWith(
+              isDelivered: isDelivered,
+              isRead: isRead,
+            );
+
+            // Update all other messages that the current user sent to also have read receipts
+            for (int i = 0; i < _messages.length; i++) {
+              if (i != messageIndex &&
+                  _messages[i].senderId == _currentUserId) {
+                final originalMessage = _messages[i];
+                _messages[i] = originalMessage.copyWith(
+                  isDelivered: isDelivered || originalMessage.isDelivered,
+                  isRead: isRead || originalMessage.isRead,
+                );
+              }
+            }
+          });
+        }
+
+        // Update in storage for all messages that the current user sent
+        int updatedCount = 0;
+        for (int i = 0; i < _messages.length; i++) {
+          final message = _messages[i];
+          if (message.senderId == _currentUserId) {
+            await _storageService.updateMessageStatus(
+              conversationId: widget.conversation.conversationId,
+              messageId: message.id,
+              isDelivered: isDelivered || message.isDelivered,
+              isRead: isRead || message.isRead,
+            );
+            updatedCount++;
+          }
+        }
+
+        debugPrint(
+          '✅ Updated message $actualMessageId and cascaded status to $updatedCount other messages: delivered=$isDelivered, read=$isRead',
+        );
+      } else {
+        debugPrint(
+          '⚠️ Message not found for delivery receipt - messageId: $messageId, optimisticId: $optimisticId',
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error handling delivery receipt: $e');
     }
   }
 
@@ -1023,7 +1482,34 @@ class _InnerChatPageState extends State<InnerChatPage>
       // Handle reply message data
       MessageModel? replyToMessage;
       int? replyToMessageId;
-      if (data['reply_to_message'] != null) {
+
+      // Check for reply data in metadata first (server format)
+      final metadata = data['metadata'] as Map<String, dynamic>?;
+      if (metadata != null && metadata['reply_to'] != null) {
+        final replyToData = metadata['reply_to'] as Map<String, dynamic>;
+        replyToMessageId = _parseToInt(replyToData['message_id']);
+
+        // Create reply message from metadata
+        replyToMessage = MessageModel(
+          id: replyToMessageId,
+          body: replyToData['body'] ?? '',
+          type: 'text',
+          senderId: _parseToInt(replyToData['sender_id']),
+          conversationId: widget.conversation.conversationId,
+          createdAt: replyToData['created_at'] ?? '',
+          deleted: false,
+          senderName:
+              _getUserInfo(_parseToInt(replyToData['sender_id']))['name'] ??
+              'Unknown User',
+          senderProfilePic: _getUserInfo(
+            _parseToInt(replyToData['sender_id']),
+          )['profile_pic'],
+        );
+
+        debugPrint(
+          '✅ Found reply data in metadata: replying to message $replyToMessageId',
+        );
+      } else if (data['reply_to_message'] != null) {
         replyToMessage = MessageModel.fromJson(
           data['reply_to_message'] as Map<String, dynamic>,
         );
@@ -1063,16 +1549,13 @@ class _InnerChatPageState extends State<InnerChatPage>
 
       // Add message to UI immediately with animation
       if (mounted) {
-        // IMPORTANT: Call insertItem BEFORE adding to the list for AnimatedList
-        // _animatedListKey.currentState?.insertItem(
-        //   _messages.length, // Insert at the end (current length)
-        //   duration: const Duration(
-        //     milliseconds: 500,
-        //   ), // Longer duration for smoother animation
-        // );
-
         setState(() {
           _messages.add(newMessage);
+          // Update sticky date separator for new messages
+          _currentStickyDate = ChatHelpers.getMessageDateString(
+            newMessage.createdAt,
+          );
+          _showStickyDate = true;
         });
 
         _animateNewMessage(newMessage.id);
@@ -1092,76 +1575,27 @@ class _InnerChatPageState extends State<InnerChatPage>
     int? serverId,
     Map<String, dynamic> messageData,
   ) async {
-    if (optimisticId == null || serverId == null) return;
+    final updatedMessage =
+        await MessageStorageHelpers.updateOptimisticMessageInStorage(
+          widget.conversation.conversationId,
+          optimisticId,
+          serverId,
+          messageData,
+        );
 
-    try {
-      // Get current cached messages
-      final cachedData = await _storageService.getCachedMessages(
-        widget.conversation.conversationId,
-      );
-
-      if (cachedData == null || cachedData.messages.isEmpty) {
-        debugPrint('⚠️ No cached messages found to update');
-        return;
-      }
-
-      // Find the optimistic message in cached data
-      final messageIndex = cachedData.messages.indexWhere(
-        (msg) => msg.id == optimisticId,
-      );
-
-      if (messageIndex == -1) {
-        debugPrint('⚠️ Optimistic message $optimisticId not found in cache');
-        return;
-      }
-
-      // Create updated message with server ID
-      final data = messageData['data'] as Map<String, dynamic>? ?? {};
-      final originalMessage = cachedData.messages[messageIndex];
-
-      final updatedMessage = MessageModel(
-        id: serverId, // Use server ID instead of optimistic ID
-        body: data['body'] ?? originalMessage.body,
-        type: data['type'] ?? originalMessage.type,
-        senderId: originalMessage.senderId,
-        conversationId: originalMessage.conversationId,
-        createdAt: data['created_at'] ?? originalMessage.createdAt,
-        editedAt: data['edited_at'] ?? originalMessage.editedAt,
-        metadata: data['metadata'] ?? originalMessage.metadata,
-        attachments: data['attachments'] ?? originalMessage.attachments,
-        deleted: data['deleted'] == true,
-        senderName: originalMessage.senderName,
-        senderProfilePic: originalMessage.senderProfilePic,
-        replyToMessage: originalMessage.replyToMessage,
-        replyToMessageId: originalMessage.replyToMessageId,
-      );
-
-      // Update the message in the cached messages list
-      final updatedMessages = List<MessageModel>.from(cachedData.messages);
-      updatedMessages[messageIndex] = updatedMessage;
-
-      // Save updated messages back to storage
-      await _storageService.saveMessages(
-        conversationId: widget.conversation.conversationId,
-        messages: updatedMessages,
-        meta: cachedData.meta,
-      );
-
-      // Also update the in-memory _messages list
+    if (updatedMessage != null && optimisticId != null && mounted) {
+      // Update the in-memory _messages list
       final uiMessageIndex = _messages.indexWhere(
         (msg) => msg.id == optimisticId,
       );
-      if (uiMessageIndex != -1 && mounted) {
+      if (uiMessageIndex != -1) {
         setState(() {
           _messages[uiMessageIndex] = updatedMessage;
         });
+        debugPrint(
+          '✅ Updated message ID from $optimisticId to ${updatedMessage.id} in UI',
+        );
       }
-
-      debugPrint(
-        '✅ Updated message ID from $optimisticId to $serverId in local storage and UI',
-      );
-    } catch (e) {
-      debugPrint('❌ Error updating optimistic message in storage: $e');
     }
   }
 
@@ -1173,44 +1607,74 @@ class _InnerChatPageState extends State<InnerChatPage>
     try {
       final index = _messages.indexWhere((msg) => msg.id == messageId);
       if (index != -1) {
-        // Create the confirmed message
         final data = messageData['data'] as Map<String, dynamic>? ?? {};
-        final senderId = data['sender_id'] != null
-            ? _parseToInt(data['sender_id'])
-            : _messages[index].senderId;
+        final messageType = messageData['type'];
 
-        // Get updated sender info from cache/lookup
-        final senderInfo = _getUserInfo(senderId);
-        final senderName = senderInfo['name'] ?? _messages[index].senderName;
-        final senderProfilePic =
-            senderInfo['profile_pic'] ?? _messages[index].senderProfilePic;
+        // Handle reply messages differently
+        if (messageType == 'message_reply') {
+          final newMessageId = data['new_message_id'];
+          final messageBody = data['new_message'] ?? _messages[index].body;
+          final timestamp =
+              messageData['timestamp'] ?? _messages[index].createdAt;
 
-        final confirmedMessage = MessageModel(
-          id: data['id'] ?? data['messageId'] ?? messageId,
-          body: data['body'] ?? _messages[index].body,
-          type: data['type'] ?? _messages[index].type,
-          senderId: senderId,
-          conversationId: widget.conversation.conversationId,
-          createdAt: data['created_at'] ?? _messages[index].createdAt,
-          editedAt: data['edited_at'],
-          metadata: data['metadata'],
-          attachments: data['attachments'],
-          deleted: data['deleted'] == true,
-          senderName: senderName,
-          senderProfilePic: senderProfilePic,
-        );
+          // Preserve the reply relationship from the optimistic message
+          final optimisticMessage = _messages[index];
 
-        if (mounted) {
-          setState(() {
-            _messages[index] = confirmedMessage;
-          });
+          // Create confirmed reply message
+          final confirmedMessage = MessageModel(
+            id: newMessageId ?? DateTime.now().millisecondsSinceEpoch,
+            body: messageBody,
+            type: 'text',
+            senderId: optimisticMessage.senderId,
+            conversationId: optimisticMessage.conversationId,
+            createdAt: timestamp,
+            deleted: false,
+            senderName: optimisticMessage.senderName,
+            senderProfilePic: optimisticMessage.senderProfilePic,
+            replyToMessage:
+                optimisticMessage.replyToMessage, // Preserve reply relationship
+            replyToMessageId: optimisticMessage.replyToMessageId,
+          );
+
+          if (mounted) {
+            setState(() {
+              _messages[index] = confirmedMessage;
+            });
+          }
+
+          // Store confirmed message with reply data
+          _storeMessageAsync(confirmedMessage);
+
+          debugPrint(
+            '✅ Replaced optimistic reply message with server-confirmed message',
+          );
+        } else {
+          // Handle regular messages
+          final senderId = data['sender_id'] != null
+              ? _parseToInt(data['sender_id'])
+              : _messages[index].senderId;
+          final senderInfo = _getUserInfo(senderId);
+
+          // Create the confirmed message using utility
+          final confirmedMessage = MessageStorageHelpers.createConfirmedMessage(
+            messageId,
+            messageData,
+            _messages[index],
+            senderInfo,
+          );
+
+          if (mounted) {
+            setState(() {
+              _messages[index] = confirmedMessage;
+            });
+          }
+
+          // Store confirmed message
+          _storeMessageAsync(confirmedMessage);
         }
 
         // Remove from optimistic tracking
         _optimisticMessageIds.remove(messageId);
-
-        // Store confirmed message
-        _storeMessageAsync(confirmedMessage);
       }
     } catch (e) {
       debugPrint('❌ Error replacing optimistic message: $e');
@@ -1326,10 +1790,6 @@ class _InnerChatPageState extends State<InnerChatPage>
       // Determine media type from the message data
       final mediaType = data['message_type'] ?? data['type'] ?? 'image';
       final mediaData = data['media'] as Map<String, dynamic>? ?? data;
-
-      debugPrint(
-        '📱 Received incoming media message: $mediaType from $senderName',
-      );
 
       // Create MessageModel based on media type
       final nowUTC = DateTime.now().toUtc();
@@ -1482,23 +1942,15 @@ class _InnerChatPageState extends State<InnerChatPage>
       senderProfilePic: null,
       replyToMessage: replyMessage,
       replyToMessageId: replyMessageId,
+      metadata: {
+        'optimistic_id': _optimisticMessageId,
+      }, // Store optimistic_id in metadata
     );
 
     // Track this as an optimistic message
     _optimisticMessageIds.add(_optimisticMessageId);
-
-    // Decrement for next optimistic message
-
     // Add message to UI immediately with animation
     if (mounted) {
-      // IMPORTANT: Call insertItem BEFORE adding to the list for AnimatedList
-      // _animatedListKey.currentState?.insertItem(
-      //   _messages.length, // Insert at the end (current length)
-      //   duration: const Duration(
-      //     milliseconds: 500,
-      //   ), // Longer duration for smoother animation
-      // );
-
       setState(() {
         _messages.add(optimisticMessage);
       });
@@ -1511,28 +1963,37 @@ class _InnerChatPageState extends State<InnerChatPage>
     _storeMessageAsync(optimisticMessage);
 
     try {
-      // Prepare WebSocket message data
-      final messageData = {
-        'type': 'text',
-        'body': messageText,
-        'optimistic_id': _optimisticMessageId,
-      };
-
-      // Add reply data if replying to a message
+      // Check if this is a reply message
       if (replyMessageId != null) {
-        messageData['reply_to_message_id'] = replyMessageId.toString();
+        debugPrint('🔄 Sending reply message via WebSocket');
+        // Send reply message via WebSocket
+        await _websocketService.sendMessage({
+          'type': 'message_reply',
+          'data': {
+            'new_message': messageText,
+            'optimistic_id': _optimisticMessageId,
+          },
+          'conversation_id': widget.conversation.conversationId,
+          'message_ids': [
+            replyMessageId,
+          ], // Array of message IDs being replied to
+        });
+      } else {
+        // Send regular message
+        final messageData = {
+          'type': 'text',
+          'body': messageText,
+          'optimistic_id': _optimisticMessageId,
+        };
+
+        await _websocketService.sendMessage({
+          'type': 'message',
+          'data': messageData,
+          'conversation_id': widget.conversation.conversationId,
+        });
       }
 
-      // Send message through WebSocket
-      await _websocketService.sendMessage({
-        'type': 'message',
-        'data': messageData,
-        'conversation_id': widget.conversation.conversationId,
-      });
-
       _optimisticMessageId--;
-
-      debugPrint('✅ Message sent successfully via WebSocket');
     } catch (e) {
       debugPrint('❌ Error sending message: $e');
 
@@ -1559,6 +2020,31 @@ class _InnerChatPageState extends State<InnerChatPage>
             textColor: Colors.white,
             onPressed: () => _retryMessage(messageId),
           ),
+        ),
+      );
+    }
+  }
+
+  /// Handle media upload failure
+  void _handleMediaUploadFailure(int messageId, String error) {
+    if (!mounted) return;
+
+    // Find and remove the failed loading message
+    final index = _messages.indexWhere((msg) => msg.id == messageId);
+    if (index != -1) {
+      setState(() {
+        _messages.removeAt(index);
+      });
+
+      // Remove from optimistic tracking
+      _optimisticMessageIds.remove(messageId);
+
+      // Show error to user
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 4),
         ),
       );
     }
@@ -1697,139 +2183,6 @@ class _InnerChatPageState extends State<InnerChatPage>
     });
   }
 
-  DateTime _convertToIST(String dateTimeString) {
-    try {
-      // Parse the datetime - handle both UTC and local formats
-      DateTime parsedDateTime;
-      if (dateTimeString.endsWith('Z')) {
-        // Already UTC format
-        parsedDateTime = DateTime.parse(dateTimeString).toUtc();
-      } else if (dateTimeString.contains('+') || dateTimeString.contains('T')) {
-        // ISO format with timezone or T separator
-        parsedDateTime = DateTime.parse(dateTimeString).toUtc();
-      } else {
-        // Assume local format, convert to UTC first
-        parsedDateTime = DateTime.parse(dateTimeString).toUtc();
-      }
-
-      // Convert to IST (UTC+5:30)
-      final istDateTime = parsedDateTime.add(
-        const Duration(hours: 5, minutes: 30),
-      );
-
-      return istDateTime;
-    } catch (e) {
-      debugPrint('Error converting to IST: $e for input: $dateTimeString');
-      // Return current IST time as fallback
-      return DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
-    }
-  }
-
-  String _formatMessageTime(String dateTimeString) {
-    try {
-      final dateTime = _convertToIST(dateTimeString);
-      // Always return just time for chat bubble in 12-hour format
-      final hour = dateTime.hour;
-      final minute = dateTime.minute;
-      final period = hour >= 12 ? 'PM' : 'AM';
-      final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
-
-      return '${displayHour.toString()}:${minute.toString().padLeft(2, '0')} $period';
-    } catch (e) {
-      debugPrint('Error formatting message time: $e');
-      return '';
-    }
-  }
-
-  String _formatDateSeparator(String dateTimeString) {
-    try {
-      final messageDateTime = _convertToIST(dateTimeString);
-      // Get current IST time
-      final nowUTC = DateTime.now().toUtc();
-      final nowIST = nowUTC.add(const Duration(hours: 5, minutes: 30));
-
-      final today = DateTime(nowIST.year, nowIST.month, nowIST.day);
-      final yesterday = today.subtract(const Duration(days: 1));
-      final messageDate = DateTime(
-        messageDateTime.year,
-        messageDateTime.month,
-        messageDateTime.day,
-      );
-      if (messageDate == today) {
-        return 'Today';
-      } else if (messageDate == yesterday) {
-        return 'Yesterday';
-      } else {
-        // Format as "DD MMM YYYY" or "DD MMM" for current year
-        final months = [
-          'Jan',
-          'Feb',
-          'Mar',
-          'Apr',
-          'May',
-          'Jun',
-          'Jul',
-          'Aug',
-          'Sep',
-          'Oct',
-          'Nov',
-          'Dec',
-        ];
-        final monthName = months[messageDateTime.month - 1];
-
-        if (messageDateTime.year == nowIST.year) {
-          return '${messageDateTime.day} $monthName';
-        } else {
-          return '${messageDateTime.day} $monthName ${messageDateTime.year}';
-        }
-      }
-    } catch (e) {
-      debugPrint('Error formatting date separator: $e');
-      return 'Unknown Date';
-    }
-  }
-
-  bool _shouldShowDateSeparator(int index) {
-    try {
-      // Get the current message (the one we're checking)
-      final currentMessage = _messages[_messages.length - 1 - index];
-
-      // For the first message (newest), check if we need a separator
-      if (index == 0) {
-        // Always show separator for the first (newest) message
-        debugPrint(
-          'Showing separator for newest message: ${currentMessage.id}',
-        );
-        return true;
-      }
-
-      // Get the previous message in the list (chronologically newer, displayed above)
-      final previousMessage = _messages[_messages.length - index];
-
-      // Convert both to IST and get date parts
-      final currentDateTime = _convertToIST(currentMessage.createdAt);
-      final previousDateTime = _convertToIST(previousMessage.createdAt);
-
-      final currentDate = DateTime(
-        currentDateTime.year,
-        currentDateTime.month,
-        currentDateTime.day,
-      );
-      final previousDate = DateTime(
-        previousDateTime.year,
-        previousDateTime.month,
-        previousDateTime.day,
-      );
-
-      // Show separator if the current message is from a different date than the previous message
-      final shouldShow = currentDate != previousDate;
-      return shouldShow;
-    } catch (e) {
-      debugPrint('Error in _shouldShowDateSeparator: $e');
-      return false;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1944,126 +2297,38 @@ class _InnerChatPageState extends State<InnerChatPage>
             : [
                 IconButton(
                   icon: const Icon(Icons.call, color: Colors.white),
-                  onPressed: () {
-                    // TODO: Implement call functionality
-                    debugPrint('Call pressed');
-                  },
+                  onPressed: () => _initiateCall(context),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.videocam, color: Colors.white),
-                  onPressed: () {
-                    // TODO: Implement video call functionality
-                    debugPrint('Video call pressed');
-                  },
-                ),
-
-                // PopupMenuButton<String>(
-                //   icon: const Icon(Icons.more_vert, color: Colors.white),
-                //   onSelected: (String value) {
-                //     switch (value) {
-                //       case 'clear_cache':
-                //         _showClearCacheDialog();
-                //         break;
-                //       case 'cache_stats':
-                //         _showCacheStats();
-                //         break;
-                //       case 'clear_all_cache':
-                //         _showClearAllCacheDialog();
-                //         break;
-                //       case 'debug_user':
-                //         _showUserDebugInfo();
-                //         break;
-                //       case 'smart_sync':
-                //         _performSmartSync(widget.conversation.conversationId);
-                //         ScaffoldMessenger.of(context).showSnackBar(
-                //           const SnackBar(content: Text('Smart sync triggered')),
-                //         );
-                //         break;
-                //       case 'debug_dates':
-                //         _debugMessageDates();
-                //         ScaffoldMessenger.of(context).showSnackBar(
-                //           const SnackBar(
-                //             content: Text('Check console for date debug info'),
-                //           ),
-                //         );
-                //         break;
-                //     }
+                // IconButton(
+                //   icon: const Icon(Icons.videocam, color: Colors.white),
+                //   onPressed: () {
+                //     // TODO: Implement video call functionality
+                //     debugPrint('Video call pressed');
                 //   },
-                //   itemBuilder: (BuildContext context) => [
-                //     const PopupMenuItem<String>(
-                //       value: 'clear_cache',
-                //       child: Row(
-                //         children: [
-                //           Icon(Icons.clear_all, size: 20),
-                //           SizedBox(width: 12),
-                //           Text('Clear Cache'),
-                //         ],
-                //       ),
-                //     ),
-                //     const PopupMenuItem<String>(
-                //       value: 'cache_stats',
-                //       child: Row(
-                //         children: [
-                //           Icon(Icons.info_outline, size: 20),
-                //           SizedBox(width: 12),
-                //           Text('Cache Info'),
-                //         ],
-                //       ),
-                //     ),
-                //     const PopupMenuItem<String>(
-                //       value: 'clear_all_cache',
-                //       child: Row(
-                //         children: [
-                //           Icon(Icons.delete_sweep, size: 20),
-                //           SizedBox(width: 12),
-                //           Text('Clear All Cache'),
-                //         ],
-                //       ),
-                //     ),
-                //     const PopupMenuItem<String>(
-                //       value: 'debug_user',
-                //       child: Row(
-                //         children: [
-                //           Icon(Icons.bug_report, size: 20),
-                //           SizedBox(width: 12),
-                //           Text('Debug User ID'),
-                //         ],
-                //       ),
-                //     ),
-                //     const PopupMenuItem<String>(
-                //       value: 'smart_sync',
-                //       child: Row(
-                //         children: [
-                //           Icon(Icons.sync, size: 20),
-                //           SizedBox(width: 12),
-                //           Text('Smart Sync'),
-                //         ],
-                //       ),
-                //     ),
-                //     const PopupMenuItem<String>(
-                //       value: 'debug_dates',
-                //       child: Row(
-                //         children: [
-                //           Icon(Icons.calendar_today, size: 20),
-                //           SizedBox(width: 12),
-                //           Text('Debug Dates'),
-                //         ],
-                //       ),
-                //     ),
-                //   ],
                 // ),
               ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          // Pinned Message Section
-          if (_pinnedMessageId != null) _buildPinnedMessageSection(),
+          Column(
+            children: [
+              // Pinned Message Section
+              if (_pinnedMessageId != null) _buildPinnedMessageSection(),
 
-          // Messages List
-          Expanded(child: _buildMessagesList()),
+              // Messages List
+              Expanded(child: _buildMessagesList()),
 
-          // Message Input
-          _buildMessageInput(),
+              // Message Input
+              _buildMessageInput(),
+            ],
+          ),
+          // Sticky Date Separator - Overlay on top
+          Positioned(
+            top: 10,
+            left: 0,
+            right: 0,
+            child: _buildStickyDateSeparator(),
+          ),
         ],
       ),
     );
@@ -2077,7 +2342,7 @@ class _InnerChatPageState extends State<InnerChatPage>
 
     final isMyMessage =
         _currentUserId != null && pinnedMessage.senderId == _currentUserId;
-    final messageTime = _formatMessageTime(pinnedMessage.createdAt);
+    final messageTime = ChatHelpers.formatMessageTime(pinnedMessage.createdAt);
 
     return GestureDetector(
       onTap: () => _scrollToMessage(pinnedMessage.id),
@@ -2253,25 +2518,69 @@ class _InnerChatPageState extends State<InnerChatPage>
         controller: _scrollController,
         reverse: true, // Start from bottom (newest messages)
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        initialItemCount: _messages.length + (_isLoadingMore ? 1 : 0),
+        initialItemCount:
+            _messages.length +
+            (_isLoadingMore ? 1 : 0) +
+            (!_hasMoreMessages && _messages.isNotEmpty ? 1 : 0),
         itemBuilder: (context, index, animation) {
+          // Show loading indicator at the top when loading older messages
           if (index == 0 && _isLoadingMore) {
             return Container(
               padding: const EdgeInsets.all(16),
-              alignment: Alignment.center,
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.teal[300]!),
-                ),
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey[200]!),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        Colors.teal[400]!,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Loading older messages...',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
             );
           }
 
-          // Adjust index for loading indicator
-          final messageIndex = _isLoadingMore ? index - 1 : index;
+          // Calculate the actual message index, accounting for indicators
+          int messageIndex = index;
+
+          // Subtract 1 if there's a "no more messages" indicator at index 0
+          if (!_hasMoreMessages && _messages.isNotEmpty && !_isLoadingMore) {
+            messageIndex = index - 1;
+          }
+
+          // Subtract 1 if there's a loading indicator at index 0
+          if (_isLoadingMore) {
+            messageIndex = index - 1;
+          }
+
+          // Bounds check to prevent index out of bounds errors
+          if (messageIndex < 0 || messageIndex >= _messages.length) {
+            debugPrint(
+              '❌ Invalid message index: $messageIndex, messages length: ${_messages.length}',
+            );
+            return Container(); // Return empty container for invalid indices
+          }
+
           final message =
               _messages[_messages.length -
                   1 -
@@ -2314,15 +2623,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                         curve: Curves.easeOutBack,
                       ),
                     ),
-                child: Column(
-                  children: [
-                    // Date separator - show the date for the group of messages that starts here
-                    if (_shouldShowDateSeparator(messageIndex))
-                      _buildDateSeparator(message.createdAt),
-                    // Message bubble with long press
-                    _buildMessageWithActions(message, isMyMessage),
-                  ],
-                ),
+                child: _buildMessageWithActions(message, isMyMessage),
               ),
             ),
           );
@@ -2331,31 +2632,43 @@ class _InnerChatPageState extends State<InnerChatPage>
     );
   }
 
-  Widget _buildDateSeparator(String dateTimeString) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 16),
-      child: Row(
-        children: [
-          Expanded(child: Container(height: 1, color: Colors.grey[300])),
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey[300]!),
+  /// Build sticky date separator that appears at the top when scrolling
+  Widget _buildStickyDateSeparator() {
+    if (!_showStickyDate || _currentStickyDate == null) {
+      return const SizedBox.shrink();
+    }
+
+    // Find a message with the current date to get the formatted date string
+    final messageWithCurrentDate = _messages.firstWhere(
+      (message) =>
+          ChatHelpers.getMessageDateString(message.createdAt) ==
+          _currentStickyDate,
+      orElse: () => _messages.first,
+    );
+
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.teal[600],
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.teal.withOpacity(0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
             ),
-            child: Text(
-              _formatDateSeparator(dateTimeString),
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+          ],
+        ),
+        child: Text(
+          ChatHelpers.formatDateSeparator(messageWithCurrentDate.createdAt),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.5,
           ),
-          Expanded(child: Container(height: 1, color: Colors.grey[300])),
-        ],
+        ),
       ),
     );
   }
@@ -2530,7 +2843,7 @@ class _InnerChatPageState extends State<InnerChatPage>
     bool isStarred,
   ) {
     // Pre-calculate values for better performance
-    final messageTime = _formatMessageTime(message.createdAt);
+    final messageTime = ChatHelpers.formatMessageTime(message.createdAt);
 
     // Check if this message should be animated
     final shouldAnimate = _messageAnimationControllers.containsKey(message.id);
@@ -2617,55 +2930,57 @@ class _InnerChatPageState extends State<InnerChatPage>
                                 ),
                               ],
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // Reply message preview (if this is a reply)
-                                if (message.replyToMessage != null)
-                                  _buildReplyPreview(
-                                    message.replyToMessage!,
-                                    isMyMessage,
-                                  ),
-
-                                // Message content (text, image, or video)
-                                _buildMessageContent(message, isMyMessage),
-                                const SizedBox(height: 6),
-                                // Time and status row
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
-                                    if (isStarred) ...[
-                                      Icon(
-                                        Icons.star,
-                                        size: 14,
-                                        color: isMyMessage
-                                            ? Colors.amber[600]
-                                            : Colors.amber[600],
-                                      ),
-                                      const SizedBox(width: 4),
-                                    ],
-                                    Text(
-                                      messageTime,
-                                      style: TextStyle(
-                                        color: isMyMessage
-                                            ? Colors.white70
-                                            : Colors.grey[600],
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w400,
-                                      ),
+                            child: IntrinsicWidth(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // Reply message preview (if this is a reply)
+                                  if (message.replyToMessage != null)
+                                    _buildReplyPreview(
+                                      message.replyToMessage!,
+                                      isMyMessage,
                                     ),
-                                    if (isMyMessage) ...[
-                                      const SizedBox(width: 4),
-                                      Icon(
-                                        Icons.done_all,
-                                        size: 16,
-                                        color: Colors.white70,
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ],
+
+                                  // Message content (text, image, or video)
+                                  _buildMessageContent(message, isMyMessage),
+                                  const SizedBox(height: 6),
+                                  // Time and status row - aligned to right
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (isStarred) ...[
+                                          Icon(
+                                            Icons.star,
+                                            size: 14,
+                                            color: isMyMessage
+                                                ? Colors.amber[600]
+                                                : Colors.amber[600],
+                                          ),
+                                          const SizedBox(width: 4),
+                                        ],
+                                        Text(
+                                          messageTime,
+                                          style: TextStyle(
+                                            color: isMyMessage
+                                                ? Colors.white70
+                                                : Colors.grey[600],
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w400,
+                                          ),
+                                        ),
+                                        // Show delivery/read status ticks for own messages
+                                        if (isMyMessage) ...[
+                                          const SizedBox(width: 4),
+                                          _buildMessageStatusTicks(message),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                     // Pin indicator
@@ -2768,6 +3083,18 @@ class _InnerChatPageState extends State<InnerChatPage>
   }
 
   Widget _buildMessageContent(MessageModel message, bool isMyMessage) {
+    // Handle loading states first
+    switch (message.type) {
+      case 'image_loading':
+        return _buildImageLoadingMessage(message, isMyMessage);
+      case 'video_loading':
+        return _buildVideoLoadingMessage(message, isMyMessage);
+      case 'document_loading':
+        return _buildDocumentLoadingMessage(message, isMyMessage);
+      case 'audio_loading':
+        return _buildAudioLoadingMessage(message, isMyMessage);
+    }
+
     // Handle attachments based on category
     if (message.attachments != null) {
       final attachmentData = message.attachments as Map<String, dynamic>;
@@ -2944,7 +3271,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      _formatMessageTime(message.createdAt),
+                      ChatHelpers.formatMessageTime(message.createdAt),
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 11,
@@ -2959,6 +3286,28 @@ class _InnerChatPageState extends State<InnerChatPage>
                 ),
               ),
             ),
+            if (_starredMessages.contains(message.id))
+              Positioned(
+                bottom: 4,
+                left: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.6),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // const SizedBox(width: 4),
+                      Icon(Icons.star, size: 14, color: Colors.yellow),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -3054,6 +3403,28 @@ class _InnerChatPageState extends State<InnerChatPage>
                     color: isMyMessage ? Colors.white : Colors.teal[700],
                   ),
                 ),
+                if (_starredMessages.contains(message.id))
+                  Positioned(
+                    bottom: 4,
+                    left: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 2,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withAlpha(60),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // const SizedBox(width: 4),
+                          Icon(Icons.star, size: 14, color: Colors.yellow),
+                        ],
+                      ),
+                    ),
+                  ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -3074,7 +3445,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                       if (fileSize != null) ...[
                         const SizedBox(height: 2),
                         Text(
-                          _formatFileSize(fileSize),
+                          ChatHelpers.formatFileSize(fileSize),
                           style: TextStyle(
                             color: isMyMessage
                                 ? Colors.white
@@ -3257,7 +3628,8 @@ class _InnerChatPageState extends State<InnerChatPage>
                         Row(
                           children: [
                             const SizedBox(width: 8),
-                            // const Spacer(),
+                            if (_starredMessages.contains(message.id))
+                              Icon(Icons.star, size: 14, color: Colors.yellow),
                             Text(
                               _formatDuration(isPlaying ? position : duration),
                               style: TextStyle(
@@ -3269,7 +3641,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                             ),
                             const Spacer(),
                             Text(
-                              _formatMessageTime(message.createdAt),
+                              ChatHelpers.formatMessageTime(message.createdAt),
                               style: TextStyle(
                                 color: isMyMessage
                                     ? Colors.white70
@@ -3427,7 +3799,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      _formatMessageTime(message.createdAt),
+                      ChatHelpers.formatMessageTime(message.createdAt),
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 11,
@@ -3442,6 +3814,28 @@ class _InnerChatPageState extends State<InnerChatPage>
                 ),
               ),
             ),
+            if (_starredMessages.contains(message.id))
+              Positioned(
+                bottom: 4,
+                left: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(60),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // const SizedBox(width: 4),
+                      Icon(Icons.star, size: 14, color: Colors.yellow),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -4031,20 +4425,24 @@ class _InnerChatPageState extends State<InnerChatPage>
         message.type == 'video' ||
         message.type == 'attachment' ||
         message.type == 'docs' ||
-        message.type == 'audios';
+        message.type == 'audios' ||
+        message.type == 'image_loading' ||
+        message.type == 'video_loading' ||
+        message.type == 'document_loading' ||
+        message.type == 'audio_loading';
   }
 
-  String _formatFileSize(int bytes) {
-    if (bytes < 1024) {
-      return '${bytes} B';
-    } else if (bytes < 1024 * 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    } else if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    } else {
-      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
-    }
-  }
+  // String _formatFileSize(int bytes) {
+  //   if (bytes < 1024) {
+  //     return '${bytes} B';
+  //   } else if (bytes < 1024 * 1024) {
+  //     return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  //   } else if (bytes < 1024 * 1024 * 1024) {
+  //     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  //   } else {
+  //     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  //   }
+  // }
 
   void _showPermissionDeniedDialog(String permissionType) {
     showDialog(
@@ -4442,50 +4840,79 @@ class _InnerChatPageState extends State<InnerChatPage>
   }
 
   void _sendImageMessage(File imageFile, String source) async {
+    // Store reply message reference
+    final replyMessage = _replyToMessageData;
+    final replyMessageId = _replyToMessageData?.id;
+
+    // Clear reply state immediately for better UX
+    if (_isReplying) {
+      _cancelReply();
+    }
+
+    // Create loading message for immediate display
+    final loadingMessage = MessageModel(
+      id: _optimisticMessageId, // Use negative ID for optimistic message
+      conversationId: widget.conversation.conversationId,
+      senderId: _currentUserId ?? 0,
+      senderName: 'You', // Current user name
+      body: '', // Empty body for image message
+      type: 'image_loading', // Special type for loading state
+      createdAt: DateTime.now().toIso8601String(),
+      deleted: false,
+      attachments: {
+        'local_path': imageFile.path,
+      }, // Store local path for preview
+      replyToMessageId: replyMessageId,
+      replyToMessage: replyMessage,
+      metadata: {
+        'optimistic_id': _optimisticMessageId,
+      }, // Store optimistic_id in metadata
+    );
+
+    // Track this as an optimistic message
+    _optimisticMessageIds.add(_optimisticMessageId);
+
+    // Add loading message to UI immediately
+    if (mounted) {
+      setState(() {
+        _messages.add(loadingMessage);
+      });
+      _animateNewMessage(loadingMessage.id);
+      _scrollToBottom();
+    }
+
     try {
       final response = await _chatsServices.sendMediaMessage(imageFile);
 
       if (response['success'] == true && response['data'] != null) {
         final mediaData = response['data'];
 
-        // Create a new message model for the image
+        // Update the loading message with actual data
         final imageMessage = MessageModel(
-          id: _optimisticMessageId--, // Use negative ID for optimistic message
+          id: loadingMessage.id, // Keep same ID
           conversationId: widget.conversation.conversationId,
           senderId: _currentUserId ?? 0,
           senderName: 'You', // Current user name
           body: '', // Empty body for image message
-          type: 'image',
+          type: 'image', // Change to actual image type
           createdAt: DateTime.now().toIso8601String(),
           deleted: false,
           attachments: mediaData, // Store the media data as attachment
-          replyToMessageId: _isReplying ? _replyToMessageData?.id : null,
-          replyToMessage: _isReplying && _replyToMessageData != null
-              ? MessageModel(
-                  id: _replyToMessageData!.id,
-                  body: _replyToMessageData!.body,
-                  senderName: _replyToMessageData!.senderName,
-                  type: _replyToMessageData!.type,
-                  senderId: _replyToMessageData!.senderId,
-                  conversationId: widget.conversation.conversationId,
-                  createdAt: _replyToMessageData!.createdAt,
-                  deleted: false,
-                )
-              : null,
+          replyToMessageId: replyMessageId,
+          replyToMessage: replyMessage,
         );
 
-        // Add optimistic message ID to track it
-        _optimisticMessageIds.add(imageMessage.id);
-
-        // Add message to local list immediately
-        setState(() {
-          _messages.add(imageMessage);
-          // Clear reply state if replying
-          if (_isReplying) {
-            _isReplying = false;
-            _replyToMessageData = null;
+        // Update message in local list
+        if (mounted) {
+          final index = _messages.indexWhere(
+            (msg) => msg.id == loadingMessage.id,
+          );
+          if (index != -1) {
+            setState(() {
+              _messages[index] = imageMessage;
+            });
           }
-        });
+        }
 
         // Store in local storage
         final updatedMeta =
@@ -4505,9 +4932,6 @@ class _InnerChatPageState extends State<InnerChatPage>
           insertAtBeginning: false, // Add at end (newest)
         );
 
-        // Scroll to bottom to show new message
-        _scrollToBottom();
-
         debugPrint('💾 Image message stored locally and displayed');
 
         // Send to websocket for real-time messaging
@@ -4516,79 +4940,108 @@ class _InnerChatPageState extends State<InnerChatPage>
           'data': {
             ...response['data'],
             'conversation_id': widget.conversation.conversationId,
-            'reply_to_message_id': _isReplying ? _replyToMessageData?.id : null,
+            'reply_to_message_id': replyMessageId,
           },
           'conversation_id': widget.conversation.conversationId,
         });
 
         debugPrint('📡 Image message sent to websocket for real-time delivery');
       } else {
-        debugPrint(
-          '❌ Failed to upload image: ${response['message'] ?? 'Unknown error'}',
-        );
-        // Show error to user
-        _showErrorDialog(
-          'Failed to send image: ${response['message'] ?? 'Upload failed'}',
+        // Handle upload failure - replace loading message with error
+        _handleMediaUploadFailure(
+          loadingMessage.id,
+          'Failed to upload image: ${response['message'] ?? 'Upload failed'}',
         );
       }
     } catch (e) {
       debugPrint('❌ Error sending image message: $e');
-      _showErrorDialog('Failed to send image. Please try again.');
+      _handleMediaUploadFailure(
+        loadingMessage.id,
+        'Failed to send image. Please try again.',
+      );
     }
+
+    _optimisticMessageId--;
   }
 
   void _sendVideoMessage(File videoFile, String source) async {
     debugPrint('📤 Sending video message from $source');
-    debugPrint('📤 Video path: ${videoFile.path}');
-    debugPrint('📤 Video exists: ${videoFile.existsSync()}');
+
+    // Store reply message reference
+    final replyMessage = _replyToMessageData;
+    final replyMessageId = _replyToMessageData?.id;
+
+    // Clear reply state immediately for better UX
+    if (_isReplying) {
+      _cancelReply();
+    }
+
+    // Create loading message for immediate display
+    final loadingMessage = MessageModel(
+      id: _optimisticMessageId, // Use negative ID for optimistic message
+      conversationId: widget.conversation.conversationId,
+      senderId: _currentUserId ?? 0,
+      senderName: 'You', // Current user name
+      body: '', // Empty body for video message
+      type: 'video_loading', // Special type for loading state
+      createdAt: DateTime.now().toIso8601String(),
+      deleted: false,
+      attachments: {
+        'local_path': videoFile.path,
+      }, // Store local path for preview
+      replyToMessageId: replyMessageId,
+      replyToMessage: replyMessage,
+      metadata: {
+        'optimistic_id': _optimisticMessageId,
+      }, // Store optimistic_id in metadata
+    );
+
+    // Track this as an optimistic message
+    _optimisticMessageIds.add(_optimisticMessageId);
+
+    // Add loading message to UI immediately
+    if (mounted) {
+      setState(() {
+        _messages.add(loadingMessage);
+      });
+      _animateNewMessage(loadingMessage.id);
+      _scrollToBottom();
+    }
 
     try {
       debugPrint('📤 Uploading video to server...');
-
       final response = await _chatsServices.sendMediaMessage(videoFile);
 
       if (response['success'] == true && response['data'] != null) {
         final mediaData = response['data'];
         debugPrint('✅ Video uploaded successfully: ${mediaData['url']}');
 
-        // Create a new message model for the video
+        // Update the loading message with actual data
         final videoMessage = MessageModel(
-          id: _optimisticMessageId--, // Use negative ID for optimistic message
+          id: loadingMessage.id, // Keep same ID
           conversationId: widget.conversation.conversationId,
           senderId: _currentUserId ?? 0,
           senderName: 'You', // Current user name
           body: '', // Empty body for video message
-          type: 'video',
+          type: 'video', // Change to actual video type
           createdAt: DateTime.now().toIso8601String(),
           deleted: false,
           attachments: mediaData, // Store the media data as attachment
-          replyToMessageId: _isReplying ? _replyToMessageData?.id : null,
-          replyToMessage: _isReplying && _replyToMessageData != null
-              ? MessageModel(
-                  id: _replyToMessageData!.id,
-                  body: _replyToMessageData!.body,
-                  senderName: _replyToMessageData!.senderName,
-                  type: _replyToMessageData!.type,
-                  senderId: _replyToMessageData!.senderId,
-                  conversationId: widget.conversation.conversationId,
-                  createdAt: _replyToMessageData!.createdAt,
-                  deleted: false,
-                )
-              : null,
+          replyToMessageId: replyMessageId,
+          replyToMessage: replyMessage,
         );
 
-        // Add optimistic message ID to track it
-        _optimisticMessageIds.add(videoMessage.id);
-
-        // Add message to local list immediately
-        setState(() {
-          _messages.add(videoMessage);
-          // Clear reply state if replying
-          if (_isReplying) {
-            _isReplying = false;
-            _replyToMessageData = null;
+        // Update message in local list
+        if (mounted) {
+          final index = _messages.indexWhere(
+            (msg) => msg.id == loadingMessage.id,
+          );
+          if (index != -1) {
+            setState(() {
+              _messages[index] = videoMessage;
+            });
           }
-        });
+        }
 
         // Store in local storage
         final updatedMeta =
@@ -4608,9 +5061,6 @@ class _InnerChatPageState extends State<InnerChatPage>
           insertAtBeginning: false, // Add at end (newest)
         );
 
-        // Scroll to bottom to show new message
-        _scrollToBottom();
-
         debugPrint('💾 Video message stored locally and displayed');
 
         // Send to websocket for real-time messaging
@@ -4620,24 +5070,28 @@ class _InnerChatPageState extends State<InnerChatPage>
             ...response['data'],
             'conversation_id': widget.conversation.conversationId,
             'message_type': 'video',
-            'reply_to_message_id': _isReplying ? _replyToMessageData?.id : null,
+            'reply_to_message_id': replyMessageId,
           },
           'conversation_id': widget.conversation.conversationId,
         });
 
         debugPrint('📡 Video message sent to websocket for real-time delivery');
       } else {
-        debugPrint(
-          '❌ Failed to upload video: ${response['message'] ?? 'Unknown error'}',
-        );
-        _showErrorDialog(
-          'Failed to send video: ${response['message'] ?? 'Upload failed'}',
+        // Handle upload failure - replace loading message with error
+        _handleMediaUploadFailure(
+          loadingMessage.id,
+          'Failed to upload video: ${response['message'] ?? 'Upload failed'}',
         );
       }
     } catch (e) {
       debugPrint('❌ Error sending video message: $e');
-      _showErrorDialog('Failed to send video. Please try again.');
+      _handleMediaUploadFailure(
+        loadingMessage.id,
+        'Failed to send video. Please try again.',
+      );
     }
+
+    _optimisticMessageId--;
   }
 
   void _sendDocumentMessage(
@@ -4645,6 +5099,49 @@ class _InnerChatPageState extends State<InnerChatPage>
     String fileName,
     String extension,
   ) async {
+    // Store reply message reference
+    final replyMessage = _replyToMessageData;
+    final replyMessageId = _replyToMessageData?.id;
+
+    // Clear reply state immediately for better UX
+    if (_isReplying) {
+      _cancelReply();
+    }
+
+    // Create loading message for immediate display
+    final loadingMessage = MessageModel(
+      id: _optimisticMessageId, // Use negative ID for optimistic message
+      conversationId: widget.conversation.conversationId,
+      senderId: _currentUserId ?? 0,
+      senderName: 'You', // Current user name
+      body: '', // Empty body for document message
+      type: 'document_loading', // Special type for loading state
+      createdAt: DateTime.now().toIso8601String(),
+      deleted: false,
+      attachments: {
+        'local_path': documentFile.path,
+        'file_name': fileName,
+        'file_extension': extension,
+      }, // Store local info for preview
+      replyToMessageId: replyMessageId,
+      replyToMessage: replyMessage,
+      metadata: {
+        'optimistic_id': _optimisticMessageId,
+      }, // Store optimistic_id in metadata
+    );
+
+    // Track this as an optimistic message
+    _optimisticMessageIds.add(_optimisticMessageId);
+
+    // Add loading message to UI immediately
+    if (mounted) {
+      setState(() {
+        _messages.add(loadingMessage);
+      });
+      _animateNewMessage(loadingMessage.id);
+      _scrollToBottom();
+    }
+
     try {
       final response = await _chatsServices.sendMediaMessage(documentFile);
 
@@ -4652,44 +5149,32 @@ class _InnerChatPageState extends State<InnerChatPage>
         final mediaData = response['data'];
         debugPrint('✅ Document uploaded successfully: ${mediaData['url']}');
 
-        // Create a new message model for the document
+        // Update the loading message with actual data
         final documentMessage = MessageModel(
-          id: _optimisticMessageId--, // Use negative ID for optimistic message
+          id: loadingMessage.id, // Keep same ID
           conversationId: widget.conversation.conversationId,
           senderId: _currentUserId ?? 0,
           senderName: 'You', // Current user name
           body: '', // Empty body for document message
-          type: 'document',
+          type: 'document', // Change to actual document type
           createdAt: DateTime.now().toIso8601String(),
           deleted: false,
           attachments: mediaData, // Store the media data as attachment
-          replyToMessageId: _isReplying ? _replyToMessageData?.id : null,
-          replyToMessage: _isReplying && _replyToMessageData != null
-              ? MessageModel(
-                  id: _replyToMessageData!.id,
-                  body: _replyToMessageData!.body,
-                  senderName: _replyToMessageData!.senderName,
-                  type: _replyToMessageData!.type,
-                  senderId: _replyToMessageData!.senderId,
-                  conversationId: widget.conversation.conversationId,
-                  createdAt: _replyToMessageData!.createdAt,
-                  deleted: false,
-                )
-              : null,
+          replyToMessageId: replyMessageId,
+          replyToMessage: replyMessage,
         );
 
-        // Add optimistic message ID to track it
-        _optimisticMessageIds.add(documentMessage.id);
-
-        // Add message to local list immediately
-        setState(() {
-          _messages.add(documentMessage);
-          // Clear reply state if replying
-          if (_isReplying) {
-            _isReplying = false;
-            _replyToMessageData = null;
+        // Update message in local list
+        if (mounted) {
+          final index = _messages.indexWhere(
+            (msg) => msg.id == loadingMessage.id,
+          );
+          if (index != -1) {
+            setState(() {
+              _messages[index] = documentMessage;
+            });
           }
-        });
+        }
 
         // Store in local storage
         final updatedMeta =
@@ -4716,7 +5201,7 @@ class _InnerChatPageState extends State<InnerChatPage>
             ...response['data'],
             'conversation_id': widget.conversation.conversationId,
             'message_type': 'document',
-            'reply_to_message_id': _isReplying ? _replyToMessageData?.id : null,
+            'reply_to_message_id': replyMessageId,
           },
           'conversation_id': widget.conversation.conversationId,
         });
@@ -4729,17 +5214,21 @@ class _InnerChatPageState extends State<InnerChatPage>
           '📡 Document message sent to websocket for real-time delivery',
         );
       } else {
-        debugPrint(
-          '❌ Failed to upload document: ${response['message'] ?? 'Unknown error'}',
-        );
-        _showErrorDialog(
-          'Failed to send document: ${response['message'] ?? 'Upload failed'}',
+        // Handle upload failure - replace loading message with error
+        _handleMediaUploadFailure(
+          loadingMessage.id,
+          'Failed to upload document: ${response['message'] ?? 'Upload failed'}',
         );
       }
     } catch (e) {
       debugPrint('❌ Error sending document message: $e');
-      _showErrorDialog('Failed to send document. Please try again.');
+      _handleMediaUploadFailure(
+        loadingMessage.id,
+        'Failed to send document. Please try again.',
+      );
     }
+
+    _optimisticMessageId--;
   }
 
   void _enterSelectionMode(int messageId) {
@@ -4826,13 +5315,14 @@ class _InnerChatPageState extends State<InnerChatPage>
     });
   }
 
-  void _replyToMessage(MessageModel message) {
+  void _replyToMessage(MessageModel message) async {
     setState(() {
       _replyToMessageData = message;
       _isReplying = true;
     });
-    // Focus on the text field
-    FocusScope.of(context).requestFocus(FocusNode());
+
+    // Focus on the text field for user to type their reply
+    // The actual message will be sent when user presses send button
   }
 
   void _cancelReply() {
@@ -5448,13 +5938,13 @@ class _InnerChatPageState extends State<InnerChatPage>
           _timerStreamController.add(_recordingDuration);
 
           // Check if we're actually recording audio
-          print('⏱️ Recording duration: ${_recordingDuration.inSeconds}s');
+          debugPrint('⏱️ Recording duration: ${_recordingDuration.inSeconds}s');
         }
       });
 
-      print('🎤 Started recording voice note at: $recordingPath');
+      debugPrint('🎤 Started recording voice note at: $recordingPath');
     } catch (e) {
-      print('❌ Error starting voice recording: $e');
+      debugPrint('❌ Error starting voice recording: $e');
       _showErrorDialog('Failed to start recording. Please try again.');
     }
   }
@@ -5521,10 +6011,10 @@ class _InnerChatPageState extends State<InnerChatPage>
         _recordingPath = recordingPath;
       });
 
-      print('🎤 Stopped recording voice note. Path: $recordingPath');
+      debugPrint('🎤 Stopped recording voice note. Path: $recordingPath');
     } catch (e) {
-      print('❌ Error stopping voice recording: $e');
-      print('❌ Stack trace: ${e.toString()}');
+      debugPrint('❌ Error stopping voice recording: $e');
+      debugPrint('❌ Stack trace: ${e.toString()}');
       _showErrorDialog('Failed to stop recording. Please try again. Error: $e');
     }
   }
@@ -5604,94 +6094,131 @@ class _InnerChatPageState extends State<InnerChatPage>
         return;
       }
 
+      // Store reply message reference before closing modal
+      final replyMessage = _replyToMessageData;
+      final replyMessageId = _replyToMessageData?.id;
+
+      // Clear reply state immediately for better UX
+      if (_isReplying) {
+        _cancelReply();
+      }
+
       Navigator.of(context).pop();
+
+      // Create loading message for immediate display
+      final loadingMessage = MessageModel(
+        id: _optimisticMessageId, // Use negative ID for optimistic message
+        conversationId: widget.conversation.conversationId,
+        senderId: _currentUserId ?? 0,
+        senderName: 'You',
+        body: '',
+        type: 'audio_loading', // Special type for loading state
+        createdAt: DateTime.now().toIso8601String(),
+        deleted: false,
+        attachments: {
+          'local_path': voiceFile.path,
+          'duration': _recordingDuration.inSeconds,
+        }, // Store local info for preview
+        replyToMessageId: replyMessageId,
+        replyToMessage: replyMessage,
+        metadata: {
+          'optimistic_id': _optimisticMessageId,
+        }, // Store optimistic_id in metadata
+      );
+
+      // Track this as an optimistic message
+      _optimisticMessageIds.add(_optimisticMessageId);
+
+      // Add loading message to UI immediately
+      if (mounted) {
+        setState(() {
+          _messages.add(loadingMessage);
+        });
+        _animateNewMessage(loadingMessage.id);
+        _scrollToBottom();
+      }
+
       print('📤 Sending voice note: ${voiceFile.path}');
       print('📤 Voice note file size: ${await voiceFile.length()} bytes');
-      print('📤 Voice note file extension: ${voiceFile.path.split('.').last}');
 
-      final response = await _chatsServices.sendMediaMessage(voiceFile);
-      print('📤 Voice note response: $response');
+      try {
+        final response = await _chatsServices.sendMediaMessage(voiceFile);
+        print('📤 Voice note response: $response');
 
-      if (response['success'] == true && response['data'] != null) {
-        final mediaData = response['data'];
-        print('✅ Voice note uploaded successfully: ${mediaData['url']}');
+        if (response['success'] == true && response['data'] != null) {
+          final mediaData = response['data'];
+          print('✅ Voice note uploaded successfully: ${mediaData['url']}');
 
-        // Create a new message model for the voice note
-        final voiceMessage = MessageModel(
-          id: _optimisticMessageId--,
-          conversationId: widget.conversation.conversationId,
-          senderId: _currentUserId ?? 0,
-          senderName: 'You',
-          body: '',
-          type: 'audio',
-          createdAt: DateTime.now().toIso8601String(),
-          deleted: false,
-          attachments: mediaData,
-          replyToMessageId: _isReplying ? _replyToMessageData?.id : null,
-          replyToMessage: _isReplying && _replyToMessageData != null
-              ? MessageModel(
-                  id: _replyToMessageData!.id,
-                  body: _replyToMessageData!.body,
-                  senderName: _replyToMessageData!.senderName,
-                  type: _replyToMessageData!.type,
-                  senderId: _replyToMessageData!.senderId,
-                  conversationId: widget.conversation.conversationId,
-                  createdAt: _replyToMessageData!.createdAt,
-                  deleted: false,
-                )
-              : null,
-        );
+          // Update the loading message with actual data
+          final voiceMessage = MessageModel(
+            id: loadingMessage.id, // Keep same ID
+            conversationId: widget.conversation.conversationId,
+            senderId: _currentUserId ?? 0,
+            senderName: 'You',
+            body: '',
+            type: 'audio', // Change to actual audio type
+            createdAt: DateTime.now().toIso8601String(),
+            deleted: false,
+            attachments: mediaData,
+            replyToMessageId: replyMessageId,
+            replyToMessage: replyMessage,
+          );
 
-        // Add optimistic message ID to track it
-        _optimisticMessageIds.add(voiceMessage.id);
-
-        // Add message to local list immediately
-        setState(() {
-          _messages.add(voiceMessage);
-          if (_isReplying) {
-            _isReplying = false;
-            _replyToMessageData = null;
-          }
-        });
-
-        // Store in local storage
-        final updatedMeta =
-            _conversationMeta?.copyWith() ??
-            ConversationMeta(
-              totalCount: _messages.length,
-              currentPage: 1,
-              totalPages: 1,
-              hasNextPage: false,
-              hasPreviousPage: false,
+          // Update message in local list
+          if (mounted) {
+            final index = _messages.indexWhere(
+              (msg) => msg.id == loadingMessage.id,
             );
+            if (index != -1) {
+              setState(() {
+                _messages[index] = voiceMessage;
+              });
+            }
+          }
 
-        await _storageService.addMessageToCache(
-          conversationId: widget.conversation.conversationId,
-          newMessage: voiceMessage,
-          updatedMeta: updatedMeta,
-          insertAtBeginning: false,
-        );
+          // Store in local storage
+          final updatedMeta =
+              _conversationMeta?.copyWith() ??
+              ConversationMeta(
+                totalCount: _messages.length,
+                currentPage: 1,
+                totalPages: 1,
+                hasNextPage: false,
+                hasPreviousPage: false,
+              );
 
-        // Send to websocket for real-time messaging
-        await _websocketService.sendMessage({
-          'type': 'media',
-          'data': {
-            ...response['data'],
+          await _storageService.addMessageToCache(
+            conversationId: widget.conversation.conversationId,
+            newMessage: voiceMessage,
+            updatedMeta: updatedMeta,
+            insertAtBeginning: false,
+          );
+
+          // Send to websocket for real-time messaging
+          await _websocketService.sendMessage({
+            'type': 'media',
+            'data': {
+              ...response['data'],
+              'conversation_id': widget.conversation.conversationId,
+              'message_type': 'audio',
+              'reply_to_message_id': replyMessageId,
+            },
             'conversation_id': widget.conversation.conversationId,
-            'message_type': 'audio',
-            'reply_to_message_id': _isReplying ? _replyToMessageData?.id : null,
-          },
-          'conversation_id': widget.conversation.conversationId,
-        });
+          });
 
-        _scrollToBottom();
-        print('💾 Voice message stored locally and displayed');
-      } else {
-        print(
-          '❌ Failed to upload voice note: ${response['message'] ?? 'Unknown error'}',
-        );
-        _showErrorDialog(
-          'Failed to send voice note: ${response['message'] ?? 'Upload failed'}',
+          print('💾 Voice message stored locally and displayed');
+        } else {
+          // Handle upload failure - replace loading message with error
+          _handleMediaUploadFailure(
+            loadingMessage.id,
+            'Failed to upload voice note: ${response['message'] ?? 'Upload failed'}',
+          );
+        }
+      } catch (e) {
+        print('❌ Error uploading voice note: $e');
+        _handleMediaUploadFailure(
+          loadingMessage.id,
+          'Failed to send voice note. Please try again.',
         );
       }
 
@@ -5705,6 +6232,8 @@ class _InnerChatPageState extends State<InnerChatPage>
       if (await voiceFile.exists()) {
         await voiceFile.delete();
       }
+
+      _optimisticMessageId--;
     } catch (e) {
       print('❌ Error sending voice note: $e');
       _showErrorDialog('Failed to send voice note. Please try again.');
@@ -5875,6 +6404,413 @@ class _InnerChatPageState extends State<InnerChatPage>
     final minutes = twoDigits(duration.inMinutes);
     final seconds = twoDigits(duration.inSeconds % 60);
     return '$minutes:$seconds';
+  }
+
+  // Loading message builders
+  Widget _buildImageLoadingMessage(MessageModel message, bool isMyMessage) {
+    final attachmentData = message.attachments as Map<String, dynamic>;
+    final localPath = attachmentData['local_path'] as String?;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: 200,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(
+            color: isMyMessage
+                ? const Color(0xFF008080)
+                : const Color(0xFF008080),
+            width: 6,
+          ),
+        ),
+        child: Stack(
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 200,
+                  height: 200,
+                  child: localPath != null
+                      ? Image.file(
+                          File(localPath),
+                          width: 200,
+                          height: 200,
+                          fit: BoxFit.cover,
+                        )
+                      : Container(
+                          color: Colors.grey[200],
+                          child: Icon(
+                            Icons.image,
+                            size: 50,
+                            color: Colors.grey[400],
+                          ),
+                        ),
+                ),
+              ],
+            ),
+            // Loading overlay
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 30,
+                        height: 30,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Uploading...',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVideoLoadingMessage(MessageModel message, bool isMyMessage) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: 200,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(
+            color: isMyMessage
+                ? const Color(0xFF008080)
+                : const Color(0xFF008080),
+            width: 6,
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Stack(
+          children: [
+            Container(
+              width: 220,
+              height: 220,
+              color: Colors.black87,
+              child: Center(
+                child: Icon(
+                  Icons.play_circle_filled,
+                  size: 50,
+                  color: Colors.white.withOpacity(0.7),
+                ),
+              ),
+            ),
+            // Loading overlay
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.7),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 30,
+                        height: 30,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Uploading video...',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDocumentLoadingMessage(MessageModel message, bool isMyMessage) {
+    final attachmentData = message.attachments as Map<String, dynamic>;
+    final fileName = attachmentData['file_name'] as String? ?? 'Document';
+    final extension = attachmentData['file_extension'] as String? ?? '';
+
+    IconData docIcon = Icons.description;
+    if (extension.isNotEmpty) {
+      if (extension.contains('pdf')) {
+        docIcon = Icons.picture_as_pdf;
+      } else if (extension.contains('doc')) {
+        docIcon = Icons.description;
+      } else if (extension.contains('xls')) {
+        docIcon = Icons.table_chart;
+      } else if (extension.contains('ppt')) {
+        docIcon = Icons.slideshow;
+      } else if (extension.contains('zip') || extension.contains('rar')) {
+        docIcon = Icons.archive;
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 280,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: isMyMessage ? Colors.teal : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isMyMessage ? Colors.teal : Colors.grey[300]!,
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withAlpha(5),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isMyMessage
+                      ? Colors.teal.withAlpha(25)
+                      : Colors.teal.withAlpha(10),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  docIcon,
+                  size: 24,
+                  color: isMyMessage ? Colors.white : Colors.teal[700],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      fileName,
+                      style: TextStyle(
+                        color: isMyMessage ? Colors.white : Colors.black87,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Uploading...',
+                      style: TextStyle(
+                        color: isMyMessage ? Colors.white70 : Colors.grey[600],
+                        fontSize: 13,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    isMyMessage ? Colors.white : Colors.teal,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAudioLoadingMessage(MessageModel message, bool isMyMessage) {
+    final attachmentData = message.attachments as Map<String, dynamic>;
+    final duration = attachmentData['duration'] as int? ?? 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 250,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: isMyMessage ? Colors.teal : Colors.grey[100],
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isMyMessage
+                      ? Colors.white.withAlpha(20)
+                      : Colors.grey[200],
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Icon(
+                  Icons.mic,
+                  size: 20,
+                  color: isMyMessage ? Colors.white : Colors.grey[700],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.audiotrack,
+                          size: 16,
+                          color: isMyMessage
+                              ? Colors.white70
+                              : Colors.grey[600],
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Container(
+                            height: 3,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(2),
+                              color: isMyMessage
+                                  ? Colors.white30
+                                  : Colors.grey[300],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const SizedBox(width: 8),
+                        Text(
+                          _formatDuration(Duration(seconds: duration)),
+                          style: TextStyle(
+                            color: isMyMessage
+                                ? Colors.white70
+                                : Colors.grey[600],
+                            fontSize: 12,
+                          ),
+                        ),
+                        const Spacer(),
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              isMyMessage ? Colors.white70 : Colors.teal,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Uploading...',
+                          style: TextStyle(
+                            color: isMyMessage
+                                ? Colors.white70
+                                : Colors.grey[600],
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Initiate audio call
+  Future<void> _initiateCall(BuildContext context) async {
+    try {
+      final callService = Provider.of<CallService>(context, listen: false);
+
+      // Check WebSocket connection status
+      if (!_websocketService.isConnected) {
+        print('[CALL] WebSocket not connected, attempting to reconnect...');
+        await _websocketService.connect();
+        await Future.delayed(const Duration(seconds: 2)); // Wait for connection
+      }
+
+      // Check if already in a call
+      if (callService.hasActiveCall) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Already in a call'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // Initiate the call
+      await callService.initiateCall(
+        widget.conversation.userId,
+        widget.conversation.userName,
+        widget.conversation.userProfilePic,
+      );
+
+      // Navigate to in-call screen
+      if (context.mounted) {
+        Navigator.of(context).pushNamed('/call');
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to start call: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 }
 

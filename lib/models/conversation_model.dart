@@ -10,6 +10,7 @@ class ConversationModel {
   final int userId;
   final String userName;
   final String? userProfilePic;
+  final bool? isOnline; // Online status for DM conversations
 
   ConversationModel({
     required this.conversationId,
@@ -23,6 +24,7 @@ class ConversationModel {
     required this.userId,
     required this.userName,
     this.userProfilePic,
+    this.isOnline,
   });
 
   factory ConversationModel.fromJson(Map<String, dynamic> json) {
@@ -40,6 +42,7 @@ class ConversationModel {
       userId: _parseToInt(json['userId']),
       userName: json['userName'] ?? 'Unknown User',
       userProfilePic: json['userProfilePic'],
+      isOnline: json['isOnline'], // Will be set separately by UserStatusService
     );
   }
 
@@ -81,6 +84,55 @@ class ConversationModel {
   bool get isDM {
     return type.toLowerCase() == 'dm';
   }
+
+  /// Convert this conversation to JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'conversationId': conversationId,
+      'type': type,
+      'title': title,
+      'metadata': metadata?.toJson(),
+      'lastMessageAt': lastMessageAt,
+      'role': role,
+      'unreadCount': unreadCount,
+      'joinedAt': joinedAt,
+      'userId': userId,
+      'userName': userName,
+      'userProfilePic': userProfilePic,
+      'isOnline': isOnline,
+    };
+  }
+
+  /// Create a copy of this conversation with updated online status
+  ConversationModel copyWith({
+    int? conversationId,
+    String? type,
+    String? title,
+    ConversationMetadata? metadata,
+    String? lastMessageAt,
+    String? role,
+    int? unreadCount,
+    String? joinedAt,
+    int? userId,
+    String? userName,
+    String? userProfilePic,
+    bool? isOnline,
+  }) {
+    return ConversationModel(
+      conversationId: conversationId ?? this.conversationId,
+      type: type ?? this.type,
+      title: title ?? this.title,
+      metadata: metadata ?? this.metadata,
+      lastMessageAt: lastMessageAt ?? this.lastMessageAt,
+      role: role ?? this.role,
+      unreadCount: unreadCount ?? this.unreadCount,
+      joinedAt: joinedAt ?? this.joinedAt,
+      userId: userId ?? this.userId,
+      userName: userName ?? this.userName,
+      userProfilePic: userProfilePic ?? this.userProfilePic,
+      isOnline: isOnline ?? this.isOnline,
+    );
+  }
 }
 
 class ConversationMetadata {
@@ -92,6 +144,10 @@ class ConversationMetadata {
     return ConversationMetadata(
       lastMessage: LastMessage.fromJson(json['last_message']),
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {'last_message': lastMessage.toJson()};
   }
 }
 
@@ -121,6 +177,17 @@ class LastMessage {
       createdAt: json['created_at'] ?? '',
       conversationId: _parseToInt(json['conversation_id']),
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'body': body,
+      'type': type,
+      'sender_id': senderId,
+      'created_at': createdAt,
+      'conversation_id': conversationId,
+    };
   }
 
   static int _parseToInt(dynamic value) {

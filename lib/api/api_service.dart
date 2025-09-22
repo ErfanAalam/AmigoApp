@@ -4,6 +4,9 @@ import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:amigo/services/auth_service.dart';
 import 'package:amigo/services/cookie_service.dart';
+import 'package:amigo/services/location_service.dart';
+import 'package:amigo/services/ip_service.dart';
+import 'package:amigo/api/user.service.dart' as userService;
 import 'package:mime/mime.dart';
 import 'package:path/path.dart' as path;
 
@@ -63,6 +66,9 @@ class ApiService {
             if (response.requestOptions.path.contains('verify-login-otp') &&
                 response.statusCode == 200) {
               _authService.setAuthenticated();
+              // Update user location and IP after successful authentication
+              // Run this in the background to avoid blocking the response
+              updateUserLocationAndIp();
             }
             return handler.next(response);
           },
@@ -173,10 +179,7 @@ class ApiService {
       // Check if we received any cookies
       final cookies = response.headers['set-cookie'];
       if (cookies != null && cookies.isNotEmpty) {
-        print('🍪 Received authentication cookies');
-      } else {
-        print('⚠️ No cookies received in login response');
-      }
+      } else {}
 
       return {
         'success': response.statusCode == 200,
@@ -201,6 +204,35 @@ class ApiService {
   // Debug method to list all cookies (don't use in production)
   Future<void> debugListCookies() async {
     await _cookieService.debugListCookies();
+  }
+
+  // Update user location and IP after authentication
+  Future<void> updateUserLocationAndIp() async {
+    try {
+      print('🚀 Updating user location and IP after authentication...');
+
+      final LocationService locationService = LocationService();
+      final IpService ipService = IpService();
+
+      // Get location and IP concurrently for better performance
+      final futures = await Future.wait([
+        locationService.getCurrentLocation(),
+        ipService.getDetailedIpInfo(),
+      ]);
+
+      final locationResult = futures[0];
+      final ipResult = futures[1];
+      final data = {
+        'location': {
+          'latitude': locationResult['latitude'],
+          'longitude': locationResult['longitude'],
+        },
+        'ip_address': (ipResult['ip']).toString(),
+      };
+
+    } catch (e) {
+      print('❌ Error updating user location and IP: $e');
+    }
   }
 
   // Method to make authenticated requests
@@ -242,6 +274,7 @@ class ApiService {
   Future<Response> authenticatedDelete(
     String path, {
     dynamic body,
+
     Map<String, dynamic>? queryParameters,
   }) async {
     return await _dio.delete(
@@ -277,12 +310,6 @@ class ApiService {
       final fileSize = await file.length();
       final mimeType = lookupMimeType(file.path) ?? 'application/octet-stream';
 
-      print('📤 Preparing file upload:');
-      print('📤 File path: ${file.path}');
-      print('📤 File name: $fileName');
-      print('📤 File size: $fileSize bytes');
-      print('📤 MIME type: $mimeType');
-
       // Validate file size (50MB limit)
       const maxFileSize = 50 * 1024 * 1024; // 50MB in bytes
       if (fileSize > maxFileSize) {
@@ -295,7 +322,6 @@ class ApiService {
 
       // Read file as bytes to avoid content length issues
       final fileBytes = await file.readAsBytes();
-      print('📤 Read ${fileBytes.length} bytes from file');
 
       // Create multipart file from bytes instead of file path
       final multipartFile = MultipartFile.fromBytes(
@@ -304,19 +330,8 @@ class ApiService {
         contentType: DioMediaType.parse(mimeType),
       );
 
-      print('📤 Multipart file created successfully');
-      print('📤 Upload URL: ${Environment.baseUrl}/media/upload');
-      print('📤 Original file size: $fileSize bytes');
-      print('📤 Multipart file length: ${multipartFile.length} bytes');
-
-      // Check authentication status
-      final hasAuth = await hasAuthCookies();
-      print('📤 Has authentication cookies: $hasAuth');
-
       // Prepare form data
       final formData = FormData.fromMap({'file': multipartFile});
-
-      print('📤 About to send multipart data to server...');
 
       // Send the file
       final response = await _dio.post(
@@ -330,10 +345,6 @@ class ApiService {
           sendTimeout: const Duration(minutes: 5),
         ),
       );
-
-      print('📤 Media upload response status: ${response.statusCode}');
-      print('📤 Media upload response data: ${response.data}');
-      print('📤 Media upload response headers: ${response.headers}');
 
       // Handle the response data properly
       if (response.data is Map<String, dynamic>) {
@@ -350,15 +361,6 @@ class ApiService {
         };
       }
     } on DioException catch (e) {
-      print('❌ DioException caught during media upload:');
-      print('❌ Exception type: ${e.type}');
-      print('❌ Exception message: ${e.message}');
-      print('❌ Exception error: ${e.error}');
-      print('❌ Exception requestOptions: ${e.requestOptions.uri}');
-      print('❌ Response status code: ${e.response?.statusCode}');
-      print('❌ Response data: ${e.response?.data}');
-      print('❌ Response headers: ${e.response?.headers}');
-
       String errorMessage = 'Failed to send media';
 
       if (e.type == DioExceptionType.connectionTimeout ||

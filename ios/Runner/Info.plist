@@ -53,5 +53,9 @@
 	<string>This app needs access to photo library to select and share photos and videos in messages.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>This app needs access to microphone to record videos with audio and voice notes for messaging.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>This app needs access to location to provide location-based features and services.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>This app needs access to location to provide location-based features and services.</string>
 </dict>
 </plist>

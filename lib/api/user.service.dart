@@ -7,12 +7,7 @@ class UserService {
   Future<Map<String, dynamic>> getUser() async {
     try {
       final response = await _apiService.authenticatedGet('/user/get-user');
-      return {
-        'success': response.statusCode == 200,
-        'statusCode': response.statusCode,
-        'data': response.data,
-        'message': 'User data retrieved successfully',
-      };
+      return response.data;
     } on DioException catch (e) {
       return {
         'success': false,
@@ -55,6 +50,38 @@ class UserService {
     try {
       final response = await _apiService.authenticatedGet(
         '/chat/get-chat-list/$type',
+      );
+      return response.data;
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Unexpected error occurred',
+      };
+    }
+  }
+
+    Future<Map<String, dynamic>> GetCommunityChatList() async {
+    try {
+      final response = await _apiService.authenticatedGet(
+        '/community/list-connected-communities',
+      );
+      return response.data;
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Unexpected error occurred',
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> updateUser(Map<String, dynamic> data) async {
+    print(data);
+    try {
+      final response = await _apiService.authenticatedPost(
+        '/user/update-user',
+        data: data,
       );
       return response.data;
     } catch (e) {

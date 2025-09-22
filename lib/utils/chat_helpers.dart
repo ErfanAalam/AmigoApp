@@ -47,7 +47,7 @@ class ChatHelpers {
     }
   }
 
-  /// Format date separator for messages
+  /// Format date separator for messages (WhatsApp style)
   static String formatDateSeparator(String dateTimeString) {
     try {
       final messageDateTime = convertToIST(dateTimeString);
@@ -68,7 +68,7 @@ class ChatHelpers {
       } else if (messageDate == yesterday) {
         return 'Yesterday';
       } else {
-        // Format as "DD MMM YYYY" or "DD MMM" for current year
+        // Format as "DD MMM YYYY" for older messages
         const months = [
           'Jan',
           'Feb',
@@ -84,16 +84,22 @@ class ChatHelpers {
           'Dec',
         ];
         final monthName = months[messageDateTime.month - 1];
-
-        if (messageDateTime.year == nowIST.year) {
-          return '${messageDateTime.day} $monthName';
-        } else {
-          return '${messageDateTime.day} $monthName ${messageDateTime.year}';
-        }
+        return '${messageDateTime.day} $monthName ${messageDateTime.year}';
       }
     } catch (e) {
       debugPrint('Error formatting date separator: $e');
       return 'Unknown Date';
+    }
+  }
+
+  /// Get the date string for a message (for sticky header)
+  static String getMessageDateString(String dateTimeString) {
+    try {
+      final messageDateTime = convertToIST(dateTimeString);
+      return '${messageDateTime.year}-${messageDateTime.month.toString().padLeft(2, '0')}-${messageDateTime.day.toString().padLeft(2, '0')}';
+    } catch (e) {
+      debugPrint('Error getting message date string: $e');
+      return '';
     }
   }
 
@@ -126,41 +132,78 @@ class ChatHelpers {
     return 0;
   }
 
-  /// Check if date separator should be shown
+  /// Check if date separator should be shown (WhatsApp style - once per date group)
   static bool shouldShowDateSeparator(List messages, int index) {
     try {
+      // Since the ListView uses reverse: true, the index represents position from bottom
+      // Index 0 = newest message (at bottom), higher indices = older messages (going up)
+
       // Get the current message (the one we're checking)
       final currentMessage = messages[messages.length - 1 - index];
 
-      // For the first message (newest), check if we need a separator
+      // For the first message (newest at bottom), always show separator
       if (index == 0) {
-        // Always show separator for the first (newest) message
+        debugPrint(
+          '📅 Date separator: Showing for first message (index 0) - ${currentMessage.createdAt}',
+        );
         return true;
       }
 
-      // Get the previous message in the list (chronologically newer, displayed above)
-      final previousMessage = messages[messages.length - index];
+      // Get the next message in the display order (chronologically newer, displayed below)
+      // Since we're going up in the list (higher index = older message), we need to get the message below
+      final nextMessage = messages[messages.length - 1 - (index - 1)];
 
       // Convert both to IST and get date parts
       final currentDateTime = convertToIST(currentMessage.createdAt);
-      final previousDateTime = convertToIST(previousMessage.createdAt);
+      final nextDateTime = convertToIST(nextMessage.createdAt);
 
       final currentDate = DateTime(
         currentDateTime.year,
         currentDateTime.month,
         currentDateTime.day,
       );
-      final previousDate = DateTime(
-        previousDateTime.year,
-        previousDateTime.month,
-        previousDateTime.day,
+      final nextDate = DateTime(
+        nextDateTime.year,
+        nextDateTime.month,
+        nextDateTime.day,
       );
 
-      // Show separator if the current message is from a different date than the previous message
-      return currentDate != previousDate;
+      // Show separator if the current message is from a different date than the next message
+      // This means we're at the start of a new date group (WhatsApp style)
+      final shouldShow = currentDate != nextDate;
+
+      // Debug logging
+      if (shouldShow) {
+        debugPrint(
+          '📅 Date separator: Showing at index $index (start of new date group)',
+        );
+        debugPrint(
+          '   Current: ${currentMessage.createdAt} -> ${currentDate.toString().split(' ')[0]}',
+        );
+        debugPrint(
+          '   Next: ${nextMessage.createdAt} -> ${nextDate.toString().split(' ')[0]}',
+        );
+      }
+
+      return shouldShow;
     } catch (e) {
       debugPrint('Error in shouldShowDateSeparator: $e');
       return false;
+    }
+  }
+
+  /// Debug helper to print all message dates for troubleshooting
+  static void debugMessageDates(List messages) {
+    debugPrint('🔍 Debug: Message dates (from newest to oldest):');
+    for (int i = 0; i < messages.length; i++) {
+      final message = messages[messages.length - 1 - i];
+      final dateTime = convertToIST(message.createdAt);
+      final dateStr =
+          '${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}';
+      final shouldShowSeparator = shouldShowDateSeparator(messages, i);
+      debugPrint(
+        '   Index $i: ${message.createdAt} -> $dateStr ${shouldShowSeparator ? '📅 SEPARATOR' : ''}',
+      );
     }
   }
 }

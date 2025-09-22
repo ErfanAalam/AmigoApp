@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../models/group_model.dart';
+import '../../models/community_model.dart';
 import '../../api/user.service.dart';
 import 'inner_group_chat_page.dart';
 import 'create_group_page.dart';
+import 'community_inner_groups_page.dart';
 
 class GroupsPage extends StatefulWidget {
   const GroupsPage({Key? key}) : super(key: key);
@@ -13,15 +15,16 @@ class GroupsPage extends StatefulWidget {
 
 class _GroupsPageState extends State<GroupsPage> {
   final UserService _userService = UserService();
-  late Future<List<GroupModel>> _groupsFuture;
+  late Future<Map<String, dynamic>> _dataFuture;
   final TextEditingController _searchController = TextEditingController();
   List<GroupModel> _allGroups = [];
-  List<GroupModel> _filteredGroups = [];
+  List<CommunityModel> _allCommunities = [];
+  List<dynamic> _filteredItems = []; // Can contain both groups and communities
 
   @override
   void initState() {
     super.initState();
-    _groupsFuture = _loadGroups();
+    _dataFuture = _loadGroupsAndCommunities();
     _searchController.addListener(_onSearchChanged);
   }
 
@@ -36,24 +39,39 @@ class _GroupsPageState extends State<GroupsPage> {
     final query = _searchController.text.toLowerCase();
     setState(() {
       if (query.isEmpty) {
-        _filteredGroups = List.from(_allGroups);
+        _filteredItems = [..._allGroups, ..._allCommunities];
       } else {
-        _filteredGroups = _allGroups.where((group) {
+        final filteredGroups = _allGroups.where((group) {
           return group.title.toLowerCase().contains(query) ||
               group.members.any(
                 (member) => member.name.toLowerCase().contains(query),
               );
         }).toList();
+
+        final filteredCommunities = _allCommunities.where((community) {
+          return community.name.toLowerCase().contains(query);
+        }).toList();
+
+        _filteredItems = [...filteredGroups, ...filteredCommunities];
       }
     });
   }
 
-  Future<List<GroupModel>> _loadGroups() async {
+  Future<Map<String, dynamic>> _loadGroupsAndCommunities() async {
     try {
-      final response = await _userService.GetChatList('group');
+      // Load groups
+      final groupResponse = await _userService.GetChatList('group');
 
-      if (response['success']) {
-        final dynamic responseData = response['data'];
+      // Load communities
+      final communityResponse = await _userService.GetCommunityChatList();
+      print('Community response: $communityResponse');
+
+      List<GroupModel> groups = [];
+      List<CommunityModel> communities = [];
+
+      // Process groups
+      if (groupResponse['success']) {
+        final dynamic responseData = groupResponse['data'];
         List<dynamic> conversationsList = [];
 
         if (responseData is List) {
@@ -73,22 +91,32 @@ class _GroupsPageState extends State<GroupsPage> {
         }
 
         // Filter only group conversations and convert to GroupModel
-        final groups = conversationsList
+        groups = conversationsList
             .where((json) => json['type'] == 'group')
             .map((json) => _convertToGroupModel(json))
             .toList();
-
-        setState(() {
-          _allGroups = groups;
-          _filteredGroups = List.from(groups);
-        });
-
-        return groups;
-      } else {
-        throw Exception(response['message'] ?? 'Failed to load groups');
       }
+
+      // Process communities
+      if (communityResponse['success'] && communityResponse['data'] != null) {
+        final List<dynamic> communityList =
+            communityResponse['data'] as List<dynamic>;
+        communities = communityList
+            .map(
+              (json) => CommunityModel.fromJson(json as Map<String, dynamic>),
+            )
+            .toList();
+      }
+
+      setState(() {
+        _allGroups = groups;
+        _allCommunities = communities;
+        _filteredItems = [...groups, ...communities];
+      });
+
+      return {'groups': groups, 'communities': communities};
     } catch (e) {
-      throw Exception('Error loading groups: ${e.toString()}');
+      throw Exception('Error loading data: ${e.toString()}');
     }
   }
 
@@ -105,7 +133,7 @@ class _GroupsPageState extends State<GroupsPage> {
           : null,
       lastMessageAt: json['lastMessageAt'],
       role: json['role'],
-      unreadCount: json['unreadCount'] ?? 0,
+      // unreadCount: json['unreadCount'] ?? 0,
       joinedAt: json['joinedAt'] ?? DateTime.now().toIso8601String(),
     );
   }
@@ -120,9 +148,9 @@ class _GroupsPageState extends State<GroupsPage> {
     return [];
   }
 
-  void _refreshGroups() {
+  void _refreshData() {
     setState(() {
-      _groupsFuture = _loadGroups();
+      _dataFuture = _loadGroupsAndCommunities();
     });
   }
 
@@ -140,22 +168,22 @@ class _GroupsPageState extends State<GroupsPage> {
           'Groups',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
-        backgroundColor: Colors.green,
+        backgroundColor: Colors.teal,
         elevation: 0,
-        actions: [
-          IconButton(
-            icon: Icon(Icons.search, color: Colors.white),
-            onPressed: () {
-              // TODO: Implement search functionality
-            },
-          ),
-          IconButton(
-            icon: Icon(Icons.more_vert, color: Colors.white),
-            onPressed: () {
-              // TODO: Implement more options
-            },
-          ),
-        ],
+        // actions: [
+        //   IconButton(
+        //     icon: Icon(Icons.search, color: Colors.white),
+        //     onPressed: () {
+        //       // TODO: Implement search functionality
+        //     },
+        //   ),
+        //   IconButton(
+        //     icon: Icon(Icons.more_vert, color: Colors.white),
+        //     onPressed: () {
+        //       // TODO: Implement more options
+        //     },
+        //   ),
+        // ],
       ),
       body: Container(
         color: Colors.grey[50],
@@ -180,19 +208,19 @@ class _GroupsPageState extends State<GroupsPage> {
               ),
             ),
 
-            // Groups List
+            // Groups and Communities List
             Expanded(
-              child: FutureBuilder<List<GroupModel>>(
-                future: _groupsFuture,
+              child: FutureBuilder<Map<String, dynamic>>(
+                future: _dataFuture,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return _buildSkeletonLoader();
-                  } else if (!snapshot.hasData || _filteredGroups.isEmpty) {
+                  } else if (!snapshot.hasData || _filteredItems.isEmpty) {
                     return _buildEmptyState();
                   } else if (snapshot.hasError) {
                     return _buildErrorState(snapshot.error.toString());
                   } else {
-                    return _buildGroupsList();
+                    return _buildItemsList();
                   }
                 },
               ),
@@ -208,12 +236,12 @@ class _GroupsPageState extends State<GroupsPage> {
             MaterialPageRoute(builder: (context) => const CreateGroupPage()),
           );
 
-          // If a group was created, refresh the groups list
+          // If a group was created, refresh the data
           if (result == true) {
-            _refreshGroups();
+            _refreshData();
           }
         },
-        backgroundColor: Colors.green,
+        backgroundColor: Colors.teal,
         child: Icon(Icons.group_add, color: Colors.white),
       ),
     );
@@ -308,7 +336,7 @@ class _GroupsPageState extends State<GroupsPage> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 16),
-          ElevatedButton(onPressed: _refreshGroups, child: const Text('Retry')),
+          ElevatedButton(onPressed: _refreshData, child: const Text('Retry')),
         ],
       ),
     );
@@ -322,12 +350,12 @@ class _GroupsPageState extends State<GroupsPage> {
           Icon(Icons.group_outlined, size: 64, color: Colors.grey[400]),
           const SizedBox(height: 16),
           Text(
-            'No groups yet',
+            'No groups or communities yet',
             style: TextStyle(color: Colors.grey[600], fontSize: 16),
           ),
           const SizedBox(height: 8),
           Text(
-            'Create a group to start chatting',
+            'Create a group or join a community to start chatting',
             style: TextStyle(color: Colors.grey[500], fontSize: 14),
           ),
         ],
@@ -335,26 +363,44 @@ class _GroupsPageState extends State<GroupsPage> {
     );
   }
 
-  Widget _buildGroupsList() {
+  Widget _buildItemsList() {
     return RefreshIndicator(
-      onRefresh: () async => _refreshGroups(),
+      onRefresh: () async => _refreshData(),
       child: ListView.builder(
-        itemCount: _filteredGroups.length,
+        itemCount: _filteredItems.length,
         itemExtent: 80, // Fixed height for better performance
         cacheExtent: 500, // Cache more items for smoother scrolling
         itemBuilder: (context, index) {
-          final group = _filteredGroups[index];
-          return GroupListItem(
-            group: group,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => InnerGroupChatPage(group: group),
-                ),
-              );
-            },
-          );
+          final item = _filteredItems[index];
+
+          if (item is GroupModel) {
+            return GroupListItem(
+              group: item,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => InnerGroupChatPage(group: item),
+                  ),
+                );
+              },
+            );
+          } else if (item is CommunityModel) {
+            return CommunityListItem(
+              community: item,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        CommunityInnerGroupsPage(community: item),
+                  ),
+                );
+              },
+            );
+          }
+
+          return const SizedBox.shrink(); // Fallback
         },
       ),
     );
@@ -392,11 +438,10 @@ class GroupListItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasUnreadMessages = group.unreadCount > 0;
+    // final hasUnreadMessages = group.unreadCount > 0;
     final lastMessageText =
         group.metadata?.lastMessage?.body ?? 'No messages yet';
     final timeText = _formatTime(group.lastMessageAt ?? group.joinedAt);
-    final memberCountText = '${group.memberCount} members';
 
     return Container(
       height: 80,
@@ -406,69 +451,222 @@ class GroupListItem extends StatelessWidget {
           bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
         ),
       ),
-      child: ListTile(
-        leading: CircleAvatar(
-          radius: 25,
-          backgroundColor: Colors.green[100],
-          child: Icon(Icons.group, color: Colors.green, size: 24),
-        ),
-        title: Text(
-          group.title,
-          style: TextStyle(
-            fontWeight: hasUnreadMessages ? FontWeight.bold : FontWeight.normal,
-            fontSize: 16,
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              lastMessageText,
-              style: TextStyle(color: Colors.grey[600], fontSize: 14),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            SizedBox(height: 2),
-            Text(
-              memberCountText,
-              style: TextStyle(color: Colors.grey[500], fontSize: 12),
-            ),
-          ],
-        ),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              timeText,
-              style: TextStyle(color: Colors.grey[500], fontSize: 12),
-            ),
-            if (hasUnreadMessages) ...[
-              SizedBox(height: 4),
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.green,
-                  borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              // Avatar with proper constraints
+              SizedBox(
+                width: 48,
+                height: 48,
+                child: CircleAvatar(
+                  radius: 24,
+                  backgroundColor: Colors.teal[100],
+                  child: Icon(Icons.group, color: Colors.teal, size: 22),
                 ),
-                child: Text(
-                  group.unreadCount.toString(),
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
+              ),
+              const SizedBox(width: 16),
+              // Content area
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      group.title,
+                      style: TextStyle(
+                        // fontWeight: false
+                        //     ? FontWeight.bold
+                        //     : FontWeight.normal,
+                        fontSize: 16,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      lastMessageText,
+                      style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              // Trailing area
+              Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    timeText,
+                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                  ),
+                  // if (hasUnreadMessages) ...[
+                  //   const SizedBox(height: 4),
+                  //   Container(
+                  //     padding: const EdgeInsets.symmetric(
+                  //       horizontal: 8,
+                  //       vertical: 2,
+                  //     ),
+                  //     decoration: BoxDecoration(
+                  //       color: Colors.teal,
+                  //       borderRadius: BorderRadius.circular(10),
+                  //     ),
+                  //     child: Text(
+                  //       group.unreadCount.toString(),
+                  //       style: const TextStyle(
+                  //         color: Colors.white,
+                  //         fontSize: 12,
+                  //         fontWeight: FontWeight.bold,
+                  //       ),
+                  //     ),
+                  //   ),
+                  // ],
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class CommunityListItem extends StatelessWidget {
+  final CommunityModel community;
+  final VoidCallback onTap;
+
+  const CommunityListItem({
+    Key? key,
+    required this.community,
+    required this.onTap,
+  }) : super(key: key);
+
+  String _formatTime(String? dateTimeString) {
+    if (dateTimeString == null) return '';
+
+    try {
+      final dateTime = DateTime.parse(dateTimeString);
+      final now = DateTime.now();
+      final difference = now.difference(dateTime);
+
+      if (difference.inDays > 0) {
+        return '${difference.inDays}d ago';
+      } else if (difference.inHours > 0) {
+        return '${difference.inHours}h ago';
+      } else if (difference.inMinutes > 0) {
+        return '${difference.inMinutes}m ago';
+      } else {
+        return 'Just now';
+      }
+    } catch (e) {
+      return 'Unknown';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final timeText = _formatTime(community.updatedAt);
+
+    return Container(
+      height: 80,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(
+          bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
+        ),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              // Community Avatar
+              SizedBox(
+                width: 48,
+                height: 48,
+                child: CircleAvatar(
+                  radius: 24,
+                  backgroundColor: Colors.purple[100],
+                  child: Icon(
+                    Icons.diversity_3,
+                    color: Colors.purple[700],
+                    size: 22,
                   ),
                 ),
               ),
+              const SizedBox(width: 16),
+              // Content area
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            community.name,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.purple[100],
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            'COMMUNITY',
+                            style: TextStyle(
+                              color: Colors.purple[700],
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${community.innerGroupsCount} inner groups',
+                      style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              // Trailing area
+              Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    timeText,
+                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                  ),
+                  const SizedBox(height: 4),
+                  Icon(Icons.chevron_right, color: Colors.grey[400], size: 20),
+                ],
+              ),
             ],
-          ],
+          ),
         ),
-        onTap: onTap,
-        dense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       ),
     );
   }

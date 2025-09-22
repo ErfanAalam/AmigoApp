@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:amigo/screens/main_pages/inner_chat_page.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/contact_model.dart';
 import '../../models/conversation_model.dart';
 import '../../models/user_model.dart';
@@ -154,9 +156,28 @@ class _ContactsPageState extends State<ContactsPage>
           _availableUsers = users;
           _filteredUsers = users;
         });
+
+        // Store in local storage for use in other pages
+        await _storeAvailableUsersInLocalStorage(users);
       }
     } catch (e) {
       // Error loading available users
+    }
+  }
+
+  // Local Storage Methods for Available Users
+  static const String _availableUsersStorageKey = 'available_users_contacts';
+
+  Future<void> _storeAvailableUsersInLocalStorage(List<UserModel> users) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final List<String> userJsonList = users
+          .map((user) => jsonEncode(user.toJson()))
+          .toList();
+      await prefs.setStringList(_availableUsersStorageKey, userJsonList);
+      debugPrint('Stored ${users.length} available users in local storage');
+    } catch (e) {
+      debugPrint('Error storing available users in local storage: $e');
     }
   }
 
@@ -348,213 +369,360 @@ class _ContactsPageState extends State<ContactsPage>
     return Stack(
       children: [
         Scaffold(
-          appBar: AppBar(
-            leadingWidth: 40, // Reduce leading width to minimize gap
-            leading: Padding(
-              padding: EdgeInsets.only(left: 16), // Add some left padding
-              child: Icon(Icons.people, color: Colors.white),
+          backgroundColor: Color(0xFFF8FAFB),
+          appBar: PreferredSize(
+            preferredSize: Size.fromHeight(70),
+            child: Container(
+              child: AppBar(
+                backgroundColor: Colors.teal,
+                elevation: 0,
+                centerTitle: false,
+                leadingWidth: 60,
+                leading: Container(
+                  margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.people_rounded,
+                    color: Colors.white,
+                    size: 24,
+                  ),
+                ),
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Contacts',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 22,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    Text(
+                      _isLoading
+                          ? 'Loading...'
+                          : '${_availableUsers.length} contacts',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.9),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+                actions: [
+                  Container(
+                    margin: EdgeInsets.only(right: 8),
+                    child: IconButton(
+                      icon: Container(
+                        padding: EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.search_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                      onPressed: _toggleSearch,
+                    ),
+                  ),
+                  Container(
+                    margin: EdgeInsets.only(right: 16),
+                    child: IconButton(
+                      icon: Container(
+                        padding: EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.refresh_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                      onPressed: _loadContactsAndUsers,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            titleSpacing: 8, // Reduce spacing between leading and title
-            title: Text(
-              'Contacts',
-              style: TextStyle(
+          ),
+          floatingActionButton: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0xFF00A884).withOpacity(0.4),
+                  blurRadius: 20,
+                  offset: Offset(0, 8),
+                ),
+              ],
+            ),
+            child: FloatingActionButton(
+              onPressed: _showFindUserDialog,
+              backgroundColor: Color(0xFF00A884),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(
+                Icons.person_add_rounded,
                 color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 20,
+                size: 24,
               ),
             ),
-            backgroundColor: Colors.teal,
-            elevation: 0,
-            actions: [
-              IconButton(
-                icon: Icon(Icons.add, color: Colors.white),
-                onPressed: _showFindUserDialog,
-              ),
-              IconButton(
-                icon: Icon(Icons.search, color: Colors.white),
-                onPressed: _toggleSearch,
-              ),
-              IconButton(
-                icon: Icon(Icons.refresh, color: Colors.white),
-                onPressed: _loadContactsAndUsers,
-              ),
-            ],
           ),
           body: GestureDetector(
             onTap: _isSearching ? _closeSearch : null,
             child: Container(
-              color: Colors.grey[50],
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xFFF8FAFB), Color(0xFFFFFFFF)],
+                ),
+              ),
               child: Column(
                 children: [
-                  // Header section (always visible)
-                  // Container(
-                  //   width: double.infinity,
-                  //   padding: EdgeInsets.only(
-                  //     top: 30,
-                  //     bottom: 20,
-                  //     left: 20,
-                  //     right: 20,
-                  //   ),
-                  //   decoration: BoxDecoration(
-                  //     borderRadius: BorderRadius.only(
-                  //       bottomLeft: Radius.circular(20),
-                  //       bottomRight: Radius.circular(20),
-                  //     ),
-                  //     gradient: LinearGradient(
-                  //       begin: Alignment.topCenter,
-                  //       end: Alignment.bottomCenter,
-                  //       colors: [Colors.teal, Colors.teal[300]!],
-                  //     ),
-                  //   ),
-                  //   child: Column(
-                  //     children: [
-                  //       Icon(Icons.people, size: 60, color: Colors.white),
-                  //       SizedBox(height: 12),
-                  //       Text(
-                  //         'Available Users',
-                  //         style: TextStyle(
-                  //           fontSize: 24,
-                  //           fontWeight: FontWeight.bold,
-                  //           color: Colors.white,
-                  //         ),
-                  //       ),
-                  //       SizedBox(height: 8),
-                  //       Text(
-                  //         _isLoading
-                  //             ? 'Loading users...'
-                  //             : '${_availableUsers.length} users found',
-                  //         style: TextStyle(color: Colors.white70, fontSize: 16),
-                  //       ),
-                  //       SizedBox(height: 16),
-                  //       Row(
-                  //         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  //         children: [
-                  //           ElevatedButton(
-                  //             onPressed: _loadContactsAndUsers,
-                  //             style: ElevatedButton.styleFrom(
-                  //               backgroundColor: Colors.white,
-                  //               foregroundColor: Colors.teal,
-                  //               padding: EdgeInsets.symmetric(
-                  //                 horizontal: 20,
-                  //                 vertical: 12,
-                  //               ),
-                  //             ),
-                  //             child: Text(
-                  //               _contacts.isNotEmpty
-                  //                   ? 'Refresh Users'
-                  //                   : 'Fetch Contacts',
-                  //             ),
-                  //           ),
-                  //           ElevatedButton.icon(
-                  //             onPressed: _showFindUserDialog,
-                  //             icon: Icon(Icons.add, size: 18),
-                  //             label: Text('Add User'),
-                  //             style: ElevatedButton.styleFrom(
-                  //               backgroundColor: Colors.teal[100],
-                  //               foregroundColor: Colors.teal[800],
-                  //               padding: EdgeInsets.symmetric(
-                  //                 horizontal: 20,
-                  //                 vertical: 12,
-                  //               ),
-                  //             ),
-                  //           ),
-                  //         ],
-                  //       ),
-                  //     ],
-                  //   ),
-                  // ),
-
                   // Users list
+                  // SizedBox(height: 10),
                   Expanded(
                     child: _isLoading
-                        ? Center(
-                            child: CircularProgressIndicator(
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                Colors.teal,
-                              ),
-                            ),
-                          )
-                        : _filteredUsers.isEmpty
                         ? Center(
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(
-                                  _isSearching
-                                      ? Icons.search_off
-                                      : Icons.person_off,
-                                  size: 80,
-                                  color: Colors.grey[400],
-                                ),
-                                SizedBox(height: 16),
-                                Text(
-                                  _isSearching
-                                      ? 'No search results'
-                                      : 'No users found',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    color: Colors.grey[600],
+                                Container(
+                                  padding: EdgeInsets.all(20),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(20),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.05),
+                                        blurRadius: 20,
+                                        offset: Offset(0, 4),
+                                      ),
+                                    ],
+                                  ),
+                                  child: CircularProgressIndicator(
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Color(0xFF00A884),
+                                    ),
+                                    strokeWidth: 3,
                                   ),
                                 ),
-                                SizedBox(height: 8),
+                                SizedBox(height: 20),
                                 Text(
-                                  _isSearching
-                                      ? 'Try searching with a different term'
-                                      : 'Make sure you have contacts and they are synced',
-                                  style: TextStyle(color: Colors.grey[500]),
+                                  'Loading your contacts...',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: Color(0xFF6B7280),
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
                               ],
                             ),
                           )
+                        : _filteredUsers.isEmpty
+                        ? Center(
+                            child: Container(
+                              margin: EdgeInsets.all(32),
+                              padding: EdgeInsets.all(32),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(24),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.05),
+                                    blurRadius: 20,
+                                    offset: Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    padding: EdgeInsets.all(20),
+                                    decoration: BoxDecoration(
+                                      color: Color(0xFF00A884).withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Icon(
+                                      _isSearching
+                                          ? Icons.search_off_rounded
+                                          : Icons.person_off_rounded,
+                                      size: 48,
+                                      color: Color(0xFF00A884),
+                                    ),
+                                  ),
+                                  SizedBox(height: 20),
+                                  Text(
+                                    _isSearching
+                                        ? 'No search results'
+                                        : 'No contacts found',
+                                    style: TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF1F2937),
+                                    ),
+                                  ),
+                                  SizedBox(height: 8),
+                                  Text(
+                                    _isSearching
+                                        ? 'Try searching with a different term'
+                                        : 'Add contacts to start chatting',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Color(0xFF6B7280),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  if (!_isSearching) ...[
+                                    SizedBox(height: 24),
+                                    ElevatedButton.icon(
+                                      onPressed: _showFindUserDialog,
+                                      icon: Icon(Icons.person_add_rounded),
+                                      label: Text('Add Contact'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Color(0xFF00A884),
+                                        foregroundColor: Colors.white,
+                                        padding: EdgeInsets.symmetric(
+                                          horizontal: 24,
+                                          vertical: 12,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                        ),
+                                        elevation: 0,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          )
                         : ListView.builder(
-                            padding: EdgeInsets.all(16),
+                            padding: EdgeInsets.symmetric(horizontal: 16),
                             itemCount: _filteredUsers.length,
                             itemBuilder: (context, index) {
                               final user = _filteredUsers[index];
-                              return Card(
-                                margin: EdgeInsets.only(bottom: 12),
-                                elevation: 2,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
+                              return Container(
+                                margin: EdgeInsets.only(bottom: 8),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.04),
+                                      blurRadius: 10,
+                                      offset: Offset(0, 2),
+                                    ),
+                                  ],
                                 ),
-                                child: ListTile(
-                                  leading: CircleAvatar(
-                                    radius: 25,
-                                    backgroundColor: Colors.teal[100],
-                                    backgroundImage: user.profilePic != null
-                                        ? NetworkImage(user.profilePic!)
-                                        : null,
-                                    child: user.profilePic == null
-                                        ? Icon(
-                                            Icons.person,
-                                            color: Colors.teal[700],
-                                            size: 30,
-                                          )
-                                        : null,
-                                  ),
-                                  title: Text(
-                                    user.name,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
+                                child: Material(
+                                  color: Colors.transparent,
+                                  borderRadius: BorderRadius.circular(16),
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(16),
+                                    onTap: () {
+                                      startConversation(user.id.toString());
+                                    },
+                                    child: Padding(
+                                      padding: EdgeInsets.all(16),
+                                      child: Row(
+                                        children: [
+                                          Container(
+                                            decoration: BoxDecoration(
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Color(
+                                                    0xFF00A884,
+                                                  ).withOpacity(0.2),
+                                                  blurRadius: 12,
+                                                  offset: Offset(0, 4),
+                                                ),
+                                              ],
+                                            ),
+                                            child: CircleAvatar(
+                                              radius: 28,
+                                              backgroundColor: Color(
+                                                0xFF00A884,
+                                              ).withOpacity(0.1),
+                                              backgroundImage:
+                                                  user.profilePic != null
+                                                  ? NetworkImage(
+                                                      user.profilePic!,
+                                                    )
+                                                  : null,
+                                              child: user.profilePic == null
+                                                  ? Icon(
+                                                      Icons.person_rounded,
+                                                      color: Color(0xFF00A884),
+                                                      size: 28,
+                                                    )
+                                                  : null,
+                                            ),
+                                          ),
+                                          SizedBox(width: 16),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  user.name,
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.w600,
+                                                    fontSize: 16,
+                                                    color: Color(0xFF1F2937),
+                                                  ),
+                                                ),
+                                                SizedBox(height: 4),
+                                                Text(
+                                                  user.phone,
+                                                  style: TextStyle(
+                                                    color: Color(0xFF6B7280),
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          Container(
+                                            padding: EdgeInsets.all(8),
+                                            decoration: BoxDecoration(
+                                              color: Color(
+                                                0xFF00A884,
+                                              ).withOpacity(0.1),
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                            ),
+                                            child: Icon(
+                                              Icons.chat_bubble_rounded,
+                                              color: Color(0xFF00A884),
+                                              size: 20,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                  subtitle: Text(
-                                    user.phone,
-                                    style: TextStyle(
-                                      color: Colors.grey[600],
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                  trailing: Icon(
-                                    Icons.arrow_forward_ios,
-                                    color: Colors.teal[300],
-                                    size: 16,
-                                  ),
-                                  onTap: () {
-                                    // Handle user tap if needed
-                                    startConversation(user.id.toString());
-                                  },
                                 ),
                               );
                             },
@@ -566,7 +734,7 @@ class _ContactsPageState extends State<ContactsPage>
           ),
         ),
 
-        // Search Bar Overlay (animated) - overlaps AppBar
+        // Modern Search Bar Overlay (animated) - overlaps AppBar
         if (_isSearching && _searchAnimation != null)
           Positioned(
             top: 0,
@@ -576,61 +744,109 @@ class _ContactsPageState extends State<ContactsPage>
               position: _searchAnimation!,
               child: Container(
                 width: double.infinity,
-                height: kToolbarHeight + MediaQuery.of(context).padding.top,
+                height: 70 + MediaQuery.of(context).padding.top,
                 padding: EdgeInsets.only(
-                  top: MediaQuery.of(context).padding.top,
-                  bottom: 0,
-                  left: 20,
-                  right: 20,
+                  top: MediaQuery.of(context).padding.top + 8,
+                  bottom: 8,
+                  left: 16,
+                  right: 16,
                 ),
-                decoration: BoxDecoration(color: Colors.teal),
+                decoration: BoxDecoration(
+                  color: Colors.teal,
+                  
+                  boxShadow: [
+                    BoxShadow(
+                      color: Color(0xFF00A884).withOpacity(0.3),
+                      blurRadius: 20,
+                      offset: Offset(0, 8),
+                    ),
+                  ],
+                ),
                 child: Row(
                   children: [
+                    Container(
+                      margin: EdgeInsets.only(right: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: IconButton(
+                        icon: Icon(
+                          Icons.arrow_back_rounded,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                        onPressed: _closeSearch,
+                      ),
+                    ),
                     Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        onChanged: _performSearch,
-                        autofocus: true,
-                        style: TextStyle(color: Colors.white, fontSize: 16),
-                        decoration: InputDecoration(
-                          hintText: 'Search by name or phone number...',
-                          contentPadding: EdgeInsets.only(bottom: 20),
-                          hintStyle: TextStyle(color: Colors.white70),
-                          prefixIcon: Icon(Icons.search, color: Colors.white),
-                          suffixIcon: _searchQuery.isNotEmpty
-                              ? IconButton(
-                                  icon: Icon(Icons.clear, color: Colors.white),
-                                  onPressed: () {
-                                    _searchController.clear();
-                                    _performSearch('');
-                                  },
-                                )
-                              : null,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(25),
-                            borderSide: BorderSide(
-                              color: Colors.white.withValues(alpha: 0.3),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.3),
+                            width: 1,
+                          ),
+                        ),
+                        child: TextField(
+                          controller: _searchController,
+                          onChanged: _performSearch,
+                          autofocus: true,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: 'Search contacts...',
+                            hintStyle: TextStyle(
+                              color: Colors.white.withOpacity(0.8),
+                              fontWeight: FontWeight.w500,
+                            ),
+                            prefixIcon: Container(
+                              margin: EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(
+                                Icons.search_rounded,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                            ),
+                            suffixIcon: _searchQuery.isNotEmpty
+                                ? Container(
+                                    margin: EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.2),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: IconButton(
+                                      icon: Icon(
+                                        Icons.clear_rounded,
+                                        color: Colors.white,
+                                        size: 20,
+                                      ),
+                                      onPressed: () {
+                                        _searchController.clear();
+                                        _performSearch('');
+                                      },
+                                    ),
+                                  )
+                                : null,
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
                             ),
                           ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(25),
-                            borderSide: BorderSide(
-                              color: Colors.white.withValues(alpha: 0.3),
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(25),
-                            borderSide: BorderSide(
-                              color: Colors.white,
-                              width: 0.5,
-                            ),
-                          ),
-                          filled: true,
-                          fillColor: Colors.white.withValues(alpha: 0.2),
                         ),
                       ),
                     ),
-                    SizedBox(width: 10),
                   ],
                 ),
               ),
@@ -698,11 +914,7 @@ class _FindUserDialogState extends State<FindUserDialog> {
               width: double.infinity,
               padding: EdgeInsets.all(24),
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Colors.teal, Colors.teal.shade600],
-                ),
+                color: Colors.teal,
                 borderRadius: BorderRadius.only(
                   topLeft: Radius.circular(20),
                   topRight: Radius.circular(20),
@@ -719,7 +931,7 @@ class _FindUserDialogState extends State<FindUserDialog> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Icon(
-                          Icons.search,
+                          Icons.person_search_rounded,
                           color: Colors.white,
                           size: 24,
                         ),
@@ -778,15 +990,17 @@ class _FindUserDialogState extends State<FindUserDialog> {
                       width: double.infinity,
                       padding: EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
+                        color: Color(0xFF00A884).withOpacity(0.1),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.blue.shade200),
+                        border: Border.all(
+                          color: Color(0xFF00A884).withOpacity(0.3),
+                        ),
                       ),
                       child: Row(
                         children: [
                           Icon(
-                            Icons.info_outline,
-                            color: Colors.blue.shade600,
+                            Icons.info_outline_rounded,
+                            color: Color(0xFF00A884),
                             size: 20,
                           ),
                           SizedBox(width: 12),
@@ -794,9 +1008,9 @@ class _FindUserDialogState extends State<FindUserDialog> {
                             child: Text(
                               'Please include country code (e.g., +1, +91)',
                               style: TextStyle(
-                                color: Colors.blue.shade700,
+                                color: Color(0xFF00A884),
                                 fontSize: 14,
-                                fontWeight: FontWeight.w500,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
@@ -837,12 +1051,12 @@ class _FindUserDialogState extends State<FindUserDialog> {
                             margin: EdgeInsets.all(12),
                             padding: EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: Colors.teal.shade50,
+                              color: Color(0xFF00A884).withOpacity(0.1),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Icon(
-                              Icons.phone,
-                              color: Colors.teal,
+                              Icons.phone_rounded,
+                              color: Color(0xFF00A884),
                               size: 20,
                             ),
                           ),
@@ -857,7 +1071,7 @@ class _FindUserDialogState extends State<FindUserDialog> {
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide(
-                              color: Colors.teal,
+                              color: Color(0xFF00A884),
                               width: 2,
                             ),
                           ),
@@ -884,12 +1098,12 @@ class _FindUserDialogState extends State<FindUserDialog> {
                             Container(
                               padding: EdgeInsets.all(20),
                               decoration: BoxDecoration(
-                                color: Colors.teal.shade50,
+                                color: Color(0xFF00A884).withOpacity(0.1),
                                 borderRadius: BorderRadius.circular(16),
                               ),
                               child: CircularProgressIndicator(
                                 valueColor: AlwaysStoppedAnimation<Color>(
-                                  Colors.teal,
+                                  Color(0xFF00A884),
                                 ),
                                 strokeWidth: 3,
                               ),
@@ -925,7 +1139,9 @@ class _FindUserDialogState extends State<FindUserDialog> {
                               decoration: BoxDecoration(
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: Colors.teal.shade200),
+                                border: Border.all(
+                                  color: Color(0xFF00A884).withOpacity(0.3),
+                                ),
                                 boxShadow: [
                                   BoxShadow(
                                     color: Colors.grey.withOpacity(0.1),
@@ -955,9 +1171,9 @@ class _FindUserDialogState extends State<FindUserDialog> {
                                             ),
                                             boxShadow: [
                                               BoxShadow(
-                                                color: Colors.teal.withOpacity(
-                                                  0.2,
-                                                ),
+                                                color: Color(
+                                                  0xFF00A884,
+                                                ).withOpacity(0.2),
                                                 blurRadius: 8,
                                                 spreadRadius: 0,
                                               ),
@@ -965,8 +1181,9 @@ class _FindUserDialogState extends State<FindUserDialog> {
                                           ),
                                           child: CircleAvatar(
                                             radius: 24,
-                                            backgroundColor:
-                                                Colors.teal.shade100,
+                                            backgroundColor: Color(
+                                              0xFF00A884,
+                                            ).withOpacity(0.1),
                                             backgroundImage:
                                                 user.profilePic != null
                                                 ? NetworkImage(user.profilePic!)
@@ -974,7 +1191,7 @@ class _FindUserDialogState extends State<FindUserDialog> {
                                             child: user.profilePic == null
                                                 ? Icon(
                                                     Icons.person,
-                                                    color: Colors.teal.shade700,
+                                                    color: Color(0xFF00A884),
                                                     size: 24,
                                                   )
                                                 : null,
@@ -1006,8 +1223,8 @@ class _FindUserDialogState extends State<FindUserDialog> {
                                           ),
                                         ),
                                         Icon(
-                                          Icons.arrow_forward_ios,
-                                          color: Colors.teal.shade400,
+                                          Icons.arrow_forward_ios_rounded,
+                                          color: Color(0xFF00A884),
                                           size: 16,
                                         ),
                                       ],
@@ -1111,19 +1328,19 @@ class _FindUserDialogState extends State<FindUserDialog> {
                     child: ElevatedButton(
                       onPressed: _isSearching ? null : _performSearch,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.teal,
+                        backgroundColor: Color(0xFF00A884),
                         foregroundColor: Colors.white,
                         padding: EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        elevation: 2,
-                        shadowColor: Colors.teal.withOpacity(0.3),
+                        elevation: 0,
+                        shadowColor: Color(0xFF00A884).withOpacity(0.3),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.search, size: 20),
+                          Icon(Icons.search_rounded, size: 20),
                           SizedBox(width: 8),
                           Text(
                             'Search',

@@ -145,7 +145,7 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Group "$groupName" created successfully!'),
-              backgroundColor: Colors.green,
+              backgroundColor: Colors.teal,
             ),
           );
 
@@ -184,7 +184,7 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
           'Create Group',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
-        backgroundColor: Colors.green,
+        backgroundColor: Colors.teal,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
@@ -220,14 +220,14 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
               controller: _groupNameController,
               decoration: InputDecoration(
                 hintText: 'Group name',
-                prefixIcon: const Icon(Icons.group, color: Colors.green),
+                prefixIcon: const Icon(Icons.group, color: Colors.teal),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide(color: Colors.grey[300]!),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Colors.green, width: 2),
+                  borderSide: const BorderSide(color: Colors.teal, width: 2),
                 ),
                 filled: true,
                 fillColor: Colors.grey[50],
@@ -240,11 +240,11 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: Colors.green[50],
+              color: Colors.teal[50],
               child: Text(
                 '${_selectedUserIds.length} member${_selectedUserIds.length > 1 ? 's' : ''} selected',
                 style: TextStyle(
-                  color: Colors.green[700],
+                  color: Colors.teal[700],
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -288,7 +288,7 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
           ),
           SizedBox(height: 16),
           Text(
@@ -364,7 +364,7 @@ class UserListItem extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: isSelected ? Colors.green[50] : Colors.white,
+        color: isSelected ? Colors.teal[50] : Colors.white,
         border: Border(
           bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
         ),
@@ -374,7 +374,7 @@ class UserListItem extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 25,
-              backgroundColor: Colors.green[100],
+              backgroundColor: Colors.teal[100],
               backgroundImage: user.profilePic != null
                   ? NetworkImage(user.profilePic!)
                   : null,
@@ -382,7 +382,7 @@ class UserListItem extends StatelessWidget {
                   ? Text(
                       _getInitials(user.name),
                       style: const TextStyle(
-                        color: Colors.green,
+                        color: Colors.teal,
                         fontWeight: FontWeight.bold,
                         fontSize: 18,
                       ),
@@ -396,7 +396,7 @@ class UserListItem extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.all(2),
                   decoration: const BoxDecoration(
-                    color: Colors.green,
+                    color: Colors.teal,
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.check, color: Colors.white, size: 16),
@@ -416,7 +416,7 @@ class UserListItem extends StatelessWidget {
           style: TextStyle(color: Colors.grey[600], fontSize: 14),
         ),
         trailing: isSelected
-            ? Icon(Icons.check_circle, color: Colors.green[600], size: 24)
+            ? Icon(Icons.check_circle, color: Colors.teal[600], size: 24)
             : Icon(
                 Icons.radio_button_unchecked,
                 color: Colors.grey[400],

@@ -6,7 +6,7 @@ class GroupModel {
   final GroupMetadata? metadata;
   final String? lastMessageAt;
   final String? role; // user's role in the group (admin/member)
-  final int unreadCount;
+  // final int unreadCount;
   final String joinedAt;
 
   GroupModel({
@@ -17,7 +17,7 @@ class GroupModel {
     this.metadata,
     this.lastMessageAt,
     this.role,
-    required this.unreadCount,
+    // required this.unreadCount,
     required this.joinedAt,
   });
 
@@ -36,7 +36,7 @@ class GroupModel {
           : null,
       lastMessageAt: json['lastMessageAt'] ?? json['last_message_at'],
       role: json['role'],
-      unreadCount: json['unreadCount'] ?? json['unread_count'] ?? 0,
+      // unreadCount: json['unreadCount'] ?? json['unread_count'] ?? 0,
       joinedAt:
           json['joinedAt'] ??
           json['joined_at'] ??
@@ -70,7 +70,7 @@ class GroupModel {
       'metadata': metadata?.toJson(),
       'lastMessageAt': lastMessageAt,
       'role': role,
-      'unreadCount': unreadCount,
+      // 'unreadCount': unreadCount,
       'joinedAt': joinedAt,
     };
   }
