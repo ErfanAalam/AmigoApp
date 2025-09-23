@@ -135,6 +135,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     super.initState();
     _scrollController.addListener(_onScroll);
 
+    // _websocketService.connect();
+
     // Initialize typing animation
     _initializeTypingAnimation();
 
@@ -2160,8 +2162,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                 ),
               ],
       ),
-      body: Stack(
-        children: [
+      body: SafeArea(
+        child: Stack(
+          children: [
           Column(
             children: [
               // Pinned Message Section
@@ -2182,6 +2185,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             child: _buildStickyDateSeparator(),
           ),
         ],
+        ),
       ),
     );
   }
@@ -2521,7 +2525,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   ) {
     // Pre-calculate values for better performance
     final messageTime = ChatHelpers.formatMessageTime(message.createdAt);
-    debugPrint('🔍 Group WebSocket message: ${message.senderName}');
 
     // Check if this message should be animated
     final shouldAnimate = _messageAnimationControllers.containsKey(message.id);

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart' as material;
-import '../main_screen.dart';
 import 'signup_screen.dart';
 import '../../api/api_service.dart';
 import '../../services/auth_service.dart';
 import '../../models/country_model.dart' as country_model;
 import '../../widgets/country_selector_modal.dart';
+import '../../utils/app_restart_helper.dart';
 
 class LoginScreen extends material.StatefulWidget {
   const LoginScreen({material.Key? key}) : super(key: key);
@@ -18,7 +18,7 @@ class _LoginScreenState extends material.State<LoginScreen> {
   final _otpController = material.TextEditingController();
   String _completePhoneNumber = '';
   country_model.Country _selectedCountry =
-      country_model.CountryData.getCountryByCode('US');
+      country_model.CountryData.getCountryByCode('IN');
   bool _isPhoneSubmitted = false;
   bool _isLoading = false;
 
@@ -114,11 +114,8 @@ class _LoginScreenState extends material.State<LoginScreen> {
           ),
         );
 
-        // Navigate to main screen after login
-        material.Navigator.pushReplacement(
-          context,
-          material.MaterialPageRoute(builder: (context) => const MainScreen()),
-        );
+        // Restart the app to ensure all services are properly initialized
+        await AppRestartHelper.restartAppWithDialog(context);
       } else {
         material.ScaffoldMessenger.of(context).showSnackBar(
           const material.SnackBar(
@@ -147,12 +144,9 @@ class _LoginScreenState extends material.State<LoginScreen> {
   Future<void> _checkAuthentication() async {
     final isAuthenticated = await authService.isAuthenticated();
     if (isAuthenticated) {
-      // Navigate to main screen if already authenticated
-      material.WidgetsBinding.instance.addPostFrameCallback((_) {
-        material.Navigator.pushReplacement(
-          context,
-          material.MaterialPageRoute(builder: (context) => const MainScreen()),
-        );
+      // Restart the app if already authenticated to ensure proper initialization
+      material.WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await AppRestartHelper.restartAppWithDialog(context);
       });
     }
   }

@@ -190,6 +190,7 @@ class CallService extends ChangeNotifier {
 
       await WebSocketService().sendMessage(message);
       await _cleanup();
+      // notifyListeners();
 
       print('[CALL] Call declined');
     } catch (e) {

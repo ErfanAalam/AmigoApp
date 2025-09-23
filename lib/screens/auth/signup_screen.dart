@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart' as material;
-import '../main_screen.dart';
 import '../../api/api_service.dart';
 import '../../services/auth_service.dart';
 import '../../models/country_model.dart' as country_model;
 import '../../widgets/country_selector_modal.dart';
+import '../../utils/app_restart_helper.dart';
 
 class SignUpScreen extends material.StatefulWidget {
   const SignUpScreen({material.Key? key}) : super(key: key);
@@ -142,10 +142,9 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
           content: material.Text('Account created successfully'),
         ),
       );
-      material.Navigator.pushReplacement(
-        context,
-        material.MaterialPageRoute(builder: (context) => const MainScreen()),
-      );
+
+      // Restart the app to ensure all services are properly initialized
+      await AppRestartHelper.restartAppWithDialog(context);
     } else {
       material.ScaffoldMessenger.of(context).showSnackBar(
         const material.SnackBar(

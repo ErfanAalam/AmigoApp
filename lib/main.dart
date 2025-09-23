@@ -66,10 +66,20 @@ class _MyAppState extends material.State<MyApp> {
 
     // Connect to WebSocket if user is authenticated
     if (isAuthenticated) {
-      // Connect to WebSocket
-      await _websocketService.connect();
+      try {
+        // Connect to WebSocket and wait for connection
+        await _websocketService.connect();
 
-     await _apiService.updateUserLocationAndIp();
+        // Wait a bit for WebSocket to establish connection
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        print('✅ WebSocket connection established in main.dart');
+
+        await _apiService.updateUserLocationAndIp();
+      } catch (e) {
+        print('❌ Failed to establish WebSocket connection in main.dart: $e');
+        // Don't prevent app from loading, but log the error
+      }
     }
   }
 
