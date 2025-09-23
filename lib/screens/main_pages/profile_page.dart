@@ -54,7 +54,6 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _loadUserData() async {
     try {
       final response = await _userService.getUser();
-      print(response);
 
       if (response['success'] && mounted) {
         setState(() {

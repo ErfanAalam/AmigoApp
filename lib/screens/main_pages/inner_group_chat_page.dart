@@ -1161,7 +1161,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       final senderName = senderInfo['name'] ?? 'Unknown User';
       final senderProfilePic = senderInfo['profile_pic'];
 
-      debugPrint('👤 Group message from user $senderId: $senderName');
 
       // Skip if this is our own optimistic message being echoed back
       if (_optimisticMessageIds.contains(optimisticId)) {

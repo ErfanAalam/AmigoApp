@@ -490,7 +490,7 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         _handleUserOfflineMessage(message);
       } else if (messageType == 'message_delivery_receipt') {
         _handleMessageDeliveryReceipt(message);
-      } else if (messageType == 'message') {
+      } else if (messageType == 'message' || messageType == 'media') {
         _handleNewMessage(message);
       }
     } catch (e) {
@@ -522,6 +522,7 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         return;
       }
 
+
       // Find the conversation to update
       final conversationIndex = _conversations.indexWhere(
         (conv) => conv.conversationId == conversationId,
@@ -537,18 +538,12 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
       if (mounted && _isLoaded) {
         setState(() {
           final conversation = _conversations[conversationIndex];
-
-          debugPrint(
-            '🔄 Updating conversation: ${conversation.userName} (ID: $conversationId)',
-          );
-          debugPrint('🔄 Current unread count: ${conversation.unreadCount}');
-
           // Update the last message if provided
           ConversationMetadata? updatedMetadata = conversation.metadata;
           if (messageData.isNotEmpty) {
             final lastMessage = LastMessage(
               id: messageData['id'] ?? 0,
-              body: messageData['body'] ?? '',
+              body: messageData['body'] ?? messageData['data']['message_type'] ?? '',
               type: messageData['type'] ?? 'text',
               senderId: messageData['sender_id'] ?? 0,
               createdAt:
@@ -556,7 +551,6 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
               conversationId: conversationId,
             );
             updatedMetadata = ConversationMetadata(lastMessage: lastMessage);
-            debugPrint('🔄 Updated last message: ${lastMessage.body}');
           }
 
           // Update unread count (only increment if not the active conversation)
@@ -568,9 +562,6 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
                         .unreadCount // Don't increment if user is viewing this chat
                   : conversation.unreadCount +
                         1); // Increment if user is not viewing this chat
-          debugPrint(
-            '🔄 New unread count: $newUnreadCount (active conversation: $_activeConversationId)',
-          );
 
           // Create updated conversation
           final updatedConversation = conversation.copyWith(
@@ -601,7 +592,6 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
           // Update filtered conversations
           _filterConversations();
 
-          debugPrint('🔄 Conversation list updated, triggering UI rebuild');
         });
       } else {
         debugPrint(
@@ -609,9 +599,6 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         );
       }
 
-      debugPrint(
-        '✅ Updated conversation $conversationId with delivery receipt',
-      );
     } catch (e) {
       debugPrint('❌ Error handling message delivery receipt: $e');
     }
@@ -635,6 +622,11 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         (conv) => conv.conversationId == conversationId,
       );
 
+            print('------------------------------------------------------------------');
+      print('messageData: $data');
+      print('------------------------------------------------------------------');
+      print('------------------------------------------------------------------');
+
       if (conversationIndex == -1) {
         debugPrint(
           '⚠️ Conversation not found for new message: $conversationId',
@@ -642,26 +634,23 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         return;
       }
 
+      // {type: media, data: {user_id: 7300437892, url: https://amigo-chat-app.s3.ap-south-1.amazonaws.com/audios/7300437892/1758627144111_voice_note_1758627136762.m4a, key: audios/7300437892/1758627144111_voice_note_1758627136762.m4a, category: audios, file_name: voice_note_1758627136762.m4a, file_size: 96156, mime_type: audio/x-m4a, conversation_id: 3904105585, message_type: audio, reply_to_message_id: null, optimistic_id: -1, media_message_id: 531}, conversation_id: 3904105585, timestamp: 2025-09-23T11:32:25.419Z}
+
+      // {id: 532, optimistic_id: -2, conversation_id: 3904105585, sender_id: 7300437892, type: text, body: hrhfh, created_at: 2025-09-23T11:35:26.561Z}
+
       if (mounted && _isLoaded) {
         setState(() {
           final conversation = _conversations[conversationIndex];
 
-          debugPrint(
-            '🔄 Updating conversation with new message: ${conversation.userName} (ID: $conversationId)',
-          );
-          debugPrint('🔄 Current unread count: ${conversation.unreadCount}');
-
           // Create new last message from the message data
           final lastMessage = LastMessage(
-            id: data['id'] ?? data['message_id'] ?? 0,
-            body: data['body'] ?? '',
-            type: data['type'] ?? 'text',
-            senderId: data['sender_id'] ?? 0,
-            createdAt: data['created_at'] ?? DateTime.now().toIso8601String(),
+            id: data['id'] ?? data['user_id'] ?? 0,
+            body: data['body'] ?? data['data']['message_type'] ?? data['data']['file_name'] ?? '',
+            type: data['type'] ?? data['data']['message_type'] ?? 'text',
+            senderId: data['sender_id'] ?? data['data']['user_id'] ?? 0,
+            createdAt: data['created_at'] ?? data['data']['created_at'] ?? DateTime.now().toIso8601String(),
             conversationId: conversationId,
           );
-
-          debugPrint('🔄 New last message: ${lastMessage.body}');
 
           final updatedMetadata = ConversationMetadata(
             lastMessage: lastMessage,
@@ -673,9 +662,6 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
                     .unreadCount // Don't increment if user is viewing this chat
               : conversation.unreadCount +
                     1; // Increment if user is not viewing this chat
-          debugPrint(
-            '🔄 New unread count: $newUnreadCount (active conversation: $_activeConversationId)',
-          );
 
           // Create updated conversation
           final updatedConversation = conversation.copyWith(
@@ -705,9 +691,6 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
           // Update filtered conversations
           _filterConversations();
 
-          debugPrint(
-            '🔄 Conversation list updated with new message, triggering UI rebuild',
-          );
         });
       } else {
         debugPrint(
@@ -715,7 +698,6 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         );
       }
 
-      debugPrint('✅ Updated conversation $conversationId with new message');
     } catch (e) {
       debugPrint('❌ Error handling new message: $e');
     }
