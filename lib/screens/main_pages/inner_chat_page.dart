@@ -37,8 +37,6 @@ class _InnerChatPageState extends State<InnerChatPage>
   final TextEditingController _messageController = TextEditingController();
   final WebSocketService _websocketService = WebSocketService();
   final ImagePicker _imagePicker = ImagePicker();
-  final GlobalKey<AnimatedListState> _animatedListKey =
-      GlobalKey<AnimatedListState>();
   List<MessageModel> _messages = [];
   bool _isLoading = false; // Start false, will be set true only if no cache
   bool _isLoadingMore = false;
@@ -316,6 +314,9 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   /// Quick cache check and load for instant display
   Future<void> _tryLoadFromCacheFirst() async {
+    print(
+      "------------------------------------------------------------\n _hasCheckedCache -> $_hasCheckedCache \n----------------------------------------------------------------",
+    );
     if (_hasCheckedCache) return; // Avoid double-checking
 
     try {
@@ -761,12 +762,21 @@ class _InnerChatPageState extends State<InnerChatPage>
     final distanceFromTop = maxScrollExtent - scrollPosition;
 
     if (distanceFromTop <= 200) {
+      print(
+        "------------------------------------------------------------\n _isInitialized -> $_isInitialized \n----------------------------------------------------------------",
+      );
+      print(
+        "------------------------------------------------------------\n _hasMoreMessages -> $_hasMoreMessages \n----------------------------------------------------------------",
+      );
+      print(
+        "------------------------------------------------------------\n _isLoadingMore -> $_isLoadingMore \n----------------------------------------------------------------",
+      );
       if (!_isLoadingMore && _hasMoreMessages && _isInitialized) {
         debugPrint(
           '🔄 Triggering load more messages - Distance from top: $distanceFromTop',
         );
-        _loadMoreMessages();
       }
+      _loadMoreMessages();
     }
   }
 
@@ -774,9 +784,21 @@ class _InnerChatPageState extends State<InnerChatPage>
     try {
       final conversationId = widget.conversation.conversationId;
 
+      print(
+        "------------------------------------------------------------\n _hasCheckedCache -> $_hasCheckedCache \n----------------------------------------------------------------",
+      );
       // If we already have messages from cache, do smart sync
       if (_hasCheckedCache && _messages.isNotEmpty) {
-        debugPrint('📦 Already have cached messages, doing smart sync...');
+        print(
+          "------------------------------------------------------------\n found cached msgs, performing smart sync \n----------------------------------------------------------------",
+        );
+        final cachedData = await _storageService.getCachedMessages(
+          conversationId,
+        );
+        final lenn = cachedData?.messages.length;
+        print(
+          "------------------------------------------------------------\n cachedData -> $lenn \n----------------------------------------------------------------",
+        );
 
         // Always check backend for new messages (but silently)
         await _performSmartSync(conversationId);
@@ -787,6 +809,10 @@ class _InnerChatPageState extends State<InnerChatPage>
 
         final cachedData = await _storageService.getCachedMessages(
           conversationId,
+        );
+        final lenn = cachedData?.messages.length;
+        print(
+          "------------------------------------------------------------\n cachedData -> $lenn \n----------------------------------------------------------------",
         );
 
         if (cachedData != null && cachedData.messages.isNotEmpty) {
@@ -946,6 +972,9 @@ class _InnerChatPageState extends State<InnerChatPage>
       );
 
       debugPrint('📡 Response received: Success');
+      print(
+        "------------------------------------------------------------\n response -> $response \n----------------------------------------------------------------",
+      );
 
       if (!mounted) return;
 
@@ -992,25 +1021,25 @@ class _InnerChatPageState extends State<InnerChatPage>
 
           // After loading older messages, maintain the user's current position
           // Since we're adding messages at the beginning, we need to adjust scroll position
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_scrollController.hasClients &&
-                newMessagesWithReadStatus.isNotEmpty) {
-              // Calculate approximate height per message for smooth positioning
-              // This helps maintain the user's view position after loading older messages
-              final approximateMessageHeight = 60.0; // Estimate
-              final scrollAdjustment =
-                  newMessagesWithReadStatus.length * approximateMessageHeight;
-
-              // Adjust scroll position to account for new messages at the beginning
-              final currentPosition = _scrollController.position.pixels;
-              final newPosition = (currentPosition + scrollAdjustment).clamp(
-                0.0,
-                _scrollController.position.maxScrollExtent,
-              );
-
-              _scrollController.jumpTo(newPosition);
-            }
-          });
+          // WidgetsBinding.instance.addPostFrameCallback((_) {
+          //   if (_scrollController.hasClients &&
+          //       newMessagesWithReadStatus.isNotEmpty) {
+          //     // Calculate approximate height per message for smooth positioning
+          //     // This helps maintain the user's view position after loading older messages
+          //     final approximateMessageHeight = 60.0; // Estimate
+          //     final scrollAdjustment =
+          //         newMessagesWithReadStatus.length * approximateMessageHeight;
+          //
+          //     // Adjust scroll position to account for new messages at the beginning
+          //     final currentPosition = _scrollController.position.pixels;
+          //     final newPosition = (currentPosition + scrollAdjustment).clamp(
+          //       0.0,
+          //       _scrollController.position.maxScrollExtent,
+          //     );
+          //
+          //     _scrollController.jumpTo(newPosition);
+          //   }
+          // });
         } catch (processingError) {
           debugPrint(
             '❌ Error processing message history response: $processingError',
@@ -1132,6 +1161,12 @@ class _InnerChatPageState extends State<InnerChatPage>
       if (_currentUserId != null && userId == _currentUserId) {
         debugPrint(
           '🔄 Updating own reply message from optimistic ID to server ID in local storage',
+        );
+        print(
+          "------------------------------------------------------------\n optimisticId -> $optimisticId \n----------------------------------------------------------------",
+        );
+        print(
+          "------------------------------------------------------------\n newMessageId -> $newMessageId \n----------------------------------------------------------------",
         );
         await _updateOptimisticMessageInStorage(
           optimisticId,
@@ -1455,6 +1490,12 @@ class _InnerChatPageState extends State<InnerChatPage>
         return;
       }
 
+      print(
+        "------------------------------------------------------------\n senderId -> $senderId \n----------------------------------------------------------------",
+      );
+      print(
+        "------------------------------------------------------------\n _currentUserId -> $_currentUserId \n----------------------------------------------------------------",
+      );
       // If this is our own message (sender), update the optimistic message in local storage
       if (_currentUserId != null && senderId == _currentUserId) {
         debugPrint(
@@ -1982,7 +2023,6 @@ class _InnerChatPageState extends State<InnerChatPage>
         });
       }
       _optimisticMessageId--;
-
     } catch (e) {
       debugPrint('❌ Error sending message: $e');
 
@@ -2502,16 +2542,14 @@ class _InnerChatPageState extends State<InnerChatPage>
 
     return Container(
       color: Colors.white, // Pure white background
-      child: AnimatedList(
-        key: _animatedListKey,
+      child: ListView.builder(
         controller: _scrollController,
         reverse: true, // Start from bottom (newest messages)
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        initialItemCount:
-            _messages.length +
-            (_isLoadingMore ? 1 : 0) +
-            (!_hasMoreMessages && _messages.isNotEmpty ? 1 : 0),
-        itemBuilder: (context, index, animation) {
+        itemCount: _messages.length + (_isLoadingMore ? 1 : 0),
+        // (_isLoadingMore ? 1 : 0) +
+        // (!_hasMoreMessages && _messages.isNotEmpty ? 1 : 0),
+        itemBuilder: (context, index) {
           // Show loading indicator at the top when loading older messages
           if (index == 0 && _isLoadingMore) {
             return Container(
@@ -2567,6 +2605,9 @@ class _InnerChatPageState extends State<InnerChatPage>
             debugPrint(
               '❌ Invalid message index: $messageIndex, messages length: ${_messages.length}',
             );
+            print(
+              "------------------------------------------------------------\n _messages -> $_messages \n----------------------------------------------------------------",
+            );
             return Container(); // Return empty container for invalid indices
           }
 
@@ -2588,34 +2629,7 @@ class _InnerChatPageState extends State<InnerChatPage>
           //   );
           // }
 
-          return SlideTransition(
-            position:
-                Tween<Offset>(
-                  begin: const Offset(0, 0.3), // Start slightly below
-                  end: Offset.zero, // End at normal position
-                ).animate(
-                  CurvedAnimation(
-                    parent: animation,
-                    curve: Curves.easeOutBack, // More bouncy/natural curve
-                  ),
-                ),
-            child: FadeTransition(
-              opacity: CurvedAnimation(parent: animation, curve: Curves.easeIn),
-              child: ScaleTransition(
-                scale:
-                    Tween<double>(
-                      begin: 0.8, // Start slightly smaller
-                      end: 1.0, // End at normal size
-                    ).animate(
-                      CurvedAnimation(
-                        parent: animation,
-                        curve: Curves.easeOutBack,
-                      ),
-                    ),
-                child: _buildMessageWithActions(message, isMyMessage),
-              ),
-            ),
-          );
+          return _buildMessageWithActions(message, isMyMessage);
         },
       ),
     );
@@ -2649,8 +2663,13 @@ class _InnerChatPageState extends State<InnerChatPage>
             ),
           ],
         ),
+        // show a loading indicator when  _isLoadingMore is true else day
         child: Text(
-          ChatHelpers.formatDateSeparator(messageWithCurrentDate.createdAt),
+          _isLoadingMore
+              ? "Loading more chats..."
+              : ChatHelpers.formatDateSeparator(
+                  messageWithCurrentDate.createdAt,
+                ),
           style: const TextStyle(
             color: Colors.white,
             fontSize: 12,
