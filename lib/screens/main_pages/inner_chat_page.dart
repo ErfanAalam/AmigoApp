@@ -45,12 +45,13 @@ class _InnerChatPageState extends State<InnerChatPage>
   String? _errorMessage;
   int? _currentUserId;
   bool _isInitialized = false;
+  bool _hasCallAccess = false;
   ConversationMeta? _conversationMeta;
   bool _isLoadingFromCache = false;
   bool _hasCheckedCache = false; // Track if we've checked cache
   bool _isCheckingCache = true; // Show brief cache check state
   bool _isTyping = false;
-  bool _isOtherTyping = false;
+  final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
   // For optimistic message handling
   StreamSubscription<Map<String, dynamic>>? _websocketSubscription;
   StreamSubscription? _audioProgressSubscription;
@@ -290,6 +291,9 @@ class _InnerChatPageState extends State<InnerChatPage>
     // This ensures we can properly identify sender vs receiver messages
     await _getCurrentUserId();
 
+    // Fetch user call access status
+    await _fetchUserCallAccess();
+
     // Notify server that user is active in this conversation
     await _websocketService.sendMessage({
       'type': 'active_in_conversation',
@@ -310,6 +314,26 @@ class _InnerChatPageState extends State<InnerChatPage>
 
     // Then load from server if needed
     await _loadInitialMessages();
+  }
+
+  /// Fetch user call access status
+  Future<void> _fetchUserCallAccess() async {
+    try {
+      final response = await _userService.getUser();
+      if (response['success'] == true && response['data'] != null) {
+        final userData = response['data'];
+        _hasCallAccess = userData['call_access'] == true;
+        debugPrint('✅ User call access: $_hasCallAccess');
+      } else {
+        debugPrint(
+          '❌ Failed to fetch user call access: ${response['message']}',
+        );
+        _hasCallAccess = false; // Default to no access
+      }
+    } catch (e) {
+      debugPrint('❌ Error fetching user call access: $e');
+      _hasCallAccess = false; // Default to no access
+    }
   }
 
   /// Quick cache check and load for instant display
@@ -688,6 +712,7 @@ class _InnerChatPageState extends State<InnerChatPage>
 
     _scrollController.dispose();
     _messageController.dispose();
+    _isOtherTypingNotifier.dispose();
     _websocketSubscription?.cancel();
     _typingAnimationController.dispose();
     _typingTimeout?.cancel();
@@ -1151,11 +1176,11 @@ class _InnerChatPageState extends State<InnerChatPage>
       }
 
       // Check if this is our own optimistic message being confirmed
-      if (_optimisticMessageIds.contains(optimisticId)) {
-        debugPrint('🔄 Replacing optimistic reply message with server message');
-        _replaceOptimisticMessage(optimisticId, message);
-        return;
-      }
+      // if (_optimisticMessageIds.contains(optimisticId)) {
+      //   debugPrint('🔄 Replacing optimistic reply message with server message');
+      //   _replaceOptimisticMessage(optimisticId, message);
+      //   return;
+      // }
 
       // If this is our own message (sender), update the optimistic message in local storage
       if (_currentUserId != null && userId == _currentUserId) {
@@ -1484,11 +1509,11 @@ class _InnerChatPageState extends State<InnerChatPage>
       final senderProfilePic = senderInfo['profile_pic'];
 
       // Skip if this is our own optimistic message being echoed back
-      if (_optimisticMessageIds.contains(optimisticId)) {
-        debugPrint('🔄 Replacing optimistic message with server message');
-        _replaceOptimisticMessage(optimisticId, messageData);
-        return;
-      }
+      // if (_optimisticMessageIds.contains(optimisticId)) {
+      //   debugPrint('🔄 Replacing optimistic message with server message');
+      //   _replaceOptimisticMessage(optimisticId, messageData);
+      //   return;
+      // }
 
       print(
         "------------------------------------------------------------\n senderId -> $senderId \n----------------------------------------------------------------",
@@ -1735,20 +1760,17 @@ class _InnerChatPageState extends State<InnerChatPage>
     // Cancel any existing timeout
     _typingTimeout?.cancel();
 
-    setState(() {
-      _isOtherTyping = isTyping;
-    });
+    // Update the ValueNotifier directly without setState
+    _isOtherTypingNotifier.value = isTyping;
 
     // Control the typing animation
     if (isTyping) {
       _typingAnimationController.repeat(reverse: true);
 
-      // Set a safety timeout to hide typing indicator after 5 seconds
+      // Set a safety timeout to hide typing indicator after 2 seconds
       _typingTimeout = Timer(const Duration(seconds: 2), () {
         if (mounted) {
-          setState(() {
-            _isOtherTyping = false;
-          });
+          _isOtherTypingNotifier.value = false;
           _typingAnimationController.stop();
           _typingAnimationController.reset();
         }
@@ -1767,16 +1789,21 @@ class _InnerChatPageState extends State<InnerChatPage>
     try {
       // Extract message data from WebSocket payload
       final data = messageData['data'] as Map<String, dynamic>? ?? {};
-      final senderId = _parseToInt(data['sender_id'] ?? data['senderId']);
+      final senderId = _parseToInt(data['user_id'] ?? data['user_id']);
       final messageId = data['id'] ?? data['messageId'];
       final optimisticId = data['optimistic_id'] ?? data['optimisticId'];
 
+      
+      final senderInfo = _getUserInfo(senderId);
+      final senderName = senderInfo['name'] ?? 'Unknown User';
+      final senderProfilePic = senderInfo['profile_pic'];
+
       // Skip if this is our own optimistic message being echoed back
-      if (_optimisticMessageIds.contains(optimisticId)) {
-        debugPrint('🔄 Replacing optimistic media message with server message');
-        _replaceOptimisticMessage(optimisticId, messageData);
-        return;
-      }
+      // if (_optimisticMessageIds.contains(optimisticId)) {
+      //   debugPrint('🔄 Replacing optimistic media message with server message');
+      //   _replaceOptimisticMessage(optimisticId, messageData);
+      //   return;
+      // }
 
       // If this is our own message (sender), update the optimistic message in local storage
       if (_currentUserId != null && senderId == _currentUserId) {
@@ -1792,9 +1819,6 @@ class _InnerChatPageState extends State<InnerChatPage>
       }
 
       // Get sender info from cache/lookup
-      final senderInfo = _getUserInfo(senderId);
-      final senderName = senderInfo['name'] ?? 'Unknown User';
-      final senderProfilePic = senderInfo['profile_pic'];
 
       // Handle reply message data for media messages
       MessageModel? replyToMessage;
@@ -1995,7 +2019,6 @@ class _InnerChatPageState extends State<InnerChatPage>
     try {
       // Check if this is a reply message
       if (replyMessageId != null) {
-        debugPrint('🔄 Sending reply message via WebSocket');
         // Send reply message via WebSocket
         await _websocketService.sendMessage({
           'type': 'message_reply',
@@ -2324,10 +2347,12 @@ class _InnerChatPageState extends State<InnerChatPage>
                 ),
               ]
             : [
-                IconButton(
-                  icon: const Icon(Icons.call, color: Colors.white),
-                  onPressed: () => _initiateCall(context),
-                ),
+                // Only show call button if user has call access
+                if (_hasCallAccess)
+                  IconButton(
+                    icon: const Icon(Icons.call, color: Colors.white),
+                    onPressed: () => _initiateCall(context),
+                  ),
                 // IconButton(
                 //   icon: const Icon(Icons.videocam, color: Colors.white),
                 //   onPressed: () {
@@ -5472,7 +5497,14 @@ class _InnerChatPageState extends State<InnerChatPage>
     return Column(
       children: [
         // Typing indicator
-        if (_isOtherTyping) _buildTypingIndicator(),
+        ValueListenableBuilder<bool>(
+          valueListenable: _isOtherTypingNotifier,
+          builder: (context, isOtherTyping, child) {
+            return isOtherTyping
+                ? _buildTypingIndicator()
+                : const SizedBox.shrink();
+          },
+        ),
 
         // Reply container
         if (_isReplying && _replyToMessageData != null) _buildReplyContainer(),

@@ -3,12 +3,14 @@ class UserModel {
   final String name;
   final String phone;
   final String? profilePic;
+  final bool callAccess;
 
   UserModel({
     required this.id,
     required this.name,
     required this.phone,
     this.profilePic,
+    this.callAccess = false,
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
@@ -29,15 +31,22 @@ class UserModel {
       name: json['name']?.toString() ?? '',
       phone: json['phone']?.toString() ?? '',
       profilePic: json['profile_pic']?.toString(),
+      callAccess: json['call_access'] == true,
     );
   }
 
   Map<String, dynamic> toJson() {
-    return {'id': id, 'name': name, 'phone': phone, 'profile_pic': profilePic};
+    return {
+      'id': id,
+      'name': name,
+      'phone': phone,
+      'profile_pic': profilePic,
+      'call_access': callAccess,
+    };
   }
 
   @override
   String toString() {
-    return 'UserModel(id: $id, name: $name, phone: $phone, profilePic: $profilePic)';
+    return 'UserModel(id: $id, name: $name, phone: $phone, profilePic: $profilePic, callAccess: $callAccess)';
   }
 }

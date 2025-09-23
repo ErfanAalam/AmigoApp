@@ -261,6 +261,7 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   }
 
   Future<List<ConversationModel>> _loadConversations() async {
+    print('Loading conversations');
     try {
       final response = await _userService.GetChatList('dm');
       print('response: $response');
@@ -812,20 +813,21 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         ),
         backgroundColor: Colors.teal,
         elevation: 0,
-        // actions: [
-        //   IconButton(
-        //     icon: Icon(Icons.search, color: Colors.white),
-        //     onPressed: () {
-        //       // TODO: Implement search functionality
-        //     },
-        //   ),
-        //   IconButton(
-        //     icon: Icon(Icons.more_vert, color: Colors.white),
-        //     onPressed: () {
-        //       // TODO: Implement more options
-        //     },
-        //   ),
-        // ],
+        actions: [
+          IconButton(
+            icon: Icon(Icons.refresh, color: Colors.white),
+            onPressed: () {
+              _loadConversations();
+              // TODO: Implement search functionality
+            },
+          ),
+          // IconButton(
+          //   icon: Icon(Icons.more_vert, color: Colors.white),
+          //   onPressed: () {
+          //     // TODO: Implement more options
+          //   },
+          // ),
+        ],
       ),
       body: Container(
         color: Colors.grey[50],
