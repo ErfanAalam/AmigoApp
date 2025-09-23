@@ -61,7 +61,7 @@ class UserService {
     }
   }
 
-    Future<Map<String, dynamic>> GetCommunityChatList() async {
+  Future<Map<String, dynamic>> GetCommunityChatList() async {
     try {
       final response = await _apiService.authenticatedGet(
         '/community/list-connected-communities',

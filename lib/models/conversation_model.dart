@@ -28,6 +28,18 @@ class ConversationModel {
   });
 
   factory ConversationModel.fromJson(Map<String, dynamic> json) {
+    // Parse onlineStatus from the response
+    // The API sends onlineStatus as either 'offline' (string) or true (boolean)
+    bool? onlineStatus;
+    final onlineStatusValue = json['onlineStatus'];
+    if (onlineStatusValue != null) {
+      if (onlineStatusValue is bool) {
+        onlineStatus = onlineStatusValue;
+      } else if (onlineStatusValue is String) {
+        onlineStatus = onlineStatusValue.toLowerCase() != 'offline';
+      }
+    }
+
     return ConversationModel(
       conversationId: _parseToInt(json['conversationId']),
       type: json['type'] ?? '',
@@ -42,7 +54,7 @@ class ConversationModel {
       userId: _parseToInt(json['userId']),
       userName: json['userName'] ?? 'Unknown User',
       userProfilePic: json['userProfilePic'],
-      isOnline: json['isOnline'], // Will be set separately by UserStatusService
+      isOnline: onlineStatus,
     );
   }
 

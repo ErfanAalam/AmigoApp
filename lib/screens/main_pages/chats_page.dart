@@ -264,7 +264,9 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
     print('Loading conversations');
     try {
       final response = await _userService.GetChatList('dm');
-      print('response: $response');
+      print(
+        "------------------------------------------------------------\n response -> $response \n----------------------------------------------------------------",
+      );
       if (response['success']) {
         final dynamic responseData = response['data'];
         List<dynamic> conversationsList = [];
@@ -392,7 +394,26 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
       }
     }
 
+    // Set initial online status for all users from the response
+    _setInitialOnlineStatus(processedConversations);
+
     return processedConversations;
+  }
+
+  /// Set initial online status from the API response
+  void _setInitialOnlineStatus(List<ConversationModel> conversations) {
+    for (final conversation in conversations) {
+      // Only set status for DM conversations and if onlineStatus is not null
+      if (conversation.isDM && conversation.isOnline != null) {
+        _userStatusService.setUserOnline(
+          conversation.userId, 
+          isOnline: conversation.isOnline!
+        );
+        debugPrint(
+          '📡 Set initial online status for user ${conversation.userId}: ${conversation.isOnline}'
+        );
+      }
+    }
   }
 
   void _refreshConversations() {
@@ -523,7 +544,6 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         return;
       }
 
-
       // Find the conversation to update
       final conversationIndex = _conversations.indexWhere(
         (conv) => conv.conversationId == conversationId,
@@ -544,7 +564,10 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
           if (messageData.isNotEmpty) {
             final lastMessage = LastMessage(
               id: messageData['id'] ?? 0,
-              body: messageData['body'] ?? messageData['data']['message_type'] ?? '',
+              body:
+                  messageData['body'] ??
+                  messageData['data']['message_type'] ??
+                  '',
               type: messageData['type'] ?? 'text',
               senderId: messageData['sender_id'] ?? 0,
               createdAt:
@@ -592,14 +615,12 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
 
           // Update filtered conversations
           _filterConversations();
-
         });
       } else {
         debugPrint(
           '⚠️ Cannot update UI: mounted=$mounted, _isLoaded=$_isLoaded',
         );
       }
-
     } catch (e) {
       debugPrint('❌ Error handling message delivery receipt: $e');
     }
@@ -623,10 +644,16 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         (conv) => conv.conversationId == conversationId,
       );
 
-            print('------------------------------------------------------------------');
+      print(
+        '------------------------------------------------------------------',
+      );
       print('messageData: $data');
-      print('------------------------------------------------------------------');
-      print('------------------------------------------------------------------');
+      print(
+        '------------------------------------------------------------------',
+      );
+      print(
+        '------------------------------------------------------------------',
+      );
 
       if (conversationIndex == -1) {
         debugPrint(
@@ -646,10 +673,17 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
           // Create new last message from the message data
           final lastMessage = LastMessage(
             id: data['id'] ?? data['user_id'] ?? 0,
-            body: data['body'] ?? data['data']['message_type'] ?? data['data']['file_name'] ?? '',
+            body:
+                data['body'] ??
+                data['data']['message_type'] ??
+                data['data']['file_name'] ??
+                '',
             type: data['type'] ?? data['data']['message_type'] ?? 'text',
             senderId: data['sender_id'] ?? data['data']['user_id'] ?? 0,
-            createdAt: data['created_at'] ?? data['data']['created_at'] ?? DateTime.now().toIso8601String(),
+            createdAt:
+                data['created_at'] ??
+                data['data']['created_at'] ??
+                DateTime.now().toIso8601String(),
             conversationId: conversationId,
           );
 
@@ -691,14 +725,12 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
 
           // Update filtered conversations
           _filterConversations();
-
         });
       } else {
         debugPrint(
           '⚠️ Cannot update UI for new message: mounted=$mounted, _isLoaded=$_isLoaded',
         );
       }
-
     } catch (e) {
       debugPrint('❌ Error handling new message: $e');
     }

@@ -209,6 +209,9 @@ class _InnerChatPageState extends State<InnerChatPage>
         page: 1,
         limit: 50, // Get more messages to check for new ones
       );
+      print(
+        "------------------------------------------------------------\n response -> $response \n----------------------------------------------------------------",
+      );
 
       if (response['success'] == true && response['data'] != null) {
         final historyResponse = ConversationHistoryResponse.fromJson(
@@ -822,7 +825,7 @@ class _InnerChatPageState extends State<InnerChatPage>
         );
         final lenn = cachedData?.messages.length;
         print(
-          "------------------------------------------------------------\n cachedData -> $lenn \n----------------------------------------------------------------",
+          "------------------------------------------------------------\n init cachedData -> $lenn \n----------------------------------------------------------------",
         );
 
         // Always check backend for new messages (but silently)
@@ -837,7 +840,7 @@ class _InnerChatPageState extends State<InnerChatPage>
         );
         final lenn = cachedData?.messages.length;
         print(
-          "------------------------------------------------------------\n cachedData -> $lenn \n----------------------------------------------------------------",
+          "------------------------------------------------------------\n init (else) cachedData -> $lenn \n----------------------------------------------------------------",
         );
 
         if (cachedData != null && cachedData.messages.isNotEmpty) {
@@ -997,9 +1000,6 @@ class _InnerChatPageState extends State<InnerChatPage>
       );
 
       debugPrint('📡 Response received: Success');
-      print(
-        "------------------------------------------------------------\n response -> $response \n----------------------------------------------------------------",
-      );
 
       if (!mounted) return;
 
