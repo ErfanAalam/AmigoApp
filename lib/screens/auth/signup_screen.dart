@@ -134,6 +134,9 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
       setState(() {
         _isLoading = false;
       });
+
+      // Authentication is handled in the API service interceptor
+      // which automatically stores cookies and updates auth state
       material.ScaffoldMessenger.of(context).showSnackBar(
         const material.SnackBar(
           content: material.Text('Account created successfully'),

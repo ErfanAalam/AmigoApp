@@ -6,6 +6,7 @@ import 'package:amigo/services/auth_service.dart';
 import 'package:amigo/services/cookie_service.dart';
 import 'package:amigo/services/location_service.dart';
 import 'package:amigo/services/ip_service.dart';
+import 'package:amigo/services/websocket_service.dart';
 import 'package:amigo/api/user.service.dart' as userService;
 import 'package:mime/mime.dart';
 import 'package:path/path.dart' as path;
@@ -14,6 +15,7 @@ class ApiService {
   final Dio _dio = Dio();
   final CookieService _cookieService = CookieService();
   final AuthService _authService = AuthService();
+  final WebSocketService _websocketService = WebSocketService();
 
   // Singleton pattern
   static final ApiService _instance = ApiService._internal();
@@ -63,9 +65,17 @@ class ApiService {
             }
 
             // Check for authentication success
-            if (response.requestOptions.path.contains('verify-login-otp') &&
+            if ((response.requestOptions.path.contains('verify-login-otp') ||
+                    response.requestOptions.path.contains(
+                      'verify-signup-otp',
+                    )) &&
                 response.statusCode == 200) {
+              // Mark user as authenticated
               _authService.setAuthenticated();
+
+              // Connect to WebSocket after successful authentication
+              _connectWebSocketAfterLogin();
+
               // Update user location and IP after successful authentication
               // Run this in the background to avoid blocking the response
               updateUserLocationAndIp();
@@ -76,6 +86,7 @@ class ApiService {
             // Handle auth errors
             if (e.response?.statusCode == 401) {
               _authService.logout();
+              _disconnectWebSocketOnLogout();
             }
             return handler.next(e);
           },
@@ -230,12 +241,8 @@ class ApiService {
         'ip_address': (ipResult['ip']).toString(),
       };
 
-      final response = await authenticatedPost(
-        '/user/update-user',
-        data: data,
-      );
+      final response = await authenticatedPost('/user/update-user', data: data);
       return response.data;
-
     } catch (e) {
       print('❌ Error updating user location and IP: $e');
     }
@@ -389,6 +396,7 @@ class ApiService {
         } else if (statusCode == 401) {
           errorMessage = 'Authentication required';
           _authService.logout();
+          _disconnectWebSocketOnLogout();
         } else if (statusCode == 400) {
           errorMessage = e.response!.data?['message'] ?? 'Invalid request';
         } else {
@@ -542,6 +550,7 @@ class ApiService {
         } else if (statusCode == 401) {
           errorMessage = 'Authentication required';
           _authService.logout();
+          _disconnectWebSocketOnLogout();
         } else if (statusCode == 400) {
           errorMessage = e.response!.data?['message'] ?? 'Invalid request';
         }
@@ -559,6 +568,28 @@ class ApiService {
         'error': e.toString(),
         'message': 'Unexpected error occurred while sending media files',
       };
+    }
+  }
+
+  // Connect to WebSocket after successful login
+  Future<void> _connectWebSocketAfterLogin() async {
+    try {
+      print('🔌 Connecting to WebSocket after successful login...');
+      await _websocketService.connect();
+      print('✅ WebSocket connected successfully after login');
+    } catch (e) {
+      print('❌ Failed to connect WebSocket after login: $e');
+    }
+  }
+
+  // Disconnect WebSocket on logout
+  Future<void> _disconnectWebSocketOnLogout() async {
+    try {
+      print('🔌 Disconnecting WebSocket on logout...');
+      await _websocketService.disconnect();
+      print('✅ WebSocket disconnected successfully on logout');
+    } catch (e) {
+      print('❌ Failed to disconnect WebSocket on logout: $e');
     }
   }
 }

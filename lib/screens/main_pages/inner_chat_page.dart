@@ -406,6 +406,9 @@ class _InnerChatPageState extends State<InnerChatPage>
         'name': widget.conversation.userName,
         'profile_pic': widget.conversation.userProfilePic,
       };
+      debugPrint(
+        '👤 Cached user info for ${widget.conversation.userId}: ${widget.conversation.userName}',
+      );
     }
 
     // Cache current user info
@@ -1944,6 +1947,8 @@ class _InnerChatPageState extends State<InnerChatPage>
         _messages.add(optimisticMessage);
       });
 
+      print('📝 Added optimistic message. Total messages: ${_messages.length}');
+
       _animateNewMessage(optimisticMessage.id);
       _scrollToBottom();
     }
@@ -1982,7 +1987,6 @@ class _InnerChatPageState extends State<InnerChatPage>
         });
       }
       _optimisticMessageId--;
-
     } catch (e) {
       debugPrint('❌ Error sending message: $e');
 
@@ -2575,18 +2579,9 @@ class _InnerChatPageState extends State<InnerChatPage>
                   1 -
                   messageIndex]; // Show newest at bottom
 
-          // Keep pinned message in regular list - it will also be shown in pinned section
-
           // Debug: Check user ID comparison
           final isMyMessage =
               _currentUserId != null && message.senderId == _currentUserId;
-
-          // Debug logging for first few messages to troubleshoot
-          // if (index < 3) {
-          //   debugPrint(
-          //     '🔍 Message ${message.id}: senderId=${message.senderId}, currentUserId=$_currentUserId, isMyMessage=$isMyMessage',
-          //   );
-          // }
 
           return SlideTransition(
             position:

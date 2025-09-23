@@ -69,18 +69,13 @@ class _MyAppState extends material.State<MyApp> {
       // Connect to WebSocket
       await _websocketService.connect();
 
-      // Update user location and IP after authentication check (app startup)
-      print(
-        '🔄 App startup: User is already authenticated, updating location and IP...',
-      );
-      _apiService.updateUserLocationAndIp();
+     await _apiService.updateUserLocationAndIp();
     }
   }
 
   void _setupWebSocketListeners() {
     // Listen to WebSocket connection state changes
     _websocketService.connectionStateStream.listen((state) {
-      print('🔌 WebSocket connection state changed: $state');
       if (state == WebSocketConnectionState.disconnected) {
         // Clear all user online status when disconnected
         _userStatusService.clearAllStatus();
@@ -88,9 +83,7 @@ class _MyAppState extends material.State<MyApp> {
     });
 
     // Listen to WebSocket messages
-    _websocketService.messageStream.listen((message) {
-      // Handle incoming messages here - let individual pages handle their specific messages
-    });
+    _websocketService.messageStream.listen((message) {});
 
     // Listen to WebSocket errors
     _websocketService.errorStream.listen((error) {
