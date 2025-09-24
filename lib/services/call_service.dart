@@ -31,7 +31,11 @@ class CallService extends ChangeNotifier {
     'iceServers': [
       {'urls': 'stun:stun.l.google.com:19302'},
       // Add TURN servers here for production
-      // {'urls': 'turn:your-turn-server.com:3478', 'username': 'user', 'credential': 'pass'}
+      {
+        'urls': 'turn:ui.gosecureserver.in:3478',
+        'username': 'amigo',
+        'credential': 'amigopass',
+      },
     ],
     'sdpSemantics': 'plan-b', // Changed to plan-b for addStream compatibility
   };
@@ -194,6 +198,7 @@ class CallService extends ChangeNotifier {
 
       await WebSocketService().sendMessage(message);
       await _cleanup();
+      // notifyListeners();
 
       print('[CALL] Call declined');
     } catch (e) {
@@ -487,6 +492,11 @@ class CallService extends ChangeNotifier {
         break;
 
       case 'call:decline':
+        print('---------------------------------------------------------');
+        print('---------------------------------------------------------');
+        print('[CALL] Call declined');
+        print('---------------------------------------------------------');
+        print('---------------------------------------------------------');
         _handleCallDeclined(message);
         break;
 

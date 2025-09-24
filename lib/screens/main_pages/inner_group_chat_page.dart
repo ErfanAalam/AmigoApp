@@ -135,6 +135,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     super.initState();
     _scrollController.addListener(_onScroll);
 
+    // _websocketService.connect();
+
     // Initialize typing animation
     _initializeTypingAnimation();
 
@@ -1161,7 +1163,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       final senderName = senderInfo['name'] ?? 'Unknown User';
       final senderProfilePic = senderInfo['profile_pic'];
 
-
       // Skip if this is our own optimistic message being echoed back
       if (_optimisticMessageIds.contains(optimisticId)) {
         debugPrint('🔄 Replacing optimistic group message with server message');
@@ -2160,28 +2161,30 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                 ),
               ],
       ),
-      body: Stack(
-        children: [
-          Column(
-            children: [
-              // Pinned Message Section
-              if (_pinnedMessageId != null) _buildPinnedMessageSection(),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Column(
+              children: [
+                // Pinned Message Section
+                if (_pinnedMessageId != null) _buildPinnedMessageSection(),
 
-              // Messages List
-              Expanded(child: _buildMessagesList()),
+                // Messages List
+                Expanded(child: _buildMessagesList()),
 
-              // Message Input
-              _buildMessageInput(),
-            ],
-          ),
-          // Sticky Date Separator - Overlay on top
-          Positioned(
-            top: 10,
-            left: 0,
-            right: 0,
-            child: _buildStickyDateSeparator(),
-          ),
-        ],
+                // Message Input
+                _buildMessageInput(),
+              ],
+            ),
+            // Sticky Date Separator - Overlay on top
+            Positioned(
+              top: 10,
+              left: 0,
+              right: 0,
+              child: _buildStickyDateSeparator(),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2311,7 +2314,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             children: [
               // Date separator - show the date for the group of messages that starts here
               // if (ChatHelpers.shouldShowDateSeparator(_messages, messageIndex))
-                // _buildDateSeparator(message.createdAt),
+              // _buildDateSeparator(message.createdAt),
               // Message bubble with long press
               _buildMessageWithActions(message, isMyMessage),
             ],
@@ -2521,7 +2524,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   ) {
     // Pre-calculate values for better performance
     final messageTime = ChatHelpers.formatMessageTime(message.createdAt);
-    debugPrint('🔍 Group WebSocket message: ${message.senderName}');
 
     // Check if this message should be animated
     final shouldAnimate = _messageAnimationControllers.containsKey(message.id);

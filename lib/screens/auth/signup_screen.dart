@@ -7,6 +7,7 @@ import '../../models/country_model.dart' as country_model;
 import '../../widgets/country_selector_modal.dart';
 import '../../widgets/setup_loading_popup.dart';
 import '../../utils/navigation_helper.dart';
+import '../../utils/app_restart_helper.dart';
 
 class SignUpScreen extends material.StatefulWidget {
   const SignUpScreen({material.Key? key}) : super(key: key);
@@ -53,9 +54,9 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
     );
 
     // Wait for a moment to show the popup, then restart the app
-    Future.delayed(const Duration(seconds: 3), () {
-      _restartApp();
-    });
+    // Future.delayed(const Duration(seconds: 3), () {
+    //   _restartApp();
+    // });
   }
 
   void _restartApp() {
@@ -63,14 +64,12 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
     if (material.Navigator.of(context).canPop()) {
       material.Navigator.of(context).pop();
     }
-    
+
     // Clear all navigation and go to main screen
     // This will trigger a fresh authentication check
     material.Navigator.pushAndRemoveUntil(
       context,
-      material.MaterialPageRoute(
-        builder: (context) => const MainScreen(),
-      ),
+      material.MaterialPageRoute(builder: (context) => const MainScreen()),
       (route) => false,
     );
   }
@@ -170,6 +169,16 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
 
       // Show the setup loading popup
       _showSetupLoadingPopup();
+      // Authentication is handled in the API service interceptor
+      // which automatically stores cookies and updates auth state
+      material.ScaffoldMessenger.of(context).showSnackBar(
+        const material.SnackBar(
+          content: material.Text('Account created successfully'),
+        ),
+      );
+
+      // Restart the app to ensure all services are properly initialized
+      await AppRestartHelper.restartAppWithDialog(context);
     } else {
       material.ScaffoldMessenger.of(context).showSnackBar(
         const material.SnackBar(
@@ -741,4 +750,3 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
     );
   }
 }
-

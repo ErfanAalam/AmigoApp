@@ -4,6 +4,7 @@ import '../services/call_service.dart';
 import '../models/call_model.dart';
 import '../screens/call/incoming_call_screen.dart';
 import '../utils/navigation_helper.dart';
+import 'draggable_call_button.dart';
 
 class CallManager extends StatefulWidget {
   final Widget child;
@@ -72,7 +73,16 @@ class _CallManagerState extends State<CallManager> {
           _hasShownIncomingCall = false;
         }
 
-        return widget.child;
+        return SizedBox.expand(
+          child: Stack(
+            children: [
+              // Main app content
+              widget.child,
+              // Draggable call button overlay
+              const DraggableCallButton(),
+            ],
+          ),
+        );
       },
     );
   }
@@ -87,7 +97,7 @@ class _CallManagerState extends State<CallManager> {
       print('[CallManager] 📱 Attempting to navigate to incoming call screen');
 
       NavigationHelper.pushRoute(const IncomingCallScreen())
-          ?.then((_) {
+          .then((_) {
             print('[CallManager] 📱 Route closed - resetting flag');
             _hasShownIncomingCall = false;
           })

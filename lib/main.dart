@@ -43,7 +43,7 @@ void main() async {
   material.runApp(
     ChangeNotifierProvider<CallService>(
       create: (_) => CallService()..initialize(),
-      child: CallEnabledApp(child: MyApp()),
+      child: MyApp(),
     ),
   );
 }
@@ -78,16 +78,27 @@ class _MyAppState extends material.State<MyApp> {
 
     // Connect to WebSocket if user is authenticated
     if (isAuthenticated) {
-      // Connect to WebSocket
-      await _websocketService.connect();
+      try {
+        // Connect to WebSocket and wait for connection
+        await _websocketService.connect();
 
-      // Send FCM token to backend
-      final userId = await _authService.getCurrentUserId();
-      if (userId != null) {
-        await _notificationService.sendTokenToBackend(userId.toString());
+        // Send FCM token to backend
+        final userId = await _authService.getCurrentUserId();
+        if (userId != null) {
+          await _notificationService.sendTokenToBackend(userId.toString());
+        }
+
+        await _apiService.updateUserLocationAndIp();
+        // Wait a bit for WebSocket to establish connection
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        print('✅ WebSocket connection established in main.dart');
+
+        await _apiService.updateUserLocationAndIp();
+      } catch (e) {
+        print('❌ Failed to establish WebSocket connection in main.dart: $e');
+        // Don't prevent app from loading, but log the error
       }
-
-      await _apiService.updateUserLocationAndIp();
     }
   }
 
@@ -138,11 +149,13 @@ class _MyAppState extends material.State<MyApp> {
         visualDensity: material.VisualDensity.adaptivePlatformDensity,
         useMaterial3: true,
       ),
-      home: _isLoading
-          ? _buildLoadingScreen()
-          : _isAuthenticated
-          ? MainScreen()
-          : LoginScreen(),
+      home: CallEnabledApp(
+        child: _isLoading
+            ? _buildLoadingScreen()
+            : _isAuthenticated
+            ? MainScreen()
+            : LoginScreen(),
+      ),
       routes: {
         '/call': (context) => const InCallScreen(),
         '/incoming-call': (context) => const IncomingCallScreen(),
