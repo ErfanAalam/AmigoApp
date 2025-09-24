@@ -4,6 +4,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../models/call_model.dart';
 import '../services/websocket_service.dart';
+import '../services/notification_service.dart';
 import '../api/user.service.dart';
 
 class CallService extends ChangeNotifier {
@@ -15,6 +16,9 @@ class CallService extends ChangeNotifier {
   RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
   MediaStream? _remoteStream;
+
+  // Services
+  final NotificationService _notificationService = NotificationService();
 
   // Call state
   ActiveCallState? _activeCall;
@@ -62,7 +66,7 @@ class CallService extends ChangeNotifier {
     try {
       // Setup WebSocket message listener
       _webSocketSubscription = WebSocketService().messageStream.listen(
-        _handleWebSocketMessage,
+        handleWebSocketMessage,
       );
 
       _isInitialized = true;
@@ -426,7 +430,7 @@ class CallService extends ChangeNotifier {
   }
 
   /// Handle WebSocket messages
-  void _handleWebSocketMessage(Map<String, dynamic> message) {
+  void handleWebSocketMessage(Map<String, dynamic> message) {
     print('[CALL] Received WebSocket message: $message');
 
     final type = message['type'] as String?;
@@ -520,6 +524,20 @@ class CallService extends ChangeNotifier {
       callType: CallType.incoming,
       status: CallStatus.ringing,
       startTime: DateTime.now(),
+    );
+
+    // Show incoming call notification
+    _notificationService.showCallNotification(
+      title: 'Incoming ${payload['callType'] == 'video' ? 'Video' : 'Audio'} Call',
+      body: '${payload['callerName'] ?? 'Unknown'} is calling you',
+      data: {
+        'callId': callId.toString(),
+        'callerId': from,
+        'callerName': payload['callerName'] ?? 'Unknown',
+        'callType': payload['callType'] ?? 'audio',
+        'callerProfilePic': payload['callerProfilePic'],
+        'action': 'tap', // Default action for notification tap
+      },
     );
 
     notifyListeners();

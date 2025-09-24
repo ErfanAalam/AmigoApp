@@ -12,10 +12,10 @@ class ChatsPage extends StatefulWidget {
   const ChatsPage({Key? key}) : super(key: key);
 
   @override
-  State<ChatsPage> createState() => _ChatsPageState();
+  State<ChatsPage> createState() => ChatsPageState();
 }
 
-class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
+class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   final UserService _userService = UserService();
   final WebSocketService _websocketService = WebSocketService();
   final UserStatusService _userStatusService = UserStatusService();
@@ -406,11 +406,11 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
       // Only set status for DM conversations and if onlineStatus is not null
       if (conversation.isDM && conversation.isOnline != null) {
         _userStatusService.setUserOnline(
-          conversation.userId, 
-          isOnline: conversation.isOnline!
+          conversation.userId,
+          isOnline: conversation.isOnline!,
         );
         debugPrint(
-          '📡 Set initial online status for user ${conversation.userId}: ${conversation.isOnline}'
+          '📡 Set initial online status for user ${conversation.userId}: ${conversation.isOnline}',
         );
       }
     }
@@ -826,6 +826,60 @@ class _ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       debugPrint('📱 App resumed, clearing active conversation state');
       _activeConversationId = null;
+    }
+  }
+
+  /// Called when the page becomes visible (when user navigates to Chats tab)
+  void onPageVisible() {
+    debugPrint('📱 ChatsPage became visible - silently refreshing conversations');
+    // Silently refresh conversations without showing loading state
+    _loadConversationsSilently();
+  }
+
+  /// Silently load conversations without affecting the UI state
+  Future<void> _loadConversationsSilently() async {
+    try {
+      debugPrint('🔄 Silently loading conversations...');
+      final response = await _userService.GetChatList('dm');
+      
+      if (response['success']) {
+        final dynamic responseData = response['data'];
+        List<dynamic> conversationsList = [];
+
+        if (responseData is List) {
+          conversationsList = responseData;
+        } else if (responseData is Map<String, dynamic>) {
+          if (responseData.containsKey('data') &&
+              responseData['data'] is List) {
+            conversationsList = responseData['data'] as List<dynamic>;
+          } else {
+            for (var key in responseData.keys) {
+              if (responseData[key] is List) {
+                conversationsList = responseData[key] as List<dynamic>;
+                break;
+              }
+            }
+          }
+        }
+
+        if (conversationsList.isNotEmpty) {
+          // Process data in background
+          final conversations = await _processConversationsAsync(conversationsList);
+          // Filter out deleted conversations and sort
+          final filteredConversations = await _filterAndSortConversations(conversations);
+
+          // Update the state silently (only if mounted and not already showing loading)
+          if (mounted && _isLoaded) {
+            setState(() {
+              _conversations = filteredConversations;
+              _filterConversations(); // Update filtered conversations
+            });
+            debugPrint('✅ Silently updated ${filteredConversations.length} conversations');
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error silently loading conversations: $e');
     }
   }
 

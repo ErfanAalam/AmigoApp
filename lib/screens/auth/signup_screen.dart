@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart' as material;
+import 'package:flutter/services.dart';
 import '../main_screen.dart';
 import '../../api/api_service.dart';
 import '../../services/auth_service.dart';
 import '../../models/country_model.dart' as country_model;
 import '../../widgets/country_selector_modal.dart';
+import '../../widgets/setup_loading_popup.dart';
+import '../../utils/navigation_helper.dart';
 
 class SignUpScreen extends material.StatefulWidget {
   const SignUpScreen({material.Key? key}) : super(key: key);
@@ -40,6 +43,36 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
     setState(() {
       _completePhoneNumber = _selectedCountry.dialCode + _phoneController.text;
     });
+  }
+
+  void _showSetupLoadingPopup() {
+    material.showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const SetupLoadingPopup(),
+    );
+
+    // Wait for a moment to show the popup, then restart the app
+    Future.delayed(const Duration(seconds: 3), () {
+      _restartApp();
+    });
+  }
+
+  void _restartApp() {
+    // Close the popup first
+    if (material.Navigator.of(context).canPop()) {
+      material.Navigator.of(context).pop();
+    }
+    
+    // Clear all navigation and go to main screen
+    // This will trigger a fresh authentication check
+    material.Navigator.pushAndRemoveUntil(
+      context,
+      material.MaterialPageRoute(
+        builder: (context) => const MainScreen(),
+      ),
+      (route) => false,
+    );
   }
 
   void _showCountrySelector() {
@@ -135,17 +168,8 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
         _isLoading = false;
       });
 
-      // Authentication is handled in the API service interceptor
-      // which automatically stores cookies and updates auth state
-      material.ScaffoldMessenger.of(context).showSnackBar(
-        const material.SnackBar(
-          content: material.Text('Account created successfully'),
-        ),
-      );
-      material.Navigator.pushReplacement(
-        context,
-        material.MaterialPageRoute(builder: (context) => const MainScreen()),
-      );
+      // Show the setup loading popup
+      _showSetupLoadingPopup();
     } else {
       material.ScaffoldMessenger.of(context).showSnackBar(
         const material.SnackBar(
@@ -717,3 +741,4 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
     );
   }
 }
+

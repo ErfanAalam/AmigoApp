@@ -15,15 +15,10 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _currentPageIndex = 0;
+  final GlobalKey<ChatsPageState> _chatsPageKey = GlobalKey<ChatsPageState>();
 
   // List of pages for bottom navigation
-  final List<Widget> _pages = [
-    ChatsPage(),
-    GroupsPage(),
-    ContactsPage(),
-    CallsPage(),
-    ProfilePage(),
-  ];
+  late final List<Widget> _pages;
 
   // List of colors for each page
   final List<Color> _pageColors = [
@@ -33,6 +28,26 @@ class _MainScreenState extends State<MainScreen> {
     Colors.teal,
     Colors.teal,
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize pages with the ChatsPage having a key
+    _pages = [
+      ChatsPage(key: _chatsPageKey),
+      GroupsPage(),
+      ContactsPage(),
+      CallsPage(),
+      ProfilePage(),
+    ];
+    
+    // Trigger silent refresh for ChatsPage if it's the initial page
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_currentPageIndex == 0) {
+        _chatsPageKey.currentState?.onPageVisible();
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,6 +65,11 @@ class _MainScreenState extends State<MainScreen> {
           setState(() {
             _currentPageIndex = index;
           });
+          
+          // If navigating to Chats tab (index 0), trigger silent refresh
+          if (index == 0) {
+            _chatsPageKey.currentState?.onPageVisible();
+          }
         },
         indicatorColor: _pageColors[_currentPageIndex].withValues(alpha: 0.2),
         selectedIndex: _currentPageIndex,

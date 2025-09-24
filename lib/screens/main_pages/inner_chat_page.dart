@@ -1793,7 +1793,6 @@ class _InnerChatPageState extends State<InnerChatPage>
       final messageId = data['id'] ?? data['messageId'];
       final optimisticId = data['optimistic_id'] ?? data['optimisticId'];
 
-      
       final senderInfo = _getUserInfo(senderId);
       final senderName = senderInfo['name'] ?? 'Unknown User';
       final senderProfilePic = senderInfo['profile_pic'];
@@ -2362,28 +2361,30 @@ class _InnerChatPageState extends State<InnerChatPage>
                 // ),
               ],
       ),
-      body: Stack(
-        children: [
-          Column(
-            children: [
-              // Pinned Message Section
-              if (_pinnedMessageId != null) _buildPinnedMessageSection(),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Column(
+              children: [
+                // Pinned Message Section
+                if (_pinnedMessageId != null) _buildPinnedMessageSection(),
 
-              // Messages List
-              Expanded(child: _buildMessagesList()),
+                // Messages List
+                Expanded(child: _buildMessagesList()),
 
-              // Message Input
-              _buildMessageInput(),
-            ],
-          ),
-          // Sticky Date Separator - Overlay on top
-          Positioned(
-            top: 10,
-            left: 0,
-            right: 0,
-            child: _buildStickyDateSeparator(),
-          ),
-        ],
+                // Message Input
+                _buildMessageInput(),
+              ],
+            ),
+            // Sticky Date Separator - Overlay on top
+            Positioned(
+              top: 10,
+              left: 0,
+              right: 0,
+              child: _buildStickyDateSeparator(),
+            ),
+          ],
+        ),
       ),
     );
   }

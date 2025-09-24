@@ -9,6 +9,9 @@ import 'services/cookie_service.dart';
 import 'services/websocket_service.dart';
 import 'services/user_status_service.dart';
 import 'services/call_service.dart';
+import 'services/notification_service.dart';
+import 'services/call_notification_handler.dart';
+import 'services/call_notification_demo.dart';
 import 'widgets/call_manager.dart';
 import 'api/api_service.dart';
 import 'utils/navigation_helper.dart';
@@ -25,6 +28,14 @@ void main() async {
 
   // Initialize UserStatusService
   UserStatusService();
+
+  // Initialize NotificationService
+  final notificationService = NotificationService();
+  await notificationService.initialize();
+
+  // Initialize CallNotificationHandler
+  final callNotificationHandler = CallNotificationHandler();
+  callNotificationHandler.initialize();
 
   // Initialize API service (which uses the cookie service)
   // final apiService = ApiService();
@@ -46,6 +57,7 @@ class _MyAppState extends material.State<MyApp> {
   final AuthService _authService = AuthService();
   final WebSocketService _websocketService = WebSocketService();
   final UserStatusService _userStatusService = UserStatusService();
+  final NotificationService _notificationService = NotificationService();
   final ApiService _apiService = ApiService();
   bool _isLoading = true;
   bool _isAuthenticated = false;
@@ -69,7 +81,13 @@ class _MyAppState extends material.State<MyApp> {
       // Connect to WebSocket
       await _websocketService.connect();
 
-     await _apiService.updateUserLocationAndIp();
+      // Send FCM token to backend
+      final userId = await _authService.getCurrentUserId();
+      if (userId != null) {
+        await _notificationService.sendTokenToBackend(userId.toString());
+      }
+
+      await _apiService.updateUserLocationAndIp();
     }
   }
 
@@ -89,12 +107,24 @@ class _MyAppState extends material.State<MyApp> {
     _websocketService.errorStream.listen((error) {
       print('❌ WebSocket error in main app: $error');
     });
+
+    // Listen to notification streams
+    _notificationService.messageNotificationStream.listen((data) {
+      print('📨 Message notification received: $data');
+      // Handle message notification - could navigate to specific chat
+    });
+
+    _notificationService.callNotificationStream.listen((data) {
+      print('📞 Call notification received: $data');
+      // Handle call notification - could show incoming call screen
+    });
   }
 
   @override
   void dispose() {
     _websocketService.dispose();
     _userStatusService.dispose();
+    _notificationService.dispose();
     super.dispose();
   }
 

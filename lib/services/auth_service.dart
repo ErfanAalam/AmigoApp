@@ -1,6 +1,7 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'cookie_service.dart';
+import 'package:amigo/api/user.service.dart' as userService;
 
 class AuthService {
   static const String _authStatusKey = 'auth_status';
@@ -75,6 +76,30 @@ class AuthService {
       await _cookieService.clearAllCookies();
     } catch (e) {
       print('❌ Error during logout: $e');
+    }
+  }
+
+  // Get current user ID
+  Future<int?> getCurrentUserId() async {
+    try {
+      final userServiceInstance = userService.UserService();
+      final response = await userServiceInstance.getUser();
+      if (response['success'] == true && response['data'] != null) {
+        final userData = response['data'];
+        final id = userData['id'];
+        
+        if (id is int) {
+          return id;
+        } else if (id is String) {
+          return int.tryParse(id);
+        } else {
+          return int.tryParse(id.toString());
+        }
+      }
+      return null;
+    } catch (e) {
+      print('❌ Error getting current user ID: $e');
+      return null;
     }
   }
 }

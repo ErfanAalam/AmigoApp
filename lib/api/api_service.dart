@@ -248,6 +248,22 @@ class ApiService {
     }
   }
 
+  /// Update user FCM token
+  Future<void> updateFCMToken(String fcmToken) async {
+    try {
+      print('🔑 Updating FCM token...');
+      
+      final response = await authenticatedPost('/user/update-fcm-token', data: {
+        'fcm_token': fcmToken,
+      });
+      
+      print('✅ FCM token updated successfully');
+      return response.data;
+    } catch (e) {
+      print('❌ Error updating FCM token: $e');
+    }
+  }
+
   // Method to make authenticated requests
   Future<Response> authenticatedGet(String path) async {
     // Check if we have auth cookies before making the request

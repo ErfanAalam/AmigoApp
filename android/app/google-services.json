@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "111586287924",
+    "project_id": "hehe-fd133",
+    "storage_bucket": "hehe-fd133.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:111586287924:android:79fcef6238b2cc3a224561",
+        "android_client_info": {
+          "package_name": "com.example.amigo"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDudOOwiZzbOsj6_Goicvk4xfwkVhXN5q8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
