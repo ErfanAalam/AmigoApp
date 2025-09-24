@@ -54,9 +54,9 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
     );
 
     // Wait for a moment to show the popup, then restart the app
-    // Future.delayed(const Duration(seconds: 3), () {
-    //   _restartApp();
-    // });
+    Future.delayed(const Duration(seconds: 3), () {
+      _restartApp();
+    });
   }
 
   void _restartApp() {
@@ -178,7 +178,7 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
       );
 
       // Restart the app to ensure all services are properly initialized
-      await AppRestartHelper.restartAppWithDialog(context);
+      // await AppRestartHelper.restartAppWithDialog(context);
     } else {
       material.ScaffoldMessenger.of(context).showSnackBar(
         const material.SnackBar(

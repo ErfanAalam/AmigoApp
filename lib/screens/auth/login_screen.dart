@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart' as material;
 import 'signup_screen.dart';
+import '../main_screen.dart';
 import '../../api/api_service.dart';
 import '../../services/auth_service.dart';
 import '../../models/country_model.dart' as country_model;
@@ -114,8 +115,13 @@ class _LoginScreenState extends material.State<LoginScreen> {
           ),
         );
 
+        material.Navigator.pushReplacement(
+          context,
+          material.MaterialPageRoute(builder: (context) => const MainScreen()),
+        );
+
         // Restart the app to ensure all services are properly initialized
-        await AppRestartHelper.restartAppWithDialog(context);
+        // await AppRestartHelper.restartAppWithDialog(context);
       } else {
         material.ScaffoldMessenger.of(context).showSnackBar(
           const material.SnackBar(
