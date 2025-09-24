@@ -9,6 +9,7 @@ import 'edit_profile_modal.dart';
 import 'deleted_chats_page.dart';
 import '../../api/api_service.dart';
 import '../../services/chat_preferences_service.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({Key? key}) : super(key: key);
@@ -36,6 +37,7 @@ class _ProfilePageState extends State<ProfilePage> {
     super.initState();
     _loadUserData();
     _loadDeletedChatsCount();
+    _checkPermissions();
   }
 
   Future<void> _loadDeletedChatsCount() async {
@@ -222,6 +224,242 @@ class _ProfilePageState extends State<ProfilePage> {
       SnackBar(
         content: Text(message),
         backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _checkPermissions() async {
+    await _checkContactsPermission();
+    await _checkLocationPermission();
+  }
+
+  Future<void> _checkContactsPermission() async {
+    try {
+      final status = await Permission.contacts.status;
+
+      if (status.isDenied || status.isPermanentlyDenied) {
+        _showContactsPermissionDialog();
+      } else if (status.isGranted) {
+        // Permission is granted, do nothing
+        debugPrint('✅ Contacts permission already granted');
+      }
+    } catch (e) {
+      debugPrint('❌ Error checking contacts permission: $e');
+    }
+  }
+
+  Future<void> _checkLocationPermission() async {
+    try {
+      final status = await Permission.location.status;
+
+      if (status.isDenied || status.isPermanentlyDenied) {
+        _showLocationPermissionDialog();
+      } else if (status.isGranted) {
+        // Permission is granted, do nothing
+        debugPrint('✅ Location permission already granted');
+      }
+    } catch (e) {
+      debugPrint('❌ Error checking location permission: $e');
+    }
+  }
+
+  void _showContactsPermissionDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.contacts, color: Colors.teal),
+            SizedBox(width: 8),
+            Text(
+              'Contacts Permission Required',
+              style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Amigo needs access to your contacts to:',
+              style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
+            ),
+            SizedBox(height: 8),
+            Text('• Find friends who are already using Amigo'),
+            Text('• Sync your contact list for better connectivity'),
+            Text('• Enable seamless communication features'),
+            SizedBox(height: 12),
+            Text(
+              'This permission is essential for the app to function properly.',
+              style: TextStyle(
+                fontStyle: FontStyle.italic,
+                color: Colors.grey[600],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Not Now'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _requestContactsPermission();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.teal,
+              foregroundColor: Colors.white,
+            ),
+            child: Text('Grant Permission'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showLocationPermissionDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.location_on, color: Colors.teal),
+            SizedBox(width: 8),
+            Text(
+              'Location Permission Required',
+              style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Amigo needs access to your location to:',
+              style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
+            ),
+            SizedBox(height: 8),
+            Text('• Find nearby friends and communities'),
+            Text('• Enable location-based features'),
+            Text('• Provide better user experience'),
+            SizedBox(height: 12),
+            Text(
+              'This permission is essential for the app to function properly.',
+              style: TextStyle(
+                fontStyle: FontStyle.italic,
+                color: Colors.grey[600],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Not Now'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _requestLocationPermission();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.teal,
+              foregroundColor: Colors.white,
+            ),
+            child: Text('Grant Permission'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _requestContactsPermission() async {
+    try {
+      final status = await Permission.contacts.request();
+
+      if (status.isGranted) {
+        _showSuccessSnackBar('Contacts permission granted!');
+        debugPrint('✅ Contacts permission granted');
+      } else if (status.isPermanentlyDenied) {
+        _showPermissionDeniedDialog(
+          'Contacts Permission Denied',
+          'Contacts permission has been permanently denied. Please enable it manually in app settings.',
+          Permission.contacts,
+        );
+      } else {
+        _showErrorSnackBar('Contacts permission denied');
+      }
+    } catch (e) {
+      debugPrint('❌ Error requesting contacts permission: $e');
+      _showErrorSnackBar('Failed to request contacts permission');
+    }
+  }
+
+  Future<void> _requestLocationPermission() async {
+    try {
+      final status = await Permission.location.request();
+
+      if (status.isGranted) {
+        _showSuccessSnackBar('Location permission granted!');
+        debugPrint('✅ Location permission granted');
+      } else if (status.isPermanentlyDenied) {
+        _showPermissionDeniedDialog(
+          'Location Permission Denied',
+          'Location permission has been permanently denied. Please enable it manually in app settings.',
+          Permission.location,
+        );
+      } else {
+        _showErrorSnackBar('Location permission denied');
+      }
+    } catch (e) {
+      debugPrint('❌ Error requesting location permission: $e');
+      _showErrorSnackBar('Failed to request location permission');
+    }
+  }
+
+  void _showPermissionDeniedDialog(
+    String title,
+    String message,
+    Permission permission,
+  ) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await openAppSettings();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.teal,
+              foregroundColor: Colors.white,
+            ),
+            child: Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSuccessSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
         behavior: SnackBarBehavior.floating,
       ),
     );

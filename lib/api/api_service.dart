@@ -135,7 +135,13 @@ class ApiService {
         "${Environment.baseUrl}/auth/verify-signup-otp",
         data: {'phone': phoneNumber, 'otp': otp, 'name': name, 'role': 'user'},
       );
-      print('this is the response: $response');
+
+       // Check if we received any cookies
+      final cookies = response.headers['set-cookie'];
+      if (cookies != null && cookies.isNotEmpty) {
+      } else {
+        print('No cookies received');
+      }
       return {
         'success': response.statusCode == 200,
         'statusCode': response.statusCode,

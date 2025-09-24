@@ -4,7 +4,6 @@ import 'main_pages/groups_page.dart';
 import 'main_pages/contacts_page.dart';
 import 'main_pages/profile_page.dart';
 import 'main_pages/calls_page.dart';
-import '../widgets/call_banner.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({Key? key}) : super(key: key);
@@ -37,14 +36,7 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Column(
-        children: [
-          const CallBanner(),
-          Expanded(
-            child: IndexedStack(index: _currentPageIndex, children: _pages),
-          ),
-        ],
-      ),
+      body: IndexedStack(index: _currentPageIndex, children: _pages),
       bottomNavigationBar: NavigationBar(
         onDestinationSelected: (int index) {
           setState(() {

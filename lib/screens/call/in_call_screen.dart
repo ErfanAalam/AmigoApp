@@ -52,6 +52,76 @@ class _InCallScreenState extends State<InCallScreen> {
           body: SafeArea(
             child: Column(
               children: [
+                // Top bar with minimize button
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Minimize button
+                      GestureDetector(
+                        onTap: () => _minimizeCall(context),
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white.withOpacity(0.1),
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.3),
+                              width: 1,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.minimize,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                      // Call status indicator
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: Colors.green.withOpacity(0.5),
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: Colors.green,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Live Call',
+                              style: TextStyle(
+                                color: Colors.green,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Placeholder for symmetry
+                      const SizedBox(width: 40),
+                    ],
+                  ),
+                ),
+
                 // Top section - call info
                 Expanded(
                   flex: 2,
@@ -256,6 +326,11 @@ class _InCallScreenState extends State<InCallScreen> {
     final minutes = duration.inMinutes;
     final seconds = duration.inSeconds % 60;
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  void _minimizeCall(BuildContext context) {
+    // Navigate back to the previous screen (main app)
+    Navigator.of(context).pop();
   }
 
   void _endCall(BuildContext context, CallService callService) async {

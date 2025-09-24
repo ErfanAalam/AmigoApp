@@ -32,7 +32,7 @@ void main() async {
   material.runApp(
     ChangeNotifierProvider<CallService>(
       create: (_) => CallService()..initialize(),
-      child: CallEnabledApp(child: MyApp()),
+      child: MyApp(),
     ),
   );
 }
@@ -118,11 +118,13 @@ class _MyAppState extends material.State<MyApp> {
         visualDensity: material.VisualDensity.adaptivePlatformDensity,
         useMaterial3: true,
       ),
-      home: _isLoading
-          ? _buildLoadingScreen()
-          : _isAuthenticated
-          ? MainScreen()
-          : LoginScreen(),
+      home: CallEnabledApp(
+        child: _isLoading
+            ? _buildLoadingScreen()
+            : _isAuthenticated
+            ? MainScreen()
+            : LoginScreen(),
+      ),
       routes: {
         '/call': (context) => const InCallScreen(),
         '/incoming-call': (context) => const IncomingCallScreen(),

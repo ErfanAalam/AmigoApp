@@ -52,6 +52,10 @@ class _InnerChatPageState extends State<InnerChatPage>
   bool _isCheckingCache = true; // Show brief cache check state
   bool _isTyping = false;
   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
+
+  int _lastReadMessageId = -1; // Last read message ID
+
+  bool _isOtherUserActive = false;
   // For optimistic message handling
   StreamSubscription<Map<String, dynamic>>? _websocketSubscription;
   StreamSubscription? _audioProgressSubscription;
@@ -64,6 +68,9 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   // User info cache for sender names and profile pics
   final Map<int, Map<String, String?>> _userInfoCache = {};
+
+  // Track if other users are active in the conversation
+  final Map<int, bool> _activeUsers = {};
 
   // Message selection and actions
   final Set<int> _selectedMessages = {};
@@ -711,6 +718,22 @@ class _InnerChatPageState extends State<InnerChatPage>
   }
 
   @override
+  void deactivate() {
+    // Send inactive message when user navigates away from the page
+    _websocketService
+        .sendMessage({
+          'type': 'inactive_in_conversation',
+          'conversation_id': widget.conversation.conversationId,
+        })
+        .catchError((e) {
+          debugPrint(
+            '❌ Error sending inactive_in_conversation in deactivate: $e',
+          );
+        });
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
     if (_isDisposed) return; // Prevent multiple dispose calls
     _isDisposed = true;
@@ -1117,6 +1140,13 @@ class _InnerChatPageState extends State<InnerChatPage>
     _websocketSubscription = _websocketService.messageStream.listen(
       (message) {
         _handleIncomingWebSocketMessage(message);
+        print('🔍 WebSocket message handled');
+        print(
+          '-------------------------------------------------------------------------',
+        );
+        print(
+          '-------------------------------------------------------------------------',
+        );
       },
       onError: (error) {
         debugPrint('❌ WebSocket message stream error: $error');
@@ -1128,6 +1158,18 @@ class _InnerChatPageState extends State<InnerChatPage>
   void _handleIncomingWebSocketMessage(Map<String, dynamic> message) {
     try {
       print('🔍 WebSocket message: $message');
+      print(
+        '-------------------------------------------------------------------------',
+      );
+      print(
+        '-------------------------------------------------------------------------',
+      );
+      print(
+        '-------------------------------------------------------------------------',
+      );
+      print(
+        '-------------------------------------------------------------------------',
+      );
 
       // Check if this is a message for our conversation
       final messageConversationId =
@@ -1153,6 +1195,8 @@ class _InnerChatPageState extends State<InnerChatPage>
         _handleIncomingMediaMessages(message);
       } else if (messageType == 'message_delivery_receipt') {
         _handleMessageDeliveryReceipt(message);
+      } else if (messageType == 'read_receipt') {
+        _handleReadReceipt(message);
       }
     } catch (e) {
       debugPrint('❌ Error handling WebSocket message: $e');
@@ -1328,15 +1372,30 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   /// Build message status ticks (single/double) based on delivery and read status
   Widget _buildMessageStatusTicks(MessageModel message) {
+    // Check if any user is currently active in the conversation
+    bool hasActiveUsers = _activeUsers.values.any((isActive) => isActive);
+
     if (message.isRead) {
-      // Double blue tick - message is read
+      // Message is already marked as read - always show blue tick
       return Icon(Icons.done_all, size: 16, color: Colors.blue);
-    } else if (message.isDelivered) {
-      // Double grey tick - message is delivered but not read
-      return Icon(Icons.done_all, size: 16, color: Colors.white70);
+    } else if (hasActiveUsers) {
+      // User is active - show blue tick for delivered messages
+      if (message.isDelivered) {
+        // Double blue tick - user is active and message is delivered
+        return Icon(Icons.done_all, size: 16, color: Colors.blue);
+      } else {
+        // Single grey tick - message is sent but not delivered
+        return Icon(Icons.done, size: 16, color: Colors.white70);
+      }
     } else {
-      // Single grey tick - message is sent but not delivered
-      return Icon(Icons.done, size: 16, color: Colors.white70);
+      // No users active - show grey tick for delivered messages
+      if (message.isDelivered) {
+        // Double grey tick - message is delivered but no users active
+        return Icon(Icons.done_all, size: 16, color: Colors.white70);
+      } else {
+        // Single grey tick - message is sent but not delivered
+        return Icon(Icons.done, size: 16, color: Colors.white70);
+      }
     }
   }
 
@@ -1370,8 +1429,12 @@ class _InnerChatPageState extends State<InnerChatPage>
       bool isDelivered = false;
       bool isRead = false;
 
-      // Check if this message is delivered or read by any user
+      // Only consider OTHER users (not the current user) for read/delivery status
+      // because we only want to show read receipts for messages sent by the current user
       for (final userId in userLastDeliveredMessageIds.keys) {
+        // Skip current user - we don't want our own read status to affect delivery status
+        if (_currentUserId != null && userId == _currentUserId) continue;
+
         final lastDeliveredId = userLastDeliveredMessageIds[userId] ?? 0;
         if (message.id <= lastDeliveredId) {
           isDelivered = true;
@@ -1380,6 +1443,9 @@ class _InnerChatPageState extends State<InnerChatPage>
       }
 
       for (final userId in userLastReadMessageIds.keys) {
+        // Skip current user - we don't want our own read status to affect read status
+        if (_currentUserId != null && userId == _currentUserId) continue;
+
         final lastReadId = userLastReadMessageIds[userId] ?? 0;
         if (message.id <= lastReadId) {
           isRead = true;
@@ -1391,7 +1457,7 @@ class _InnerChatPageState extends State<InnerChatPage>
     }).toList();
 
     debugPrint(
-      '📖 Processed read status for ${updatedMessages.length} messages',
+      '📖 Processed read status for ${updatedMessages.length} messages (excluding current user: $_currentUserId)',
     );
     return updatedMessages;
   }
@@ -1492,8 +1558,66 @@ class _InnerChatPageState extends State<InnerChatPage>
     }
   }
 
+  /// Handle read receipt from WebSocket (for active/inactive conversation status)
+  void _handleReadReceipt(Map<String, dynamic> messageData) async {
+    try {
+      final data = messageData['data'] as Map<String, dynamic>? ?? {};
+      final userId = data['user_id'];
+      final readAll = data['read_all'] ?? false;
+      final userActive = data['user_active'] ?? false;
+      final lastReadMessageId = data['message_id'];
+
+      setState(() {
+        _isOtherUserActive = userActive;
+      });
+
+      if (lastReadMessageId != null) {
+        setState(() {
+          _lastReadMessageId = lastReadMessageId;
+        });
+      }
+
+      // Skip if this is our own read receipt
+      if (_currentUserId != null && userId == _currentUserId) {
+        return;
+      }
+
+      // Update the active user state
+      _activeUsers[userId] = userActive;
+
+      debugPrint(
+        '📖 Read receipt - User: $userId, Active: $userActive, ReadAll: $readAll',
+      );
+      debugPrint('📖 Active users: $_activeUsers');
+
+      if (mounted) {
+        setState(() {
+          // If user became active, mark delivered messages as read
+          if (userActive && readAll) {
+            for (int i = 0; i < _messages.length; i++) {
+              final message = _messages[i];
+
+              // Only update messages sent by the current user
+              if (message.senderId == _currentUserId &&
+                  message.isDelivered &&
+                  !message.isRead) {
+                _messages[i] = message.copyWith(isRead: true);
+              }
+            }
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error handling read receipt: $e');
+    }
+  }
+
   /// Handle incoming message from WebSocket
   void _handleIncomingMessage(Map<String, dynamic> messageData) async {
+    print('🔍 Handling incoming message: $messageData');
+    print('🔍 Current user ID: $_currentUserId');
+    print('🔍 Conversation ID: ${widget.conversation.conversationId}');
+
     try {
       // Extract message data from WebSocket payload
       final data = messageData['data'] as Map<String, dynamic>? ?? {};
@@ -1517,12 +1641,12 @@ class _InnerChatPageState extends State<InnerChatPage>
       //   return;
       // }
 
-      print(
-        "------------------------------------------------------------\n senderId -> $senderId \n----------------------------------------------------------------",
-      );
-      print(
-        "------------------------------------------------------------\n _currentUserId -> $_currentUserId \n----------------------------------------------------------------",
-      );
+      _websocketService.sendMessage({
+        'type': 'read_receipt',
+        'message_ids': [messageId],
+        'conversation_id': widget.conversation.conversationId,
+      });
+
       // If this is our own message (sender), update the optimistic message in local storage
       if (_currentUserId != null && senderId == _currentUserId) {
         debugPrint(
@@ -1657,86 +1781,86 @@ class _InnerChatPageState extends State<InnerChatPage>
   }
 
   /// Replace optimistic message with server-confirmed message
-  void _replaceOptimisticMessage(
-    int messageId,
-    Map<String, dynamic> messageData,
-  ) {
-    try {
-      final index = _messages.indexWhere((msg) => msg.id == messageId);
-      if (index != -1) {
-        final data = messageData['data'] as Map<String, dynamic>? ?? {};
-        final messageType = messageData['type'];
+  // void _replaceOptimisticMessage(
+  //   int messageId,
+  //   Map<String, dynamic> messageData,
+  // ) {
+  //   try {
+  //     final index = _messages.indexWhere((msg) => msg.id == messageId);
+  //     if (index != -1) {
+  //       final data = messageData['data'] as Map<String, dynamic>? ?? {};
+  //       final messageType = messageData['type'];
 
-        // Handle reply messages differently
-        if (messageType == 'message_reply') {
-          final newMessageId = data['new_message_id'];
-          final messageBody = data['new_message'] ?? _messages[index].body;
-          final timestamp =
-              messageData['timestamp'] ?? _messages[index].createdAt;
+  //       // Handle reply messages differently
+  //       if (messageType == 'message_reply') {
+  //         final newMessageId = data['new_message_id'];
+  //         final messageBody = data['new_message'] ?? _messages[index].body;
+  //         final timestamp =
+  //             messageData['timestamp'] ?? _messages[index].createdAt;
 
-          // Preserve the reply relationship from the optimistic message
-          final optimisticMessage = _messages[index];
+  //         // Preserve the reply relationship from the optimistic message
+  //         final optimisticMessage = _messages[index];
 
-          // Create confirmed reply message
-          final confirmedMessage = MessageModel(
-            id: newMessageId ?? DateTime.now().millisecondsSinceEpoch,
-            body: messageBody,
-            type: 'text',
-            senderId: optimisticMessage.senderId,
-            conversationId: optimisticMessage.conversationId,
-            createdAt: timestamp,
-            deleted: false,
-            senderName: optimisticMessage.senderName,
-            senderProfilePic: optimisticMessage.senderProfilePic,
-            replyToMessage:
-                optimisticMessage.replyToMessage, // Preserve reply relationship
-            replyToMessageId: optimisticMessage.replyToMessageId,
-          );
+  //         // Create confirmed reply message
+  //         final confirmedMessage = MessageModel(
+  //           id: newMessageId ?? DateTime.now().millisecondsSinceEpoch,
+  //           body: messageBody,
+  //           type: 'text',
+  //           senderId: optimisticMessage.senderId,
+  //           conversationId: optimisticMessage.conversationId,
+  //           createdAt: timestamp,
+  //           deleted: false,
+  //           senderName: optimisticMessage.senderName,
+  //           senderProfilePic: optimisticMessage.senderProfilePic,
+  //           replyToMessage:
+  //               optimisticMessage.replyToMessage, // Preserve reply relationship
+  //           replyToMessageId: optimisticMessage.replyToMessageId,
+  //         );
 
-          if (mounted) {
-            setState(() {
-              _messages[index] = confirmedMessage;
-            });
-          }
+  //         if (mounted) {
+  //           setState(() {
+  //             _messages[index] = confirmedMessage;
+  //           });
+  //         }
 
-          // Store confirmed message with reply data
-          _storeMessageAsync(confirmedMessage);
+  //         // Store confirmed message with reply data
+  //         _storeMessageAsync(confirmedMessage);
 
-          debugPrint(
-            '✅ Replaced optimistic reply message with server-confirmed message',
-          );
-        } else {
-          // Handle regular messages
-          final senderId = data['sender_id'] != null
-              ? _parseToInt(data['sender_id'])
-              : _messages[index].senderId;
-          final senderInfo = _getUserInfo(senderId);
+  //         debugPrint(
+  //           '✅ Replaced optimistic reply message with server-confirmed message',
+  //         );
+  //       } else {
+  //         // Handle regular messages
+  //         final senderId = data['sender_id'] != null
+  //             ? _parseToInt(data['sender_id'])
+  //             : _messages[index].senderId;
+  //         final senderInfo = _getUserInfo(senderId);
 
-          // Create the confirmed message using utility
-          final confirmedMessage = MessageStorageHelpers.createConfirmedMessage(
-            messageId,
-            messageData,
-            _messages[index],
-            senderInfo,
-          );
+  //         // Create the confirmed message using utility
+  //         final confirmedMessage = MessageStorageHelpers.createConfirmedMessage(
+  //           messageId,
+  //           messageData,
+  //           _messages[index],
+  //           senderInfo,
+  //         );
 
-          if (mounted) {
-            setState(() {
-              _messages[index] = confirmedMessage;
-            });
-          }
+  //         if (mounted) {
+  //           setState(() {
+  //             _messages[index] = confirmedMessage;
+  //           });
+  //         }
 
-          // Store confirmed message
-          _storeMessageAsync(confirmedMessage);
-        }
+  //         // Store confirmed message
+  //         _storeMessageAsync(confirmedMessage);
+  //       }
 
-        // Remove from optimistic tracking
-        _optimisticMessageIds.remove(messageId);
-      }
-    } catch (e) {
-      debugPrint('❌ Error replacing optimistic message: $e');
-    }
-  }
+  //       // Remove from optimistic tracking
+  //       _optimisticMessageIds.remove(messageId);
+  //     }
+  //   } catch (e) {
+  //     debugPrint('❌ Error replacing optimistic message: $e');
+  //   }
+  // }
 
   void _handleTyping(String value) async {
     // final wasTyping = _isTyping;
@@ -1818,6 +1942,12 @@ class _InnerChatPageState extends State<InnerChatPage>
         );
         return;
       }
+
+      _websocketService.sendMessage({
+        'type': 'read_receipt',
+        'message_ids': [messageId],
+        'conversation_id': widget.conversation.conversationId,
+      });
 
       // Get sender info from cache/lookup
 
@@ -4197,7 +4327,7 @@ class _InnerChatPageState extends State<InnerChatPage>
               ],
             ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 48),
         ],
       ),
     );
@@ -5514,7 +5644,7 @@ class _InnerChatPageState extends State<InnerChatPage>
         if (_isReplying && _replyToMessageData != null) _buildReplyContainer(),
 
         Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(color: Colors.white),
           child: Row(
             children: [
