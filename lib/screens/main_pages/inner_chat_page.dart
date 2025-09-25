@@ -18,6 +18,7 @@ import '../../utils/message_storage_helpers.dart';
 import '../../widgets/media_preview_widgets.dart';
 import '../../services/call_service.dart';
 import 'package:provider/provider.dart';
+import '../../services/user_status_service.dart';
 
 class InnerChatPage extends StatefulWidget {
   final ConversationModel conversation;
@@ -241,16 +242,6 @@ class _InnerChatPageState extends State<InnerChatPage>
         print(
           "------------------------------------------------------------\n userLastReadMessageIds -> $userLastReadMessageIds \n----------------------------------------------------------------",
         );
-        userLastReadMessageIds.addEntries(
-          membersData.map((member) {
-            final userId = member['user_id'] as int;
-            final lastReadMessageId = member['last_read_message_id'] as int;
-            return MapEntry(userId, lastReadMessageId);
-          }),
-        );
-        print(
-          "------------------------------------------------------------\n userLastReadMessageIds -> $userLastReadMessageIds \n----------------------------------------------------------------",
-        );
 
         final backendMessagesWithReadStatus = historyResponse.messages;
 
@@ -275,6 +266,16 @@ class _InnerChatPageState extends State<InnerChatPage>
           // Update UI with all messages (cached + new) - no loading state
           if (mounted) {
             setState(() {
+              // Update userLastReadMessageIds from members data
+              userLastReadMessageIds.addEntries(
+                membersData.map((member) {
+                  final userId = member['user_id'] as int;
+                  final lastReadMessageId =
+                      member['last_read_message_id'] as int;
+                  return MapEntry(userId, lastReadMessageId);
+                }),
+              );
+
               _messages =
                   backendMessagesWithReadStatus; // Show all messages including new ones
               _conversationMeta = ConversationMeta.fromResponse(
@@ -291,6 +292,20 @@ class _InnerChatPageState extends State<InnerChatPage>
             messages: _messages,
             meta: _conversationMeta!,
           );
+
+          // Update userLastReadMessageIds even if no new messages
+          if (mounted) {
+            setState(() {
+              userLastReadMessageIds.addEntries(
+                membersData.map((member) {
+                  final userId = member['user_id'] as int;
+                  final lastReadMessageId =
+                      member['last_read_message_id'] as int;
+                  return MapEntry(userId, lastReadMessageId);
+                }),
+              );
+            });
+          }
         } else {
           // Replace cache with backend data
           _conversationMeta = ConversationMeta.fromResponse(historyResponse);
@@ -302,6 +317,16 @@ class _InnerChatPageState extends State<InnerChatPage>
 
           if (mounted) {
             setState(() {
+              // Update userLastReadMessageIds from members data
+              userLastReadMessageIds.addEntries(
+                membersData.map((member) {
+                  final userId = member['user_id'] as int;
+                  final lastReadMessageId =
+                      member['last_read_message_id'] as int;
+                  return MapEntry(userId, lastReadMessageId);
+                }),
+              );
+
               _messages = backendMessagesWithReadStatus;
               _conversationMeta = ConversationMeta.fromResponse(
                 historyResponse,
@@ -1506,16 +1531,16 @@ class _InnerChatPageState extends State<InnerChatPage>
                 );
               }
             }
-          });
-        }
 
-        // Update userLastReadMessageIds for all users using readBy and unreadBy
-        if (readBy.isNotEmpty) {
-          for (final userId in readBy) {
-            if (userId != null && messageId != null) {
-              userLastReadMessageIds[userId] = messageId;
+            // Update userLastReadMessageIds for all users using readBy and unreadBy
+            if (readBy.isNotEmpty) {
+              for (final userId in readBy) {
+                if (userId != null && messageId != null) {
+                  userLastReadMessageIds[userId] = messageId;
+                }
+              }
             }
-          }
+          });
         }
         // // Optionally, if you want to clear last read for users in unreadBy:
         // if (unreadBy.isNotEmpty) {
@@ -1591,6 +1616,14 @@ class _InnerChatPageState extends State<InnerChatPage>
 
       if (mounted) {
         setState(() {
+          // Update userLastReadMessageIds when we receive a read receipt
+          if (lastReadMessageId != null && userId != null) {
+            userLastReadMessageIds[userId] = lastReadMessageId;
+            debugPrint(
+              '📖 Updated userLastReadMessageIds[$userId] = $lastReadMessageId',
+            );
+          }
+
           // If user became active, mark delivered messages as read
           if (userActive && readAll) {
             for (int i = 0; i < _messages.length; i++) {
@@ -1625,14 +1658,33 @@ class _InnerChatPageState extends State<InnerChatPage>
         _activeUsers[userId] = true;
       }
 
-      _onlineUsers = (onlineInConversation as List)
-          .map((e) => _parseToInt(e))
-          .toList();
+      if (mounted) {
+        setState(() {
+          _onlineUsers = (onlineInConversation as List)
+              .map((e) => _parseToInt(e))
+              .toList();
+
+          // Update userReadMsgId for online users to the last message
+          // This ensures that when a user comes online, they're considered to have seen all current messages
+          if (_messages.isNotEmpty) {
+            final lastMessageId = _messages.last.id;
+            for (final userId in _onlineUsers) {
+              // Only update for other users, not the current user
+              if (userId != _currentUserId) {
+                userLastReadMessageIds[userId] = lastMessageId;
+              }
+            }
+          }
+        });
+      }
       print(
         "------------------------------------------------------------\n _onlineUsers -> $_onlineUsers \n----------------------------------------------------------------",
       );
+      print(
+        "------------------------------------------------------------\n Updated userLastReadMessageIds -> $userLastReadMessageIds \n----------------------------------------------------------------",
+      );
     } catch (e) {
-      debugPrint('❌ Error handling read receipt: $e');
+      debugPrint('❌ Error handling online status: $e');
     }
   }
 
@@ -2365,12 +2417,25 @@ class _InnerChatPageState extends State<InnerChatPage>
                         ),
                         Row(
                           children: [
-                            const Text(
-                              'Online', // TODO: Implement real online status
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
-                              ),
+                            StreamBuilder<Map<int, bool>>(
+                              stream: UserStatusService().statusStream,
+                              initialData: UserStatusService().onlineStatus,
+                              builder: (context, snapshot) {
+                                final isOnline =
+                                    snapshot.data?[widget
+                                        .conversation
+                                        .userId] ??
+                                    false;
+                                return Text(
+                                  isOnline ? 'Online' : 'Offline',
+                                  style: TextStyle(
+                                    color: isOnline
+                                        ? Colors.greenAccent[100]
+                                        : Colors.red[100],
+                                    fontSize: 12,
+                                  ),
+                                );
+                              },
                             ),
                             if (_isLoadingFromCache) ...[
                               const SizedBox(width: 8),
@@ -3389,7 +3454,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                     ),
                     if (isMyMessage) ...[
                       const SizedBox(width: 4),
-                      Icon(Icons.done_all, size: 14, color: Colors.white),
+                      _buildMessageStatusTicks(message),
                     ],
                   ],
                 ),
@@ -3917,7 +3982,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                     ),
                     if (isMyMessage) ...[
                       const SizedBox(width: 4),
-                      Icon(Icons.done_all, size: 14, color: Colors.white),
+                      _buildMessageStatusTicks(message),
                     ],
                   ],
                 ),

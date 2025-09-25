@@ -112,7 +112,15 @@ class _MyAppState extends material.State<MyApp> {
     });
 
     // Listen to WebSocket messages
-    _websocketService.messageStream.listen((message) {});
+    _websocketService.messageStream.listen((message) {
+      final type = message['type'] as String?;
+      
+      if (type == 'user_online') {
+        _userStatusService.handleUserOnlineMessage(message);
+      } else if (type == 'user_offline') {
+        _userStatusService.handleUserOfflineMessage(message);
+      }
+    });
 
     // Listen to WebSocket errors
     _websocketService.errorStream.listen((error) {
