@@ -667,7 +667,7 @@ class MessageStorageService {
         final currentMessage = messages[messageIndex];
         final updatedMessage = currentMessage.copyWith(
           isDelivered: isDelivered ?? currentMessage.isDelivered,
-          isRead: isRead ?? currentMessage.isRead,
+          // isRead: isRead ?? currentMessage.isRead,
         );
 
         messages[messageIndex] = updatedMessage;

@@ -14,7 +14,6 @@ class MessageModel {
   final MessageModel? replyToMessage; // Reply to message
   final int? replyToMessageId; // Reply to message ID
   final bool isDelivered; // Message delivery status
-  final bool isRead; // Message read status
 
   MessageModel({
     required this.id,
@@ -32,7 +31,6 @@ class MessageModel {
     this.replyToMessage,
     this.replyToMessageId,
     this.isDelivered = false,
-    this.isRead = false,
   });
 
   factory MessageModel.fromJson(Map<String, dynamic> json) {
@@ -68,7 +66,6 @@ class MessageModel {
         senderName: '', // Will be populated later if needed
         senderProfilePic: null,
         isDelivered: false,
-        isRead: false,
       );
     }
 
@@ -93,7 +90,6 @@ class MessageModel {
               : null),
       isDelivered:
           json['is_delivered'] == true || json['is_delivered'] == 'true',
-      isRead: json['is_read'] == true || json['is_read'] == 'true',
     );
   }
 
@@ -121,7 +117,6 @@ class MessageModel {
       'reply_to_message': replyToMessage?.toJson(),
       'reply_to_message_id': replyToMessageId,
       'is_delivered': isDelivered,
-      'is_read': isRead,
     };
   }
 
@@ -147,7 +142,6 @@ class MessageModel {
       replyToMessage: replyToMessage,
       replyToMessageId: replyToMessageId,
       isDelivered: isDelivered ?? this.isDelivered,
-      isRead: isRead ?? this.isRead,
     );
   }
 }

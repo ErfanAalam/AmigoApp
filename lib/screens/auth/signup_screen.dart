@@ -54,7 +54,7 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
     );
 
     // Wait for a moment to show the popup, then restart the app
-    Future.delayed(const Duration(seconds: 3), () {
+    Future.delayed(const Duration(seconds: 2), () {
       _restartApp();
     });
   }

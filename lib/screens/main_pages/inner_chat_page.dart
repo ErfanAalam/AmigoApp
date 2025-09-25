@@ -52,10 +52,8 @@ class _InnerChatPageState extends State<InnerChatPage>
   bool _isCheckingCache = true; // Show brief cache check state
   bool _isTyping = false;
   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
+  Map<int, int> userLastReadMessageIds = {}; // userId -> lastReadMessageId
 
-  int _lastReadMessageId = -1; // Last read message ID
-
-  bool _isOtherUserActive = false;
   // For optimistic message handling
   StreamSubscription<Map<String, dynamic>>? _websocketSubscription;
   StreamSubscription? _audioProgressSubscription;
@@ -71,6 +69,7 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   // Track if other users are active in the conversation
   final Map<int, bool> _activeUsers = {};
+  List<int> _onlineUsers = [];
 
   // Message selection and actions
   final Set<int> _selectedMessages = {};
@@ -230,10 +229,30 @@ class _InnerChatPageState extends State<InnerChatPage>
         // Process read status from members data
         final membersData =
             response['data']['data']['members'] as List<dynamic>? ?? [];
-        final backendMessagesWithReadStatus = _processReadStatusFromMembers(
-          historyResponse.messages,
-          membersData,
+        // final backendMessagesWithReadStatus = _processReadStatusFromMembers(
+        //   historyResponse.messages,
+        //   membersData,
+        // );
+
+        print(
+          "------------------------------------------------------------\n membersData -> $membersData \n----------------------------------------------------------------",
         );
+
+        print(
+          "------------------------------------------------------------\n userLastReadMessageIds -> $userLastReadMessageIds \n----------------------------------------------------------------",
+        );
+        userLastReadMessageIds.addEntries(
+          membersData.map((member) {
+            final userId = member['user_id'] as int;
+            final lastReadMessageId = member['last_read_message_id'] as int;
+            return MapEntry(userId, lastReadMessageId);
+          }),
+        );
+        print(
+          "------------------------------------------------------------\n userLastReadMessageIds -> $userLastReadMessageIds \n----------------------------------------------------------------",
+        );
+
+        final backendMessagesWithReadStatus = historyResponse.messages;
 
         final backendCount = backendMessagesWithReadStatus.length;
 
@@ -309,6 +328,11 @@ class _InnerChatPageState extends State<InnerChatPage>
     // Notify server that user is active in this conversation
     await _websocketService.sendMessage({
       'type': 'active_in_conversation',
+      'conversation_id': widget.conversation.conversationId,
+    });
+
+    await _websocketService.sendMessage({
+      'type': 'online_status',
       'conversation_id': widget.conversation.conversationId,
     });
 
@@ -838,7 +862,7 @@ class _InnerChatPageState extends State<InnerChatPage>
       final conversationId = widget.conversation.conversationId;
 
       print(
-        "------------------------------------------------------------\n _hasCheckedCache -> $_hasCheckedCache \n----------------------------------------------------------------",
+        "------------------------------------------------------------\n load int msg _hasCheckedCache -> $_hasCheckedCache \n----------------------------------------------------------------",
       );
       // If we already have messages from cache, do smart sync
       if (_hasCheckedCache && _messages.isNotEmpty) {
@@ -937,20 +961,34 @@ class _InnerChatPageState extends State<InnerChatPage>
           // Process read status from members data
           final membersData =
               response['data']['data']['members'] as List<dynamic>? ?? [];
-          final messagesWithReadStatus = _processReadStatusFromMembers(
-            processedMessages,
-            membersData,
+
+          print(
+            "------------------------------------------------------------\n membersData -> $membersData \n----------------------------------------------------------------",
           );
 
-          // Save to cache
-          await _storageService.saveMessages(
-            conversationId: conversationId,
-            messages: messagesWithReadStatus, // Save with read status
-            meta: _conversationMeta!,
+          print(
+            "------------------------------------------------------------\n userLastReadMessageIds -> $userLastReadMessageIds \n----------------------------------------------------------------",
           );
+          userLastReadMessageIds.addEntries(
+            membersData.map((member) {
+              final userId = member['user_id'] as int;
+              final lastReadMessageId = member['last_read_message_id'] as int;
+              return MapEntry(userId, lastReadMessageId);
+            }),
+          );
+          print(
+            "------------------------------------------------------------\n userLastReadMessageIds -> $userLastReadMessageIds \n----------------------------------------------------------------",
+          );
+
+          // // Save to cache
+          // await _storageService.saveMessages(
+          //   conversationId: conversationId,
+          //   messages: messagesWithReadStatus, // Save with read status
+          //   meta: _conversationMeta!,
+          // );
 
           setState(() {
-            _messages = messagesWithReadStatus;
+            _messages = processedMessages;
             _hasMoreMessages = historyResponse.hasNextPage;
             _currentPage = 1;
             _isLoading = false;
@@ -1037,59 +1075,35 @@ class _InnerChatPageState extends State<InnerChatPage>
           // Process read status from members data
           final membersData =
               response['data']['data']['members'] as List<dynamic>? ?? [];
-          final newMessagesWithReadStatus = _processReadStatusFromMembers(
-            historyResponse.messages,
-            membersData,
+
+          userLastReadMessageIds.addEntries(
+            membersData.map((member) {
+              final userId = member['user_id'] as int;
+              final lastReadMessageId = member['last_read_message_id'] as int;
+              return MapEntry(userId, lastReadMessageId);
+            }),
           );
 
           // Update conversation metadata
           _conversationMeta = ConversationMeta.fromResponse(historyResponse);
 
-          debugPrint(
-            '✅ Processed ${newMessagesWithReadStatus.length} new messages',
-          );
-
           // Add to cache (insert at beginning for older messages)
           await _storageService.addMessagesToCache(
             conversationId: conversationId,
-            newMessages: newMessagesWithReadStatus, // Save with read status
+            newMessages: historyResponse.messages, // Save with read status
             updatedMeta: _conversationMeta!,
             insertAtBeginning: true,
           );
 
           setState(() {
             // Insert older messages at the beginning (chronologically)
-            _messages.insertAll(0, newMessagesWithReadStatus);
+            _messages.insertAll(0, historyResponse.messages);
             _hasMoreMessages = historyResponse.hasNextPage;
             _currentPage++;
             _isLoadingMore = false;
           });
-
-          debugPrint(
-            '✅ Loaded ${newMessagesWithReadStatus.length} older messages. Total: ${_messages.length}, HasMore: $_hasMoreMessages',
-          );
-
-          // After loading older messages, maintain the user's current position
-          // Since we're adding messages at the beginning, we need to adjust scroll position
-          // WidgetsBinding.instance.addPostFrameCallback((_) {
-          //   if (_scrollController.hasClients &&
-          //       newMessagesWithReadStatus.isNotEmpty) {
-          //     // Calculate approximate height per message for smooth positioning
-          //     // This helps maintain the user's view position after loading older messages
-          //     final approximateMessageHeight = 60.0; // Estimate
-          //     final scrollAdjustment =
-          //         newMessagesWithReadStatus.length * approximateMessageHeight;
           //
-          //     // Adjust scroll position to account for new messages at the beginning
-          //     final currentPosition = _scrollController.position.pixels;
-          //     final newPosition = (currentPosition + scrollAdjustment).clamp(
-          //       0.0,
-          //       _scrollController.position.maxScrollExtent,
-          //     );
           //
-          //     _scrollController.jumpTo(newPosition);
-          //   }
-          // });
         } catch (processingError) {
           debugPrint(
             '❌ Error processing message history response: $processingError',
@@ -1197,6 +1211,8 @@ class _InnerChatPageState extends State<InnerChatPage>
         _handleMessageDeliveryReceipt(message);
       } else if (messageType == 'read_receipt') {
         _handleReadReceipt(message);
+      } else if (messageType == 'online_status') {
+        _handleOnlineStatus(message);
       }
     } catch (e) {
       debugPrint('❌ Error handling WebSocket message: $e');
@@ -1373,9 +1389,35 @@ class _InnerChatPageState extends State<InnerChatPage>
   /// Build message status ticks (single/double) based on delivery and read status
   Widget _buildMessageStatusTicks(MessageModel message) {
     // Check if any user is currently active in the conversation
-    bool hasActiveUsers = _activeUsers.values.any((isActive) => isActive);
+    // Check if any other user's online status is true (excluding current user)
+    // bool hasActiveUsers = _activeUsers.values.any((isActive) => isActive);
+    bool hasActiveUsers = _onlineUsers
+        .where((userId) => userId != _currentUserId)
+        .isNotEmpty;
 
-    if (message.isRead) {
+    print(
+      "------------------------------------------------------------\n onlineUsers -> $_onlineUsers \n----------------------------------------------------------------",
+    );
+    print(
+      "------------------------------------------------------------\n hasActiveUsers -> $hasActiveUsers \n----------------------------------------------------------------",
+    );
+    print(
+      "------------------------------------------------------------\n userLastReadMessageIds -> $userLastReadMessageIds \n----------------------------------------------------------------",
+    );
+    // Get the last read message id of the other user (not the current user)
+    int userReadMsgId = -1;
+    if (userLastReadMessageIds.isNotEmpty) {
+      // Find the first user id that is not the current user
+      final otherUserId = userLastReadMessageIds.keys.firstWhere(
+        (id) => id != _currentUserId,
+      );
+      userReadMsgId = userLastReadMessageIds[otherUserId] ?? -1;
+    }
+    print(
+      "------------------------------------------------------------\n userReadMsgId -> $userReadMsgId \n----------------------------------------------------------------",
+    );
+
+    if ((message.id <= userReadMsgId || hasActiveUsers) && message.id > 0) {
       // Message is already marked as read - always show blue tick
       return Icon(Icons.done_all, size: 16, color: Colors.blue);
     } else if (hasActiveUsers) {
@@ -1397,69 +1439,6 @@ class _InnerChatPageState extends State<InnerChatPage>
         return Icon(Icons.done, size: 16, color: Colors.white70);
       }
     }
-  }
-
-  /// Process read status from members data and update messages accordingly
-  List<MessageModel> _processReadStatusFromMembers(
-    List<MessageModel> messages,
-    List<dynamic> membersData,
-  ) {
-    if (membersData.isEmpty) return messages;
-
-    // Create a map for quick lookup of last read message IDs by user
-    final Map<int, int> userLastReadMessageIds = {};
-    final Map<int, int> userLastDeliveredMessageIds = {};
-
-    for (final member in membersData) {
-      final memberData = member as Map<String, dynamic>;
-      final userId = _parseToInt(memberData['user_id']);
-      final lastReadId = _parseToInt(memberData['last_read_message_id']);
-      final lastDeliveredId = _parseToInt(
-        memberData['last_delivered_message_id'],
-      );
-
-      if (userId > 0) {
-        userLastReadMessageIds[userId] = lastReadId;
-        userLastDeliveredMessageIds[userId] = lastDeliveredId;
-      }
-    }
-
-    // Update messages with read/delivery status
-    final updatedMessages = messages.map((message) {
-      bool isDelivered = false;
-      bool isRead = false;
-
-      // Only consider OTHER users (not the current user) for read/delivery status
-      // because we only want to show read receipts for messages sent by the current user
-      for (final userId in userLastDeliveredMessageIds.keys) {
-        // Skip current user - we don't want our own read status to affect delivery status
-        if (_currentUserId != null && userId == _currentUserId) continue;
-
-        final lastDeliveredId = userLastDeliveredMessageIds[userId] ?? 0;
-        if (message.id <= lastDeliveredId) {
-          isDelivered = true;
-          break;
-        }
-      }
-
-      for (final userId in userLastReadMessageIds.keys) {
-        // Skip current user - we don't want our own read status to affect read status
-        if (_currentUserId != null && userId == _currentUserId) continue;
-
-        final lastReadId = userLastReadMessageIds[userId] ?? 0;
-        if (message.id <= lastReadId) {
-          isRead = true;
-          break;
-        }
-      }
-
-      return message.copyWith(isDelivered: isDelivered, isRead: isRead);
-    }).toList();
-
-    debugPrint(
-      '📖 Processed read status for ${updatedMessages.length} messages (excluding current user: $_currentUserId)',
-    );
-    return updatedMessages;
   }
 
   /// Handle message delivery receipt from WebSocket
@@ -1523,12 +1502,29 @@ class _InnerChatPageState extends State<InnerChatPage>
                 final originalMessage = _messages[i];
                 _messages[i] = originalMessage.copyWith(
                   isDelivered: isDelivered || originalMessage.isDelivered,
-                  isRead: isRead || originalMessage.isRead,
+                  // isRead: isRead || originalMessage.isRead,
                 );
               }
             }
           });
         }
+
+        // Update userLastReadMessageIds for all users using readBy and unreadBy
+        if (readBy.isNotEmpty) {
+          for (final userId in readBy) {
+            if (userId != null && messageId != null) {
+              userLastReadMessageIds[userId] = messageId;
+            }
+          }
+        }
+        // // Optionally, if you want to clear last read for users in unreadBy:
+        // if (unreadBy.isNotEmpty) {
+        //   for (final userId in unreadBy) {
+        //     if (userId != null) {
+        //       userLastReadMessageIds[userId] = null;
+        //     }
+        //   }
+        // }
 
         // Update in storage for all messages that the current user sent
         int updatedCount = 0;
@@ -1539,7 +1535,7 @@ class _InnerChatPageState extends State<InnerChatPage>
               conversationId: widget.conversation.conversationId,
               messageId: message.id,
               isDelivered: isDelivered || message.isDelivered,
-              isRead: isRead || message.isRead,
+              // isRead: isRead || message.isRead,
             );
             updatedCount++;
           }
@@ -1560,6 +1556,9 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   /// Handle read receipt from WebSocket (for active/inactive conversation status)
   void _handleReadReceipt(Map<String, dynamic> messageData) async {
+    print(
+      "------------------------------------------------------------\n messageData handle RR -> $messageData \n----------------------------------------------------------------",
+    );
     try {
       final data = messageData['data'] as Map<String, dynamic>? ?? {};
       final userId = data['user_id'];
@@ -1567,14 +1566,14 @@ class _InnerChatPageState extends State<InnerChatPage>
       final userActive = data['user_active'] ?? false;
       final lastReadMessageId = data['message_id'];
 
-      setState(() {
-        _isOtherUserActive = userActive;
-      });
+      // setState(() {
+      //   _isOtherUserActive = userActive;
+      // });
 
       if (lastReadMessageId != null) {
-        setState(() {
-          _lastReadMessageId = lastReadMessageId;
-        });
+        // setState(() {
+        //   _lastReadMessageId = lastReadMessageId;
+        // });
       }
 
       // Skip if this is our own read receipt
@@ -1598,15 +1597,40 @@ class _InnerChatPageState extends State<InnerChatPage>
               final message = _messages[i];
 
               // Only update messages sent by the current user
-              if (message.senderId == _currentUserId &&
-                  message.isDelivered &&
-                  !message.isRead) {
+              if (message.senderId == _currentUserId && message.isDelivered
+              // && !message.isRead
+              ) {
                 _messages[i] = message.copyWith(isRead: true);
               }
             }
           }
         });
       }
+    } catch (e) {
+      debugPrint('❌ Error handling read receipt: $e');
+    }
+  }
+
+  void _handleOnlineStatus(Map<String, dynamic> messageData) async {
+    print(
+      "------------------------------------------------------------\n messageData handle OS -> $messageData \n----------------------------------------------------------------",
+    );
+    try {
+      final data = messageData['data'] as Map<String, dynamic>? ?? {};
+      final conversationId = messageData['conversation_id'];
+      final onlineInConversation = data['online_in_conversation'];
+
+      // add to active users map if not present and update if present
+      for (final userId in onlineInConversation) {
+        _activeUsers[userId] = true;
+      }
+
+      _onlineUsers = (onlineInConversation as List)
+          .map((e) => _parseToInt(e))
+          .toList();
+      print(
+        "------------------------------------------------------------\n _onlineUsers -> $_onlineUsers \n----------------------------------------------------------------",
+      );
     } catch (e) {
       debugPrint('❌ Error handling read receipt: $e');
     }
@@ -1779,88 +1803,6 @@ class _InnerChatPageState extends State<InnerChatPage>
       }
     }
   }
-
-  /// Replace optimistic message with server-confirmed message
-  // void _replaceOptimisticMessage(
-  //   int messageId,
-  //   Map<String, dynamic> messageData,
-  // ) {
-  //   try {
-  //     final index = _messages.indexWhere((msg) => msg.id == messageId);
-  //     if (index != -1) {
-  //       final data = messageData['data'] as Map<String, dynamic>? ?? {};
-  //       final messageType = messageData['type'];
-
-  //       // Handle reply messages differently
-  //       if (messageType == 'message_reply') {
-  //         final newMessageId = data['new_message_id'];
-  //         final messageBody = data['new_message'] ?? _messages[index].body;
-  //         final timestamp =
-  //             messageData['timestamp'] ?? _messages[index].createdAt;
-
-  //         // Preserve the reply relationship from the optimistic message
-  //         final optimisticMessage = _messages[index];
-
-  //         // Create confirmed reply message
-  //         final confirmedMessage = MessageModel(
-  //           id: newMessageId ?? DateTime.now().millisecondsSinceEpoch,
-  //           body: messageBody,
-  //           type: 'text',
-  //           senderId: optimisticMessage.senderId,
-  //           conversationId: optimisticMessage.conversationId,
-  //           createdAt: timestamp,
-  //           deleted: false,
-  //           senderName: optimisticMessage.senderName,
-  //           senderProfilePic: optimisticMessage.senderProfilePic,
-  //           replyToMessage:
-  //               optimisticMessage.replyToMessage, // Preserve reply relationship
-  //           replyToMessageId: optimisticMessage.replyToMessageId,
-  //         );
-
-  //         if (mounted) {
-  //           setState(() {
-  //             _messages[index] = confirmedMessage;
-  //           });
-  //         }
-
-  //         // Store confirmed message with reply data
-  //         _storeMessageAsync(confirmedMessage);
-
-  //         debugPrint(
-  //           '✅ Replaced optimistic reply message with server-confirmed message',
-  //         );
-  //       } else {
-  //         // Handle regular messages
-  //         final senderId = data['sender_id'] != null
-  //             ? _parseToInt(data['sender_id'])
-  //             : _messages[index].senderId;
-  //         final senderInfo = _getUserInfo(senderId);
-
-  //         // Create the confirmed message using utility
-  //         final confirmedMessage = MessageStorageHelpers.createConfirmedMessage(
-  //           messageId,
-  //           messageData,
-  //           _messages[index],
-  //           senderInfo,
-  //         );
-
-  //         if (mounted) {
-  //           setState(() {
-  //             _messages[index] = confirmedMessage;
-  //           });
-  //         }
-
-  //         // Store confirmed message
-  //         _storeMessageAsync(confirmedMessage);
-  //       }
-
-  //       // Remove from optimistic tracking
-  //       _optimisticMessageIds.remove(messageId);
-  //     }
-  //   } catch (e) {
-  //     debugPrint('❌ Error replacing optimistic message: $e');
-  //   }
-  // }
 
   void _handleTyping(String value) async {
     // final wasTyping = _isTyping;
