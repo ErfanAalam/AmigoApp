@@ -194,6 +194,7 @@ class WebSocketService {
 
   /// Send a message through WebSocket
   Future<void> sendMessage(Map<String, dynamic> message) async {
+    print('🔍 Sending WebSocket message: $message');
     if (_socket == null ||
         _connectionState != WebSocketConnectionState.connected) {
       throw Exception('WebSocket is not connected');

@@ -114,6 +114,12 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
           ),
         );
       });
+    } else if (response['success'] == false && response['code'] == 409) {
+      material.ScaffoldMessenger.of(context).showSnackBar(
+        const material.SnackBar(
+          content: material.Text('Phone number already exists! Please Login'),
+        ),
+      );
     } else {
       setState(() {
         _isLoading = false;
@@ -124,22 +130,6 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
         );
       });
     }
-
-    // setState(() {
-    //   _isLoading = true;
-    // });
-
-    // TODO: Implement send OTP API call
-    await Future.delayed(const Duration(seconds: 2)); // Simulate API call
-
-    // setState(() {
-    //   _isOtpSent = true;
-    //   _isLoading = false;
-    // });
-
-    // material.ScaffoldMessenger.of(context).showSnackBar(
-    //   const material.SnackBar(content: material.Text('OTP sent successfully')),
-    // );
   }
 
   void handleVerifyOtp() async {

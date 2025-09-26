@@ -87,7 +87,7 @@ class _MyAppState extends material.State<MyApp> {
           await _notificationService.sendTokenToBackend(userId.toString());
         }
 
-        await _apiService.updateUserLocationAndIp();
+        // await _apiService.updateUserLocationAndIp();
         // Wait a bit for WebSocket to establish connection
         await Future.delayed(const Duration(milliseconds: 500));
 

@@ -15,6 +15,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _currentPageIndex = 0;
   final GlobalKey<ChatsPageState> _chatsPageKey = GlobalKey<ChatsPageState>();
+  final GlobalKey<CallsPageState> _callsPageKey = GlobalKey<CallsPageState>();
 
   // List of pages for bottom navigation
   late final List<Widget> _pages;
@@ -31,15 +32,15 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
-    // Initialize pages with the ChatsPage having a key
+    // Initialize pages with keys for ChatsPage and CallsPage
     _pages = [
       ChatsPage(key: _chatsPageKey),
       GroupsPage(),
       ContactsPage(),
-      CallsPage(),
+      CallsPage(key: _callsPageKey),
       ProfilePage(),
     ];
-    
+
     // Trigger silent refresh for ChatsPage if it's the initial page
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_currentPageIndex == 0) {
@@ -57,10 +58,14 @@ class _MainScreenState extends State<MainScreen> {
           setState(() {
             _currentPageIndex = index;
           });
-          
+
           // If navigating to Chats tab (index 0), trigger silent refresh
           if (index == 0) {
             _chatsPageKey.currentState?.onPageVisible();
+          }
+          // If navigating to Calls tab (index 3), trigger silent refresh
+          else if (index == 3) {
+            _callsPageKey.currentState?.onPageVisible();
           }
         },
         indicatorColor: _pageColors[_currentPageIndex].withValues(alpha: 0.2),

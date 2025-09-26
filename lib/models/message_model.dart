@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 class MessageModel {
   final int id;
   final String body;
@@ -153,6 +155,8 @@ class ConversationHistoryResponse {
   final int totalPages;
   final bool hasNextPage;
   final bool hasPreviousPage;
+  final List<Map<String, dynamic>>
+  members; // Store members data for sender names
 
   ConversationHistoryResponse({
     required this.messages,
@@ -161,6 +165,7 @@ class ConversationHistoryResponse {
     required this.totalPages,
     required this.hasNextPage,
     required this.hasPreviousPage,
+    this.members = const [],
   });
 
   factory ConversationHistoryResponse.fromJson(Map<String, dynamic> json) {
@@ -169,6 +174,14 @@ class ConversationHistoryResponse {
     final innerData = outerData['data'] ?? outerData;
     final messagesData = innerData['messages'] ?? [];
     final pagination = innerData['pagination'] ?? {};
+    final membersData = innerData['members'] ?? [];
+
+    debugPrint(
+      '🔍 ConversationHistoryResponse: Parsing members data: $membersData',
+    );
+    debugPrint(
+      '🔍 ConversationHistoryResponse: Members count: ${membersData.length}',
+    );
 
     return ConversationHistoryResponse(
       messages: (messagesData as List)
@@ -186,6 +199,7 @@ class ConversationHistoryResponse {
       hasPreviousPage:
           pagination['hasPreviousPage'] == true ||
           pagination['hasPreviousPage'] == 'true',
+      members: (membersData as List).cast<Map<String, dynamic>>(),
     );
   }
 

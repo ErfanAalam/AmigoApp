@@ -73,7 +73,7 @@ class _InCallScreenState extends State<InCallScreen> {
                             ),
                           ),
                           child: const Icon(
-                            Icons.minimize,
+                            Icons.arrow_back,
                             color: Colors.white,
                             size: 20,
                           ),

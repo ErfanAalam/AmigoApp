@@ -107,13 +107,7 @@ class ApiService {
       Response response = await _dio.post(
         "${Environment.baseUrl}/auth/generate-signup-otp/$phoneNumber",
       );
-      print('this is the response: $response');
-      return {
-        'success': response.statusCode == 200,
-        'statusCode': response.statusCode,
-        'data': response.data,
-        'message': 'Signup OTP sent successfully',
-      };
+      return response.data;
     } catch (e) {
       return {
         'success': false,
@@ -136,7 +130,7 @@ class ApiService {
         data: {'phone': phoneNumber, 'otp': otp, 'name': name, 'role': 'user'},
       );
 
-       // Check if we received any cookies
+      // Check if we received any cookies
       final cookies = response.headers['set-cookie'];
       if (cookies != null && cookies.isNotEmpty) {
       } else {
@@ -163,13 +157,7 @@ class ApiService {
       Response response = await _dio.post(
         "${Environment.baseUrl}/auth/generate-login-otp/$phone_number",
       );
-      print('this is the response: $response');
-      return {
-        'success': response.statusCode == 200,
-        'statusCode': response.statusCode,
-        'data': response.data,
-        'message': 'Login OTP sent successfully',
-      };
+      return response.data;
     } catch (e) {
       return {
         'success': false,
@@ -248,6 +236,14 @@ class ApiService {
       };
 
       final response = await authenticatedPost('/user/update-user', data: data);
+
+      print(
+        '-------------------------------------------------------------------------------',
+      );
+      print('this is the response: $response');
+      print(
+        '-------------------------------------------------------------------------------',
+      );
       return response.data;
     } catch (e) {
       print('❌ Error updating user location and IP: $e');
@@ -258,11 +254,12 @@ class ApiService {
   Future<void> updateFCMToken(String fcmToken) async {
     try {
       print('🔑 Updating FCM token...');
-      
-      final response = await authenticatedPost('/user/update-fcm-token', data: {
-        'fcm_token': fcmToken,
-      });
-      
+
+      final response = await authenticatedPost(
+        '/user/update-fcm-token',
+        data: {'fcm_token': fcmToken},
+      );
+
       print('✅ FCM token updated successfully');
       return response.data;
     } catch (e) {

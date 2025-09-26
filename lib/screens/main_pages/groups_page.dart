@@ -170,20 +170,14 @@ class _GroupsPageState extends State<GroupsPage> {
         ),
         backgroundColor: Colors.teal,
         elevation: 0,
-        // actions: [
-        //   IconButton(
-        //     icon: Icon(Icons.search, color: Colors.white),
-        //     onPressed: () {
-        //       // TODO: Implement search functionality
-        //     },
-        //   ),
-        //   IconButton(
-        //     icon: Icon(Icons.more_vert, color: Colors.white),
-        //     onPressed: () {
-        //       // TODO: Implement more options
-        //     },
-        //   ),
-        // ],
+        actions: [
+          IconButton(
+            icon: Icon(Icons.refresh, color: Colors.white),
+            onPressed: () {
+              _loadGroupsAndCommunities();
+            },
+          ),
+        ],
       ),
       body: Container(
         color: Colors.grey[50],

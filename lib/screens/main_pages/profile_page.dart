@@ -257,6 +257,8 @@ class _ProfilePageState extends State<ProfilePage> {
         _showLocationPermissionDialog();
       } else if (status.isGranted) {
         // Permission is granted, do nothing
+
+        await _apiService.updateUserLocationAndIp();
         debugPrint('✅ Location permission already granted');
       }
     } catch (e) {
@@ -368,6 +370,7 @@ class _ProfilePageState extends State<ProfilePage> {
             onPressed: () async {
               Navigator.pop(context);
               await _requestLocationPermission();
+              await _apiService.updateUserLocationAndIp();
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.teal,

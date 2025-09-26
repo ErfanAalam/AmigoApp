@@ -56,6 +56,7 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
     _setupWebSocketListener();
     _setupUserStatusListener();
     _loadChatPreferences();
+    
 
     // Setup search functionality
     _searchController.addListener(_onSearchChanged);

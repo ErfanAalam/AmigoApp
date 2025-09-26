@@ -8,6 +8,7 @@ import '../../models/user_model.dart';
 import '../../services/contact_service.dart';
 import '../../api/user.service.dart';
 import '../../api/chats.services.dart';
+import '../../services/websocket_service.dart';
 
 class ContactsPage extends StatefulWidget {
   const ContactsPage({Key? key}) : super(key: key);
@@ -19,6 +20,7 @@ class ContactsPage extends StatefulWidget {
 class _ContactsPageState extends State<ContactsPage>
     with AutomaticKeepAliveClientMixin, TickerProviderStateMixin {
   final ContactService _contactService = ContactService();
+  final WebSocketService _websocketService = WebSocketService();
   List<ContactModel> _contacts = [];
   List<UserModel> _availableUsers = [];
   List<UserModel> _filteredUsers = [];
@@ -283,6 +285,15 @@ class _ContactsPageState extends State<ContactsPage>
           userProfilePic: user.profilePic,
         );
 
+        await _websocketService.sendMessage({
+          'type': 'join_conversation',
+          'conversation_id': conversationData['id'],
+          'data':{
+          'recipient_id': user.id,
+          }
+        });
+
+
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -336,6 +347,14 @@ class _ContactsPageState extends State<ContactsPage>
           userName: userInfo.name,
           userProfilePic: userInfo.profilePic,
         );
+
+         await _websocketService.sendMessage({
+          'type': 'join_conversation',
+          'conversation_id': conversationData['id'],
+          'data':{
+          'recipient_id': userId,
+          }
+        });
 
         Navigator.push(
           context,

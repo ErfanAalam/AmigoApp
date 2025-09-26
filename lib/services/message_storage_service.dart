@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/message_model.dart';
 
@@ -698,6 +699,8 @@ class ConversationMeta {
   final int totalPages;
   final bool hasNextPage;
   final bool hasPreviousPage;
+  final List<Map<String, dynamic>>
+  members; // Store members data for sender names
 
   ConversationMeta({
     required this.totalCount,
@@ -705,15 +708,23 @@ class ConversationMeta {
     required this.totalPages,
     required this.hasNextPage,
     required this.hasPreviousPage,
+    this.members = const [],
   });
 
   factory ConversationMeta.fromResponse(ConversationHistoryResponse response) {
+    debugPrint(
+      '🔍 ConversationMeta.fromResponse: Creating meta with ${response.members.length} members',
+    );
+    debugPrint(
+      '🔍 ConversationMeta.fromResponse: Members data: ${response.members}',
+    );
     return ConversationMeta(
       totalCount: response.totalCount,
       currentPage: response.currentPage,
       totalPages: response.totalPages,
       hasNextPage: response.hasNextPage,
       hasPreviousPage: response.hasPreviousPage,
+      members: response.members,
     );
   }
 
@@ -724,6 +735,9 @@ class ConversationMeta {
       totalPages: json['totalPages'] ?? 1,
       hasNextPage: json['hasNextPage'] ?? false,
       hasPreviousPage: json['hasPreviousPage'] ?? false,
+      members:
+          (json['members'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
+          [],
     );
   }
 
@@ -734,6 +748,7 @@ class ConversationMeta {
       'totalPages': totalPages,
       'hasNextPage': hasNextPage,
       'hasPreviousPage': hasPreviousPage,
+      'members': members,
     };
   }
 
@@ -743,6 +758,7 @@ class ConversationMeta {
     int? totalPages,
     bool? hasNextPage,
     bool? hasPreviousPage,
+    List<Map<String, dynamic>>? members,
   }) {
     return ConversationMeta(
       totalCount: totalCount ?? this.totalCount,
@@ -750,7 +766,45 @@ class ConversationMeta {
       totalPages: totalPages ?? this.totalPages,
       hasNextPage: hasNextPage ?? this.hasNextPage,
       hasPreviousPage: hasPreviousPage ?? this.hasPreviousPage,
+      members: members ?? this.members,
     );
+  }
+
+  /// Get sender name from members data by user ID
+  String getSenderName(int userId) {
+    debugPrint(
+      '🔍 getSenderName: Looking for userId $userId in ${members.length} members',
+    );
+    for (final member in members) {
+      debugPrint('🔍 getSenderName: Checking member $member');
+      // Handle both int and string user_id values
+      final memberUserId = member['user_id'];
+      final userIdInt = memberUserId is int
+          ? memberUserId
+          : int.tryParse(memberUserId.toString());
+      if (userIdInt == userId) {
+        final name = member['name']?.toString() ?? 'Unknown User';
+        debugPrint('🔍 getSenderName: Found name $name for userId $userId');
+        return name;
+      }
+    }
+    debugPrint('🔍 getSenderName: No member found for userId $userId');
+    return 'Unknown User';
+  }
+
+  /// Get sender profile picture from members data by user ID
+  String? getSenderProfilePic(int userId) {
+    for (final member in members) {
+      // Handle both int and string user_id values
+      final memberUserId = member['user_id'];
+      final userIdInt = memberUserId is int
+          ? memberUserId
+          : int.tryParse(memberUserId.toString());
+      if (userIdInt == userId) {
+        return member['profile_pic']?.toString();
+      }
+    }
+    return null;
   }
 }
 
