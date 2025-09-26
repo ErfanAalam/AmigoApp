@@ -60,7 +60,7 @@ class _CallsPageState extends State<CallsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: Color(0xFFF8FAFB),
       appBar: AppBar(
         leadingWidth: 40, // Reduce leading width to minimize gap
         leading: Padding(

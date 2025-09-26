@@ -29,15 +29,17 @@ class CallService extends ChangeNotifier {
   // WebRTC configuration - using Plan B for compatibility
   final Map<String, dynamic> _configuration = {
     'iceServers': [
-      {'urls': 'stun:stun.l.google.com:19302'},
-      // Add TURN servers here for production
+      {'urls': 'stun:stun.l.google.com:19302'}, // STUN fallback
       {
-        'urls': 'turn:ui.gosecureserver.in:3478',
+        'urls': [
+          'turn:43.205.144.169:3478?transport=udp',
+          'turn:43.205.144.169:3478?transport=tcp',
+        ],
         'username': 'amigo',
         'credential': 'amigopass',
       },
     ],
-    'sdpSemantics': 'plan-b', // Changed to plan-b for addStream compatibility
+    'sdpSemantics': 'plan-b',
   };
 
   // Constraints for audio-only calls
@@ -538,7 +540,8 @@ class CallService extends ChangeNotifier {
 
     // Show incoming call notification
     _notificationService.showCallNotification(
-      title: 'Incoming ${payload['callType'] == 'video' ? 'Video' : 'Audio'} Call',
+      title:
+          'Incoming ${payload['callType'] == 'video' ? 'Video' : 'Audio'} Call',
       body: '${payload['callerName'] ?? 'Unknown'} is calling you',
       data: {
         'callId': callId.toString(),

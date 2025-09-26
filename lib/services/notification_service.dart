@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:amigo/api/api_service.dart';
+import 'package:amigo/services/call_service.dart';
+import 'package:amigo/utils/navigation_helper.dart';
 // import 'package:amigo/firebase_options.dart';
 
 class NotificationService {
@@ -16,42 +18,47 @@ class NotificationService {
   NotificationService._internal();
 
   FirebaseMessaging? _firebaseMessaging;
-  final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
-  
+  final FlutterLocalNotificationsPlugin _localNotifications =
+      FlutterLocalNotificationsPlugin();
+
   String? _fcmToken;
   String? get fcmToken => _fcmToken;
 
   // Stream controllers for different notification types
-  final StreamController<Map<String, dynamic>> _messageNotificationController = 
+  final StreamController<Map<String, dynamic>> _messageNotificationController =
       StreamController<Map<String, dynamic>>.broadcast();
-  final StreamController<Map<String, dynamic>> _callNotificationController = 
+  final StreamController<Map<String, dynamic>> _callNotificationController =
       StreamController<Map<String, dynamic>>.broadcast();
 
   // Getters for streams
-  Stream<Map<String, dynamic>> get messageNotificationStream => _messageNotificationController.stream;
-  Stream<Map<String, dynamic>> get callNotificationStream => _callNotificationController.stream;
+  Stream<Map<String, dynamic>> get messageNotificationStream =>
+      _messageNotificationController.stream;
+  Stream<Map<String, dynamic>> get callNotificationStream =>
+      _callNotificationController.stream;
 
   /// Initialize the notification service
   Future<void> initialize() async {
     try {
       // Initialize Firebase
       await Firebase.initializeApp();
-      
+
       // Initialize FirebaseMessaging after Firebase is initialized
       _firebaseMessaging = FirebaseMessaging.instance;
-      
+
       // Request notification permissions
       await _requestPermissions();
-      
+
       // Initialize local notifications
       await _initializeLocalNotifications();
-      
+
       // Get FCM token
       await _getFCMToken();
-      
+
       // Set up message handlers
       _setupMessageHandlers();
-      
+
+      await CallService().initialize();
+
       print('🔔 NotificationService initialized successfully');
     } catch (e) {
       print('❌ Error initializing NotificationService: $e');
@@ -74,9 +81,8 @@ class NotificationService {
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/launcher_icon');
 
-    const InitializationSettings initializationSettings = InitializationSettings(
-      android: initializationSettingsAndroid,
-    );
+    const InitializationSettings initializationSettings =
+        InitializationSettings(android: initializationSettingsAndroid);
 
     await _localNotifications.initialize(
       initializationSettings,
@@ -91,14 +97,15 @@ class NotificationService {
 
   /// Create notification channels for Android
   Future<void> _createNotificationChannels() async {
-    const AndroidNotificationChannel messageChannel = AndroidNotificationChannel(
-      'messages',
-      'Messages',
-      description: 'Notifications for new messages',
-      importance: Importance.high,
-      playSound: true,
-      enableVibration: true,
-    );
+    const AndroidNotificationChannel messageChannel =
+        AndroidNotificationChannel(
+          'messages',
+          'Messages',
+          description: 'Notifications for new messages',
+          importance: Importance.high,
+          playSound: true,
+          enableVibration: true,
+        );
 
     const AndroidNotificationChannel callChannel = AndroidNotificationChannel(
       'calls',
@@ -110,11 +117,15 @@ class NotificationService {
     );
 
     await _localNotifications
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
         ?.createNotificationChannel(messageChannel);
 
     await _localNotifications
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
         ?.createNotificationChannel(callChannel);
   }
 
@@ -124,7 +135,7 @@ class NotificationService {
       if (_firebaseMessaging != null) {
         _fcmToken = await _firebaseMessaging!.getToken();
         print('🔑 FCM Token: $_fcmToken');
-        
+
         // Store token in shared preferences
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('fcm_token', _fcmToken ?? '');
@@ -163,10 +174,10 @@ class NotificationService {
   /// Handle foreground messages
   void _handleForegroundMessage(RemoteMessage message) {
     print('📨 Received foreground message: ${message.messageId}');
-    
+
     final data = message.data;
     final notification = message.notification;
-    
+
     if (data['type'] == 'call') {
       _handleCallNotification(data, notification);
     } else if (data['type'] == 'message') {
@@ -177,9 +188,9 @@ class NotificationService {
   /// Handle notification taps
   void _handleNotificationTap(RemoteMessage message) {
     print('👆 Notification tapped: ${message.messageId}');
-    
+
     final data = message.data;
-    
+
     if (data['type'] == 'call') {
       _callNotificationController.add(data);
     } else if (data['type'] == 'message') {
@@ -188,31 +199,34 @@ class NotificationService {
   }
 
   /// Handle call notifications
-  void _handleCallNotification(Map<String, dynamic> data, RemoteNotification? notification) {
+  void _handleCallNotification(
+    Map<String, dynamic> data,
+    RemoteNotification? notification,
+  ) {
     // Use data from FCM for call notifications
     final title = data['title'] ?? notification?.title ?? 'Incoming Call';
-    final body = data['body'] ?? notification?.body ?? 'You have an incoming call';
-    
+    final body =
+        data['body'] ?? notification?.body ?? 'You have an incoming call';
+
     // Show local notification for incoming call with action buttons
-    showCallNotification(
-      title: title,
-      body: body,
-      data: data,
-    );
-    
+    showCallNotification(title: title, body: body, data: data);
+
     // Emit to stream
     _callNotificationController.add(data);
   }
 
   /// Handle message notifications
-  void _handleMessageNotification(Map<String, dynamic> data, RemoteNotification? notification) {
+  void _handleMessageNotification(
+    Map<String, dynamic> data,
+    RemoteNotification? notification,
+  ) {
     // Show local notification for new message
     showMessageNotification(
       title: notification?.title ?? 'New Message',
       body: notification?.body ?? 'You have a new message',
       data: data,
     );
-    
+
     // Emit to stream
     _messageNotificationController.add(data);
   }
@@ -223,33 +237,34 @@ class NotificationService {
     required String body,
     required Map<String, dynamic> data,
   }) async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'calls',
-      'Calls',
-      channelDescription: 'Notifications for incoming calls',
-      importance: Importance.max,
-      priority: Priority.high,
-      playSound: true,
-      enableVibration: true,
-      fullScreenIntent: true,
-      category: AndroidNotificationCategory.call,
-      ongoing: true, // Make it ongoing so it can't be dismissed easily
-      autoCancel: false, // Don't auto-cancel when tapped
-      actions: [
-        AndroidNotificationAction(
-          'accept_call',
-          'Accept',
-          icon: DrawableResourceAndroidBitmap('ic_call_accept'),
-          showsUserInterface: true,
-        ),
-        AndroidNotificationAction(
-          'decline_call',
-          'Decline',
-          icon: DrawableResourceAndroidBitmap('ic_call_decline'),
-          showsUserInterface: true,
-        ),
-      ],
-    );
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+          'calls',
+          'Calls',
+          channelDescription: 'Notifications for incoming calls',
+          importance: Importance.max,
+          priority: Priority.high,
+          playSound: true,
+          enableVibration: true,
+          fullScreenIntent: true,
+          category: AndroidNotificationCategory.call,
+          ongoing: true, // Make it ongoing so it can't be dismissed easily
+          autoCancel: false, // Don't auto-cancel when tapped
+          actions: [
+            AndroidNotificationAction(
+              'accept_call',
+              'Accept',
+              icon: DrawableResourceAndroidBitmap('ic_call_accept'),
+              showsUserInterface: true,
+            ),
+            AndroidNotificationAction(
+              'decline_call',
+              'Decline',
+              icon: DrawableResourceAndroidBitmap('ic_call_decline'),
+              showsUserInterface: true,
+            ),
+          ],
+        );
 
     const NotificationDetails notificationDetails = NotificationDetails(
       android: androidDetails,
@@ -277,16 +292,17 @@ class NotificationService {
     required String body,
     required Map<String, dynamic> data,
   }) async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'messages',
-      'Messages',
-      channelDescription: 'Notifications for new messages',
-      importance: Importance.high,
-      priority: Priority.high,
-      playSound: true,
-      enableVibration: true,
-      groupKey: 'messages',
-    );
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+          'messages',
+          'Messages',
+          channelDescription: 'Notifications for new messages',
+          importance: Importance.high,
+          priority: Priority.high,
+          playSound: true,
+          enableVibration: true,
+          groupKey: 'messages',
+        );
 
     const NotificationDetails notificationDetails = NotificationDetails(
       android: androidDetails,
@@ -310,16 +326,18 @@ class NotificationService {
 
   /// Handle notification tap
   void _onNotificationTapped(NotificationResponse response) {
-    print('👆 Local notification tapped: ${response.actionId} - ${response.payload}');
-    
+    print(
+      '👆 Local notification tapped: ${response.actionId} - ${response.payload}',
+    );
+
     try {
       final payload = response.payload;
       final actionId = response.actionId;
-      
+
       if (payload != null) {
         // Parse the payload data
         final data = _parseNotificationPayload(payload);
-        
+
         if (data != null) {
           if (data['type'] == 'call') {
             _handleCallNotificationAction(actionId, data);
@@ -341,13 +359,10 @@ class NotificationService {
         final Map<String, dynamic> data = jsonDecode(payload);
         return data;
       }
-      
+
       // If not JSON, try to extract basic info from string
       // This is a fallback for simple string payloads
-      return {
-        'type': 'call',
-        'callId': payload,
-      };
+      return {'type': 'call', 'callId': payload};
     } catch (e) {
       print('❌ Error parsing notification payload: $e');
       return null;
@@ -355,48 +370,102 @@ class NotificationService {
   }
 
   /// Handle call notification actions
-  void _handleCallNotificationAction(String? actionId, Map<String, dynamic> data) {
+  void _handleCallNotificationAction(
+    String? actionId,
+    Map<String, dynamic> data,
+  ) async {
     print('📞 Call notification action: $actionId');
-    
+
     switch (actionId) {
       case 'accept_call':
         print('✅ Call accepted via notification');
-        // Emit to call stream with accept action
-        _callNotificationController.add({
-          ...data,
-          'action': 'accept',
-        });
+        // Accept the call and navigate to in-call screen
+        await _acceptCallAndNavigate();
+        _callNotificationController.add({...data, 'action': 'accept'});
+        dispose();
         break;
-        
+
       case 'decline_call':
         print('❌ Call declined via notification');
-        // Emit to call stream with decline action
-        _callNotificationController.add({
-          ...data,
-          'action': 'decline',
-        });
+        // Decline the call and cleanup
+        await _declineCallAndCleanup();
+        _callNotificationController.add({...data, 'action': 'decline'});
+        dispose();
         break;
-        
+
       default:
-        // Regular tap on notification body
+        // Regular tap on notification body - navigate to incoming call screen
         print('👆 Call notification tapped (no action)');
-        _callNotificationController.add({
-          ...data,
-          'action': 'tap',
-        });
+        // await _navigateToIncomingCall();
+        dispose();
         break;
     }
   }
 
+  /// Accept call and navigate to in-call screen
+  Future<void> _acceptCallAndNavigate() async {
+    try {
+      // Use the singleton instance
+      final callService = CallService();
+      await callService.acceptCall();
+
+      // Cancel the notification
+      await _localNotifications.cancelAll();
+
+      // Navigate to in-call screen
+      if (NavigationHelper.navigatorKey.currentContext != null) {
+        await Navigator.of(
+          NavigationHelper.navigatorKey.currentContext!,
+        ).pushNamedAndRemoveUntil('/call', (route) => route.isFirst);
+      }
+    } catch (e) {
+      print('❌ Error accepting call from notification: $e');
+    }
+  }
+
+  /// Decline call and cleanup
+  Future<void> _declineCallAndCleanup() async {
+    try {
+      // Use the singleton instance
+      final callService = CallService();
+      await callService.declineCall();
+
+      // Cancel the notification
+      await _localNotifications.cancelAll();
+
+      // Close any call-related screens and return to main app
+      if (NavigationHelper.navigatorKey.currentContext != null) {
+        Navigator.of(
+          NavigationHelper.navigatorKey.currentContext!,
+        ).popUntil((route) => route.isFirst);
+      }
+    } catch (e) {
+      print('❌ Error declining call from notification: $e');
+    }
+  }
+
+  /// Navigate to incoming call screen
+  Future<void> _navigateToIncomingCall() async {
+    try {
+      if (NavigationHelper.navigatorKey.currentContext != null) {
+        await Navigator.of(
+          NavigationHelper.navigatorKey.currentContext!,
+        ).pushNamed('/incoming-call');
+      }
+    } catch (e) {
+      print('❌ Error navigating to incoming call: $e');
+    }
+  }
+
   /// Handle message notification actions
-  void _handleMessageNotificationAction(String? actionId, Map<String, dynamic> data) {
+  void _handleMessageNotificationAction(
+    String? actionId,
+    Map<String, dynamic> data,
+  ) {
     print('📨 Message notification action: $actionId');
-    
+
     // For message notifications, we just emit to the stream
-    _messageNotificationController.add({
-      ...data,
-      'action': actionId ?? 'tap',
-    });
+    _messageNotificationController.add({...data, 'action': actionId ?? 'tap'});
   }
 
   /// Send FCM token to backend
@@ -431,19 +500,20 @@ class NotificationService {
     required String body,
     required Map<String, dynamic> data,
   }) async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'calls',
-      'Calls',
-      channelDescription: 'Notifications for incoming calls',
-      importance: Importance.max,
-      priority: Priority.high,
-      playSound: false, // No sound for updates
-      enableVibration: false,
-      fullScreenIntent: false,
-      category: AndroidNotificationCategory.call,
-      ongoing: false,
-      autoCancel: true,
-    );
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+          'calls',
+          'Calls',
+          channelDescription: 'Notifications for incoming calls',
+          importance: Importance.max,
+          priority: Priority.high,
+          playSound: false, // No sound for updates
+          enableVibration: false,
+          fullScreenIntent: false,
+          category: AndroidNotificationCategory.call,
+          ongoing: false,
+          autoCancel: true,
+        );
 
     const NotificationDetails notificationDetails = NotificationDetails(
       android: androidDetails,
@@ -454,11 +524,7 @@ class NotificationService {
       title,
       body,
       notificationDetails,
-      payload: jsonEncode({
-        'type': 'call_update',
-        'callId': callId,
-        ...data,
-      }),
+      payload: jsonEncode({'type': 'call_update', 'callId': callId, ...data}),
     );
   }
 
@@ -474,19 +540,19 @@ class NotificationService {
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   print('📨 Background message received: ${message.messageId}');
-  
+
   // Handle call notifications in background
   final data = message.data;
   if (data['type'] == 'call') {
     print('📞 Background call notification received');
-    
+
     // Initialize notification service to show call notification
     final notificationService = NotificationService();
     await notificationService._initializeLocalNotifications();
-    
+
     final title = data['title'] ?? 'Incoming Call';
     final body = data['body'] ?? 'You have an incoming call';
-    
+
     // Show call notification with action buttons
     await notificationService.showCallNotification(
       title: title,

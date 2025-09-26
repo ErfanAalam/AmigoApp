@@ -54,21 +54,68 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
           );
         }
 
+        // If no active call or call was declined/ended, close the screen
         if (activeCall == null ||
-            activeCall.callType != CallType.incoming ||
-            activeCall.status != CallStatus.ringing) {
-          print('[IncomingCallScreen] ❌ Invalid call state');
-          print(
-            '[IncomingCallScreen] activeCall == null: ${activeCall == null}',
-          );
-          print(
-            '[IncomingCallScreen] callType != incoming: ${activeCall?.callType != CallType.incoming}',
-          );
-          print(
-            '[IncomingCallScreen] status != ringing: ${activeCall?.status != CallStatus.ringing}',
-          );
+            activeCall.status == CallStatus.declined ||
+            activeCall.status == CallStatus.ended ||
+            activeCall.status == CallStatus.missed) {
+          print('[IncomingCallScreen] ❌ Call ended, declined, or missed - closing screen');
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (context.mounted) {
+              Navigator.of(context).pop();
+            }
+          });
 
-          // Show a fallback screen instead of immediately popping
+          return const Scaffold(
+            backgroundColor: Colors.black,
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(color: Colors.white),
+                  SizedBox(height: 20),
+                  Text(
+                    'Call ended',
+                    style: TextStyle(color: Colors.white, fontSize: 16),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        // If call was answered, navigate to in-call screen
+        if (activeCall.status == CallStatus.answered) {
+          print('[IncomingCallScreen] ✅ Call answered - navigating to in-call screen');
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (context.mounted) {
+              Navigator.of(context).pushReplacementNamed('/call');
+            }
+          });
+
+          return const Scaffold(
+            backgroundColor: Colors.black,
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(color: Colors.white),
+                  SizedBox(height: 20),
+                  Text(
+                    'Connecting...',
+                    style: TextStyle(color: Colors.white, fontSize: 16),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        // If not an incoming call that's ringing, show fallback
+        if (activeCall.callType != CallType.incoming ||
+            activeCall.status != CallStatus.ringing) {
+          print('[IncomingCallScreen] ❌ Invalid call state for incoming call screen');
+
           return Scaffold(
             backgroundColor: Colors.black,
             body: Center(

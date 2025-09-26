@@ -615,7 +615,7 @@ class _ContactsPageState extends State<ContactsPage>
                             ),
                           )
                         : ListView.builder(
-                            padding: EdgeInsets.symmetric(horizontal: 16),
+                            padding: EdgeInsets.all(16),
                             itemCount: _filteredUsers.length,
                             itemBuilder: (context, index) {
                               final user = _filteredUsers[index];
@@ -753,7 +753,7 @@ class _ContactsPageState extends State<ContactsPage>
                 ),
                 decoration: BoxDecoration(
                   color: Colors.teal,
-                  
+
                   boxShadow: [
                     BoxShadow(
                       color: Color(0xFF00A884).withOpacity(0.3),
