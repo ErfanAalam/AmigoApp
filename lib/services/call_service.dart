@@ -492,11 +492,6 @@ class CallService extends ChangeNotifier {
         break;
 
       case 'call:decline':
-        print('---------------------------------------------------------');
-        print('---------------------------------------------------------');
-        print('[CALL] Call declined');
-        print('---------------------------------------------------------');
-        print('---------------------------------------------------------');
         _handleCallDeclined(message);
         break;
 
@@ -538,7 +533,8 @@ class CallService extends ChangeNotifier {
 
     // Show incoming call notification
     _notificationService.showCallNotification(
-      title: 'Incoming ${payload['callType'] == 'video' ? 'Video' : 'Audio'} Call',
+      title:
+          'Incoming ${payload['callType'] == 'video' ? 'Video' : 'Audio'} Call',
       body: '${payload['callerName'] ?? 'Unknown'} is calling you',
       data: {
         'callId': callId.toString(),

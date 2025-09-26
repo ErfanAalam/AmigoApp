@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/call_model.dart';
@@ -8,26 +9,66 @@ class CallsPage extends StatefulWidget {
   const CallsPage({super.key});
 
   @override
-  State<CallsPage> createState() => _CallsPageState();
+  State<CallsPage> createState() => CallsPageState();
 }
 
-class _CallsPageState extends State<CallsPage> {
+class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
   final ApiService _apiService = ApiService();
   List<CallHistoryItem> _callHistory = [];
   bool _isLoading = true;
   String? _error;
+  Timer? _debounceTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadCallHistory();
+
+    // Add a post-frame callback to ensure the page is fully loaded
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _loadCallHistory(showLoading: false);
+      }
+    });
   }
 
-  Future<void> _loadCallHistory() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _debounceTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      // Reload call history when app comes back to foreground
+      _loadCallHistory();
+    }
+  }
+
+  // This method will be called when the page becomes visible
+  void onPageVisible() {
+    // Cancel any existing debounce timer
+    _debounceTimer?.cancel();
+
+    // Set a new debounce timer to avoid too many API calls
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted && !_isLoading) {
+        _loadCallHistory(showLoading: false);
+      }
     });
+  }
+
+  Future<void> _loadCallHistory({bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    }
 
     try {
       final response = await _apiService.authenticatedGet(
@@ -59,6 +100,18 @@ class _CallsPageState extends State<CallsPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Trigger refresh when the page is built (becomes visible) with debouncing
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _debounceTimer?.cancel();
+        _debounceTimer = Timer(const Duration(milliseconds: 200), () {
+          if (mounted && !_isLoading) {
+            _loadCallHistory(showLoading: false);
+          }
+        });
+      }
+    });
+
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(

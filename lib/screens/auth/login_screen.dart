@@ -77,7 +77,13 @@ class _LoginScreenState extends material.State<LoginScreen> {
       setState(() {
         _isPhoneSubmitted = true;
       });
-    } else {
+    }else if (response['success'] == false && response['code'] == 404) {
+      material.ScaffoldMessenger.of(context).showSnackBar(
+        const material.SnackBar(
+          content: material.Text('Phone number not found! Please Signup First'),
+        ),
+      );
+    }  else {
       material.ScaffoldMessenger.of(context).showSnackBar(
         const material.SnackBar(content: material.Text('Failed to send OTP')),
       );
@@ -144,18 +150,18 @@ class _LoginScreenState extends material.State<LoginScreen> {
   void initState() {
     super.initState();
     // Check if user is already authenticated
-    _checkAuthentication();
+    // _checkAuthentication();
   }
 
-  Future<void> _checkAuthentication() async {
-    final isAuthenticated = await authService.isAuthenticated();
-    if (isAuthenticated) {
-      // Restart the app if already authenticated to ensure proper initialization
-      material.WidgetsBinding.instance.addPostFrameCallback((_) async {
-        await AppRestartHelper.restartAppWithDialog(context);
-      });
-    }
-  }
+  // Future<void> _checkAuthentication() async {
+  //   final isAuthenticated = await authService.isAuthenticated();
+  //   if (isAuthenticated) {
+  //     // Restart the app if already authenticated to ensure proper initialization
+  //     material.WidgetsBinding.instance.addPostFrameCallback((_) async {
+  //       await AppRestartHelper.restartAppWithDialog(context);
+  //     });
+  //   }
+  // }
 
   @override
   material.Widget build(material.BuildContext context) {

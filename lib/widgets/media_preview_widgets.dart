@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:path/path.dart' as path;
+import '../services/download_service.dart';
 
 class ImagePreviewScreen extends StatefulWidget {
   final List<String> imageUrls;
@@ -156,18 +157,169 @@ class _ImagePreviewScreenState extends State<ImagePreviewScreen> {
     );
   }
 
-  void _downloadImage(String imageUrl) {
-    // TODO: Implement image download functionality
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Download functionality to be implemented')),
-    );
+  void _downloadImage(String imageUrl) async {
+    try {
+      // Show download progress dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return const DownloadProgressDialog(fileName: 'image');
+        },
+      );
+
+      final downloadService = DownloadService();
+      final filePath = await downloadService.downloadToDownloadsFolder(
+        url: imageUrl,
+        fileType: 'image',
+        onProgress: (progress) {
+          // Update progress if needed
+          debugPrint(
+            'Download progress: ${(progress * 100).toStringAsFixed(1)}%',
+          );
+        },
+        onError: (error) {
+          // Close progress dialog
+          Navigator.of(context).pop();
+
+          // Show detailed error message with appropriate actions
+          if (error.contains('permanently denied') ||
+              error.contains('app settings')) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(error),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 5),
+                action: SnackBarAction(
+                  label: 'Settings',
+                  textColor: Colors.white,
+                  onPressed: () => _openAppSettings(),
+                ),
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Download failed: $error'),
+                backgroundColor: Colors.red,
+                action: SnackBarAction(
+                  label: 'Retry',
+                  textColor: Colors.white,
+                  onPressed: () => _downloadImage(imageUrl),
+                ),
+              ),
+            );
+          }
+        },
+      );
+
+      // Close progress dialog
+      Navigator.of(context).pop();
+
+      if (filePath != null) {
+        // Get the directory path for user information
+        final directoryPath = await downloadService.getDownloadDirectoryPath(
+          'image',
+        );
+
+        // Show success message with options
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Image downloaded successfully!'),
+                if (directoryPath != null)
+                  Text(
+                    'Saved to: ${directoryPath.replaceAll('\\', '/')}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Open',
+              textColor: Colors.white,
+              onPressed: () => downloadService.openFile(filePath),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      // Close progress dialog if it's still open
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Download failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
-  void _shareImage(String imageUrl) {
-    // TODO: Implement image sharing functionality
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Share functionality to be implemented')),
-    );
+  void _shareImage(String imageUrl) async {
+    try {
+      // First download the image, then share it
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return const DownloadProgressDialog(fileName: 'image');
+        },
+      );
+
+      final downloadService = DownloadService();
+      final filePath = await downloadService.downloadToDownloadsFolder(
+        url: imageUrl,
+        fileType: 'image',
+        onError: (error) {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to prepare image for sharing: $error'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        },
+      );
+
+      Navigator.of(context).pop();
+
+      if (filePath != null) {
+        await downloadService.shareFile(filePath, text: 'Shared from Amigo');
+      }
+    } catch (e) {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to share image: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _openAppSettings() async {
+    try {
+      final downloadService = DownloadService();
+      await downloadService.openAppSettingsForPermissions();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to open settings: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 }
 
@@ -394,18 +546,166 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
     );
   }
 
-  void _downloadVideo() {
-    // TODO: Implement video download functionality
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Download functionality to be implemented')),
-    );
+  void _downloadVideo() async {
+    try {
+      // Show download progress dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return DownloadProgressDialog(fileName: widget.fileName ?? 'video');
+        },
+      );
+
+      final downloadService = DownloadService();
+      final filePath = await downloadService.downloadToDownloadsFolder(
+        url: widget.videoUrl,
+        fileName: widget.fileName,
+        fileType: 'video',
+        onProgress: (progress) {
+          debugPrint(
+            'Video download progress: ${(progress * 100).toStringAsFixed(1)}%',
+          );
+        },
+        onError: (error) {
+          Navigator.of(context).pop();
+
+          // Show detailed error message with appropriate actions
+          if (error.contains('permanently denied') ||
+              error.contains('app settings')) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(error),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 5),
+                action: SnackBarAction(
+                  label: 'Settings',
+                  textColor: Colors.white,
+                  onPressed: () => _openAppSettings(),
+                ),
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Video download failed: $error'),
+                backgroundColor: Colors.red,
+                action: SnackBarAction(
+                  label: 'Retry',
+                  textColor: Colors.white,
+                  onPressed: () => _downloadVideo(),
+                ),
+              ),
+            );
+          }
+        },
+      );
+
+      Navigator.of(context).pop();
+
+      if (filePath != null) {
+        // Get the directory path for user information
+        final directoryPath = await downloadService.getDownloadDirectoryPath(
+          'video',
+        );
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Video downloaded successfully!'),
+                if (directoryPath != null)
+                  Text(
+                    'Saved to: ${directoryPath.replaceAll('\\', '/')}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Open',
+              textColor: Colors.white,
+              onPressed: () => downloadService.openFile(filePath),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Video download failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
-  void _shareVideo() {
-    // TODO: Implement video sharing functionality
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Share functionality to be implemented')),
-    );
+  void _shareVideo() async {
+    try {
+      // First download the video, then share it
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return DownloadProgressDialog(fileName: widget.fileName ?? 'video');
+        },
+      );
+
+      final downloadService = DownloadService();
+      final filePath = await downloadService.downloadToDownloadsFolder(
+        url: widget.videoUrl,
+        fileName: widget.fileName,
+        fileType: 'video',
+        onError: (error) {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to prepare video for sharing: $error'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        },
+      );
+
+      Navigator.of(context).pop();
+
+      if (filePath != null) {
+        await downloadService.shareFile(filePath, text: 'Shared from Amigo');
+      }
+    } catch (e) {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to share video: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _openAppSettings() async {
+    try {
+      final downloadService = DownloadService();
+      await downloadService.openAppSettingsForPermissions();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to open settings: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 }
 
@@ -772,17 +1072,231 @@ class _DocumentPreviewScreenState extends State<DocumentPreviewScreen> {
     }
   }
 
-  void _downloadDocument() {
-    // TODO: Implement document download functionality
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Download functionality to be implemented')),
+  void _downloadDocument() async {
+    try {
+      // Show download progress dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return DownloadProgressDialog(
+            fileName: widget.fileName ?? 'document',
+          );
+        },
+      );
+
+      final downloadService = DownloadService();
+      final filePath = await downloadService.downloadToDownloadsFolder(
+        url: widget.documentUrl,
+        fileName: widget.fileName,
+        fileType: 'document',
+        onProgress: (progress) {
+          debugPrint(
+            'Document download progress: ${(progress * 100).toStringAsFixed(1)}%',
+          );
+        },
+        onError: (error) {
+          Navigator.of(context).pop();
+
+          // Show detailed error message with appropriate actions
+          if (error.contains('permanently denied') ||
+              error.contains('app settings')) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(error),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 5),
+                action: SnackBarAction(
+                  label: 'Settings',
+                  textColor: Colors.white,
+                  onPressed: () => _openAppSettings(),
+                ),
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Document download failed: $error'),
+                backgroundColor: Colors.red,
+                action: SnackBarAction(
+                  label: 'Retry',
+                  textColor: Colors.white,
+                  onPressed: () => _downloadDocument(),
+                ),
+              ),
+            );
+          }
+        },
+      );
+
+      Navigator.of(context).pop();
+
+      if (filePath != null) {
+        // Get the directory path for user information
+        final directoryPath = await downloadService.getDownloadDirectoryPath(
+          'document',
+        );
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Document downloaded successfully!'),
+                if (directoryPath != null)
+                  Text(
+                    'Saved to: ${directoryPath.replaceAll('\\', '/')}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Open',
+              textColor: Colors.white,
+              onPressed: () => downloadService.openFile(filePath),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Document download failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _shareDocument() async {
+    try {
+      // First download the document, then share it
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return DownloadProgressDialog(
+            fileName: widget.fileName ?? 'document',
+          );
+        },
+      );
+
+      final downloadService = DownloadService();
+      final filePath = await downloadService.downloadToDownloadsFolder(
+        url: widget.documentUrl,
+        fileName: widget.fileName,
+        fileType: 'document',
+        onError: (error) {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to prepare document for sharing: $error'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        },
+      );
+
+      Navigator.of(context).pop();
+
+      if (filePath != null) {
+        await downloadService.shareFile(filePath, text: 'Shared from Amigo');
+      }
+    } catch (e) {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to share document: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _openAppSettings() async {
+    try {
+      final downloadService = DownloadService();
+      await downloadService.openAppSettingsForPermissions();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to open settings: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+/// Download progress dialog widget
+class DownloadProgressDialog extends StatefulWidget {
+  final String fileName;
+
+  const DownloadProgressDialog({Key? key, required this.fileName})
+    : super(key: key);
+
+  @override
+  State<DownloadProgressDialog> createState() => _DownloadProgressDialogState();
+}
+
+class _DownloadProgressDialogState extends State<DownloadProgressDialog> {
+  double _progress = 0.0;
+  String _status = 'Preparing download...';
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 16),
+          Text(
+            'Downloading ${widget.fileName}',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _status,
+            style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+            textAlign: TextAlign.center,
+          ),
+          if (_progress > 0) ...[
+            const SizedBox(height: 16),
+            LinearProgressIndicator(
+              value: _progress,
+              backgroundColor: Colors.grey[300],
+              valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${(_progress * 100).toStringAsFixed(1)}%',
+              style: const TextStyle(fontSize: 12),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
-  void _shareDocument() {
-    // TODO: Implement document sharing functionality
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Share functionality to be implemented')),
-    );
+  void updateProgress(double progress, String status) {
+    if (mounted) {
+      setState(() {
+        _progress = progress;
+        _status = status;
+      });
+    }
   }
 }

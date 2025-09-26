@@ -107,6 +107,20 @@ class _InnerChatPageState extends State<InnerChatPage>
   final Map<int, AnimationController> _swipeAnimationControllers = {};
   final Map<int, Animation<double>> _swipeAnimations = {};
 
+  // Swipe gesture tracking variables
+  Offset? _swipeStartPosition;
+  double _swipeTotalDistance = 0.0;
+  bool _isSwipeGesture = false;
+  bool _isScrolling = false;
+  static const double _minSwipeDistance =
+      30.0; // Minimum distance to consider as swipe
+  static const double _maxVerticalDeviation =
+      40.0; // Max vertical movement allowed for horizontal swipe
+  static const double _minSwipeVelocity =
+      800.0; // Minimum velocity for swipe completion
+  static const double _swipeThreshold =
+      0.4; // Threshold for swipe completion (0.0 to 1.0)
+
   // Voice recording related variables
   late FlutterSoundRecorder _recorder;
   late FlutterSoundPlayer _audioPlayer;
@@ -803,6 +817,16 @@ class _InnerChatPageState extends State<InnerChatPage>
   void _onScroll() {
     // Ensure we have a valid scroll position and the widget is still mounted
     if (!mounted || !_scrollController.hasClients) return;
+
+    // Set scrolling flag to disable swipe gestures during scroll
+    _isScrolling = true;
+
+    // Reset scrolling flag after a short delay
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (mounted) {
+        _isScrolling = false;
+      }
+    });
 
     // Update sticky date separator
     _updateStickyDateSeparator();
@@ -1729,6 +1753,11 @@ class _InnerChatPageState extends State<InnerChatPage>
       );
 
       // Add message to UI immediately with animation
+
+      print(
+        'aaaaaa------------------------------- \n recieved new message from websocket \n ------------------------',
+      );
+
       if (mounted) {
         setState(() {
           _messages.add(newMessage);
@@ -1742,6 +1771,10 @@ class _InnerChatPageState extends State<InnerChatPage>
         _animateNewMessage(newMessage.id);
         _scrollToBottom();
       }
+
+      print(
+        'aaaaa------------------------------- \n recieved new message from websocket \n ------------------------',
+      );
 
       // Store message asynchronously
       _storeMessageAsync(newMessage);
@@ -2170,12 +2203,22 @@ class _InnerChatPageState extends State<InnerChatPage>
           'optimistic_id': _optimisticMessageId,
         };
 
+        print(
+          'aaaaaaa------------------------------- \n sending new message to webscoket ${widget.conversation.conversationId} \n ------------------------',
+        );
+        print(
+          'conversation_id: ${widget.conversation.conversationId} ----------',
+        );
+
         await _websocketService.sendMessage({
           'type': 'message',
           'data': messageData,
           'conversation_id': widget.conversation.conversationId,
         });
       }
+      print(
+        'aaaaaaaa------------------------------- \n sending new message to webscoket ${widget.conversation.conversationId} \n ------------------------',
+      );
       _optimisticMessageId--;
     } catch (e) {
       debugPrint('❌ Error sending message: $e');
@@ -2904,6 +2947,11 @@ class _InnerChatPageState extends State<InnerChatPage>
         end: 1.0,
       ).animate(CurvedAnimation(parent: controller, curve: Curves.easeOut));
     }
+
+    // Reset swipe tracking variables
+    _swipeStartPosition = details.globalPosition;
+    _swipeTotalDistance = 0.0;
+    _isSwipeGesture = false;
   }
 
   void _onSwipeUpdate(
@@ -2911,12 +2959,35 @@ class _InnerChatPageState extends State<InnerChatPage>
     DragUpdateDetails details,
     bool isMyMessage,
   ) {
-    // Only allow right swipe (positive delta x) for reply gesture
-    if (details.delta.dx > 0 && !_isSelectionMode) {
+    if (_isSelectionMode || _swipeStartPosition == null || _isScrolling) return;
+
+    // Calculate total distance moved from start position
+    final currentPosition = details.globalPosition;
+    final horizontalDistance = currentPosition.dx - _swipeStartPosition!.dx;
+    final verticalDistance = (currentPosition.dy - _swipeStartPosition!.dy)
+        .abs();
+
+    _swipeTotalDistance = horizontalDistance.abs();
+
+    // Determine if this is a horizontal swipe gesture
+    if (!_isSwipeGesture) {
+      // Check if we have enough horizontal movement and not too much vertical movement
+      if (_swipeTotalDistance > _minSwipeDistance &&
+          verticalDistance < _maxVerticalDeviation) {
+        _isSwipeGesture = true;
+      } else if (verticalDistance > _maxVerticalDeviation) {
+        // Too much vertical movement, this is likely a scroll, not a swipe
+        _isScrolling = true;
+        return;
+      }
+    }
+
+    // Only proceed if this is confirmed as a horizontal swipe
+    if (_isSwipeGesture && horizontalDistance > 0) {
       final controller = _swipeAnimationControllers[message.id];
       if (controller != null) {
-        // Calculate swipe progress (0 to 1)
-        final progress = (details.delta.dx / 100).clamp(0.0, 1.0);
+        // Calculate swipe progress (0 to 1) based on total distance
+        final progress = (_swipeTotalDistance / 100).clamp(0.0, 1.0);
         controller.value = progress;
       }
     }
@@ -2929,8 +3000,10 @@ class _InnerChatPageState extends State<InnerChatPage>
   ) {
     final controller = _swipeAnimationControllers[message.id];
     if (controller != null) {
-      // If swipe velocity is sufficient or swipe distance is enough, trigger reply
-      if (details.velocity.pixelsPerSecond.dx > 300 || controller.value > 0.3) {
+      // Only trigger reply if this was confirmed as a horizontal swipe gesture
+      if (_isSwipeGesture &&
+          (details.velocity.pixelsPerSecond.dx > _minSwipeVelocity ||
+              controller.value > _swipeThreshold)) {
         // Animate to complete position then trigger reply
         controller.forward().then((_) {
           _replyToMessage(message);
@@ -2942,6 +3015,12 @@ class _InnerChatPageState extends State<InnerChatPage>
         controller.reverse();
       }
     }
+
+    // Reset swipe tracking variables
+    _swipeStartPosition = null;
+    _swipeTotalDistance = 0.0;
+    _isSwipeGesture = false;
+    _isScrolling = false;
   }
 
   Widget _buildSwipeableMessageBubble(

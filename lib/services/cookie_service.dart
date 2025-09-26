@@ -46,7 +46,7 @@ class CookieService {
     try {
       final baseUrl = Uri.parse(Environment.baseUrl);
       final cookies = await _cookieJar.loadForRequest(baseUrl);
-      print('🍪 Cookies: $cookies');
+      // print('🍪 Cookies: $cookies');
       // Check for auth cookies - look for common names
       bool hasAuthCookie = cookies.any(
         (cookie) =>
@@ -55,7 +55,7 @@ class CookieService {
             cookie.name.toLowerCase().contains('session'),
       );
 
-      print('🔍 Auth cookies found: $hasAuthCookie');
+      // print('🔍 Auth cookies found: $hasAuthCookie');
       return hasAuthCookie;
     } catch (e) {
       print('❌ Error checking auth cookies: $e');
