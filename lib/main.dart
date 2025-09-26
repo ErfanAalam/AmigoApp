@@ -10,8 +10,7 @@ import 'services/websocket_service.dart';
 import 'services/user_status_service.dart';
 import 'services/call_service.dart';
 import 'services/notification_service.dart';
-import 'services/call_notification_handler.dart';
-import 'services/call_notification_demo.dart';
+// import 'services/call_notification_handler.dart';
 import 'widgets/call_manager.dart';
 import 'api/api_service.dart';
 import 'utils/navigation_helper.dart';
@@ -34,8 +33,8 @@ void main() async {
   await notificationService.initialize();
 
   // Initialize CallNotificationHandler
-  final callNotificationHandler = CallNotificationHandler();
-  callNotificationHandler.initialize();
+  // final callNotificationHandler = CallNotificationHandler();
+  // callNotificationHandler.initialize();
 
   // Initialize API service (which uses the cookie service)
   // final apiService = ApiService();
