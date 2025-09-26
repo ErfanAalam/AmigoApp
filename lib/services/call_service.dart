@@ -6,6 +6,7 @@ import '../models/call_model.dart';
 import '../services/websocket_service.dart';
 import '../services/notification_service.dart';
 import '../api/user.service.dart';
+import '../utils/ringing_tone.dart';
 
 class CallService extends ChangeNotifier {
   static final CallService _instance = CallService._internal();
@@ -25,6 +26,8 @@ class CallService extends ChangeNotifier {
   bool _isInitialized = false;
   Timer? _callDurationTimer;
   StreamSubscription? _webSocketSubscription;
+
+  Timer? _callStartedTimer;
 
   // WebRTC configuration - using Plan B for compatibility
   final Map<String, dynamic> _configuration = {
@@ -121,8 +124,6 @@ class CallService extends ChangeNotifier {
         },
         'timestamp': DateTime.now().toIso8601String(),
       };
-
-      print('[CALL] Sending call init message: $message');
       await WebSocketService().sendMessage(message);
 
       // Set up local call state (will be updated when backend confirms)
@@ -137,9 +138,11 @@ class CallService extends ChangeNotifier {
       );
 
       notifyListeners();
-      print(
-        '[CALL] Call initiated to user $calleeId - waiting for backend response',
-      );
+
+      // Start the 30-second timeout timer
+      _startCallStartedTimer();
+
+      await RingtoneManager.playRingtone();
     } catch (e) {
       print('[CALL] Error initiating call: $e');
       await _cleanup();
@@ -171,11 +174,15 @@ class CallService extends ChangeNotifier {
 
       await WebSocketService().sendMessage(message);
 
+      // Cancel the call started timer since call is now accepted
+      _callStartedTimer?.cancel();
+      _callStartedTimer = null;
+
       // Update call state
       _activeCall = _activeCall!.copyWith(status: CallStatus.answered);
+      // Start timer immediately when call is accepted
+      _startCallTimer();
       notifyListeners();
-
-      print('[CALL] Call accepted');
     } catch (e) {
       print('[CALL] Error accepting call: $e');
       throw Exception('Failed to accept call: $e');
@@ -197,10 +204,13 @@ class CallService extends ChangeNotifier {
       };
 
       await WebSocketService().sendMessage(message);
+
+      // Cancel the call started timer since call is being declined
+      _callStartedTimer?.cancel();
+      _callStartedTimer = null;
+
       await _cleanup();
       // notifyListeners();
-
-      print('[CALL] Call declined');
     } catch (e) {
       print('[CALL] Error declining call: $e');
       await _cleanup();
@@ -223,9 +233,10 @@ class CallService extends ChangeNotifier {
       };
 
       await WebSocketService().sendMessage(message);
-      await _cleanup();
 
-      print('[CALL] Call ended');
+      await RingtoneManager.stopRingtone();
+
+      await _cleanup();
     } catch (e) {
       print('[CALL] Error ending call: $e');
       await _cleanup();
@@ -243,8 +254,6 @@ class CallService extends ChangeNotifier {
 
       _activeCall = _activeCall?.copyWith(isMuted: !track.enabled);
       notifyListeners();
-
-      print('[CALL] Mute toggled: ${!track.enabled}');
     }
   }
 
@@ -257,8 +266,6 @@ class CallService extends ChangeNotifier {
 
     _activeCall = _activeCall!.copyWith(isSpeakerOn: newSpeakerState);
     notifyListeners();
-
-    print('[CALL] Speaker toggled: $newSpeakerState');
   }
 
   /// Setup local media stream
@@ -267,7 +274,6 @@ class CallService extends ChangeNotifier {
       _localStream = await navigator.mediaDevices.getUserMedia(
         _mediaConstraints,
       );
-      print('[CALL] Local media stream setup complete');
     } catch (e) {
       print('[CALL] Error setting up local media: $e');
       throw Exception('Failed to access microphone: $e');
@@ -282,14 +288,12 @@ class CallService extends ChangeNotifier {
       // Add local stream (Plan B compatible)
       if (_localStream != null) {
         await _peerConnection!.addStream(_localStream!);
-        print('[CALL] Added local stream with Plan B');
       }
 
       // Handle remote stream (Plan B compatible)
       _peerConnection!.onAddStream = (MediaStream stream) {
         _remoteStream = stream;
         notifyListeners();
-        print('[CALL] Remote stream added');
       };
 
       // Handle ICE candidates
@@ -299,13 +303,8 @@ class CallService extends ChangeNotifier {
 
       // Handle connection state changes
       _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
-        print('[CALL] Connection state: $state');
-        if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
-          _startCallTimer();
-        }
+        // Timer is now started when call is accepted, not when connection is established
       };
-
-      print('[CALL] Peer connection created with Plan B');
     } catch (e) {
       print('[CALL] Error creating peer connection: $e');
       throw Exception('Failed to create peer connection: $e');
@@ -331,7 +330,6 @@ class CallService extends ChangeNotifier {
       };
 
       await WebSocketService().sendMessage(message);
-      print('[CALL] Offer sent');
     } catch (e) {
       print('[CALL] Error creating offer: $e');
       throw Exception('Failed to create offer: $e');
@@ -361,7 +359,6 @@ class CallService extends ChangeNotifier {
       };
 
       await WebSocketService().sendMessage(message);
-      print('[CALL] Answer sent');
     } catch (e) {
       print('[CALL] Error handling offer: $e');
     }
@@ -374,7 +371,6 @@ class CallService extends ChangeNotifier {
 
       final answer = RTCSessionDescription(payload['sdp'], payload['type']);
       await _peerConnection!.setRemoteDescription(answer);
-      print('[CALL] Answer received and set');
     } catch (e) {
       print('[CALL] Error handling answer: $e');
     }
@@ -392,7 +388,6 @@ class CallService extends ChangeNotifier {
       );
 
       await _peerConnection!.addCandidate(candidate);
-      print('[CALL] ICE candidate added');
     } catch (e) {
       print('[CALL] Error handling ICE candidate: $e');
     }
@@ -425,6 +420,9 @@ class CallService extends ChangeNotifier {
   void _startCallTimer() {
     if (_callDurationTimer != null) return;
 
+    // Reset the start time to now when the timer starts (when call is accepted)
+    _activeCall = _activeCall?.copyWith(startTime: DateTime.now());
+
     _callDurationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_activeCall != null && _activeCall!.status == CallStatus.answered) {
         final duration = DateTime.now().difference(_activeCall!.startTime);
@@ -434,13 +432,26 @@ class CallService extends ChangeNotifier {
     });
   }
 
-  /// Handle WebSocket messages
-  void handleWebSocketMessage(Map<String, dynamic> message) {
-    print('[CALL] Received WebSocket message: $message');
+  void _startCallStartedTimer() {
+    if (_callStartedTimer != null) return;
 
+    // Start the 30-second timeout timer when call is initiated
+    _callStartedTimer = Timer(const Duration(seconds: 30), () async {
+      // If call is still not accepted after 30 seconds, decline it automatically
+      if (_activeCall != null && _activeCall!.status != CallStatus.answered) {
+        print(
+          '[CALL] Call not accepted within 30 seconds, declining automatically',
+        );
+        declineCall(reason: 'timeout');
+        await RingtoneManager.stopRingtone();
+      }
+    });
+  }
+
+  /// Handle WebSocket messages
+  void handleWebSocketMessage(Map<String, dynamic> message) async {
     final type = message['type'] as String?;
     if (type == null) {
-      print('[CALL] Ignoring message with no type');
       return;
     }
 
@@ -449,18 +460,14 @@ class CallService extends ChangeNotifier {
       return;
     }
 
-    print('[CALL] Processing call message of type: $type');
-
     switch (type) {
       case 'call:init':
         // Acknowledgment from server with callId
         if (message['data']?['success'] == true) {
           final callId = message['data']['callId'];
-          print('[CALL] Call init successful, received callId: $callId');
           _activeCall = _activeCall?.copyWith(callId: callId);
           notifyListeners();
         } else {
-          print('[CALL] Call init failed: ${message['data']?['message']}');
           _cleanup();
         }
         break;
@@ -473,8 +480,15 @@ class CallService extends ChangeNotifier {
       case 'call:accept':
         // Call was accepted, start WebRTC
         if (_activeCall?.callType == CallType.outgoing) {
+          // Cancel the call started timer since call is now accepted
+          _callStartedTimer?.cancel();
+          _callStartedTimer = null;
+
           _activeCall = _activeCall?.copyWith(status: CallStatus.answered);
           _createOffer();
+          await RingtoneManager.stopRingtone();
+          // Start timer immediately when call is accepted
+          _startCallTimer();
           notifyListeners();
         }
         break;
@@ -492,14 +506,23 @@ class CallService extends ChangeNotifier {
         break;
 
       case 'call:decline':
+        // Cancel the call started timer since call is being declined
+        _callStartedTimer?.cancel();
+        _callStartedTimer = null;
         _handleCallDeclined(message);
         break;
 
       case 'call:end':
+        // Cancel the call started timer since call is ending
+        _callStartedTimer?.cancel();
+        _callStartedTimer = null;
         _handleCallEnded(message);
         break;
 
       case 'call:missed':
+        // Cancel the call started timer since call is missed
+        _callStartedTimer?.cancel();
+        _callStartedTimer = null;
         _handleCallMissed(message);
         break;
     }
@@ -517,7 +540,6 @@ class CallService extends ChangeNotifier {
 
     // Check if we already have an active call
     if (_activeCall != null) {
-      print('[CALL] Already have active call, ignoring incoming call');
       return;
     }
 
@@ -530,6 +552,9 @@ class CallService extends ChangeNotifier {
       status: CallStatus.ringing,
       startTime: DateTime.now(),
     );
+
+    // Start the 30-second timeout timer for incoming calls
+    _startCallStartedTimer();
 
     // Show incoming call notification
     _notificationService.showCallNotification(
@@ -547,36 +572,33 @@ class CallService extends ChangeNotifier {
     );
 
     notifyListeners();
-    print(
-      '[CALL] Incoming call from user $from - UI should show incoming call screen',
-    );
   }
 
   /// Handle call declined
-  void _handleCallDeclined(Map<String, dynamic> message) {
-    print('[CALL] Call was declined');
+  void _handleCallDeclined(Map<String, dynamic> message) async {
+    await RingtoneManager.stopRingtone();
     _cleanup();
   }
 
   /// Handle call ended
-  void _handleCallEnded(Map<String, dynamic> message) {
-    final duration = message['payload']?['duration'];
-    print('[CALL] Call ended, duration: ${duration}s');
+  void _handleCallEnded(Map<String, dynamic> message) async {
+    await RingtoneManager.stopRingtone();
     _cleanup();
   }
 
   /// Handle call missed
   void _handleCallMissed(Map<String, dynamic> message) {
-    print('[CALL] Call was missed');
     _cleanup();
   }
 
   /// Cleanup call resources
   Future<void> _cleanup() async {
     try {
-      // Stop timer
+      // Stop timers
       _callDurationTimer?.cancel();
       _callDurationTimer = null;
+      _callStartedTimer?.cancel();
+      _callStartedTimer = null;
 
       // Close peer connection
       await _peerConnection?.close();
@@ -596,7 +618,6 @@ class CallService extends ChangeNotifier {
       WakelockPlus.disable();
 
       notifyListeners();
-      print('[CALL] Cleanup completed');
     } catch (e) {
       print('[CALL] Error during cleanup: $e');
     }
@@ -612,7 +633,6 @@ class CallService extends ChangeNotifier {
         final userData = response['data'];
         return userData['name'] ?? 'Unknown User';
       } else {
-        print('[CALL] Failed to get user data: ${response['message']}');
         return 'Unknown User';
       }
     } catch (e) {

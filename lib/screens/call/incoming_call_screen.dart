@@ -57,7 +57,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
         if (activeCall == null ||
             activeCall.callType != CallType.incoming ||
             activeCall.status != CallStatus.ringing) {
-          print('[IncomingCallScreen] ❌ Invalid call state');
+          print(
+            '[IncomingCallScreen] ❌ Invalid call state - navigating to chats page',
+          );
           print(
             '[IncomingCallScreen] activeCall == null: ${activeCall == null}',
           );
@@ -68,28 +70,17 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
             '[IncomingCallScreen] status != ringing: ${activeCall?.status != CallStatus.ringing}',
           );
 
-          // Show a fallback screen instead of immediately popping
-          return Scaffold(
+          // Navigate back to main screen (which will show chats page by default)
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (context.mounted) {
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            }
+          });
+
+          // Return a loading screen while navigating
+          return const Scaffold(
             backgroundColor: Colors.black,
-            body: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text(
-                    'No incoming call',
-                    style: TextStyle(color: Colors.white, fontSize: 18),
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: () {
-                      print('[IncomingCallScreen] ❌ Manual Navigator.pop()');
-                      Navigator.of(context).pop();
-                    },
-                    child: const Text('Close'),
-                  ),
-                ],
-              ),
-            ),
+            body: Center(child: CircularProgressIndicator(color: Colors.white)),
           );
         }
 
