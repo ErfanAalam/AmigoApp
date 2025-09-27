@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../main_screen.dart';
 import '../../api/api_service.dart';
 import '../../services/auth_service.dart';
+import '../../services/notification_service.dart';
 import '../../models/country_model.dart' as country_model;
 import '../../widgets/country_selector_modal.dart';
 import '../../widgets/setup_loading_popup.dart';
@@ -30,6 +31,7 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
 
   final ApiService apiService = ApiService();
   final AuthService authService = AuthService();
+  final NotificationService notificationService = NotificationService();
 
   @override
   void dispose() {
@@ -87,6 +89,34 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
         },
       ),
     );
+  }
+
+  Future<void> _sendFCMTokenToBackend() async {
+    try {
+      // Initialize notification service if not already done
+      await notificationService.initialize();
+      
+      // Get the FCM token
+      final fcmToken = notificationService.fcmToken;
+      
+      if (fcmToken != null && fcmToken.isNotEmpty) {
+        print('🔑 Sending FCM token to backend: $fcmToken');
+        await apiService.updateFCMToken(fcmToken);
+        print('✅ FCM token sent successfully');
+      } else {
+        print('⚠️ FCM token not available, will retry later');
+        // Retry getting the token after a short delay
+        await Future.delayed(const Duration(seconds: 2));
+        final retryToken = notificationService.fcmToken;
+        if (retryToken != null && retryToken.isNotEmpty) {
+          await apiService.updateFCMToken(retryToken);
+          print('✅ FCM token sent successfully on retry');
+        }
+      }
+    } catch (e) {
+      print('❌ Error sending FCM token: $e');
+      // Don't fail the signup flow for FCM token issues
+    }
   }
 
   void handleSendOtp() async {
@@ -156,6 +186,9 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
       setState(() {
         _isLoading = false;
       });
+
+      // Send FCM token to backend after successful signup
+      _sendFCMTokenToBackend();
 
       // Show the setup loading popup
       _showSetupLoadingPopup();
