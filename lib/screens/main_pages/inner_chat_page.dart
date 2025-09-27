@@ -53,7 +53,7 @@ class _InnerChatPageState extends State<InnerChatPage>
   bool _isCheckingCache = true; // Show brief cache check state
   bool _isTyping = false;
   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
-  Map<int, int> userLastReadMessageIds = {}; // userId -> lastReadMessageId
+  Map<int, int?> userLastReadMessageIds = {}; // userId -> lastReadMessageId
 
   // For optimistic message handling
   StreamSubscription<Map<String, dynamic>>? _websocketSubscription;
@@ -1456,17 +1456,24 @@ class _InnerChatPageState extends State<InnerChatPage>
     // Get the last read message id of the other user (not the current user)
     int userReadMsgId = -1;
     if (userLastReadMessageIds.isNotEmpty) {
-      // Find the first user id that is not the current user
-      final otherUserId = userLastReadMessageIds.keys.firstWhere(
-        (id) => id != _currentUserId,
-      );
-      userReadMsgId = userLastReadMessageIds[otherUserId] ?? -1;
+      try {
+        // Find the first user id that is not the current user
+        final otherUserId = userLastReadMessageIds.keys.firstWhere(
+          (id) => id != _currentUserId,
+        );
+        userReadMsgId = userLastReadMessageIds[otherUserId] ?? -1;
+      } catch (e) {
+        // If no other user found or any error occurs, keep userReadMsgId as -1
+        userReadMsgId = -1;
+      }
     }
     print(
       "------------------------------------------------------------\n userReadMsgId -> $userReadMsgId \n----------------------------------------------------------------",
     );
 
-    if ((message.id <= userReadMsgId || hasActiveUsers) && message.id > 0) {
+    // if ((message.id <= userReadMsgId || hasActiveUsers) && message.id > 0) {
+    if (((message.id <= userReadMsgId || hasActiveUsers) && message.id > 0) &&
+        userReadMsgId > 0) {
       // Message is already marked as read - always show blue tick
       return Icon(Icons.done_all, size: 16, color: Colors.blue);
     } else if (hasActiveUsers) {
@@ -1730,7 +1737,7 @@ class _InnerChatPageState extends State<InnerChatPage>
       final optimisticId = data['optimistic_id'] ?? data['optimisticId'];
 
       // Get sender info from cache/lookup
-      final senderInfo = _getUserInfo(senderId);
+      final senderInfo = _getUserInfo(senderId);  
       final senderName = senderInfo['name'] ?? 'Unknown User';
       final senderProfilePic = senderInfo['profile_pic'];
 
