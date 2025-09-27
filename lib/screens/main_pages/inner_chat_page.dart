@@ -1737,7 +1737,7 @@ class _InnerChatPageState extends State<InnerChatPage>
       final optimisticId = data['optimistic_id'] ?? data['optimisticId'];
 
       // Get sender info from cache/lookup
-      final senderInfo = _getUserInfo(senderId);  
+      final senderInfo = _getUserInfo(senderId);
       final senderName = senderInfo['name'] ?? 'Unknown User';
       final senderProfilePic = senderInfo['profile_pic'];
 
@@ -2714,17 +2714,35 @@ class _InnerChatPageState extends State<InnerChatPage>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
+            Icon(Icons.message_rounded, size: 32, color: Colors.grey[400]),
             const SizedBox(height: 16),
             Text(
-              _errorMessage!,
+              "Conversation not started yet",
               style: TextStyle(color: Colors.grey[600], fontSize: 16),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: _loadInitialMessages,
-              child: const Text('Retry'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal[50],
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(100),
+                ),
+                elevation: 2,
+              ),
+              child: const Text(
+                'Refresh',
+                style: TextStyle(
+                  color: Colors.black,
+                  fontSize: 12,
+                  fontWeight: FontWeight.normal,
+                ),
+              ),
             ),
           ],
         ),
