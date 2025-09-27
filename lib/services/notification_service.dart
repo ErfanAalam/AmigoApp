@@ -8,8 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:amigo/api/api_service.dart';
-import 'package:amigo/services/call_service.dart';
-import 'package:amigo/utils/navigation_helper.dart';
 // import 'package:amigo/firebase_options.dart';
 
 class NotificationService {
@@ -56,8 +54,6 @@ class NotificationService {
 
       // Set up message handlers
       _setupMessageHandlers();
-
-      await CallService().initialize();
 
       print('🔔 NotificationService initialized successfully');
     } catch (e) {
@@ -373,87 +369,27 @@ class NotificationService {
   void _handleCallNotificationAction(
     String? actionId,
     Map<String, dynamic> data,
-  ) async {
+  ) {
     print('📞 Call notification action: $actionId');
 
     switch (actionId) {
       case 'accept_call':
         print('✅ Call accepted via notification');
-        // Accept the call and navigate to in-call screen
-        await _acceptCallAndNavigate();
+        // Emit to call stream with accept action
         _callNotificationController.add({...data, 'action': 'accept'});
-        dispose();
         break;
 
       case 'decline_call':
         print('❌ Call declined via notification');
-        // Decline the call and cleanup
-        await _declineCallAndCleanup();
+        // Emit to call stream with decline action
         _callNotificationController.add({...data, 'action': 'decline'});
-        dispose();
         break;
 
       default:
-        // Regular tap on notification body - navigate to incoming call screen
+        // Regular tap on notification body
         print('👆 Call notification tapped (no action)');
-        // await _navigateToIncomingCall();
-        dispose();
+        _callNotificationController.add({...data, 'action': 'tap'});
         break;
-    }
-  }
-
-  /// Accept call and navigate to in-call screen
-  Future<void> _acceptCallAndNavigate() async {
-    try {
-      // Use the singleton instance
-      final callService = CallService();
-      await callService.acceptCall();
-
-      // Cancel the notification
-      await _localNotifications.cancelAll();
-
-      // Navigate to in-call screen
-      if (NavigationHelper.navigatorKey.currentContext != null) {
-        await Navigator.of(
-          NavigationHelper.navigatorKey.currentContext!,
-        ).pushNamedAndRemoveUntil('/call', (route) => route.isFirst);
-      }
-    } catch (e) {
-      print('❌ Error accepting call from notification: $e');
-    }
-  }
-
-  /// Decline call and cleanup
-  Future<void> _declineCallAndCleanup() async {
-    try {
-      // Use the singleton instance
-      final callService = CallService();
-      await callService.declineCall();
-
-      // Cancel the notification
-      await _localNotifications.cancelAll();
-
-      // Close any call-related screens and return to main app
-      if (NavigationHelper.navigatorKey.currentContext != null) {
-        Navigator.of(
-          NavigationHelper.navigatorKey.currentContext!,
-        ).popUntil((route) => route.isFirst);
-      }
-    } catch (e) {
-      print('❌ Error declining call from notification: $e');
-    }
-  }
-
-  /// Navigate to incoming call screen
-  Future<void> _navigateToIncomingCall() async {
-    try {
-      if (NavigationHelper.navigatorKey.currentContext != null) {
-        await Navigator.of(
-          NavigationHelper.navigatorKey.currentContext!,
-        ).pushNamed('/incoming-call');
-      }
-    } catch (e) {
-      print('❌ Error navigating to incoming call: $e');
     }
   }
 
@@ -526,6 +462,27 @@ class NotificationService {
       notificationDetails,
       payload: jsonEncode({'type': 'call_update', 'callId': callId, ...data}),
     );
+  }
+
+  /// Clear all notification data (for logout)
+  Future<void> clearNotificationData() async {
+    try {
+      // Cancel all notifications
+      await _localNotifications.cancelAll();
+
+      // Clear FCM token
+      _fcmToken = null;
+
+      // Clear any stored notification preferences
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('fcm_token');
+      await prefs.remove('notification_permissions_granted');
+      await prefs.remove('last_notification_check');
+
+      print('✅ Notification data cleared');
+    } catch (e) {
+      print('❌ Error clearing notification data: $e');
+    }
   }
 
   /// Dispose resources

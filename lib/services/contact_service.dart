@@ -110,6 +110,14 @@ class ContactService {
     _contacts.clear();
   }
 
+  /// Clear contact cache (for logout)
+  void clearCache() {
+    _contacts.clear();
+    _isLoading = false;
+    _hasPermission = false;
+    print('✅ Contact cache cleared');
+  }
+
   /// Refresh contacts
   Future<List<ContactModel>> refreshContacts() async {
     clearContacts();

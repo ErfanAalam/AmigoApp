@@ -1,6 +1,13 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
 import 'cookie_service.dart';
+import 'message_storage_service.dart';
+import 'chat_preferences_service.dart';
+import 'notification_service.dart';
+import 'contact_service.dart';
+import 'user_status_service.dart';
 import 'package:amigo/api/user.service.dart' as userService;
 
 class AuthService {
@@ -65,17 +72,130 @@ class AuthService {
   // Log out user
   Future<void> logout() async {
     try {
-      // Clear authentication status
-      await _secureStorage.delete(key: _authStatusKey);
+      print('🚪 Starting comprehensive logout process...');
 
-      // Clear login timestamp
+      // 1. Clear authentication status and secure storage
+      print('🔐 Clearing secure storage...');
+      await _secureStorage.delete(key: _authStatusKey);
+      await _secureStorage.deleteAll();
+
+      // 2. Clear SharedPreferences (includes login timestamp and all app preferences)
+      print('📱 Clearing SharedPreferences...');
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_lastLoginTimeKey);
+      await prefs.clear();
 
-      // Clear cookies using the cookie service
+      // 3. Clear cookies using the cookie service
+      print('🍪 Clearing cookies...');
       await _cookieService.clearAllCookies();
+
+      // 4. Clear message storage cache
+      print('💬 Clearing message storage cache...');
+      final messageStorage = MessageStorageService();
+      await messageStorage.clearAllCache();
+
+      // 5. Clear chat preferences
+      print('⚙️ Clearing chat preferences...');
+      final chatPreferences = ChatPreferencesService();
+      await chatPreferences.clearAllPreferences();
+
+      // 6. Clear notification data
+      print('🔔 Clearing notification data...');
+      final notificationService = NotificationService();
+      await notificationService.clearNotificationData();
+
+      // 7. Clear user status data
+      print('👤 Clearing user status data...');
+      final userStatusService = UserStatusService();
+      userStatusService.clearAllStatus();
+
+      // 8. Clear contact cache
+      print('📞 Clearing contact cache...');
+      final contactService = ContactService();
+      contactService.clearCache();
+
+      // 9. Clear app cache directories
+      print('🗂️ Clearing app cache directories...');
+      await _clearAppCacheDirectories();
+
+      // 10. Clear temporary files
+      print('🗑️ Clearing temporary files...');
+      await _clearTemporaryFiles();
+
+      print('✅ Comprehensive logout completed successfully');
     } catch (e) {
       print('❌ Error during logout: $e');
+      // Continue with logout even if some steps fail
+    }
+  }
+
+  /// Clear app cache directories
+  Future<void> _clearAppCacheDirectories() async {
+    try {
+      // Clear application documents directory cache
+      final appDocDir = await getApplicationDocumentsDirectory();
+      await _clearDirectoryContents(appDocDir);
+
+      // Clear application support directory cache
+      final appSupportDir = await getApplicationSupportDirectory();
+      await _clearDirectoryContents(appSupportDir);
+
+      // Clear temporary directory
+      final tempDir = await getTemporaryDirectory();
+      await _clearDirectoryContents(tempDir);
+
+      print('🗂️ App cache directories cleared');
+    } catch (e) {
+      print('❌ Error clearing app cache directories: $e');
+    }
+  }
+
+  /// Clear temporary files
+  Future<void> _clearTemporaryFiles() async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+
+      // List all files in temp directory
+      final tempFiles = tempDir.listSync(recursive: true);
+
+      for (final file in tempFiles) {
+        if (file is File) {
+          try {
+            await file.delete();
+          } catch (e) {
+            // Ignore errors for individual files
+            print('⚠️ Could not delete temp file: ${file.path}');
+          }
+        }
+      }
+
+      print('🗑️ Temporary files cleared');
+    } catch (e) {
+      print('❌ Error clearing temporary files: $e');
+    }
+  }
+
+  /// Clear contents of a directory (but keep the directory itself)
+  Future<void> _clearDirectoryContents(Directory directory) async {
+    try {
+      if (!await directory.exists()) return;
+
+      final contents = directory.listSync(recursive: true);
+
+      for (final entity in contents) {
+        try {
+          if (entity is File) {
+            await entity.delete();
+          } else if (entity is Directory) {
+            await entity.delete(recursive: true);
+          }
+        } catch (e) {
+          // Ignore errors for individual files/directories
+          print('⚠️ Could not delete: ${entity.path}');
+        }
+      }
+    } catch (e) {
+      print('❌ Error clearing directory contents: $e');
     }
   }
 
@@ -87,7 +207,7 @@ class AuthService {
       if (response['success'] == true && response['data'] != null) {
         final userData = response['data'];
         final id = userData['id'];
-        
+
         if (id is int) {
           return id;
         } else if (id is String) {
