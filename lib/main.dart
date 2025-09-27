@@ -14,6 +14,7 @@ import 'services/notification_service.dart';
 import 'widgets/call_manager.dart';
 import 'api/api_service.dart';
 import 'utils/navigation_helper.dart';
+import 'utils/ringing_tone.dart';
 
 void main() async {
   material.WidgetsFlutterBinding.ensureInitialized();
@@ -31,6 +32,9 @@ void main() async {
   // Initialize NotificationService
   final notificationService = NotificationService();
   await notificationService.initialize();
+
+  // Initialize RingtoneManager for call audio
+  await RingtoneManager.init();
 
   // Initialize CallNotificationHandler
   // final callNotificationHandler = CallNotificationHandler();

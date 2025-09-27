@@ -7036,7 +7036,9 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   /// Initiate audio call
   Future<void> _initiateCall(BuildContext context) async {
+      print('Initiating call to 1 ${widget.conversation.userId}');
     try {
+      print('Initiating call to 2 ${widget.conversation.userId}');
       final callService = Provider.of<CallService>(context, listen: false);
 
       // Check WebSocket connection status
@@ -7045,6 +7047,7 @@ class _InnerChatPageState extends State<InnerChatPage>
         await _websocketService.connect();
         await Future.delayed(const Duration(seconds: 2)); // Wait for connection
       }
+      print('Initiating call to 3 ${widget.conversation.userId}');
 
       // Check if already in a call
       if (callService.hasActiveCall) {
@@ -7057,12 +7060,15 @@ class _InnerChatPageState extends State<InnerChatPage>
         return;
       }
 
+      print('Initiating call to 4 ${widget.conversation.userId}');
+
       // Initiate the call
       await callService.initiateCall(
         widget.conversation.userId,
         widget.conversation.userName,
         widget.conversation.userProfilePic,
       );
+      print('Initiating call to 5 ${widget.conversation.userId}');
 
       // Navigate to in-call screen
       if (context.mounted) {

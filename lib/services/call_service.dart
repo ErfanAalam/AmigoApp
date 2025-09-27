@@ -110,9 +110,12 @@ class CallService extends ChangeNotifier {
       // Enable wakelock
       WakelockPlus.enable();
 
+      print('maa ki call service ${calleeId}');
+
       // Get user media
       await _setupLocalMedia();
 
+      print('maa ki call service 2 ${calleeId}');
       // Get current user info (for now using a simple approach)
       final currentUserName = await _getCurrentUserName();
 
@@ -144,7 +147,12 @@ class CallService extends ChangeNotifier {
       // Start the 30-second timeout timer
       _startCallStartedTimer();
 
-      await RingtoneManager.playRingtone();
+      try {
+        await RingtoneManager.playRingtone();
+      } catch (e) {
+        print('[CALL] Failed to play ringtone, using system sound: $e');
+        await RingtoneManager.playSystemRingtone();
+      }
     } catch (e) {
       print('[CALL] Error initiating call: $e');
       await _cleanup();
@@ -236,7 +244,11 @@ class CallService extends ChangeNotifier {
 
       await WebSocketService().sendMessage(message);
 
-      await RingtoneManager.stopRingtone();
+      try {
+        await RingtoneManager.stopRingtone();
+      } catch (e) {
+        print('[CALL] Error stopping ringtone: $e');
+      }
 
       await _cleanup();
     } catch (e) {
@@ -273,12 +285,31 @@ class CallService extends ChangeNotifier {
   /// Setup local media stream
   Future<void> _setupLocalMedia() async {
     try {
+      print('[CALL] Setting up local media...');
+
+      // Add a small delay to ensure audio system is ready
+      await Future.delayed(const Duration(milliseconds: 200));
+
       _localStream = await navigator.mediaDevices.getUserMedia(
         _mediaConstraints,
       );
+      print('[CALL] Local media setup successful');
     } catch (e) {
       print('[CALL] Error setting up local media: $e');
-      throw Exception('Failed to access microphone: $e');
+
+      // Retry once after a delay
+      try {
+        print('[CALL] Retrying local media setup...');
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        _localStream = await navigator.mediaDevices.getUserMedia(
+          _mediaConstraints,
+        );
+        print('[CALL] Local media setup successful on retry');
+      } catch (retryError) {
+        print('[CALL] Failed to setup local media even on retry: $retryError');
+        throw Exception('Failed to access microphone: $retryError');
+      }
     }
   }
 
@@ -445,7 +476,11 @@ class CallService extends ChangeNotifier {
           '[CALL] Call not accepted within 30 seconds, declining automatically',
         );
         declineCall(reason: 'timeout');
-        await RingtoneManager.stopRingtone();
+        try {
+          await RingtoneManager.stopRingtone();
+        } catch (e) {
+          print('[CALL] Error stopping ringtone in timeout: $e');
+        }
       }
     });
   }
@@ -488,7 +523,11 @@ class CallService extends ChangeNotifier {
 
           _activeCall = _activeCall?.copyWith(status: CallStatus.answered);
           _createOffer();
-          await RingtoneManager.stopRingtone();
+          try {
+            await RingtoneManager.stopRingtone();
+          } catch (e) {
+            print('[CALL] Error stopping ringtone in accept: $e');
+          }
           // Start timer immediately when call is accepted
           _startCallTimer();
           notifyListeners();
@@ -578,13 +617,21 @@ class CallService extends ChangeNotifier {
 
   /// Handle call declined
   void _handleCallDeclined(Map<String, dynamic> message) async {
-    await RingtoneManager.stopRingtone();
+    try {
+      await RingtoneManager.stopRingtone();
+    } catch (e) {
+      print('[CALL] Error stopping ringtone in declined: $e');
+    }
     _cleanup();
   }
 
   /// Handle call ended
   void _handleCallEnded(Map<String, dynamic> message) async {
-    await RingtoneManager.stopRingtone();
+    try {
+      await RingtoneManager.stopRingtone();
+    } catch (e) {
+      print('[CALL] Error stopping ringtone in ended: $e');
+    }
     _cleanup();
   }
 
@@ -640,6 +687,22 @@ class CallService extends ChangeNotifier {
     } catch (e) {
       print('[CALL] Error getting current user name: $e');
       return 'Unknown User';
+    }
+  }
+
+  /// Test method to debug ringtone issues
+  Future<void> testRingtone() async {
+    try {
+      print('[CALL] Testing ringtone...');
+      await RingtoneManager.testAudio();
+      await RingtoneManager.playRingtone();
+      await Future.delayed(const Duration(seconds: 3));
+      await RingtoneManager.stopRingtone();
+      print('[CALL] Ringtone test completed');
+    } catch (e) {
+      print('[CALL] Ringtone test failed: $e');
+      // Try fallback
+      await RingtoneManager.playSystemRingtone();
     }
   }
 

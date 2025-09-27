@@ -9,6 +9,9 @@ import 'notification_service.dart';
 import 'contact_service.dart';
 import 'user_status_service.dart';
 import 'package:amigo/api/user.service.dart' as userService;
+import 'package:amigo/utils/navigation_helper.dart';
+import 'package:flutter/material.dart';
+import 'package:amigo/screens/auth/login_screen.dart';
 
 class AuthService {
   static const String _authStatusKey = 'auth_status';
@@ -123,6 +126,15 @@ class AuthService {
       await _clearTemporaryFiles();
 
       print('✅ Comprehensive logout completed successfully');
+      // 11. Restart the app
+      print('🔄 Restarting app...');
+      if (NavigationHelper.navigatorKey.currentContext != null) {
+        Navigator.pushAndRemoveUntil(
+          NavigationHelper.navigatorKey.currentContext!,
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+          (route) => false,
+        );
+      }
     } catch (e) {
       print('❌ Error during logout: $e');
       // Continue with logout even if some steps fail

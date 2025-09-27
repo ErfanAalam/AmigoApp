@@ -156,7 +156,7 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
             Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
             Text(
-              _error!,
+              'Failed to load call history, please try again later',
               style: TextStyle(fontSize: 16, color: Colors.grey[600]),
               textAlign: TextAlign.center,
             ),
