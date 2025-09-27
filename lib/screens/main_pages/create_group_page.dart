@@ -3,6 +3,7 @@ import '../../models/user_model.dart';
 import '../../api/groups.services.dart';
 import '../../api/user.service.dart';
 import '../../services/contact_service.dart';
+import '../../services/websocket_service.dart';
 
 class CreateGroupPage extends StatefulWidget {
   const CreateGroupPage({Key? key}) : super(key: key);
@@ -17,6 +18,7 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
   final ContactService _contactService = ContactService();
   final TextEditingController _groupNameController = TextEditingController();
   final TextEditingController _searchController = TextEditingController();
+  final WebSocketService _websocketService = WebSocketService();
 
   List<UserModel> _allUsers = [];
   List<UserModel> _filteredUsers = [];
@@ -148,6 +150,14 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
               backgroundColor: Colors.teal,
             ),
           );
+
+           await _websocketService.sendMessage({
+          'type': 'join_conversation',
+          'conversation_id': response['data']['id'],
+          'data':{
+          'recipient_id': [_selectedUserIds.toList()],
+          }
+        });
 
           // Go back to groups page
           Navigator.pop(

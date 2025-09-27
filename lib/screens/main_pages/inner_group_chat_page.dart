@@ -60,7 +60,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   bool _hasCheckedCache = false;
   bool _isCheckingCache = true;
   bool _isTyping = false;
-  bool _isOtherTyping = false;
+  // bool _isOtherTyping = false;
+   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
 
   // For optimistic message handling
   StreamSubscription<Map<String, dynamic>>? _websocketSubscription;
@@ -776,6 +777,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   void dispose() {
     _scrollController.dispose();
     _messageController.dispose();
+    _isOtherTypingNotifier.dispose();
     _websocketSubscription?.cancel();
     _typingAnimationController.dispose();
     _typingTimeout?.cancel();
@@ -2020,7 +2022,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   }
 
   void _handleTyping(String value) async {
-    final wasTyping = _isTyping;
+    // final wasTyping = _isTyping;
     final isTyping = value.isNotEmpty;
 
     setState(() {
@@ -2028,7 +2030,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     });
 
     // Only send websocket message if typing state changed
-    if (wasTyping != isTyping) {
+    if (isTyping) {
       await _websocketService.sendMessage({
         'type': 'typing',
         'data': {'user_id': _currentUserId, 'is_typing': isTyping},
@@ -2043,9 +2045,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     // Cancel any existing timeout
     _typingTimeout?.cancel();
 
-    setState(() {
-      _isOtherTyping = isTyping;
-    });
+      _isOtherTypingNotifier.value = isTyping;
 
     // Control the typing animation
     if (isTyping) {
@@ -2054,9 +2054,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       // Set a safety timeout to hide typing indicator after 5 seconds
       _typingTimeout = Timer(const Duration(seconds: 2), () {
         if (mounted) {
-          setState(() {
-            _isOtherTyping = false;
-          });
+            _isOtherTypingNotifier.value = false;
           _typingAnimationController.stop();
           _typingAnimationController.reset();
         }
@@ -2148,7 +2146,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                             fontSize: 16,
                           ),
                         ),
-                        if (_isOtherTyping) ...[
+                        if (_isOtherTypingNotifier.value) ...[
                           Text(
                             'Typing...',
                             style: TextStyle(
@@ -2263,14 +2261,14 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
             Text(
-              _errorMessage!,
-              style: TextStyle(color: Colors.grey[600], fontSize: 16),
+              'Connection lost please refresh',
+              style: TextStyle(color: Colors.black, fontSize: 16),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: _loadInitialMessages,
-              child: const Text('Retry'),
+              child: const Text('Refresh'),
             ),
           ],
         ),
@@ -2874,7 +2872,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(error),
-          backgroundColor: Colors.red,
+          backgroundColor: Colors.teal[200],
           duration: const Duration(seconds: 4),
         ),
       );
@@ -3114,7 +3112,14 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           _buildTimeRestrictionNotice(),
 
         // Typing indicator
-        if (_isOtherTyping) _buildTypingIndicator(),
+       ValueListenableBuilder<bool>(
+          valueListenable: _isOtherTypingNotifier,
+          builder: (context, isOtherTyping, child) {
+            return isOtherTyping
+                ? _buildTypingIndicator()
+                : const SizedBox.shrink();
+          },
+        ),
 
         // Reply container
         if (_isReplying && _replyToMessageData != null) _buildReplyContainer(),

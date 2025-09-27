@@ -289,7 +289,7 @@ class _ContactsPageState extends State<ContactsPage>
           'type': 'join_conversation',
           'conversation_id': conversationData['id'],
           'data':{
-          'recipient_id': user.id,
+          'recipient_id':[ user.id],
           }
         });
 
@@ -352,7 +352,7 @@ class _ContactsPageState extends State<ContactsPage>
           'type': 'join_conversation',
           'conversation_id': conversationData['id'],
           'data':{
-          'recipient_id': userId,
+          'recipient_id': [userId],
           }
         });
 
