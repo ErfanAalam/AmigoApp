@@ -39,7 +39,9 @@
             export ANDROID_HOME=$HOME/Android/Sdk
             export ANDROID_SDK_ROOT=$HOME/Android/Sdk
             export PATH=$ANDROID_HOME/platform-tools:$PATH
-            echo "hello fish"
+            echo "-----------------------------------------------------------------"
+            echo "      Your flutter android development environment is ready"
+            echo "-----------------------------------------------------------------"
             exec fish
           '';
 
