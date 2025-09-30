@@ -9,6 +9,7 @@ import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Background message handler (must be top-level function)
 @pragma('vm:entry-point')
@@ -20,30 +21,41 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     print('🔔 CallKit event received: ${event?.event}');
     print('🔔 Full event data: $event');
     print('🔔 Event type: ${event?.event.runtimeType}');
+
+    print(
+      "--------------------------------------------------------------------------------",
+    );
+    print(
+      "event -> ${event?.body['id']} :: ${event?.body['extra']['callerId']}",
+    );
+    print(
+      "--------------------------------------------------------------------------------",
+    );
+    final prefs = await SharedPreferences.getInstance();
     switch (event?.event) {
       case Event.actionCallAccept:
         // _callService.initialize();
         // _callService.acceptCall();
 
+        prefs.setString('call_status', 'answered');
+        prefs.setString('current_call_id', event?.body['id'] ?? '');
+        prefs.setString(
+          'current_caller_id',
+          event?.body['extra']['callerId'] ?? '',
+        );
         print(
           "--------------------------------------------------------------------------------",
         );
-        print("call accepted api request sent");
         print(
-          "event -> ${event?.body['id']} :: ${event?.body['extra']['callerId']}",
+          "--------------------------------------------------------------------------------",
+        );
+        print("prefs updated for accepted call");
+        print(
+          "--------------------------------------------------------------------------------",
         );
         print(
           "--------------------------------------------------------------------------------",
         );
-
-        final res = await ApiService().authenticatedPut(
-          '/call/accept',
-          data: {
-            'callId': event?.body['id'],
-            'calleId': event?.body['extra']['callerId'],
-          },
-        );
-        print("res -> $res");
 
         // Navigator.popUntil(
         //   NavigationHelper.navigator!.context,
@@ -54,18 +66,40 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       case Event.actionCallDecline:
         // _callService.initialize();
         // _callService..declineCall();
+
+        prefs.setString('call_status', 'declined');
+        prefs.setString('current_call_id', event?.body['id'] ?? '');
+        prefs.setString(
+          'current_caller_id',
+          event?.body['extra']['callerId'] ?? '',
+        );
+
         print(
           "--------------------------------------------------------------------------------",
         );
-        print("event -> ${event}");
         print(
           "--------------------------------------------------------------------------------",
         );
-        print("call declined api request sent");
+        print("prefs updated for declined call");
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+
         break;
       case Event.actionCallEnded:
-        _callService.initialize();
-        _callService..endCall();
+        break;
+
+      case Event.actionCallTimeout:
+        prefs.setString('call_status', 'missed');
+        prefs.setString('current_call_id', event?.body['id'] ?? '');
+        prefs.setString(
+          'current_caller_id',
+          event?.body['extra']['callerId'] ?? '',
+        );
+
         break;
       default:
         print('🔔 Unhandled CallKit event: ${event?.event}');

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart' as material;
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/main_screen.dart';
 import 'screens/call/in_call_screen.dart';
@@ -96,6 +98,116 @@ class _MyAppState extends material.State<MyApp> {
         await Future.delayed(const Duration(milliseconds: 500));
 
         print('✅ WebSocket connection established in main.dart');
+
+        final prefs = await SharedPreferences.getInstance();
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print("prefs current call id -> ${prefs.getString('current_call_id')}");
+        print(
+          "prefs current caller id -> ${prefs.getString('current_caller_id')}",
+        );
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+
+        final callStatus = prefs.getString('call_status');
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print("callStatus -> ${callStatus}");
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        final callId = prefs.getString('current_call_id');
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print("callId -> ${callId}");
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        final callerId = prefs.getString('current_caller_id');
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print("callerId -> ${callerId}");
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+
+        if (callId != null) {
+          print(
+            "--------------------------------------------------------------------------------",
+          );
+          print("inside if callId -> ${callId}");
+          print(
+            "--------------------------------------------------------------------------------",
+          );
+          switch (callStatus) {
+            case 'answered':
+              print(
+                "--------------------------------------------------------------------------------",
+              );
+              print("answered callId -> ${callId}");
+              print(
+                "--------------------------------------------------------------------------------",
+              );
+              // Call was answered, proceed to accept
+              await CallService().initialize();
+              await CallService().acceptCall(callId: int.parse(callId));
+
+              // Dispose all notifications from flutter_callkit_incoming
+              await FlutterCallkitIncoming.setCallConnected(callId);
+              break;
+            case 'declined':
+              // Call was rejected, clean up
+              await CallService().initialize();
+              await CallService().declineCall(
+                reason: 'declined',
+                callId: int.parse(callId),
+              );
+              return;
+            case 'ended':
+              // Call already ended, clean up
+              break;
+            case 'missed':
+              // Call was missed, clean up
+              await CallService().initialize();
+              await CallService().declineCall(
+                reason: 'timeout',
+                callId: int.parse(callId),
+              );
+              break;
+            default:
+              print(
+                "--------------------------------------------------------------------------------",
+              );
+              print("default case");
+              print(
+                "--------------------------------------------------------------------------------",
+              );
+              // No action needed
+              break;
+          }
+
+          // clean up after use
+          prefs.remove('current_call_id');
+          prefs.remove('current_caller_id');
+          prefs.remove('call_status');
+        }
 
         await _apiService.updateUserLocationAndIp();
       } catch (e) {

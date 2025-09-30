@@ -56,7 +56,7 @@ class _CallManagerState extends State<CallManager> {
               print(
                 '[CallManager] 🚨 Widget is mounted, proceeding with navigation',
               );
-              _showIncomingCallScreen();
+              // _showIncomingCallScreen();
             } else {
               print(
                 '[CallManager] ❌ Widget not mounted, cannot show incoming call',

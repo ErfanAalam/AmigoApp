@@ -88,80 +88,80 @@ class CallService extends ChangeNotifier {
 
       _isInitialized = true;
 
-      // FlutterCallkitIncoming.onEvent.listen((CallEvent? event) async {
-      //   print('🔔 CallKit event received: ${event?.event}');
-      //   print('🔔 Full event data: $event');
-      //   print('🔔 Event type: ${event?.event.runtimeType}');
-      //   switch (event?.event) {
-      //     case Event.actionCallAccept:
-      //       acceptCall();
-      //
-      //       print(
-      //         "--------------------------------------------------------------------------------",
-      //       );
-      //       final jfkdjfd = event?.body;
-      //       print("event -> $jfkdjfd");
-      //       print(
-      //         "--------------------------------------------------------------------------------",
-      //       );
-      //       print("call accepted api request sent");
-      //
-      //       // final res = await ApiService().authenticatedPut(
-      //       //   '/call/accept',
-      //       //   data: {'callId': , 'title': title},
-      //       // );
-      //       // print("res -> $res");
-      //
-      //       Navigator.popUntil(
-      //         NavigationHelper.navigator!.context,
-      //         (route) => route.isFirst,
-      //       );
-      //
-      //       break;
-      //     case Event.actionCallDecline:
-      //       declineCall();
-      //       print(
-      //         "--------------------------------------------------------------------------------",
-      //       );
-      //       print("event -> ${event}");
-      //       print(
-      //         "--------------------------------------------------------------------------------",
-      //       );
-      //       print("call declined api request sent");
-      //       break;
-      //     case Event.actionCallEnded:
-      //       endCall();
-      //       break;
-      //     case Event.actionCallIncoming:
-      //       print('🔔 Incoming call event received');
-      //       break;
-      //     case Event.actionCallStart:
-      //       print('🔔 Call started event received');
-      //       break;
-      //     case Event.actionCallToggleHold:
-      //       print('🔔 Call toggle hold event received');
-      //       break;
-      //     case Event.actionCallToggleMute:
-      //       print('🔔 Call toggle mute event received');
-      //       break;
-      //     case Event.actionCallToggleDmtf:
-      //       print('🔔 Call toggle DTMF event received');
-      //       break;
-      //     case Event.actionCallToggleGroup:
-      //       print('🔔 Call toggle group event received');
-      //       break;
-      //     case Event.actionCallToggleAudioSession:
-      //       print('🔔 Call toggle audio session event received');
-      //       break;
-      //     case Event.actionDidUpdateDevicePushTokenVoip:
-      //       print('🔔 Device push token updated event received');
-      //       break;
-      //     default:
-      //       print('🔔 Unhandled CallKit event: ${event?.event}');
-      //       print('🔔 Event data: $event');
-      //       break;
-      //   }
-      // });
+      FlutterCallkitIncoming.onEvent.listen((CallEvent? event) async {
+        print('🔔 CallKit event received: ${event?.event}');
+        print('🔔 Full event data: $event');
+        print('🔔 Event type: ${event?.event.runtimeType}');
+        switch (event?.event) {
+          case Event.actionCallAccept:
+            acceptCall();
+
+            print(
+              "--------------------------------------------------------------------------------",
+            );
+            final jfkdjfd = event?.body;
+            print("event -> $jfkdjfd");
+            print(
+              "--------------------------------------------------------------------------------",
+            );
+            print("call accepted api request sent");
+
+            // final res = await ApiService().authenticatedPut(
+            //   '/call/accept',
+            //   data: {'callId': , 'title': title},
+            // );
+            // print("res -> $res");
+
+            Navigator.popUntil(
+              NavigationHelper.navigator!.context,
+              (route) => route.isFirst,
+            );
+
+            break;
+          case Event.actionCallDecline:
+            declineCall();
+            print(
+              "--------------------------------------------------------------------------------",
+            );
+            print("event -> ${event}");
+            print(
+              "--------------------------------------------------------------------------------",
+            );
+            print("call declined api request sent");
+            break;
+          case Event.actionCallEnded:
+            endCall();
+            break;
+          case Event.actionCallIncoming:
+            print('🔔 Incoming call event received');
+            break;
+          case Event.actionCallStart:
+            print('🔔 Call started event received');
+            break;
+          case Event.actionCallToggleHold:
+            print('🔔 Call toggle hold event received');
+            break;
+          case Event.actionCallToggleMute:
+            print('🔔 Call toggle mute event received');
+            break;
+          case Event.actionCallToggleDmtf:
+            print('🔔 Call toggle DTMF event received');
+            break;
+          case Event.actionCallToggleGroup:
+            print('🔔 Call toggle group event received');
+            break;
+          case Event.actionCallToggleAudioSession:
+            print('🔔 Call toggle audio session event received');
+            break;
+          case Event.actionDidUpdateDevicePushTokenVoip:
+            print('🔔 Device push token updated event received');
+            break;
+          default:
+            print('🔔 Unhandled CallKit event: ${event?.event}');
+            print('🔔 Event data: $event');
+            break;
+        }
+      });
       print('[CALL] CallService initialized');
       print('[CALL] WebSocket connected: ${WebSocketService().isConnected}');
     } catch (e) {
@@ -241,10 +241,40 @@ class CallService extends ChangeNotifier {
   }
 
   /// Accept an incoming call
-  Future<void> acceptCall() async {
+  Future<void> acceptCall({int? callId}) async {
     try {
-      if (_activeCall == null) {
+      print(
+        "--------------------------------------------------------------------------------",
+      );
+      print("recieved callId -> ${callId}");
+      print(
+        "--------------------------------------------------------------------------------",
+      );
+      if (_activeCall == null && callId == null) {
         throw Exception('No active call to accept');
+      }
+
+      if (callId != null) {
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print("setting callId -> ${callId}");
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        _activeCall = _activeCall?.copyWith(callId: callId);
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print("_activeCall -> ${_activeCall}");
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+
+        // hasActiveCall is now updated and reflects the new _activeCall state
+        print("hasActiveCall after update: $hasActiveCall");
+
+        notifyListeners();
       }
 
       // Enable wakelock
@@ -280,10 +310,14 @@ class CallService extends ChangeNotifier {
   }
 
   /// Decline an incoming call
-  Future<void> declineCall({String? reason}) async {
+  Future<void> declineCall({String? reason, int? callId}) async {
     try {
-      if (_activeCall == null) {
-        throw Exception('No active call to decline');
+      if (_activeCall == null && callId == null) {
+        throw Exception('No active call to accept');
+      }
+      if (callId != null) {
+        _activeCall = _activeCall?.copyWith(callId: callId);
+        notifyListeners();
       }
 
       final message = {
