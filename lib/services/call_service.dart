@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:amigo/api/api_service.dart';
 import 'package:amigo/utils/navigation_helper.dart';
+import 'package:amigo/env.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
@@ -9,6 +11,7 @@ import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../models/call_model.dart';
 import '../services/websocket_service.dart';
@@ -36,6 +39,8 @@ class CallService extends ChangeNotifier {
   StreamSubscription? _webSocketSubscription;
 
   Timer? _callStartedTimer;
+  Timer? _statusPollingTimer;
+  int? _pollingCallId;
 
   // WebRTC configuration - using Plan B for compatibility
   final Map<String, dynamic> _configuration = {
@@ -226,6 +231,9 @@ class CallService extends ChangeNotifier {
 
       // Start the 30-second timeout timer
       _startCallStartedTimer();
+
+      // Start status polling as fallback (will be updated when we get the actual callId)
+      // Note: We'll start polling after we get the callId from the server response
 
       try {
         await RingtoneManager.playRingtone();
@@ -617,6 +625,10 @@ class CallService extends ChangeNotifier {
         if (message['data']?['success'] == true) {
           final callId = message['data']['callId'];
           _activeCall = _activeCall?.copyWith(callId: callId);
+
+          // Start status polling as fallback when WebSocket might not be reliable
+          _startStatusPolling(callId);
+
           notifyListeners();
         } else {
           _cleanup();
@@ -625,6 +637,13 @@ class CallService extends ChangeNotifier {
 
       case 'call:ringing':
         // Incoming call notification
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print("message -> ${message}");
+        print(
+          "--------------------------------------------------------------------------------",
+        );
         _handleIncomingCall(message);
         break;
 
@@ -634,6 +653,9 @@ class CallService extends ChangeNotifier {
           // Cancel the call started timer since call is now accepted
           _callStartedTimer?.cancel();
           _callStartedTimer = null;
+
+          // Stop status polling since call is now accepted
+          _stopStatusPolling();
 
           _activeCall = _activeCall?.copyWith(status: CallStatus.answered);
           _createOffer();
@@ -664,21 +686,30 @@ class CallService extends ChangeNotifier {
         // Cancel the call started timer since call is being declined
         _callStartedTimer?.cancel();
         _callStartedTimer = null;
+        // Stop status polling since call is being declined
+        _stopStatusPolling();
         _handleCallDeclined(message);
+        await FlutterCallkitIncoming.endAllCalls();
         break;
 
       case 'call:end':
         // Cancel the call started timer since call is ending
         _callStartedTimer?.cancel();
         _callStartedTimer = null;
+        // Stop status polling since call is ending
+        _stopStatusPolling();
         _handleCallEnded(message);
+        await FlutterCallkitIncoming.endAllCalls();
         break;
 
       case 'call:missed':
         // Cancel the call started timer since call is missed
         _callStartedTimer?.cancel();
         _callStartedTimer = null;
+        // Stop status polling since call is missed
+        _stopStatusPolling();
         _handleCallMissed(message);
+        await FlutterCallkitIncoming.endAllCalls();
         break;
     }
   }
@@ -742,7 +773,28 @@ class CallService extends ChangeNotifier {
     );
 
     print('🔧 Showing CallKit notification for call: $callId');
-    await FlutterCallkitIncoming.showCallkitIncoming(params);
+    final prefs = await SharedPreferences.getInstance();
+    final storageCallStatus = prefs.getString('call_status');
+    print(
+      "--------------------------------------------------------------------------------",
+    );
+    print("storageCallStatus -> ${storageCallStatus}");
+    print(
+      "--------------------------------------------------------------------------------",
+    );
+    final storageCallId = prefs.getString('current_call_id');
+    print(
+      "--------------------------------------------------------------------------------",
+    );
+    print("storageCallId -> ${storageCallId}");
+    print(
+      "--------------------------------------------------------------------------------",
+    );
+    if (storageCallStatus == 'answered' && storageCallId == callId.toString()) {
+      print('✅ CallKit notification already shown for call: $callId');
+    } else {
+      await FlutterCallkitIncoming.showCallkitIncoming(params);
+    }
     print('✅ CallKit notification shown successfully');
 
     print(
@@ -766,6 +818,9 @@ class CallService extends ChangeNotifier {
 
     // Start the 30-second timeout timer for incoming calls
     _startCallStartedTimer();
+
+    // Start status polling as fallback for incoming calls too
+    _startStatusPolling(callId);
 
     // CallKit notification is already shown above, no need for additional notification
     notifyListeners();
@@ -805,6 +860,9 @@ class CallService extends ChangeNotifier {
       _callStartedTimer?.cancel();
       _callStartedTimer = null;
 
+      // Stop status polling
+      _stopStatusPolling();
+
       // Close peer connection
       await _peerConnection?.close();
       _peerConnection = null;
@@ -843,6 +901,99 @@ class CallService extends ChangeNotifier {
     } catch (e) {
       print('[CALL] Error getting current user name: $e');
       return 'Unknown User';
+    }
+  }
+
+  /// Fetch call status from unprotected endpoint
+  Future<Map<String, dynamic>?> _fetchCallStatus(int callId) async {
+    try {
+      final dio = Dio();
+      final response = await dio.get(
+        '${Environment.baseUrl}/call/status/$callId',
+      );
+
+      if (response.statusCode == 200) {
+        return response.data;
+      } else {
+        print('[CALL] Failed to fetch call status: ${response.statusCode}');
+        return null;
+      }
+    } catch (e) {
+      print('[CALL] Error fetching call status: $e');
+      return null;
+    }
+  }
+
+  /// Start polling for call status as fallback when WebSocket is not connected
+  void _startStatusPolling(int callId) {
+    if (_statusPollingTimer != null) {
+      _statusPollingTimer?.cancel();
+    }
+
+    _pollingCallId = callId;
+    print('[CALL] Starting status polling for call: $callId');
+
+    int pollCount = 0;
+    const maxPolls = 15; // 30 seconds / 2 seconds = 15 polls
+
+    _statusPollingTimer = Timer.periodic(const Duration(seconds: 2), (
+      timer,
+    ) async {
+      if (_pollingCallId == null) {
+        timer.cancel();
+        return;
+      }
+
+      pollCount++;
+
+      // Stop polling after 30 seconds (15 polls)
+      if (pollCount > maxPolls) {
+        print('[CALL] Status polling timeout after 30 seconds, stopping...');
+        timer.cancel();
+        _statusPollingTimer = null;
+        _pollingCallId = null;
+        return;
+      }
+
+      final statusResponse = await _fetchCallStatus(callId);
+      if (statusResponse != null && statusResponse['success'] == true) {
+        final callData = statusResponse['data'];
+        final status = callData['status'];
+
+        print(
+          '[CALL] Polling - Call status: $status (poll $pollCount/$maxPolls)',
+        );
+
+        if (status == 'declined' || status == 'ended') {
+          print('[CALL] Call $status detected via polling, cleaning up...');
+          timer.cancel();
+          _statusPollingTimer = null;
+          _pollingCallId = null;
+
+          // Handle the call decline/end as if it came from WebSocket
+          if (status == 'declined') {
+            _handleCallDeclined({
+              'callId': callId,
+              'payload': {'reason': 'declined_via_polling'},
+            });
+          } else if (status == 'ended') {
+            _handleCallEnded({
+              'callId': callId,
+              'payload': {'reason': 'ended_via_polling'},
+            });
+          }
+        }
+      }
+    });
+  }
+
+  /// Stop status polling
+  void _stopStatusPolling() {
+    if (_statusPollingTimer != null) {
+      print('[CALL] Stopping status polling');
+      _statusPollingTimer?.cancel();
+      _statusPollingTimer = null;
+      _pollingCallId = null;
     }
   }
 

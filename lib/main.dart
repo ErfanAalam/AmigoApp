@@ -169,8 +169,8 @@ class _MyAppState extends material.State<MyApp> {
               await CallService().initialize();
               await CallService().acceptCall(callId: int.parse(callId));
 
-              // Dispose all notifications from flutter_callkit_incoming
-              await FlutterCallkitIncoming.setCallConnected(callId);
+              // // Dispose all notifications from flutter_callkit_incoming
+              // await FlutterCallkitIncoming.setCallConnected(callId);
               break;
             case 'declined':
               // Call was rejected, clean up
@@ -204,9 +204,9 @@ class _MyAppState extends material.State<MyApp> {
           }
 
           // clean up after use
-          prefs.remove('current_call_id');
-          prefs.remove('current_caller_id');
-          prefs.remove('call_status');
+          // prefs.remove('current_call_id');
+          // prefs.remove('current_caller_id');
+          // prefs.remove('call_status');
         }
 
         await _apiService.updateUserLocationAndIp();
