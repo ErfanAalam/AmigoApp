@@ -1,6 +1,14 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
+import 'package:amigo/api/api_service.dart';
+import 'package:amigo/utils/navigation_helper.dart';
+import 'package:flutter_callkit_incoming/entities/android_params.dart';
+import 'package:flutter_callkit_incoming/entities/call_event.dart';
+import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
+import 'package:flutter_callkit_incoming/entities/ios_params.dart';
+import 'package:flutter_callkit_incoming/entities/notification_params.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../models/call_model.dart';
 import '../services/websocket_service.dart';
@@ -79,6 +87,81 @@ class CallService extends ChangeNotifier {
       );
 
       _isInitialized = true;
+
+      // FlutterCallkitIncoming.onEvent.listen((CallEvent? event) async {
+      //   print('🔔 CallKit event received: ${event?.event}');
+      //   print('🔔 Full event data: $event');
+      //   print('🔔 Event type: ${event?.event.runtimeType}');
+      //   switch (event?.event) {
+      //     case Event.actionCallAccept:
+      //       acceptCall();
+      //
+      //       print(
+      //         "--------------------------------------------------------------------------------",
+      //       );
+      //       final jfkdjfd = event?.body;
+      //       print("event -> $jfkdjfd");
+      //       print(
+      //         "--------------------------------------------------------------------------------",
+      //       );
+      //       print("call accepted api request sent");
+      //
+      //       // final res = await ApiService().authenticatedPut(
+      //       //   '/call/accept',
+      //       //   data: {'callId': , 'title': title},
+      //       // );
+      //       // print("res -> $res");
+      //
+      //       Navigator.popUntil(
+      //         NavigationHelper.navigator!.context,
+      //         (route) => route.isFirst,
+      //       );
+      //
+      //       break;
+      //     case Event.actionCallDecline:
+      //       declineCall();
+      //       print(
+      //         "--------------------------------------------------------------------------------",
+      //       );
+      //       print("event -> ${event}");
+      //       print(
+      //         "--------------------------------------------------------------------------------",
+      //       );
+      //       print("call declined api request sent");
+      //       break;
+      //     case Event.actionCallEnded:
+      //       endCall();
+      //       break;
+      //     case Event.actionCallIncoming:
+      //       print('🔔 Incoming call event received');
+      //       break;
+      //     case Event.actionCallStart:
+      //       print('🔔 Call started event received');
+      //       break;
+      //     case Event.actionCallToggleHold:
+      //       print('🔔 Call toggle hold event received');
+      //       break;
+      //     case Event.actionCallToggleMute:
+      //       print('🔔 Call toggle mute event received');
+      //       break;
+      //     case Event.actionCallToggleDmtf:
+      //       print('🔔 Call toggle DTMF event received');
+      //       break;
+      //     case Event.actionCallToggleGroup:
+      //       print('🔔 Call toggle group event received');
+      //       break;
+      //     case Event.actionCallToggleAudioSession:
+      //       print('🔔 Call toggle audio session event received');
+      //       break;
+      //     case Event.actionDidUpdateDevicePushTokenVoip:
+      //       print('🔔 Device push token updated event received');
+      //       break;
+      //     default:
+      //       print('🔔 Unhandled CallKit event: ${event?.event}');
+      //       print('🔔 Event data: $event');
+      //       break;
+      //   }
+      // });
       print('[CALL] CallService initialized');
       print('[CALL] WebSocket connected: ${WebSocketService().isConnected}');
     } catch (e) {
@@ -110,12 +193,9 @@ class CallService extends ChangeNotifier {
       // Enable wakelock
       WakelockPlus.enable();
 
-      print('maa ki call service ${calleeId}');
-
       // Get user media
       await _setupLocalMedia();
 
-      print('maa ki call service 2 ${calleeId}');
       // Get current user info (for now using a simple approach)
       final currentUserName = await _getCurrentUserName();
 
@@ -125,7 +205,7 @@ class CallService extends ChangeNotifier {
         'to': calleeId,
         'payload': {
           'callerName': currentUserName,
-          'callerProfilePic': null, // TODO: Get from user service
+          'callerProfilePic': calleeProfilePic,
         },
         'timestamp': DateTime.now().toIso8601String(),
       };
@@ -570,10 +650,66 @@ class CallService extends ChangeNotifier {
   }
 
   /// Handle incoming call
-  void _handleIncomingCall(Map<String, dynamic> message) {
+  void _handleIncomingCall(Map<String, dynamic> message) async {
     final callId = message['callId'];
     final from = message['from'];
     final payload = message['payload'];
+    print(
+      "--------------------------------------------------------------------------------",
+    );
+    print("📞 INCOMING CALL - callId: $callId, from: $from");
+    print("payload -> ${payload}");
+    print(
+      "--------------------------------------------------------------------------------",
+    );
+
+    CallKitParams params = CallKitParams(
+      id: callId.toString(),
+      nameCaller: payload['callerName'] ?? 'Unknown',
+      appName: 'amigo',
+      avatar: payload['callerProfilePic'] ?? '',
+      handle: '1234567890',
+      type: 0,
+      duration: 30000,
+      textAccept: 'Accept',
+      textDecline: 'Decline',
+      missedCallNotification: const NotificationParams(
+        showNotification: true,
+        isShowCallback: true,
+        subtitle: 'Missed call',
+        callbackText: 'Call back',
+      ),
+      extra: <String, dynamic>{'userId': from},
+      android: const AndroidParams(
+        isCustomNotification: true,
+        isShowLogo: false,
+        ringtonePath: 'system_ringtone_default',
+        backgroundColor: '#06bd98',
+        backgroundUrl: 'assets/images/call_bg_dark.png',
+        actionColor: '#36b554',
+        textColor: '#ffffff',
+      ),
+      ios: const IOSParams(
+        iconName: 'CallKitLogo',
+        handleType: 'generic',
+        supportsVideo: true,
+        maximumCallGroups: 2,
+        maximumCallsPerCallGroup: 1,
+        audioSessionMode: 'default',
+        audioSessionActive: true,
+        audioSessionPreferredSampleRate: 44100.0,
+        audioSessionPreferredIOBufferDuration: 0.005,
+        supportsDTMF: true,
+        supportsHolding: true,
+        supportsGrouping: false,
+        supportsUngrouping: false,
+        ringtonePath: 'system_ringtone_default',
+      ),
+    );
+
+    print('🔧 Showing CallKit notification for call: $callId');
+    await FlutterCallkitIncoming.showCallkitIncoming(params);
+    print('✅ CallKit notification shown successfully');
 
     print(
       '[CALL] Handling incoming call - callId: $callId, from: $from, payload: $payload',
@@ -597,21 +733,7 @@ class CallService extends ChangeNotifier {
     // Start the 30-second timeout timer for incoming calls
     _startCallStartedTimer();
 
-    // Show incoming call notification
-    _notificationService.showCallNotification(
-      title:
-          'Incoming ${payload['callType'] == 'video' ? 'Video' : 'Audio'} Call',
-      body: '${payload['callerName'] ?? 'Unknown'} is calling you',
-      data: {
-        'callId': callId.toString(),
-        'callerId': from,
-        'callerName': payload['callerName'] ?? 'Unknown',
-        'callType': payload['callType'] ?? 'audio',
-        'callerProfilePic': payload['callerProfilePic'],
-        'action': 'tap', // Default action for notification tap
-      },
-    );
-
+    // CallKit notification is already shown above, no need for additional notification
     notifyListeners();
   }
 

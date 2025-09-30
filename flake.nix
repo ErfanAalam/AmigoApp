@@ -24,7 +24,6 @@
             cmdline-tools-latest
             build-tools-34-0-0
             platform-tools
-            emulator
             platforms-android-34
           ]);
 
@@ -48,10 +47,6 @@
           buildInputs = with pkgs;
             [ flutter dart pkg-config fish ]
             ++ [ pinnedJDK androidCustomPackage ];
-
-          ANDROID_HOME = "/home/gaz/Android/Sdk";
-          ANDROID_SDK_ROOT = "/home/gaz/Android/Sdk";
-          PATH = "/home/gaz/Android/Sdk/platform-tools:$PATH";
 
           JAVA_HOME = pinnedJDK;
           GRADLE_USER_HOME = "/home/gaz/.gradle";

@@ -135,11 +135,6 @@ class _MyAppState extends material.State<MyApp> {
       print('📨 Message notification received: $data');
       // Handle message notification - could navigate to specific chat
     });
-
-    _notificationService.callNotificationStream.listen((data) {
-      print('📞 Call notification received: $data');
-      // Handle call notification - could show incoming call screen
-    });
   }
 
   @override
