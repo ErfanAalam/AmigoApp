@@ -248,8 +248,42 @@ class CallService extends ChangeNotifier {
     }
   }
 
+  /// Restore call state from SharedPreferences
+  Future<void> restoreCallState(
+    int callId,
+    int callerId,
+    String callerName,
+    String? callerProfilePic,
+  ) async {
+    try {
+      print(
+        '[CALL] Restoring call state for callId: $callId, callerId: $callerId',
+      );
+
+      _activeCall = ActiveCallState(
+        callId: callId,
+        userId: callerId,
+        userName: callerName,
+        userProfilePic: callerProfilePic,
+        callType: CallType.incoming,
+        status: CallStatus.ringing,
+        startTime: DateTime.now(),
+      );
+
+      notifyListeners();
+      print('[CALL] Call state restored successfully');
+    } catch (e) {
+      print('[CALL] Error restoring call state: $e');
+    }
+  }
+
   /// Accept an incoming call
-  Future<void> acceptCall({int? callId}) async {
+  Future<void> acceptCall({
+    int? callId,
+    int? callerId,
+    String? callerName,
+    String? callerProfilePic,
+  }) async {
     try {
       print(
         "--------------------------------------------------------------------------------",
@@ -258,11 +292,28 @@ class CallService extends ChangeNotifier {
       print(
         "--------------------------------------------------------------------------------",
       );
+
+      // If _activeCall is null but we have callId, try to restore call state
+      if (_activeCall == null && callId != null) {
+        if (callerId != null && callerName != null) {
+          await restoreCallState(
+            callId,
+            callerId,
+            callerName,
+            callerProfilePic,
+          );
+        } else {
+          throw Exception(
+            'Cannot restore call state: missing caller information',
+          );
+        }
+      }
+
       if (_activeCall == null && callId == null) {
         throw Exception('No active call to accept');
       }
 
-      if (callId != null) {
+      if (callId != null && _activeCall != null) {
         print(
           "--------------------------------------------------------------------------------",
         );
@@ -310,6 +361,15 @@ class CallService extends ChangeNotifier {
       _activeCall = _activeCall!.copyWith(status: CallStatus.answered);
       // Start timer immediately when call is accepted
       _startCallTimer();
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('current_call_id');
+      await prefs.remove('current_caller_id');
+      await prefs.remove('current_caller_name');
+      await prefs.remove('current_caller_profile_pic');
+      await prefs.remove('call_status');
+      print('[CALL] Call data cleared from storage');
+
       notifyListeners();
     } catch (e) {
       print('[CALL] Error accepting call: $e');
@@ -342,6 +402,15 @@ class CallService extends ChangeNotifier {
       _callStartedTimer = null;
 
       await _cleanup();
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('current_call_id');
+      await prefs.remove('current_caller_id');
+      await prefs.remove('current_caller_name');
+      await prefs.remove('current_caller_profile_pic');
+      await prefs.remove('call_status');
+      print('[CALL] Call data cleared from storage');
+
       // notifyListeners();
     } catch (e) {
       print('[CALL] Error declining call: $e');
@@ -371,6 +440,14 @@ class CallService extends ChangeNotifier {
       } catch (e) {
         print('[CALL] Error stopping ringtone: $e');
       }
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('current_call_id');
+      await prefs.remove('current_caller_id');
+      await prefs.remove('current_caller_name');
+      await prefs.remove('current_caller_profile_pic');
+      await prefs.remove('call_status');
+      print('[CALL] Call data cleared from storage');
 
       await _cleanup();
     } catch (e) {
@@ -879,6 +956,14 @@ class CallService extends ChangeNotifier {
 
       // Disable wakelock
       WakelockPlus.disable();
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('current_call_id');
+      await prefs.remove('current_caller_id');
+      await prefs.remove('current_caller_name');
+      await prefs.remove('current_caller_profile_pic');
+      await prefs.remove('call_status');
+      print('[CALL] Call data cleared from storage');
 
       notifyListeners();
     } catch (e) {

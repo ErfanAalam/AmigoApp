@@ -52,6 +52,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
           'current_caller_id',
           event?.body['extra']['callerId'] ?? '',
         );
+        prefs.setString('current_caller_name', event?.body['extra']['callerName'] ?? '');
         
         // Stop background polling since call is accepted
         _stopBackgroundStatusPolling();

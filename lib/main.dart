@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart' as material;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/main_screen.dart';
 import 'screens/call/in_call_screen.dart';
@@ -156,6 +155,19 @@ class _MyAppState extends material.State<MyApp> {
           print(
             "--------------------------------------------------------------------------------",
           );
+
+          // Get caller information from storage
+          final callerId = prefs.getString('current_caller_id');
+          final callerName =
+              prefs.getString('current_caller_name') ?? 'Unknown';
+          final callerProfilePic = prefs.getString(
+            'current_caller_profile_pic',
+          );
+
+          print("callerId from storage -> $callerId");
+          print("callerName from storage -> $callerName");
+          print("callerProfilePic from storage -> $callerProfilePic");
+
           switch (callStatus) {
             case 'answered':
               print(
@@ -167,7 +179,12 @@ class _MyAppState extends material.State<MyApp> {
               );
               // Call was answered, proceed to accept
               await CallService().initialize();
-              await CallService().acceptCall(callId: int.parse(callId));
+              await CallService().acceptCall(
+                callId: int.parse(callId),
+                callerId: callerId != null ? int.parse(callerId) : null,
+                callerName: callerName,
+                callerProfilePic: callerProfilePic,
+              );
 
               // // Dispose all notifications from flutter_callkit_incoming
               // await FlutterCallkitIncoming.setCallConnected(callId);
