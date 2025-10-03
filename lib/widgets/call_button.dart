@@ -1,4 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_callkit_incoming/entities/android_params.dart';
+import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
+import 'package:flutter_callkit_incoming/entities/ios_params.dart';
+import 'package:flutter_callkit_incoming/entities/notification_params.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:provider/provider.dart';
 import '../services/call_service.dart';
 
@@ -54,6 +59,25 @@ class CallButton extends StatelessWidget {
   void _initiateCall(BuildContext context, CallService callService) async {
     try {
       await callService.initiateCall(userId, userName, userProfilePic);
+      // CallKitParams params = CallKitParams(
+      //   id: userId.toString(),
+      //   nameCaller: userName,
+      //   handle: '0123456789',
+      //   type: 0,
+      //   extra: <String, dynamic>{'userId': userId},
+      //   ios: IOSParams(handleType: 'generic'),
+      //   callingNotification: const NotificationParams(
+      //     showNotification: true,
+      //     isShowCallback: true,
+      //     subtitle: 'Calling...',
+      //     callbackText: 'Hang Up',
+      //   ),
+      //   android: const AndroidParams(
+      //     isCustomNotification: true,
+      //     isShowCallID: true,
+      //   ),
+      // );
+      // await FlutterCallkitIncoming.startCall(params);
 
       // Navigate to in-call screen
       if (context.mounted) {

@@ -157,27 +157,57 @@ class _GroupsPageState extends State<GroupsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        leadingWidth: 40, // Reduce leading width to minimize gap
-        leading: Padding(
-          padding: EdgeInsets.only(left: 16), // Add some left padding
-          child: Icon(Icons.group, color: Colors.white),
-        ),
-        titleSpacing: 8,
-        title: Text(
-          'Groups',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: Colors.teal,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: Icon(Icons.refresh, color: Colors.white),
-            onPressed: () {
-              _loadGroupsAndCommunities();
-            },
+      appBar: PreferredSize(
+        preferredSize: Size.fromHeight(60),
+        child: AppBar(
+          backgroundColor: Colors.teal,
+          leadingWidth: 60,
+          leading: Container(
+            margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
+            child: Container(
+              padding: EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha(40),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(Icons.groups_rounded, color: Colors.white, size: 24),
+            ),
           ),
-        ],
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Groups & Communities',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 20,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            Container(
+              margin: EdgeInsets.only(right: 16),
+              child: IconButton(
+                icon: Container(
+                  padding: EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(40),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.refresh_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+                onPressed: () => _loadGroupsAndCommunities(),
+              ),
+            ),
+          ],
+        ),
       ),
       body: Container(
         color: Colors.grey[50],

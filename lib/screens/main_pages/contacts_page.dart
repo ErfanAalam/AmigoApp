@@ -288,11 +288,10 @@ class _ContactsPageState extends State<ContactsPage>
         await _websocketService.sendMessage({
           'type': 'join_conversation',
           'conversation_id': conversationData['id'],
-          'data':{
-          'recipient_id':[ user.id],
-          }
+          'data': {
+            'recipient_id': [user.id],
+          },
         });
-
 
         Navigator.push(
           context,
@@ -348,12 +347,12 @@ class _ContactsPageState extends State<ContactsPage>
           userProfilePic: userInfo.profilePic,
         );
 
-         await _websocketService.sendMessage({
+        await _websocketService.sendMessage({
           'type': 'join_conversation',
           'conversation_id': conversationData['id'],
-          'data':{
-          'recipient_id': [userId],
-          }
+          'data': {
+            'recipient_id': [userId],
+          },
         });
 
         Navigator.push(
@@ -390,88 +389,87 @@ class _ContactsPageState extends State<ContactsPage>
         Scaffold(
           backgroundColor: Color(0xFFF8FAFB),
           appBar: PreferredSize(
-            preferredSize: Size.fromHeight(70),
-            child: Container(
-              child: AppBar(
-                backgroundColor: Colors.teal,
-                elevation: 0,
-                centerTitle: false,
-                leadingWidth: 60,
-                leading: Container(
-                  margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
+            preferredSize: Size.fromHeight(60),
+            child: AppBar(
+              backgroundColor: Colors.teal,
+              leadingWidth: 60,
+              leading: Container(
+                margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
+                child: Container(
+                  padding: EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
+                    color: Colors.white.withAlpha(40),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
-                    Icons.people_rounded,
+                    Icons.contacts_rounded,
                     color: Colors.white,
                     size: 24,
                   ),
                 ),
-                title: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Contacts',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 22,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    Text(
-                      _isLoading
-                          ? 'Loading...'
-                          : '${_availableUsers.length} contacts',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.9),
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-                actions: [
-                  Container(
-                    margin: EdgeInsets.only(right: 8),
-                    child: IconButton(
-                      icon: Container(
-                        padding: EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.search_rounded,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                      ),
-                      onPressed: _toggleSearch,
+              ),
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Contacts (${_availableUsers.length})',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 20,
+                      letterSpacing: 0.5,
                     ),
                   ),
-                  Container(
-                    margin: EdgeInsets.only(right: 16),
-                    child: IconButton(
-                      icon: Container(
-                        padding: EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.refresh_rounded,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                      ),
-                      onPressed: _loadContactsAndUsers,
-                    ),
-                  ),
+                  // Text(
+                  //   _isLoading
+                  //       ? 'Loading...'
+                  //       : '${_availableUsers.length} contacts',
+                  //   style: TextStyle(
+                  //     color: Colors.white.withOpacity(0.9),
+                  //     fontSize: 14,
+                  //     fontWeight: FontWeight.w500,
+                  //   ),
+                  // ),
                 ],
               ),
+              actions: [
+                Container(
+                  margin: EdgeInsets.only(right: 8),
+                  child: IconButton(
+                    icon: Container(
+                      padding: EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withAlpha(40),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.search_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    ),
+                    onPressed: _toggleSearch,
+                  ),
+                ),
+                Container(
+                  margin: EdgeInsets.only(right: 16),
+                  child: IconButton(
+                    icon: Container(
+                      padding: EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withAlpha(40),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.refresh_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    ),
+                    onPressed: _loadContactsAndUsers,
+                  ),
+                ),
+              ],
             ),
           ),
           floatingActionButton: Container(

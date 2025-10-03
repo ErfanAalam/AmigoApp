@@ -79,13 +79,13 @@ class _LoginScreenState extends material.State<LoginScreen> {
       setState(() {
         _isPhoneSubmitted = true;
       });
-    }else if (response['success'] == false && response['code'] == 404) {
+    } else if (response['success'] == false && response['code'] == 404) {
       material.ScaffoldMessenger.of(context).showSnackBar(
         const material.SnackBar(
           content: material.Text('Phone number not found! Please Signup First'),
         ),
       );
-    }  else {
+    } else {
       material.ScaffoldMessenger.of(context).showSnackBar(
         const material.SnackBar(content: material.Text('Failed to send OTP')),
       );
@@ -96,10 +96,10 @@ class _LoginScreenState extends material.State<LoginScreen> {
     try {
       // Initialize notification service if not already done
       await notificationService.initialize();
-      
+
       // Get the FCM token
       final fcmToken = notificationService.fcmToken;
-      
+
       if (fcmToken != null && fcmToken.isNotEmpty) {
         print('🔑 Sending FCM token to backend: $fcmToken');
         await apiService.updateFCMToken(fcmToken);
@@ -398,7 +398,7 @@ class _LoginScreenState extends material.State<LoginScreen> {
                                             child: material.Padding(
                                               padding:
                                                   const material.EdgeInsets.symmetric(
-                                                    horizontal: 6.0,
+                                                    horizontal: 10,
                                                     vertical: 0,
                                                   ),
                                               child: material.TextField(

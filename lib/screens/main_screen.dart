@@ -17,10 +17,11 @@ class _MainScreenState extends State<MainScreen> {
   final GlobalKey<ChatsPageState> _chatsPageKey = GlobalKey<ChatsPageState>();
   final GlobalKey<CallsPageState> _callsPageKey = GlobalKey<CallsPageState>();
 
-  // List of pages for bottom navigation
+  late final PageController _pageController;
+
+  // List of pages
   late final List<Widget> _pages;
 
-  // List of colors for each page
   final List<Color> _pageColors = [
     Colors.teal,
     Colors.teal,
@@ -32,7 +33,8 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
-    // Initialize pages with keys for ChatsPage and CallsPage
+    _pageController = PageController(initialPage: _currentPageIndex);
+
     _pages = [
       ChatsPage(key: _chatsPageKey),
       GroupsPage(),
@@ -41,7 +43,6 @@ class _MainScreenState extends State<MainScreen> {
       ProfilePage(),
     ];
 
-    // Trigger silent refresh for ChatsPage if it's the initial page
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_currentPageIndex == 0) {
         _chatsPageKey.currentState?.onPageVisible();
@@ -49,27 +50,49 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
+  void _onTabSelected(int index) {
+    setState(() {
+      _currentPageIndex = index;
+    });
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+
+    if (index == 0) {
+      _chatsPageKey.currentState?.onPageVisible();
+    } else if (index == 3) {
+      _callsPageKey.currentState?.onPageVisible();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _currentPageIndex, children: _pages),
-      bottomNavigationBar: NavigationBar(
-        onDestinationSelected: (int index) {
+      body: PageView(
+        controller: _pageController,
+        children: _pages,
+        onPageChanged: (index) {
           setState(() {
             _currentPageIndex = index;
           });
 
-          // If navigating to Chats tab (index 0), trigger silent refresh
           if (index == 0) {
             _chatsPageKey.currentState?.onPageVisible();
-          }
-          // If navigating to Calls tab (index 3), trigger silent refresh
-          else if (index == 3) {
+          } else if (index == 3) {
             _callsPageKey.currentState?.onPageVisible();
           }
         },
+      ),
+      bottomNavigationBar: NavigationBar(
+        onDestinationSelected: _onTabSelected,
         indicatorColor: _pageColors[_currentPageIndex].withValues(alpha: 0.2),
         selectedIndex: _currentPageIndex,
+        backgroundColor: Colors.grey[100],
+        labelTextStyle: WidgetStateProperty.all(
+          const TextStyle(fontSize: 12, color: Colors.black),
+        ),
         destinations: const <Widget>[
           NavigationDestination(
             selectedIcon: Icon(Icons.message, color: Colors.teal),

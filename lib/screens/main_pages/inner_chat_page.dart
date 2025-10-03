@@ -232,9 +232,6 @@ class _InnerChatPageState extends State<InnerChatPage>
         page: 1,
         limit: 50, // Get more messages to check for new ones
       );
-      print(
-        "------------------------------------------------------------\n response -> $response \n----------------------------------------------------------------",
-      );
 
       if (response['success'] == true && response['data'] != null) {
         final historyResponse = ConversationHistoryResponse.fromJson(
@@ -248,14 +245,6 @@ class _InnerChatPageState extends State<InnerChatPage>
         //   historyResponse.messages,
         //   membersData,
         // );
-
-        print(
-          "------------------------------------------------------------\n membersData -> $membersData \n----------------------------------------------------------------",
-        );
-
-        print(
-          "------------------------------------------------------------\n userLastReadMessageIds -> $userLastReadMessageIds \n----------------------------------------------------------------",
-        );
 
         final backendMessagesWithReadStatus = historyResponse.messages;
 
@@ -413,9 +402,6 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   /// Quick cache check and load for instant display
   Future<void> _tryLoadFromCacheFirst() async {
-    print(
-      "------------------------------------------------------------\n _hasCheckedCache -> $_hasCheckedCache \n----------------------------------------------------------------",
-    );
     if (_hasCheckedCache) return; // Avoid double-checking
 
     try {
@@ -888,15 +874,6 @@ class _InnerChatPageState extends State<InnerChatPage>
     final distanceFromTop = maxScrollExtent - scrollPosition;
 
     if (distanceFromTop <= 200) {
-      print(
-        "------------------------------------------------------------\n _isInitialized -> $_isInitialized \n----------------------------------------------------------------",
-      );
-      print(
-        "------------------------------------------------------------\n _hasMoreMessages -> $_hasMoreMessages \n----------------------------------------------------------------",
-      );
-      print(
-        "------------------------------------------------------------\n _isLoadingMore -> $_isLoadingMore \n----------------------------------------------------------------",
-      );
       if (!_isLoadingMore && _hasMoreMessages && _isInitialized) {
         debugPrint(
           '🔄 Triggering load more messages - Distance from top: $distanceFromTop',
@@ -910,21 +887,12 @@ class _InnerChatPageState extends State<InnerChatPage>
     try {
       final conversationId = widget.conversation.conversationId;
 
-      print(
-        "------------------------------------------------------------\n load int msg _hasCheckedCache -> $_hasCheckedCache \n----------------------------------------------------------------",
-      );
       // If we already have messages from cache, do smart sync
       if (_hasCheckedCache && _messages.isNotEmpty) {
-        print(
-          "------------------------------------------------------------\n found cached msgs, performing smart sync \n----------------------------------------------------------------",
-        );
         final cachedData = await _storageService.getCachedMessages(
           conversationId,
         );
         final lenn = cachedData?.messages.length;
-        print(
-          "------------------------------------------------------------\n init cachedData -> $lenn \n----------------------------------------------------------------",
-        );
 
         // Always check backend for new messages (but silently)
         await _performSmartSync(conversationId);
@@ -937,9 +905,6 @@ class _InnerChatPageState extends State<InnerChatPage>
           conversationId,
         );
         final lenn = cachedData?.messages.length;
-        print(
-          "------------------------------------------------------------\n init (else) cachedData -> $lenn \n----------------------------------------------------------------",
-        );
 
         if (cachedData != null && cachedData.messages.isNotEmpty) {
           debugPrint('📦 Found cache in fallback check');
@@ -1011,22 +976,12 @@ class _InnerChatPageState extends State<InnerChatPage>
           final membersData =
               response['data']['data']['members'] as List<dynamic>? ?? [];
 
-          print(
-            "------------------------------------------------------------\n membersData -> $membersData \n----------------------------------------------------------------",
-          );
-
-          print(
-            "------------------------------------------------------------\n userLastReadMessageIds -> $userLastReadMessageIds \n----------------------------------------------------------------",
-          );
           userLastReadMessageIds.addEntries(
             membersData.map((member) {
               final userId = member['user_id'] as int;
               final lastReadMessageId = member['last_read_message_id'] as int;
               return MapEntry(userId, lastReadMessageId);
             }),
-          );
-          print(
-            "------------------------------------------------------------\n userLastReadMessageIds -> $userLastReadMessageIds \n----------------------------------------------------------------",
           );
 
           // // Save to cache
@@ -2421,7 +2376,10 @@ class _InnerChatPageState extends State<InnerChatPage>
                 icon: const Icon(Icons.close, color: Colors.white),
                 onPressed: _exitSelectionMode,
               )
-            : null,
+            : IconButton(
+                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                onPressed: () => Navigator.pop(context),
+              ),
         title: _isSelectionMode
             ? Text(
                 '${_selectedMessages.length} selected',
@@ -5755,7 +5713,7 @@ class _InnerChatPageState extends State<InnerChatPage>
         if (_isReplying && _replyToMessageData != null) _buildReplyContainer(),
 
         Container(
-          padding: const EdgeInsets.all(4),
+          padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(color: Colors.white),
           child: Row(
             children: [
@@ -5769,7 +5727,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                 child: TextField(
                   controller: _messageController,
                   decoration: InputDecoration(
-                    hintText: 'Type a message...',
+                    hintText: 'Message',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(25),
                       borderSide: BorderSide.none,
@@ -7054,7 +7012,7 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   /// Initiate audio call
   Future<void> _initiateCall(BuildContext context) async {
-      print('Initiating call to 1 ${widget.conversation.userId}');
+    print('Initiating call to 1 ${widget.conversation.userId}');
     try {
       print('Initiating call to 2 ${widget.conversation.userId}');
       final callService = Provider.of<CallService>(context, listen: false);

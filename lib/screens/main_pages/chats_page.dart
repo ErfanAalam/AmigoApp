@@ -56,7 +56,6 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
     _setupWebSocketListener();
     _setupUserStatusListener();
     _loadChatPreferences();
-    
 
     // Setup search functionality
     _searchController.addListener(_onSearchChanged);
@@ -832,7 +831,9 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
 
   /// Called when the page becomes visible (when user navigates to Chats tab)
   void onPageVisible() {
-    debugPrint('📱 ChatsPage became visible - silently refreshing conversations');
+    debugPrint(
+      '📱 ChatsPage became visible - silently refreshing conversations',
+    );
     // Silently refresh conversations without showing loading state
     _loadConversationsSilently();
   }
@@ -842,7 +843,7 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
     try {
       debugPrint('🔄 Silently loading conversations...');
       final response = await _userService.GetChatList('dm');
-      
+
       if (response['success']) {
         final dynamic responseData = response['data'];
         List<dynamic> conversationsList = [];
@@ -865,9 +866,13 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
 
         if (conversationsList.isNotEmpty) {
           // Process data in background
-          final conversations = await _processConversationsAsync(conversationsList);
+          final conversations = await _processConversationsAsync(
+            conversationsList,
+          );
           // Filter out deleted conversations and sort
-          final filteredConversations = await _filterAndSortConversations(conversations);
+          final filteredConversations = await _filterAndSortConversations(
+            conversations,
+          );
 
           // Update the state silently (only if mounted and not already showing loading)
           if (mounted && _isLoaded) {
@@ -875,7 +880,9 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
               _conversations = filteredConversations;
               _filterConversations(); // Update filtered conversations
             });
-            debugPrint('✅ Silently updated ${filteredConversations.length} conversations');
+            debugPrint(
+              '✅ Silently updated ${filteredConversations.length} conversations',
+            );
           }
         }
       }
@@ -887,35 +894,63 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        leadingWidth: 40, // Reduce leading width to minimize gap
-        leading: Padding(
-          padding: EdgeInsets.only(left: 16), // Add some left padding
-          child: Icon(Icons.chat, color: Colors.white),
-        ),
-        titleSpacing: 8,
-        title: Text(
-          'Amigo Chats',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: Colors.teal,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: Icon(Icons.refresh, color: Colors.white),
-            onPressed: () {
-              _loadConversations();
-              // TODO: Implement search functionality
-            },
+      appBar: PreferredSize(
+        preferredSize: Size.fromHeight(60),
+        child: AppBar(
+          backgroundColor: Colors.teal,
+          leadingWidth: 60,
+          leading: Container(
+            margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
+            child: Container(
+              padding: EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha(40),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                Icons.chat_bubble_rounded,
+                color: Colors.white,
+                size: 24,
+              ),
+            ),
           ),
-          // IconButton(
-          //   icon: Icon(Icons.more_vert, color: Colors.white),
-          //   onPressed: () {
-          //     // TODO: Implement more options
-          //   },
-          // ),
-        ],
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Amigo chats',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 20,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            Container(
+              margin: EdgeInsets.only(right: 16),
+              child: IconButton(
+                icon: Container(
+                  padding: EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(40),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.refresh_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+                onPressed: () => _loadConversations(),
+              ),
+            ),
+          ],
+        ),
       ),
+
       body: Container(
         color: Colors.grey[50],
         child: Column(

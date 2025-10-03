@@ -72,6 +72,7 @@ class _MyAppState extends material.State<MyApp> {
   @override
   void initState() {
     super.initState();
+    _requestPermissions();
     _checkAuthentication();
     _setupWebSocketListeners();
   }
@@ -224,6 +225,19 @@ class _MyAppState extends material.State<MyApp> {
               break;
           }
 
+          // Request notification permission for callkit incoming
+          await FlutterCallkitIncoming.requestNotificationPermission({
+            "title": "Notification permission",
+            "rationaleMessagePermission":
+                "Notification permission is required, to show notification.",
+            "postNotificationMessageRequired":
+                "Notification permission is required, Please allow notification permission from setting.",
+          });
+          // Check if can use full screen intent
+          await FlutterCallkitIncoming.canUseFullScreenIntent();
+          // Request full intent permission
+          await FlutterCallkitIncoming.requestFullIntentPermission();
+
           // clean up after use
           // prefs.remove('current_call_id');
           // prefs.remove('current_caller_id');
@@ -269,6 +283,21 @@ class _MyAppState extends material.State<MyApp> {
       // Handle message notification - could navigate to specific chat
       _handleNotificationNavigation(data);
     });
+  }
+
+  Future<void> _requestPermissions() async {
+    // Request notification permission for callkit incoming
+    await FlutterCallkitIncoming.requestNotificationPermission({
+      "title": "Notification permission",
+      "rationaleMessagePermission":
+          "Notification permission is required, to show notification.",
+      "postNotificationMessageRequired":
+          "Notification permission is required, Please allow notification permission from setting.",
+    });
+    // Check if can use full screen intent
+    await FlutterCallkitIncoming.canUseFullScreenIntent();
+    // Request full intent permission
+    await FlutterCallkitIncoming.requestFullIntentPermission();
   }
 
   /// Handle navigation from notification tap

@@ -37,7 +37,8 @@ class _ProfilePageState extends State<ProfilePage> {
     super.initState();
     _loadUserData();
     _loadDeletedChatsCount();
-    _checkPermissions();
+    // _checkPermissions();
+    _requestPermissions();
   }
 
   Future<void> _loadDeletedChatsCount() async {
@@ -229,244 +230,245 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Future<void> _checkPermissions() async {
-    await _checkContactsPermission();
-    await _checkLocationPermission();
+  // Future<void> _checkPermissions() async {
+  //   await _checkContactsPermission();
+  //   await _checkLocationPermission();
+  // }
+
+  // Future<void> _checkContactsPermission() async {
+  //   try {
+  //     final status = await Permission.contacts.status;
+  //
+  //     // if (status.isDenied || status.isPermanentlyDenied) {
+  //     //   _showContactsPermissionDialog();
+  //     // } else if (status.isGranted) {
+  //     //   // Permission is granted, do nothing
+  //     //   debugPrint('✅ Contacts permission already granted');
+  //     // }
+  //   } catch (e) {
+  //     debugPrint('❌ Error checking contacts permission: $e');
+  //   }
+  // }
+
+  // Future<void> _checkLocationPermission() async {
+  //   try {
+  //     final status = await Permission.location.status;
+  //
+  //     // if (status.isDenied || status.isPermanentlyDenied) {
+  //     //   _showLocationPermissionDialog();
+  //     // } else if (status.isGranted) {
+  //     //   // Permission is granted, do nothing
+  //     //
+  //     //   await _apiService.updateUserLocationAndIp();
+  //     //   debugPrint('✅ Location permission already granted');
+  //     // }
+  //   } catch (e) {
+  //     debugPrint('❌ Error checking location permission: $e');
+  //   }
+  // }
+
+  // void _showContactsPermissionDialog() {
+  //   showDialog(
+  //     context: context,
+  //     barrierDismissible: false,
+  //     builder: (context) => AlertDialog(
+  //       title: Row(
+  //         children: [
+  //           Icon(Icons.contacts, color: Colors.teal),
+  //           SizedBox(width: 8),
+  //           Text(
+  //             'Contacts Permission Required',
+  //             style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
+  //           ),
+  //         ],
+  //       ),
+  //       content: Column(
+  //         mainAxisSize: MainAxisSize.min,
+  //         crossAxisAlignment: CrossAxisAlignment.start,
+  //         children: [
+  //           Text(
+  //             'Amigo needs access to your contacts to:',
+  //             style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
+  //           ),
+  //           SizedBox(height: 8),
+  //           Text('• Find friends who are already using Amigo'),
+  //           Text('• Sync your contact list for better connectivity'),
+  //           Text('• Enable seamless communication features'),
+  //           SizedBox(height: 12),
+  //           Text(
+  //             'This permission is essential for the app to function properly.',
+  //             style: TextStyle(
+  //               fontStyle: FontStyle.italic,
+  //               color: Colors.grey[600],
+  //             ),
+  //           ),
+  //         ],
+  //       ),
+  //       actions: [
+  //         TextButton(
+  //           onPressed: () => Navigator.pop(context),
+  //           child: Text('Not Now'),
+  //         ),
+  //         ElevatedButton(
+  //           onPressed: () async {
+  //             Navigator.pop(context);
+  //             await _requestContactsPermission();
+  //           },
+  //           style: ElevatedButton.styleFrom(
+  //             backgroundColor: Colors.teal,
+  //             foregroundColor: Colors.white,
+  //           ),
+  //           child: Text('Grant Permission'),
+  //         ),
+  //       ],
+  //     ),
+  //   );
+  // }
+
+  // void _showLocationPermissionDialog() {
+  //   showDialog(
+  //     context: context,
+  //     barrierDismissible: false,
+  //     builder: (context) => AlertDialog(
+  //       title: Row(
+  //         children: [
+  //           Icon(Icons.location_on, color: Colors.teal),
+  //           SizedBox(width: 8),
+  //           Text(
+  //             'Location Permission Required',
+  //             style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
+  //           ),
+  //         ],
+  //       ),
+  //       content: Column(
+  //         mainAxisSize: MainAxisSize.min,
+  //         crossAxisAlignment: CrossAxisAlignment.start,
+  //         children: [
+  //           Text(
+  //             'Amigo needs access to your location to:',
+  //             style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
+  //           ),
+  //           SizedBox(height: 8),
+  //           Text('• Find nearby friends and communities'),
+  //           Text('• Enable location-based features'),
+  //           Text('• Provide better user experience'),
+  //           SizedBox(height: 12),
+  //           Text(
+  //             'This permission is essential for the app to function properly.',
+  //             style: TextStyle(
+  //               fontStyle: FontStyle.italic,
+  //               color: Colors.grey[600],
+  //             ),
+  //           ),
+  //         ],
+  //       ),
+  //       actions: [
+  //         TextButton(
+  //           onPressed: () => Navigator.pop(context),
+  //           child: Text('Not Now'),
+  //         ),
+  //         ElevatedButton(
+  //           onPressed: () async {
+  //             Navigator.pop(context);
+  //             await _requestLocationPermission();
+  //             await _apiService.updateUserLocationAndIp();
+  //           },
+  //           style: ElevatedButton.styleFrom(
+  //             backgroundColor: Colors.teal,
+  //             foregroundColor: Colors.white,
+  //           ),
+  //           child: Text('Grant Permission'),
+  //         ),
+  //       ],
+  //     ),
+  //   );
+  // }
+
+  Future<void> _requestPermissions() async {
+    // try {
+    await Permission.contacts.request();
+    await Permission.location.request();
+
+    // if (status.isGranted) {
+    //   _showSuccessSnackBar('Contacts permission granted!');
+    //   debugPrint('✅ Contacts permission granted');
+    // } else if (status.isPermanentlyDenied) {
+    //   _showPermissionDeniedDialog(
+    //     'Contacts Permission Denied',
+    //     'Contacts permission has been permanently denied. Please enable it manually in app settings.',
+    //     Permission.contacts,
+    //   );
+    // } else {
+    //   _showErrorSnackBar('Contacts permission denied');
+    // }
+    // } catch (e) {
+    //   debugPrint('❌ Error requesting contacts permission: $e');
+    //   _showErrorSnackBar('Failed to request contacts permission');
+    // }
   }
 
-  Future<void> _checkContactsPermission() async {
-    try {
-      final status = await Permission.contacts.status;
+  // Future<void> _requestLocationPermission() async {
+  //   try {
+  //     final status = await Permission.location.request();
+  //
+  //     // if (status.isGranted) {
+  //     //   _showSuccessSnackBar('Location permission granted!');
+  //     //   debugPrint('✅ Location permission granted');
+  //     // } else if (status.isPermanentlyDenied) {
+  //     //   _showPermissionDeniedDialog(
+  //     //     'Location Permission Denied',
+  //     //     'Location permission has been permanently denied. Please enable it manually in app settings.',
+  //     //     Permission.location,
+  //     //   );
+  //     // } else {
+  //     //   _showErrorSnackBar('Location permission denied');
+  //     // }
+  //   } catch (e) {
+  //     debugPrint('❌ Error requesting location permission: $e');
+  //     _showErrorSnackBar('Failed to request location permission');
+  //   }
+  // }
 
-      if (status.isDenied || status.isPermanentlyDenied) {
-        _showContactsPermissionDialog();
-      } else if (status.isGranted) {
-        // Permission is granted, do nothing
-        debugPrint('✅ Contacts permission already granted');
-      }
-    } catch (e) {
-      debugPrint('❌ Error checking contacts permission: $e');
-    }
-  }
+  // void _showPermissionDeniedDialog(
+  //   String title,
+  //   String message,
+  //   Permission permission,
+  // ) {
+  //   showDialog(
+  //     context: context,
+  //     builder: (context) => AlertDialog(
+  //       title: Text(title),
+  //       content: Text(message),
+  //       actions: [
+  //         TextButton(
+  //           onPressed: () => Navigator.pop(context),
+  //           child: Text('Cancel'),
+  //         ),
+  //         ElevatedButton(
+  //           onPressed: () async {
+  //             Navigator.pop(context);
+  //             await openAppSettings();
+  //           },
+  //           style: ElevatedButton.styleFrom(
+  //             backgroundColor: Colors.teal,
+  //             foregroundColor: Colors.white,
+  //           ),
+  //           child: Text('Open Settings'),
+  //         ),
+  //       ],
+  //     ),
+  //   );
+  // }
 
-  Future<void> _checkLocationPermission() async {
-    try {
-      final status = await Permission.location.status;
-
-      if (status.isDenied || status.isPermanentlyDenied) {
-        _showLocationPermissionDialog();
-      } else if (status.isGranted) {
-        // Permission is granted, do nothing
-
-        await _apiService.updateUserLocationAndIp();
-        debugPrint('✅ Location permission already granted');
-      }
-    } catch (e) {
-      debugPrint('❌ Error checking location permission: $e');
-    }
-  }
-
-  void _showContactsPermissionDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.contacts, color: Colors.teal),
-            SizedBox(width: 8),
-            Text(
-              'Contacts Permission Required',
-              style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Amigo needs access to your contacts to:',
-              style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
-            ),
-            SizedBox(height: 8),
-            Text('• Find friends who are already using Amigo'),
-            Text('• Sync your contact list for better connectivity'),
-            Text('• Enable seamless communication features'),
-            SizedBox(height: 12),
-            Text(
-              'This permission is essential for the app to function properly.',
-              style: TextStyle(
-                fontStyle: FontStyle.italic,
-                color: Colors.grey[600],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Not Now'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await _requestContactsPermission();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.teal,
-              foregroundColor: Colors.white,
-            ),
-            child: Text('Grant Permission'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showLocationPermissionDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.location_on, color: Colors.teal),
-            SizedBox(width: 8),
-            Text(
-              'Location Permission Required',
-              style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Amigo needs access to your location to:',
-              style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
-            ),
-            SizedBox(height: 8),
-            Text('• Find nearby friends and communities'),
-            Text('• Enable location-based features'),
-            Text('• Provide better user experience'),
-            SizedBox(height: 12),
-            Text(
-              'This permission is essential for the app to function properly.',
-              style: TextStyle(
-                fontStyle: FontStyle.italic,
-                color: Colors.grey[600],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Not Now'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await _requestLocationPermission();
-              await _apiService.updateUserLocationAndIp();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.teal,
-              foregroundColor: Colors.white,
-            ),
-            child: Text('Grant Permission'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _requestContactsPermission() async {
-    try {
-      final status = await Permission.contacts.request();
-
-      if (status.isGranted) {
-        _showSuccessSnackBar('Contacts permission granted!');
-        debugPrint('✅ Contacts permission granted');
-      } else if (status.isPermanentlyDenied) {
-        _showPermissionDeniedDialog(
-          'Contacts Permission Denied',
-          'Contacts permission has been permanently denied. Please enable it manually in app settings.',
-          Permission.contacts,
-        );
-      } else {
-        _showErrorSnackBar('Contacts permission denied');
-      }
-    } catch (e) {
-      debugPrint('❌ Error requesting contacts permission: $e');
-      _showErrorSnackBar('Failed to request contacts permission');
-    }
-  }
-
-  Future<void> _requestLocationPermission() async {
-    try {
-      final status = await Permission.location.request();
-
-      if (status.isGranted) {
-        _showSuccessSnackBar('Location permission granted!');
-        debugPrint('✅ Location permission granted');
-      } else if (status.isPermanentlyDenied) {
-        _showPermissionDeniedDialog(
-          'Location Permission Denied',
-          'Location permission has been permanently denied. Please enable it manually in app settings.',
-          Permission.location,
-        );
-      } else {
-        _showErrorSnackBar('Location permission denied');
-      }
-    } catch (e) {
-      debugPrint('❌ Error requesting location permission: $e');
-      _showErrorSnackBar('Failed to request location permission');
-    }
-  }
-
-  void _showPermissionDeniedDialog(
-    String title,
-    String message,
-    Permission permission,
-  ) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await openAppSettings();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.teal,
-              foregroundColor: Colors.white,
-            ),
-            child: Text('Open Settings'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showSuccessSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
+  // void _showSuccessSnackBar(String message) {
+  //   ScaffoldMessenger.of(context).showSnackBar(
+  //     SnackBar(
+  //       content: Text(message),
+  //       backgroundColor: Colors.green,
+  //       behavior: SnackBarBehavior.floating,
+  //     ),
+  //   );
+  // }
 
   Widget _buildInfoSection({
     required String title,
@@ -544,35 +546,82 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        leadingWidth: 40, // Reduce leading width to minimize gap
-        leading: Padding(
-          padding: EdgeInsets.only(left: 16), // Add some left padding
-          child: Icon(Icons.person, color: Colors.white),
-        ),
-        titleSpacing: 8,
-        title: Text(
-          'Profile',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: Colors.teal,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: Icon(Icons.refresh, color: Colors.white),
-            onPressed: () {
-              setState(() {
-                isLoading = true;
-              });
-              _loadUserData();
-            },
+      appBar: PreferredSize(
+        preferredSize: Size.fromHeight(60),
+        child: AppBar(
+          backgroundColor: Colors.teal,
+          leadingWidth: 60,
+          leading: Container(
+            margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
+            child: Container(
+              padding: EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha(40),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(Icons.person_rounded, color: Colors.white, size: 24),
+            ),
           ),
-          IconButton(
-            icon: Icon(Icons.edit, color: Colors.white),
-            onPressed: _showEditProfileModal,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Profile',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 20,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
           ),
-        ],
+          actions: [
+            Container(
+              margin: EdgeInsets.only(right: 16),
+              child: IconButton(
+                icon: Container(
+                  padding: EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(40),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.refresh_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+                onPressed: () {
+                  setState(() {
+                    isLoading = true;
+                  });
+                  _loadUserData();
+                },
+              ),
+            ),
+            Container(
+              margin: EdgeInsets.only(right: 16),
+              child: IconButton(
+                icon: Container(
+                  padding: EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(40),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.edit_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+                onPressed: _showEditProfileModal,
+              ),
+            ),
+          ],
+        ),
       ),
+
       body: Container(
         color: Colors.grey[50],
         child: SingleChildScrollView(

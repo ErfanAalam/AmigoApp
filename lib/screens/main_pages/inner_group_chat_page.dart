@@ -61,7 +61,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   bool _isCheckingCache = true;
   bool _isTyping = false;
   // bool _isOtherTyping = false;
-   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
 
   // For optimistic message handling
   StreamSubscription<Map<String, dynamic>>? _websocketSubscription;
@@ -2045,7 +2045,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     // Cancel any existing timeout
     _typingTimeout?.cancel();
 
-      _isOtherTypingNotifier.value = isTyping;
+    _isOtherTypingNotifier.value = isTyping;
 
     // Control the typing animation
     if (isTyping) {
@@ -2054,7 +2054,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       // Set a safety timeout to hide typing indicator after 5 seconds
       _typingTimeout = Timer(const Duration(seconds: 2), () {
         if (mounted) {
-            _isOtherTypingNotifier.value = false;
+          _isOtherTypingNotifier.value = false;
           _typingAnimationController.stop();
           _typingAnimationController.reset();
         }
@@ -2107,7 +2107,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                 icon: const Icon(Icons.close, color: Colors.white),
                 onPressed: _exitSelectionMode,
               )
-            : null,
+            : IconButton(
+                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                onPressed: () => Navigator.pop(context),
+              ),
         title: _isSelectionMode
             ? Text(
                 '${_selectedMessages.length} selected',
@@ -3112,7 +3115,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           _buildTimeRestrictionNotice(),
 
         // Typing indicator
-       ValueListenableBuilder<bool>(
+        ValueListenableBuilder<bool>(
           valueListenable: _isOtherTypingNotifier,
           builder: (context, isOtherTyping, child) {
             return isOtherTyping
@@ -3125,7 +3128,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         if (_isReplying && _replyToMessageData != null) _buildReplyContainer(),
 
         Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(color: Colors.white),
           child: Row(
             children: [
@@ -3149,7 +3152,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                   decoration: InputDecoration(
                     hintText: shouldDisableSending
                         ? 'Messaging is disabled outside active hours'
-                        : 'Type a message...',
+                        : 'Message',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(25),
                       borderSide: BorderSide.none,

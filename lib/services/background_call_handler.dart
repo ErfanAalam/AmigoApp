@@ -254,7 +254,6 @@ Future<void> _handleBackgroundCallNotification(
         actionColor: '#36b554',
         textColor: '#ffffff',
         isShowFullLockedScreen: true,
-        
       ),
       ios: const IOSParams(
         iconName: 'CallKitLogo',
@@ -275,6 +274,7 @@ Future<void> _handleBackgroundCallNotification(
     );
 
     await FlutterCallkitIncoming.showCallkitIncoming(params);
+    // await FlutterCallkitIncoming.showMissCallNotification(params);
     print('📞 CallKit notification shown in background for call: $callId');
 
     // Start polling for call status after showing CallKit notification

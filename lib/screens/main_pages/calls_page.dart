@@ -114,31 +114,60 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
 
     return Scaffold(
       backgroundColor: Color(0xFFF8FAFB),
-      appBar: AppBar(
-        leadingWidth: 40, // Reduce leading width to minimize gap
-        leading: Padding(
-          padding: EdgeInsets.only(left: 16), // Add some left padding
-          child: Icon(Icons.call, color: Colors.white),
-        ),
-        titleSpacing: 8,
-        title: const Text(
-          'Calls',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 22,
-            fontWeight: FontWeight.w600,
+
+      appBar: PreferredSize(
+        preferredSize: Size.fromHeight(60),
+        child: AppBar(
+          backgroundColor: Colors.teal,
+          leadingWidth: 60,
+          leading: Container(
+            margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
+            child: Container(
+              padding: EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha(40),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(Icons.call_rounded, color: Colors.white, size: 24),
+            ),
           ),
-        ),
-        backgroundColor: Colors.teal,
-        elevation: 0,
-        automaticallyImplyLeading: false,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white),
-            onPressed: _loadCallHistory,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Call history',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 20,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
           ),
-        ],
+          actions: [
+            Container(
+              margin: EdgeInsets.only(right: 16),
+              child: IconButton(
+                icon: Container(
+                  padding: EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(40),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.refresh_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+                onPressed: _loadCallHistory,
+              ),
+            ),
+          ],
+        ),
       ),
+
       body: RefreshIndicator(onRefresh: _loadCallHistory, child: _buildBody()),
     );
   }
@@ -208,6 +237,8 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
 
   Widget _buildCallHistoryItem(CallHistoryItem call) {
     return Card(
+      color: Colors.white,
+      shadowColor: Colors.grey.withAlpha(20),
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: ListTile(
         leading: CircleAvatar(
@@ -273,11 +304,11 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
   IconData _getCallIcon(CallHistoryItem call) {
     switch (call.status) {
       case CallStatus.answered:
-        return Icons.call;
+        return Icons.call_rounded;
       case CallStatus.missed:
-        return Icons.call_missed;
+        return Icons.call_missed_rounded;
       case CallStatus.declined:
-        return Icons.call_end;
+        return Icons.call_end_rounded;
       default:
         return Icons.call_outlined;
     }
