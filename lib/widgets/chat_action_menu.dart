@@ -20,12 +20,13 @@ class ChatActionMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      padding: EdgeInsets.only(bottom: 27),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withAlpha(10),
             blurRadius: 10,
             offset: Offset(0, 5),
           ),
@@ -38,7 +39,7 @@ class ChatActionMenu extends StatelessWidget {
           Container(
             padding: EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.teal.withOpacity(0.1),
+              color: Colors.teal.withAlpha(10),
               borderRadius: BorderRadius.only(
                 topLeft: Radius.circular(12),
                 topRight: Radius.circular(12),
@@ -153,15 +154,15 @@ class ChatActionMenu extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 12),
         child: Row(
           children: [
             Container(
               padding: EdgeInsets.all(8),
               decoration: BoxDecoration(
                 color: isDestructive
-                    ? Colors.red.withOpacity(0.1)
-                    : color.withOpacity(0.1),
+                    ? Colors.red.withAlpha(10)
+                    : color.withAlpha(10),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(
@@ -232,7 +233,7 @@ class ChatActionBottomSheet {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        margin: EdgeInsets.all(16),
+        margin: EdgeInsets.only(left: 0, right: 0, top: 16, bottom: 40),
         child: ChatActionMenu(
           conversation: conversation,
           isPinned: isPinned,

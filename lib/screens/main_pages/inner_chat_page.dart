@@ -2241,7 +2241,7 @@ class _InnerChatPageState extends State<InnerChatPage>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to send message: $error'),
-          backgroundColor: Colors.red,
+          backgroundColor: Colors.teal,
           action: SnackBarAction(
             label: 'Retry',
             textColor: Colors.white,
@@ -2270,7 +2270,7 @@ class _InnerChatPageState extends State<InnerChatPage>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(error),
-          backgroundColor: Colors.red,
+          backgroundColor: Colors.teal,
           duration: const Duration(seconds: 4),
         ),
       );
@@ -4253,7 +4253,7 @@ class _InnerChatPageState extends State<InnerChatPage>
           ),
           // Action buttons
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
             child: Column(
               children: [
                 _buildActionButton(
