@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart' as material;
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/main_screen.dart';
 import 'screens/call/in_call_screen.dart';
 import 'screens/call/incoming_call_screen.dart';
+import 'screens/main_pages/inner_chat_page.dart';
 import 'services/auth_service.dart';
 import 'services/cookie_service.dart';
 import 'services/websocket_service.dart';
@@ -16,6 +18,7 @@ import 'widgets/call_manager.dart';
 import 'api/api_service.dart';
 import 'utils/navigation_helper.dart';
 import 'utils/ringing_tone.dart';
+import 'models/conversation_model.dart';
 
 void main() async {
   material.WidgetsFlutterBinding.ensureInitialized();
@@ -95,6 +98,7 @@ class _MyAppState extends material.State<MyApp> {
         // await _apiService.updateUserLocationAndIp();
         // Wait a bit for WebSocket to establish connection
         await Future.delayed(const Duration(milliseconds: 500));
+        FlutterCallkitIncoming.requestFullIntentPermission();
 
         print('✅ WebSocket connection established in main.dart');
 
@@ -263,7 +267,71 @@ class _MyAppState extends material.State<MyApp> {
     _notificationService.messageNotificationStream.listen((data) {
       print('📨 Message notification received: $data');
       // Handle message notification - could navigate to specific chat
+      _handleNotificationNavigation(data);
     });
+  }
+
+  /// Handle navigation from notification tap
+  void _handleNotificationNavigation(Map<String, dynamic> data) {
+    // Add a delay to ensure the app is fully loaded before navigating
+    Future.delayed(const Duration(milliseconds: 3000), () {
+      try {
+        // Parse string values to integers
+        final conversationIdStr = data['conversationId'] as String?;
+        final senderIdStr = data['senderId'] as String?;
+        final senderName = data['senderName'] as String?;
+
+        if (conversationIdStr == null ||
+            senderIdStr == null ||
+            senderName == null) {
+          print(
+            '❌ Missing required data for navigation: conversationId=$conversationIdStr, senderId=$senderIdStr, senderName=$senderName',
+          );
+          return;
+        }
+
+        // Convert string IDs to integers
+        final conversationId = int.tryParse(conversationIdStr);
+        final senderId = int.tryParse(senderIdStr);
+
+        if (conversationId == null || senderId == null) {
+          print(
+            '❌ Invalid ID format: conversationId=$conversationIdStr, senderId=$senderIdStr',
+          );
+          return;
+        }
+
+        print(
+          '🚀 Navigating to chat from notification: conversationId=$conversationId, senderName=$senderName',
+        );
+
+        // Create a conversation model from the notification data
+        final conversation = ConversationModel(
+          conversationId: conversationId,
+          type: 'dm',
+          unreadCount: 0,
+          joinedAt: DateTime.now().toIso8601String(),
+          userId: senderId,
+          userName: senderName,
+          userProfilePic: data['senderProfilePic'] as String?,
+          isOnline: null,
+        );
+
+        // Wait for navigator to be available before navigating
+        _waitForNavigatorAndNavigate(conversation);
+      } catch (e) {
+        print('❌ Error navigating to chat from notification: $e');
+      }
+    });
+  }
+
+  /// Wait for navigator to be available and then navigate
+  void _waitForNavigatorAndNavigate(ConversationModel conversation) {
+    NavigationHelper.pushRouteWithRetry(
+      InnerChatPage(conversation: conversation),
+      maxRetries: 15,
+      retryDelay: const Duration(milliseconds: 500),
+    );
   }
 
   @override

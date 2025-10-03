@@ -4,10 +4,12 @@ import 'dart:io';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:amigo/api/api_service.dart';
+import '../models/conversation_model.dart';
+import '../screens/main_pages/inner_chat_page.dart';
+import '../utils/navigation_helper.dart';
 import 'background_call_handler.dart';
 // import 'package:amigo/firebase_options.dart';
 
@@ -159,6 +161,7 @@ class NotificationService {
     // Handle notification taps when app is terminated
     _firebaseMessaging!.getInitialMessage().then((message) {
       if (message != null) {
+        print('📱 App launched from terminated state via notification');
         _handleNotificationTap(message);
       }
     });
@@ -185,11 +188,16 @@ class NotificationService {
 
     final data = message.data;
 
+    print('-------------------------------------------------------');
+    print(data);
+    print('-------------------------------------------------------');
     if (data['type'] == 'message') {
       _messageNotificationController.add(data);
+
+      // Navigate to specific chat if app is running
+      _navigateToChatFromNotification(data);
     }
   }
-
 
   /// Handle message notifications
   void _handleMessageNotification(
@@ -206,7 +214,6 @@ class NotificationService {
     // Emit to stream
     _messageNotificationController.add(data);
   }
-
 
   /// Show message notification
   Future<void> showMessageNotification({
@@ -289,7 +296,6 @@ class NotificationService {
     }
   }
 
-
   /// Handle message notification actions
   void _handleMessageNotificationAction(
     String? actionId,
@@ -299,6 +305,69 @@ class NotificationService {
 
     // For message notifications, we just emit to the stream
     _messageNotificationController.add({...data, 'action': actionId ?? 'tap'});
+
+    // Navigate to specific chat
+    _navigateToChatFromNotification(data);
+  }
+
+  /// Navigate to specific chat from notification data
+  void _navigateToChatFromNotification(Map<String, dynamic> data) {
+    try {
+      // Parse string values to integers
+      final conversationIdStr = data['conversationId'] as String?;
+      final senderIdStr = data['senderId'] as String?;
+      final senderName = data['senderName'] as String?;
+
+      if (conversationIdStr == null ||
+          senderIdStr == null ||
+          senderName == null) {
+        print(
+          '❌ Missing required data for navigation: conversationId=$conversationIdStr, senderId=$senderIdStr, senderName=$senderName',
+        );
+        return;
+      }
+
+      // Convert string IDs to integers
+      final conversationId = int.tryParse(conversationIdStr);
+      final senderId = int.tryParse(senderIdStr);
+
+      if (conversationId == null || senderId == null) {
+        print(
+          '❌ Invalid ID format: conversationId=$conversationIdStr, senderId=$senderIdStr',
+        );
+        return;
+      }
+
+      print(
+        '🚀 Navigating to chat: conversationId=$conversationId, senderName=$senderName',
+      );
+
+      // Create a conversation model from the notification data
+      final conversation = ConversationModel(
+        conversationId: conversationId,
+        type: 'dm',
+        unreadCount: 0,
+        joinedAt: DateTime.now().toIso8601String(),
+        userId: senderId,
+        userName: senderName,
+        userProfilePic: data['senderProfilePic'] as String?,
+        isOnline: null,
+      );
+
+      // Wait for navigator to be available before navigating
+      _waitForNavigatorAndNavigate(conversation);
+    } catch (e) {
+      print('❌ Error navigating to chat from notification: $e');
+    }
+  }
+
+  /// Wait for navigator to be available and then navigate
+  void _waitForNavigatorAndNavigate(ConversationModel conversation) {
+    NavigationHelper.pushRouteWithRetry(
+      InnerChatPage(conversation: conversation),
+      maxRetries: 15,
+      retryDelay: const Duration(milliseconds: 500),
+    );
   }
 
   /// Send FCM token to backend
@@ -342,7 +411,7 @@ class NotificationService {
           priority: Priority.high,
           playSound: false, // No sound for updates
           enableVibration: false,
-          fullScreenIntent: false,
+          fullScreenIntent: true,
           category: AndroidNotificationCategory.call,
           ongoing: false,
           autoCancel: true,
@@ -387,4 +456,3 @@ class NotificationService {
     _messageNotificationController.close();
   }
 }
-

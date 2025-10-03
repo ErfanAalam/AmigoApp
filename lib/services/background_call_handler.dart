@@ -52,11 +52,14 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
           'current_caller_id',
           event?.body['extra']['callerId'] ?? '',
         );
-        prefs.setString('current_caller_name', event?.body['extra']['callerName'] ?? '');
-        
+        prefs.setString(
+          'current_caller_name',
+          event?.body['extra']['callerName'] ?? '',
+        );
+
         // Stop background polling since call is accepted
         _stopBackgroundStatusPolling();
-        
+
         print(
           "--------------------------------------------------------------------------------",
         );
@@ -87,7 +90,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
           'current_caller_id',
           event?.body['extra']['callerId'] ?? '',
         );
-        
+
         // Stop background polling since call is declined
         _stopBackgroundStatusPolling();
 
@@ -125,7 +128,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         print(
           "--------------------------------------------------------------------------------",
         );
-        
+
         // Stop background polling since call is ended
         _stopBackgroundStatusPolling();
 
@@ -138,7 +141,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
           'current_caller_id',
           event?.body['extra']['callerId'] ?? '',
         );
-        
+
         // Stop background polling since call timed out
         _stopBackgroundStatusPolling();
 
@@ -189,10 +192,10 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     print(
       '--------------------------------------------------------------------------------',
     );
-    
+
     // Stop background polling since call is ended via FCM
     _stopBackgroundStatusPolling();
-    
+
     // 1. End call notification (system UI)
     await FlutterCallkitIncoming.endCall(callId);
     await FlutterCallkitIncoming.endAllCalls();
@@ -250,6 +253,8 @@ Future<void> _handleBackgroundCallNotification(
         backgroundUrl: 'assets/images/call_bg_dark.png',
         actionColor: '#36b554',
         textColor: '#ffffff',
+        isShowFullLockedScreen: true,
+        
       ),
       ios: const IOSParams(
         iconName: 'CallKitLogo',
@@ -271,7 +276,7 @@ Future<void> _handleBackgroundCallNotification(
 
     await FlutterCallkitIncoming.showCallkitIncoming(params);
     print('📞 CallKit notification shown in background for call: $callId');
-    
+
     // Start polling for call status after showing CallKit notification
     _startBackgroundStatusPolling(int.parse(callId));
   } catch (e) {
@@ -286,7 +291,7 @@ Future<Map<String, dynamic>?> _fetchBackgroundCallStatus(int callId) async {
     final response = await dio.get(
       '${Environment.baseUrl}/call/status/$callId',
     );
-    
+
     if (response.statusCode == 200) {
       return response.data;
     } else {
@@ -304,47 +309,55 @@ void _startBackgroundStatusPolling(int callId) {
   if (_backgroundPollingTimer != null) {
     _backgroundPollingTimer?.cancel();
   }
-  
+
   _backgroundPollingCallId = callId;
   print('[BACKGROUND] Starting status polling for call: $callId');
-  
+
   int pollCount = 0;
   const maxPolls = 15; // 30 seconds / 2 seconds = 15 polls
-  
-  _backgroundPollingTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
+
+  _backgroundPollingTimer = Timer.periodic(const Duration(seconds: 2), (
+    timer,
+  ) async {
     if (_backgroundPollingCallId == null) {
       timer.cancel();
       return;
     }
-    
+
     pollCount++;
-    
+
     // Stop polling after 30 seconds (15 polls)
     if (pollCount > maxPolls) {
-      print('[BACKGROUND] Status polling timeout after 30 seconds, stopping...');
+      print(
+        '[BACKGROUND] Status polling timeout after 30 seconds, stopping...',
+      );
       timer.cancel();
       _backgroundPollingTimer = null;
       _backgroundPollingCallId = null;
       return;
     }
-    
+
     final statusResponse = await _fetchBackgroundCallStatus(callId);
     if (statusResponse != null && statusResponse['success'] == true) {
       final callData = statusResponse['data'];
       final status = callData['status'];
-      
-      print('[BACKGROUND] Polling - Call status: $status (poll $pollCount/$maxPolls)');
-      
+
+      print(
+        '[BACKGROUND] Polling - Call status: $status (poll $pollCount/$maxPolls)',
+      );
+
       if (status == 'declined' || status == 'ended') {
-        print('[BACKGROUND] Call $status detected via polling, ending CallKit...');
+        print(
+          '[BACKGROUND] Call $status detected via polling, ending CallKit...',
+        );
         timer.cancel();
         _backgroundPollingTimer = null;
         _backgroundPollingCallId = null;
-        
+
         // End the CallKit notification
         await FlutterCallkitIncoming.endCall(callId.toString());
         await FlutterCallkitIncoming.endAllCalls();
-        
+
         // Update shared preferences
         final prefs = await SharedPreferences.getInstance();
         if (status == 'declined') {
@@ -353,7 +366,7 @@ void _startBackgroundStatusPolling(int callId) {
           prefs.setString('call_status', 'ended');
         }
         prefs.setString('current_call_id', callId.toString());
-        
+
         print('[BACKGROUND] CallKit notification ended due to $status status');
       }
     }

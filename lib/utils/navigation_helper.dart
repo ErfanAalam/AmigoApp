@@ -35,4 +35,36 @@ class NavigationHelper {
       return null;
     }
   }
+
+  /// Push route with retry mechanism for when navigator is not immediately available
+  static Future<T?> pushRouteWithRetry<T>(
+    Widget screen, {
+    int maxRetries = 15,
+    Duration retryDelay = const Duration(milliseconds: 500),
+  }) async {
+    for (int i = 0; i < maxRetries; i++) {
+      if (navigator != null) {
+        print('[NavigationHelper] ✅ Navigator ready, attempting navigation');
+        try {
+          return await navigator!.push<T>(
+            MaterialPageRoute(
+              builder: (context) => screen,
+              fullscreenDialog: true,
+            ),
+          );
+        } catch (e) {
+          print('[NavigationHelper] ❌ Error during navigation: $e');
+          return null;
+        }
+      }
+
+      print(
+        '[NavigationHelper] ⏳ Navigator not ready, retrying in ${retryDelay.inMilliseconds}ms... (${maxRetries - i - 1} retries left)',
+      );
+      await Future.delayed(retryDelay);
+    }
+
+    print('[NavigationHelper] ❌ Max retries reached, navigation failed');
+    return null;
+  }
 }

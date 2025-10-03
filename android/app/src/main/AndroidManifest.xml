@@ -25,6 +25,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
     
     <!-- CallKit Permissions -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
@@ -77,6 +78,12 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
+        <service
+            android:name="vn.casper.flutter_callkit_incoming.FlutterCallkitIncomingService"
+            android:foregroundServiceType="phoneCall"
+            android:exported="false"
+            android:enabled="true" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
