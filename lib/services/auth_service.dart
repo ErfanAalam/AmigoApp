@@ -1,3 +1,4 @@
+import 'package:amigo/api/api_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
@@ -126,6 +127,10 @@ class AuthService {
       await _clearTemporaryFiles();
 
       print('✅ Comprehensive logout completed successfully');
+
+      print("📡 Notifying server to logout...");
+      await ApiService().authenticatedGet("/auth/logout");
+
       // 11. Restart the app
       print('🔄 Restarting app...');
       if (NavigationHelper.navigatorKey.currentContext != null) {
