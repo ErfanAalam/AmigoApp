@@ -1,4 +1,7 @@
 import 'package:amigo/api/user.service.dart';
+import 'package:amigo/models/user_model.dart';
+import 'package:amigo/repositories/user_repository.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
@@ -10,6 +13,7 @@ import 'deleted_chats_page.dart';
 import '../../api/api_service.dart';
 import '../../services/chat_preferences_service.dart';
 import 'package:permission_handler/permission_handler.dart';
+// import 'package:cached_network_image/cached_network_image.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({Key? key}) : super(key: key);
@@ -31,6 +35,8 @@ class _ProfilePageState extends State<ProfilePage> {
   bool isLoading = true;
   bool isUpdatingProfilePic = false;
   int deletedChatsCount = 0;
+
+  final UserRepository _userRepo = UserRepository();
 
   @override
   void initState() {
@@ -54,24 +60,65 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<void> _loadUserData() async {
-    try {
-      final response = await _userService.getUser();
+  // Future<void> _loadUserData() async {
+  //   try {
+  //     final response = await _userService.getUser();
 
-      if (response['success'] && mounted) {
+  //     if (response['success'] && mounted) {
+  //       setState(() {
+  //         userData = response['data'];
+  //         isLoading = false;
+  //       });
+  //     } else {
+  //       setState(() {
+  //         isLoading = false;
+  //       });
+  //     }
+  //   } catch (e) {
+  //     setState(() {
+  //       isLoading = false;
+  //     });
+  //   }
+  // }
+
+  // load user: first local, then remote & sync
+  Future<void> _loadUserData() async {
+    setState(() => isLoading = true);
+
+    try {
+      // 1) Try local cache quickly
+      final local = await _userRepo.getFirstUser();
+      if (local != null && mounted) {
         setState(() {
-          userData = response['data'];
+          userData = local.toJson();
+          isLoading = false; // we already have something to show
+        });
+      }
+
+      // 2) Always try remote to get latest
+      final response = await _userService.getUser();
+      if (response['success'] && mounted) {
+        final remote = response['data'] as Map<String, dynamic>;
+        final userModel = UserModel.fromJson(remote);
+
+        // save remote to local DB (no need to mark needs_sync)
+        await _userRepo.insertOrUpdateUser(userModel, markNeedsSync: false);
+
+        setState(() {
+          userData = userModel.toJson();
           isLoading = false;
         });
       } else {
-        setState(() {
-          isLoading = false;
-        });
+        // If remote failed and we had no local
+        if (local == null && mounted) {
+          setState(() {
+            isLoading = false;
+          });
+        }
       }
     } catch (e) {
-      setState(() {
-        isLoading = false;
-      });
+      debugPrint('Error _loadUserData: $e');
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
@@ -143,44 +190,113 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  // Future<void> _updateProfilePicture(File imageFile) async {
+  //   setState(() {
+  //     isUpdatingProfilePic = true;
+  //   });
+
+  //   try {
+  //     // Upload the image first
+  //     final uploadResponse = await _apiService.sendMedia(file: imageFile);
+
+  //     if (uploadResponse['success']) {
+  //       final imageUrl = uploadResponse['data']['url'];
+
+  //       // Update user profile with new image URL
+  //       final updateResponse = await _userService.updateUser({
+  //         'profile_pic': imageUrl,
+  //       });
+
+  //       if (updateResponse['success'] && mounted) {
+  //         setState(() {
+  //           userData = {...userData!, 'profile_pic': imageUrl};
+  //         });
+  //         // _showSuccessSnackBar('Profile picture updated successfully!');
+  //       } else {
+  //         _showErrorSnackBar(
+  //           updateResponse['message'] ?? 'Failed to update profile picture',
+  //         );
+  //       }
+  //     } else {
+  //       _showErrorSnackBar(
+  //         uploadResponse['message'] ?? 'Failed to upload image',
+  //       );
+  //     }
+  //   } catch (e) {
+  //     _showErrorSnackBar('An error occurred: $e');
+  //   } finally {
+  //     setState(() {
+  //       isUpdatingProfilePic = false;
+  //     });
+  //   }
+  // }
+
   Future<void> _updateProfilePicture(File imageFile) async {
     setState(() {
       isUpdatingProfilePic = true;
     });
 
     try {
-      // Upload the image first
+      // 1) Upload image to media server
       final uploadResponse = await _apiService.sendMedia(file: imageFile);
+      if (!(uploadResponse['success'] == true)) {
+        _showErrorSnackBar(uploadResponse['message'] ?? 'Upload failed');
+        return;
+      }
+      final imageUrl = uploadResponse['data']['url'] as String;
 
-      if (uploadResponse['success']) {
-        final imageUrl = uploadResponse['data']['url'];
+      // 2) Update remote profile via API
+      final updateResponse = await _userService.updateUser({
+        'profile_pic': imageUrl,
+      });
 
-        // Update user profile with new image URL
-        final updateResponse = await _userService.updateUser({
-          'profile_pic': imageUrl,
-        });
+      // 3) Create/Update local user model
+      // Try to get existing local user id or use remote id from updateResponse
+      UserModel? local = await _userRepo.getFirstUser();
+      int id = local?.id ?? (updateResponse['data']?['id'] ?? 0);
 
-        if (updateResponse['success'] && mounted) {
+      // If updateResponse succeeded, use data from it; else fallback to local info
+      if (updateResponse['success'] == true) {
+        final remoteData = updateResponse['data'] as Map<String, dynamic>;
+        final userModel = UserModel.fromJson(remoteData);
+        await _userRepo.insertOrUpdateUser(userModel, markNeedsSync: false);
+        if (mounted) {
           setState(() {
-            userData = {...userData!, 'profile_pic': imageUrl};
+            userData = userModel.toJson();
           });
-          // _showSuccessSnackBar('Profile picture updated successfully!');
-        } else {
-          _showErrorSnackBar(
-            updateResponse['message'] ?? 'Failed to update profile picture',
-          );
         }
       } else {
-        _showErrorSnackBar(
-          uploadResponse['message'] ?? 'Failed to upload image',
-        );
+        // Remote failed: save local update and mark needs_sync
+        if (local != null) {
+          final updatedLocal = local.copyWith(
+            profilePic: imageUrl,
+            needsSync: true,
+          );
+          await _userRepo.insertOrUpdateUser(updatedLocal, markNeedsSync: true);
+          if (mounted) setState(() => userData = updatedLocal.toJson());
+          _showErrorSnackBar(
+            updateResponse['message'] ??
+                'Failed to update profile on server — changes saved locally and will sync later',
+          );
+        }
       }
     } catch (e) {
-      _showErrorSnackBar('An error occurred: $e');
+      debugPrint('Error updating profile pic: $e');
+      // If we have a local user, save the new profile URL locally and mark needs_sync
+      final local = await _userRepo.getFirstUser();
+      if (local != null) {
+        final updatedLocal = local.copyWith(
+          profilePic: imageFile.path,
+          needsSync: true,
+        );
+        await _userRepo.insertOrUpdateUser(updatedLocal, markNeedsSync: true);
+        if (mounted) setState(() => userData = updatedLocal.toJson());
+        _showErrorSnackBar('Failed to update profile. Changes saved locally.');
+      } else {
+        _showErrorSnackBar('Failed to update profile: $e');
+      }
     } finally {
-      setState(() {
-        isUpdatingProfilePic = false;
-      });
+      if (mounted) setState(() => isUpdatingProfilePic = false);
     }
   }
 
@@ -230,245 +346,11 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // Future<void> _checkPermissions() async {
-  //   await _checkContactsPermission();
-  //   await _checkLocationPermission();
-  // }
-
-  // Future<void> _checkContactsPermission() async {
-  //   try {
-  //     final status = await Permission.contacts.status;
-  //
-  //     // if (status.isDenied || status.isPermanentlyDenied) {
-  //     //   _showContactsPermissionDialog();
-  //     // } else if (status.isGranted) {
-  //     //   // Permission is granted, do nothing
-  //     //   debugPrint('✅ Contacts permission already granted');
-  //     // }
-  //   } catch (e) {
-  //     debugPrint('❌ Error checking contacts permission: $e');
-  //   }
-  // }
-
-  // Future<void> _checkLocationPermission() async {
-  //   try {
-  //     final status = await Permission.location.status;
-  //
-  //     // if (status.isDenied || status.isPermanentlyDenied) {
-  //     //   _showLocationPermissionDialog();
-  //     // } else if (status.isGranted) {
-  //     //   // Permission is granted, do nothing
-  //     //
-  //     //   await _apiService.updateUserLocationAndIp();
-  //     //   debugPrint('✅ Location permission already granted');
-  //     // }
-  //   } catch (e) {
-  //     debugPrint('❌ Error checking location permission: $e');
-  //   }
-  // }
-
-  // void _showContactsPermissionDialog() {
-  //   showDialog(
-  //     context: context,
-  //     barrierDismissible: false,
-  //     builder: (context) => AlertDialog(
-  //       title: Row(
-  //         children: [
-  //           Icon(Icons.contacts, color: Colors.teal),
-  //           SizedBox(width: 8),
-  //           Text(
-  //             'Contacts Permission Required',
-  //             style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
-  //           ),
-  //         ],
-  //       ),
-  //       content: Column(
-  //         mainAxisSize: MainAxisSize.min,
-  //         crossAxisAlignment: CrossAxisAlignment.start,
-  //         children: [
-  //           Text(
-  //             'Amigo needs access to your contacts to:',
-  //             style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
-  //           ),
-  //           SizedBox(height: 8),
-  //           Text('• Find friends who are already using Amigo'),
-  //           Text('• Sync your contact list for better connectivity'),
-  //           Text('• Enable seamless communication features'),
-  //           SizedBox(height: 12),
-  //           Text(
-  //             'This permission is essential for the app to function properly.',
-  //             style: TextStyle(
-  //               fontStyle: FontStyle.italic,
-  //               color: Colors.grey[600],
-  //             ),
-  //           ),
-  //         ],
-  //       ),
-  //       actions: [
-  //         TextButton(
-  //           onPressed: () => Navigator.pop(context),
-  //           child: Text('Not Now'),
-  //         ),
-  //         ElevatedButton(
-  //           onPressed: () async {
-  //             Navigator.pop(context);
-  //             await _requestContactsPermission();
-  //           },
-  //           style: ElevatedButton.styleFrom(
-  //             backgroundColor: Colors.teal,
-  //             foregroundColor: Colors.white,
-  //           ),
-  //           child: Text('Grant Permission'),
-  //         ),
-  //       ],
-  //     ),
-  //   );
-  // }
-
-  // void _showLocationPermissionDialog() {
-  //   showDialog(
-  //     context: context,
-  //     barrierDismissible: false,
-  //     builder: (context) => AlertDialog(
-  //       title: Row(
-  //         children: [
-  //           Icon(Icons.location_on, color: Colors.teal),
-  //           SizedBox(width: 8),
-  //           Text(
-  //             'Location Permission Required',
-  //             style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
-  //           ),
-  //         ],
-  //       ),
-  //       content: Column(
-  //         mainAxisSize: MainAxisSize.min,
-  //         crossAxisAlignment: CrossAxisAlignment.start,
-  //         children: [
-  //           Text(
-  //             'Amigo needs access to your location to:',
-  //             style: TextStyle(fontWeight: FontWeight.w500, fontSize: 16),
-  //           ),
-  //           SizedBox(height: 8),
-  //           Text('• Find nearby friends and communities'),
-  //           Text('• Enable location-based features'),
-  //           Text('• Provide better user experience'),
-  //           SizedBox(height: 12),
-  //           Text(
-  //             'This permission is essential for the app to function properly.',
-  //             style: TextStyle(
-  //               fontStyle: FontStyle.italic,
-  //               color: Colors.grey[600],
-  //             ),
-  //           ),
-  //         ],
-  //       ),
-  //       actions: [
-  //         TextButton(
-  //           onPressed: () => Navigator.pop(context),
-  //           child: Text('Not Now'),
-  //         ),
-  //         ElevatedButton(
-  //           onPressed: () async {
-  //             Navigator.pop(context);
-  //             await _requestLocationPermission();
-  //             await _apiService.updateUserLocationAndIp();
-  //           },
-  //           style: ElevatedButton.styleFrom(
-  //             backgroundColor: Colors.teal,
-  //             foregroundColor: Colors.white,
-  //           ),
-  //           child: Text('Grant Permission'),
-  //         ),
-  //       ],
-  //     ),
-  //   );
-  // }
-
   Future<void> _requestPermissions() async {
     // try {
     await Permission.contacts.request();
     await Permission.location.request();
-
-    // if (status.isGranted) {
-    //   _showSuccessSnackBar('Contacts permission granted!');
-    //   debugPrint('✅ Contacts permission granted');
-    // } else if (status.isPermanentlyDenied) {
-    //   _showPermissionDeniedDialog(
-    //     'Contacts Permission Denied',
-    //     'Contacts permission has been permanently denied. Please enable it manually in app settings.',
-    //     Permission.contacts,
-    //   );
-    // } else {
-    //   _showErrorSnackBar('Contacts permission denied');
-    // }
-    // } catch (e) {
-    //   debugPrint('❌ Error requesting contacts permission: $e');
-    //   _showErrorSnackBar('Failed to request contacts permission');
-    // }
   }
-
-  // Future<void> _requestLocationPermission() async {
-  //   try {
-  //     final status = await Permission.location.request();
-  //
-  //     // if (status.isGranted) {
-  //     //   _showSuccessSnackBar('Location permission granted!');
-  //     //   debugPrint('✅ Location permission granted');
-  //     // } else if (status.isPermanentlyDenied) {
-  //     //   _showPermissionDeniedDialog(
-  //     //     'Location Permission Denied',
-  //     //     'Location permission has been permanently denied. Please enable it manually in app settings.',
-  //     //     Permission.location,
-  //     //   );
-  //     // } else {
-  //     //   _showErrorSnackBar('Location permission denied');
-  //     // }
-  //   } catch (e) {
-  //     debugPrint('❌ Error requesting location permission: $e');
-  //     _showErrorSnackBar('Failed to request location permission');
-  //   }
-  // }
-
-  // void _showPermissionDeniedDialog(
-  //   String title,
-  //   String message,
-  //   Permission permission,
-  // ) {
-  //   showDialog(
-  //     context: context,
-  //     builder: (context) => AlertDialog(
-  //       title: Text(title),
-  //       content: Text(message),
-  //       actions: [
-  //         TextButton(
-  //           onPressed: () => Navigator.pop(context),
-  //           child: Text('Cancel'),
-  //         ),
-  //         ElevatedButton(
-  //           onPressed: () async {
-  //             Navigator.pop(context);
-  //             await openAppSettings();
-  //           },
-  //           style: ElevatedButton.styleFrom(
-  //             backgroundColor: Colors.teal,
-  //             foregroundColor: Colors.white,
-  //           ),
-  //           child: Text('Open Settings'),
-  //         ),
-  //       ],
-  //     ),
-  //   );
-  // }
-
-  // void _showSuccessSnackBar(String message) {
-  //   ScaffoldMessenger.of(context).showSnackBar(
-  //     SnackBar(
-  //       content: Text(message),
-  //       backgroundColor: Colors.green,
-  //       behavior: SnackBarBehavior.floating,
-  //     ),
-  //   );
-  // }
 
   Widget _buildInfoSection({
     required String title,
@@ -654,7 +536,9 @@ class _ProfilePageState extends State<ProfilePage> {
                             radius: 47,
                             backgroundColor: Colors.teal[100],
                             backgroundImage: userData?['profile_pic'] != null
-                                ? NetworkImage(userData!['profile_pic'])
+                                ? CachedNetworkImageProvider(
+                                    userData!['profile_pic'],
+                                  )
                                 : null,
                             child: userData?['profile_pic'] == null
                                 ? Text(

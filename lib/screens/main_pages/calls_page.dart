@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:amigo/repositories/call_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/call_model.dart';
@@ -62,6 +63,42 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
     });
   }
 
+  // Future<void> _loadCallHistory({bool showLoading = true}) async {
+  //   if (showLoading) {
+  //     setState(() {
+  //       _isLoading = true;
+  //       _error = null;
+  //     });
+  //   }
+
+  //   try {
+  //     final response = await _apiService.authenticatedGet(
+  //       '/call/history?limit=50',
+  //     );
+  //     final data = response.data;
+
+  //     if (data['success'] == true && data['data'] != null) {
+  //       final List<dynamic> callsData = data['data'];
+  //       setState(() {
+  //         _callHistory = callsData
+  //             .map((call) => CallHistoryItem.fromJson(call))
+  //             .toList();
+  //         _isLoading = false;
+  //       });
+  //     } else {
+  //       setState(() {
+  //         _error = data['message'] ?? 'Failed to load call history';
+  //         _isLoading = false;
+  //       });
+  //     }
+  //   } catch (e) {
+  //     setState(() {
+  //       _error = 'Error loading call history: $e';
+  //       _isLoading = false;
+  //     });
+  //   }
+  // }
+
   Future<void> _loadCallHistory({bool showLoading = true}) async {
     if (showLoading) {
       setState(() {
@@ -69,6 +106,8 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
         _error = null;
       });
     }
+
+    final callRepo = CallRepository();
 
     try {
       final response = await _apiService.authenticatedGet(
@@ -78,10 +117,16 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
 
       if (data['success'] == true && data['data'] != null) {
         final List<dynamic> callsData = data['data'];
+        final List<CallModel> calls = callsData
+            .map((c) => CallModel.fromJson(c))
+            .toList();
+
+        // Save to local DB
+        await callRepo.insertOrUpdateCallList(calls);
+
+        // Update UI
         setState(() {
-          _callHistory = callsData
-              .map((call) => CallHistoryItem.fromJson(call))
-              .toList();
+          _callHistory = calls.map(_mapCallModelToHistoryItem).toList();
           _isLoading = false;
         });
       } else {
@@ -91,8 +136,12 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
         });
       }
     } catch (e) {
+      // If server fails, fallback to local DB
+      final List<CallModel> localCalls = await CallRepository().getAllCalls();
       setState(() {
-        _error = 'Error loading call history: $e';
+        _callHistory = localCalls.map(_mapCallModelToHistoryItem).toList();
+        // Show no error if we have local data
+        _error = _callHistory.isEmpty ? 'Failed to load call history' : null;
         _isLoading = false;
       });
     }
@@ -391,12 +440,30 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to start call: $e'),
-            backgroundColor: Colors.red,
+            content: Text('Failed to start call: Please check your internet connection'),
+            backgroundColor: Colors.teal,
           ),
         );
       }
     }
+  }
+
+  // Map persisted CallModel to UI-friendly CallHistoryItem
+  CallHistoryItem _mapCallModelToHistoryItem(CallModel model) {
+    return CallHistoryItem(
+      id: model.id,
+      callerId: model.callerId,
+      calleeId: model.calleeId,
+      contactId: model.contactId,
+      contactName: model.contactName,
+      startedAt: model.startedAt,
+      answeredAt: model.answeredAt,
+      endedAt: model.endedAt,
+      durationSeconds: model.durationSeconds,
+      status: model.status,
+      reason: model.reason,
+      type: model.callType,
+    );
   }
 }
 

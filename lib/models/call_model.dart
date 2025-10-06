@@ -2,43 +2,78 @@ class CallModel {
   final int id;
   final int callerId;
   final int calleeId;
+  final int contactId;
+  final String contactName;
+  final String? contactProfilePic;
   final DateTime startedAt;
   final DateTime? answeredAt;
   final DateTime? endedAt;
   final int durationSeconds;
   final CallStatus status;
   final String? reason;
+  final CallType callType;
   final DateTime createdAt;
 
   CallModel({
     required this.id,
     required this.callerId,
     required this.calleeId,
+    required this.contactId,
+    required this.contactName,
+    this.contactProfilePic,
     required this.startedAt,
     this.answeredAt,
     this.endedAt,
     required this.durationSeconds,
     required this.status,
     this.reason,
+    required this.callType,
     required this.createdAt,
   });
 
+  static int _parseInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is String) return int.tryParse(value) ?? 0;
+    if (value is double) return value.toInt();
+    return 0;
+  }
+
   factory CallModel.fromJson(Map<String, dynamic> json) {
+    DateTime? tryParseDate(dynamic value) {
+      if (value == null) return null;
+      final s = value.toString();
+      if (s.isEmpty) return null;
+      try {
+        return DateTime.parse(s);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final String callTypeStr =
+        (json['call_type'] ?? json['callType'] ?? 'outgoing').toString();
+
     return CallModel(
-      id: json['id'],
-      callerId: json['caller_id'],
-      calleeId: json['callee_id'],
-      startedAt: DateTime.parse(json['started_at']),
-      answeredAt: json['answered_at'] != null
-          ? DateTime.parse(json['answered_at'])
-          : null,
-      endedAt: json['ended_at'] != null
-          ? DateTime.parse(json['ended_at'])
-          : null,
-      durationSeconds: json['duration_seconds'] ?? 0,
-      status: CallStatus.fromString(json['status']),
-      reason: json['reason'],
-      createdAt: DateTime.parse(json['created_at']),
+      id: _parseInt(json['id']),
+      callerId: _parseInt(json['caller_id']),
+      calleeId: _parseInt(json['callee_id']),
+      contactId: _parseInt(json['contact_id']),
+      contactName: json['contact_name']?.toString() ?? 'Unknown',
+      contactProfilePic: json['contact_profile_pic']?.toString(),
+      startedAt: tryParseDate(json['started_at']) ?? DateTime.now(),
+      answeredAt: tryParseDate(json['answered_at']),
+      endedAt: tryParseDate(json['ended_at']),
+      durationSeconds: _parseInt(json['duration_seconds']),
+      status: CallStatus.fromString(json['status']?.toString()),
+      reason: json['reason']?.toString(),
+      callType: callTypeStr == 'incoming'
+          ? CallType.incoming
+          : CallType.outgoing,
+      createdAt:
+          tryParseDate(json['created_at']) ??
+          tryParseDate(json['started_at']) ??
+          DateTime.now(),
     );
   }
 
@@ -47,12 +82,16 @@ class CallModel {
       'id': id,
       'caller_id': callerId,
       'callee_id': calleeId,
+      'contact_id': contactId,
+      'contact_name': contactName,
+      'contact_profile_pic': contactProfilePic,
       'started_at': startedAt.toIso8601String(),
       'answered_at': answeredAt?.toIso8601String(),
       'ended_at': endedAt?.toIso8601String(),
       'duration_seconds': durationSeconds,
       'status': status.value,
       'reason': reason,
+      'call_type': callType == CallType.incoming ? 'incoming' : 'outgoing',
       'created_at': createdAt.toIso8601String(),
     };
   }
@@ -69,8 +108,12 @@ enum CallStatus {
   const CallStatus(this.value);
   final String value;
 
-  static CallStatus fromString(String status) {
-    return CallStatus.values.firstWhere((e) => e.value == status);
+  static CallStatus fromString(String? status) {
+    final String value = status ?? 'ended';
+    for (final CallStatus s in CallStatus.values) {
+      if (s.value == value) return s;
+    }
+    return CallStatus.ended;
   }
 }
 

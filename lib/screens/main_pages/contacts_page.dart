@@ -1,10 +1,11 @@
-import 'dart:convert';
+// import 'dart:convert';
 import 'package:amigo/screens/main_pages/inner_chat_page.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/contact_model.dart';
 import '../../models/conversation_model.dart';
 import '../../models/user_model.dart';
+import '../../repositories/contacts_repository.dart';
 import '../../services/contact_service.dart';
 import '../../api/user.service.dart';
 import '../../api/chats.services.dart';
@@ -21,6 +22,7 @@ class _ContactsPageState extends State<ContactsPage>
     with AutomaticKeepAliveClientMixin, TickerProviderStateMixin {
   final ContactService _contactService = ContactService();
   final WebSocketService _websocketService = WebSocketService();
+  final ContactsRepository _contactsRepository = ContactsRepository();
   List<ContactModel> _contacts = [];
   List<UserModel> _availableUsers = [];
   List<UserModel> _filteredUsers = [];
@@ -50,7 +52,50 @@ class _ContactsPageState extends State<ContactsPage>
             curve: Curves.easeOutCubic,
           ),
         );
+    _loadUsersFromLocal();
     _loadContactsAndUsers();
+  }
+
+  Future<void> _loadUsersFromLocal() async {
+    try {
+      final localContacts = await _contactsRepository.getAllContacts();
+      if (localContacts.isNotEmpty) {
+        setState(() {
+          _availableUsers = localContacts;
+          _filteredUsers = localContacts;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadAvailableUsersAndPersist() async {
+    if (_contacts.isEmpty) return;
+    try {
+      List<String> contactsData = getContactsForBackend();
+      final response = await _userService.getAvailableUsers(contactsData);
+      if (response['success'] == true && response['data'] != null) {
+        List<dynamic> usersData = response['data'] is List
+            ? response['data']
+            : response['data']['data'] ?? [];
+        List<UserModel> users = usersData
+            .map((userJson) => UserModel.fromJson(userJson))
+            .toList();
+
+        // Replace local contacts DB to mirror backend
+        await _contactsRepository.replaceAllContacts(users);
+
+        if (mounted) {
+          setState(() {
+            _availableUsers = users;
+            _filteredUsers = users;
+          });
+        }
+
+        // no SharedPreferences storage; SQLite is the single source of truth
+      }
+    } catch (_) {
+      // Ignore errors; UI may still show local users
+    }
   }
 
   @override
@@ -90,9 +135,9 @@ class _ContactsPageState extends State<ContactsPage>
         _contacts = contacts;
       });
 
-      // Then load available users if we have contacts
+      // Then load available users from backend and persist to SQLite
       if (contacts.isNotEmpty) {
-        await _loadAvailableUsers();
+        await _loadAvailableUsersAndPersist();
       }
 
       setState(() {
@@ -146,6 +191,9 @@ class _ContactsPageState extends State<ContactsPage>
       final response = await _userService.getAvailableUsers(contactsData);
 
       if (response['success'] == true && response['data'] != null) {
+        print('-----------------------------');
+        print(response['data']);
+        print('-----------------------------');
         // Handle both response structures: direct array or nested data
         List<dynamic> usersData = response['data'] is List
             ? response['data']
@@ -159,29 +207,14 @@ class _ContactsPageState extends State<ContactsPage>
           _filteredUsers = users;
         });
 
-        // Store in local storage for use in other pages
-        await _storeAvailableUsersInLocalStorage(users);
+        // SQLite is the source of truth; no SharedPreferences caching
       }
     } catch (e) {
       // Error loading available users
     }
   }
 
-  // Local Storage Methods for Available Users
-  static const String _availableUsersStorageKey = 'available_users_contacts';
-
-  Future<void> _storeAvailableUsersInLocalStorage(List<UserModel> users) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final List<String> userJsonList = users
-          .map((user) => jsonEncode(user.toJson()))
-          .toList();
-      await prefs.setStringList(_availableUsersStorageKey, userJsonList);
-      debugPrint('Stored ${users.length} available users in local storage');
-    } catch (e) {
-      debugPrint('Error storing available users in local storage: $e');
-    }
-  }
+  // Removed SharedPreferences caching in favor of SQLite-only persistence
 
   /// Send contacts to backend for filtering
   Future<void> syncContactsWithBackend() async {
@@ -682,7 +715,7 @@ class _ContactsPageState extends State<ContactsPage>
                                               ).withOpacity(0.1),
                                               backgroundImage:
                                                   user.profilePic != null
-                                                  ? NetworkImage(
+                                                  ? CachedNetworkImageProvider(
                                                       user.profilePic!,
                                                     )
                                                   : null,
