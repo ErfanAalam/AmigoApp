@@ -6,6 +6,7 @@ import '../../services/websocket_service.dart';
 import '../../services/user_status_service.dart';
 import '../../services/chat_preferences_service.dart';
 import '../../widgets/chat_action_menu.dart';
+import '../../repositories/conversations_repository.dart';
 import 'inner_chat_page.dart';
 
 class ChatsPage extends StatefulWidget {
@@ -21,6 +22,7 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   final UserStatusService _userStatusService = UserStatusService();
   final ChatPreferencesService _chatPreferencesService =
       ChatPreferencesService();
+  final ConversationsRepository _conversationsRepo = ConversationsRepository();
   late Future<List<ConversationModel>> _conversationsFuture;
 
   // Search functionality
@@ -52,6 +54,7 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _loadConversationsFromLocal();
     _conversationsFuture = _loadConversations();
     _setupWebSocketListener();
     _setupUserStatusListener();
@@ -59,6 +62,21 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
 
     // Setup search functionality
     _searchController.addListener(_onSearchChanged);
+  }
+
+  Future<void> _loadConversationsFromLocal() async {
+    try {
+      final localConversations = await _conversationsRepo.getAllConversations();
+      if (localConversations.isNotEmpty && mounted) {
+        setState(() {
+          _conversations = localConversations;
+          _isLoaded = true;
+          _filterConversations();
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading conversations from local: $e');
+    }
   }
 
   /// Handle search text changes
@@ -197,6 +215,10 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
               _pinnedChats.remove(conversation.conversationId);
               _mutedChats.remove(conversation.conversationId);
               _favoriteChats.remove(conversation.conversationId);
+              // Delete from local DB
+              _conversationsRepo.deleteConversation(
+                conversation.conversationId,
+              );
             });
             _showSnackBar('Chat deleted', Colors.red);
           }
@@ -297,6 +319,11 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
             conversations,
           );
 
+          // Persist to local DB
+          await _conversationsRepo.insertOrUpdateConversations(
+            filteredConversations,
+          );
+
           // Update the state for real-time updates
           if (mounted) {
             setState(() {
@@ -319,24 +346,45 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
           return [];
         }
       } else {
+        // Server returned error, try to load from local DB
+        debugPrint('⚠️ Server fetch failed, loading from local DB');
+        final localConversations = await _conversationsRepo
+            .getAllConversations();
+        if (mounted) {
+          setState(() {
+            _conversations = localConversations;
+            _isLoaded = true;
+            _filterConversations();
+          });
+        }
+        return localConversations;
+      }
+    } catch (e) {
+      // Network error or other exception, load from local DB
+      debugPrint('❌ Error loading conversations from server: $e');
+      debugPrint('📦 Loading from local DB as fallback');
+      try {
+        final localConversations = await _conversationsRepo
+            .getAllConversations();
+        if (mounted) {
+          setState(() {
+            _conversations = localConversations;
+            _isLoaded = true;
+            _filterConversations();
+          });
+        }
+        return localConversations;
+      } catch (localError) {
+        debugPrint('❌ Error loading from local DB: $localError');
         if (mounted) {
           setState(() {
             _conversations = [];
             _isLoaded = true;
-            _filterConversations(); // Update filtered conversations
+            _filterConversations();
           });
         }
-        throw Exception(response['message'] ?? 'Failed to load conversations');
+        return [];
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _conversations = [];
-          _isLoaded = true;
-          _filterConversations(); // Update filtered conversations
-        });
-      }
-      throw Exception('Error loading conversations: ${e.toString()}');
     }
   }
 
@@ -441,6 +489,8 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         setState(() {
           final updatedConversation = conversation.copyWith(unreadCount: 0);
           _conversations[conversationIndex] = updatedConversation;
+          // Persist to local DB
+          _conversationsRepo.updateUnreadCount(conversationId, 0);
         });
         debugPrint(
           '✅ Cleared unread count for conversation $conversationId (was ${conversation.unreadCount})',
@@ -598,6 +648,9 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
           // Replace the conversation in the list
           _conversations[conversationIndex] = updatedConversation;
 
+          // Persist to local DB
+          _conversationsRepo.insertOrUpdateConversation(updatedConversation);
+
           // Sort conversations: pinned first, then by last message time
           _conversations.sort((a, b) {
             final aPinned = _pinnedChats.contains(a.conversationId);
@@ -707,6 +760,9 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
 
           // Replace the conversation in the list
           _conversations[conversationIndex] = updatedConversation;
+
+          // Persist to local DB
+          _conversationsRepo.insertOrUpdateConversation(updatedConversation);
 
           // Sort conversations: pinned first, then by last message time
           _conversations.sort((a, b) {
@@ -872,6 +928,11 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
           // Filter out deleted conversations and sort
           final filteredConversations = await _filterAndSortConversations(
             conversations,
+          );
+
+          // Persist to local DB
+          await _conversationsRepo.insertOrUpdateConversations(
+            filteredConversations,
           );
 
           // Update the state silently (only if mounted and not already showing loading)

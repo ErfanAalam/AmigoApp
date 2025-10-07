@@ -7,9 +7,6 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:amigo/api/api_service.dart';
-import '../models/conversation_model.dart';
-import '../screens/main_pages/inner_chat_page.dart';
-import '../utils/navigation_helper.dart';
 import 'background_call_handler.dart';
 // import 'package:amigo/firebase_options.dart';
 
@@ -193,9 +190,6 @@ class NotificationService {
     print('-------------------------------------------------------');
     if (data['type'] == 'message') {
       _messageNotificationController.add(data);
-
-      // Navigate to specific chat if app is running
-      _navigateToChatFromNotification(data);
     }
   }
 
@@ -211,8 +205,8 @@ class NotificationService {
       data: data,
     );
 
-    // Emit to stream
-    _messageNotificationController.add(data);
+    // DO NOT emit to stream here - only emit when user taps the notification
+    // The stream emission happens in _handleNotificationTap and _handleMessageNotificationAction
   }
 
   /// Show message notification
@@ -303,71 +297,8 @@ class NotificationService {
   ) {
     print('📨 Message notification action: $actionId');
 
-    // For message notifications, we just emit to the stream
+    // Only emit to stream - navigation will be handled by the listener in main.dart
     _messageNotificationController.add({...data, 'action': actionId ?? 'tap'});
-
-    // Navigate to specific chat
-    _navigateToChatFromNotification(data);
-  }
-
-  /// Navigate to specific chat from notification data
-  void _navigateToChatFromNotification(Map<String, dynamic> data) {
-    try {
-      // Parse string values to integers
-      final conversationIdStr = data['conversationId'] as String?;
-      final senderIdStr = data['senderId'] as String?;
-      final senderName = data['senderName'] as String?;
-
-      if (conversationIdStr == null ||
-          senderIdStr == null ||
-          senderName == null) {
-        print(
-          '❌ Missing required data for navigation: conversationId=$conversationIdStr, senderId=$senderIdStr, senderName=$senderName',
-        );
-        return;
-      }
-
-      // Convert string IDs to integers
-      final conversationId = int.tryParse(conversationIdStr);
-      final senderId = int.tryParse(senderIdStr);
-
-      if (conversationId == null || senderId == null) {
-        print(
-          '❌ Invalid ID format: conversationId=$conversationIdStr, senderId=$senderIdStr',
-        );
-        return;
-      }
-
-      print(
-        '🚀 Navigating to chat: conversationId=$conversationId, senderName=$senderName',
-      );
-
-      // Create a conversation model from the notification data
-      final conversation = ConversationModel(
-        conversationId: conversationId,
-        type: 'dm',
-        unreadCount: 0,
-        joinedAt: DateTime.now().toIso8601String(),
-        userId: senderId,
-        userName: senderName,
-        userProfilePic: data['senderProfilePic'] as String?,
-        isOnline: null,
-      );
-
-      // Wait for navigator to be available before navigating
-      _waitForNavigatorAndNavigate(conversation);
-    } catch (e) {
-      print('❌ Error navigating to chat from notification: $e');
-    }
-  }
-
-  /// Wait for navigator to be available and then navigate
-  void _waitForNavigatorAndNavigate(ConversationModel conversation) {
-    NavigationHelper.pushRouteWithRetry(
-      InnerChatPage(conversation: conversation),
-      maxRetries: 15,
-      retryDelay: const Duration(milliseconds: 500),
-    );
   }
 
   /// Send FCM token to backend

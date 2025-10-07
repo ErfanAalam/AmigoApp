@@ -1,7 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../models/group_model.dart';
 import '../../models/community_model.dart';
 import '../../api/user.service.dart';
+import '../../repositories/groups_repository.dart';
+import '../../repositories/communities_repository.dart';
+import '../../services/websocket_service.dart';
 import 'inner_group_chat_page.dart';
 import 'create_group_page.dart';
 import 'community_inner_groups_page.dart';
@@ -15,24 +19,163 @@ class GroupsPage extends StatefulWidget {
 
 class _GroupsPageState extends State<GroupsPage> {
   final UserService _userService = UserService();
+  final GroupsRepository _groupsRepo = GroupsRepository();
+  final CommunitiesRepository _communitiesRepo = CommunitiesRepository();
+  final WebSocketService _websocketService = WebSocketService();
+
   late Future<Map<String, dynamic>> _dataFuture;
   final TextEditingController _searchController = TextEditingController();
+
+  // Real-time state management
   List<GroupModel> _allGroups = [];
   List<CommunityModel> _allCommunities = [];
   List<dynamic> _filteredItems = []; // Can contain both groups and communities
+  bool _isLoaded = false;
+
+  StreamSubscription<Map<String, dynamic>>? _websocketSubscription;
 
   @override
   void initState() {
     super.initState();
+    _loadFromLocal();
     _dataFuture = _loadGroupsAndCommunities();
     _searchController.addListener(_onSearchChanged);
+    _setupWebSocketListener();
   }
 
   @override
   void dispose() {
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
+    _websocketSubscription?.cancel();
     super.dispose();
+  }
+
+  /// Load groups and communities from local DB first
+  Future<void> _loadFromLocal() async {
+    try {
+      debugPrint('📦 Loading from local DB...');
+      final localGroups = await _groupsRepo.getAllGroups();
+      final localCommunities = await _communitiesRepo.getAllCommunities();
+
+      if (mounted) {
+        setState(() {
+          _allGroups = localGroups;
+          _allCommunities = localCommunities;
+          _isLoaded = true;
+          _onSearchChanged();
+        });
+
+        if (localGroups.isNotEmpty || localCommunities.isNotEmpty) {
+          debugPrint(
+            '✅ Loaded ${localGroups.length} groups and ${localCommunities.length} communities from local DB',
+          );
+        } else {
+          debugPrint('ℹ️ No cached groups or communities found in local DB');
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading from local DB: $e');
+      // Even on error, set isLoaded to allow showing empty state
+      if (mounted) {
+        setState(() {
+          _isLoaded = true;
+          _allGroups = [];
+          _allCommunities = [];
+          _filteredItems = [];
+        });
+      }
+    }
+  }
+
+  /// Set up WebSocket listener for real-time updates
+  void _setupWebSocketListener() {
+    _websocketSubscription = _websocketService.messageStream.listen(
+      (message) {
+        _handleIncomingWebSocketMessage(message);
+      },
+      onError: (error) {
+        debugPrint('❌ WebSocket message stream error in GroupsPage: $error');
+      },
+    );
+  }
+
+  /// Handle incoming WebSocket messages
+  void _handleIncomingWebSocketMessage(Map<String, dynamic> message) {
+    try {
+      debugPrint('📨 GroupsPage received WebSocket message: $message');
+
+      final messageType = message['type'];
+
+      if (messageType == 'message' || messageType == 'media') {
+        // Update last message for groups
+        _handleNewGroupMessage(message);
+      }
+    } catch (e) {
+      debugPrint('❌ Error handling WebSocket message in GroupsPage: $e');
+    }
+  }
+
+  /// Handle new message for groups
+  void _handleNewGroupMessage(Map<String, dynamic> message) {
+    try {
+      final conversationId = message['conversation_id'] as int?;
+      if (conversationId == null) return;
+
+      final groupIndex = _allGroups.indexWhere(
+        (group) => group.conversationId == conversationId,
+      );
+
+      if (groupIndex == -1) return;
+
+      final data = message['data'] as Map<String, dynamic>? ?? {};
+
+      if (mounted && _isLoaded) {
+        setState(() {
+          final group = _allGroups[groupIndex];
+
+          // Create new last message
+          final lastMessage = GroupLastMessage(
+            id: data['id'] ?? 0,
+            body: data['body'] ?? data['data']?['message_type'] ?? '',
+            type: data['type'] ?? 'text',
+            senderId: data['sender_id'] ?? 0,
+            senderName: data['sender_name'] ?? '',
+            createdAt: data['created_at'] ?? DateTime.now().toIso8601String(),
+            conversationId: conversationId,
+          );
+
+          final updatedMetadata = GroupMetadata(
+            lastMessage: lastMessage,
+            totalMessages: (group.metadata?.totalMessages ?? 0) + 1,
+            createdAt: group.metadata?.createdAt,
+            createdBy: group.metadata?.createdBy ?? 0,
+          );
+
+          // Create updated group
+          final updatedGroup = GroupModel(
+            conversationId: group.conversationId,
+            title: group.title,
+            type: group.type,
+            members: group.members,
+            metadata: updatedMetadata,
+            lastMessageAt: lastMessage.createdAt,
+            role: group.role,
+            joinedAt: group.joinedAt,
+          );
+
+          _allGroups[groupIndex] = updatedGroup;
+
+          // Persist to local DB
+          _groupsRepo.insertOrUpdateGroup(updatedGroup);
+
+          // Update filtered items
+          _onSearchChanged();
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error handling new group message: $e');
+    }
   }
 
   void _onSearchChanged() {
@@ -58,7 +201,23 @@ class _GroupsPageState extends State<GroupsPage> {
   }
 
   Future<Map<String, dynamic>> _loadGroupsAndCommunities() async {
+    // First, get current local data
+    List<GroupModel> localGroups = [];
+    List<CommunityModel> localCommunities = [];
+
     try {
+      localGroups = await _groupsRepo.getAllGroups();
+      localCommunities = await _communitiesRepo.getAllCommunities();
+      debugPrint(
+        '📦 Current local DB has ${localGroups.length} groups and ${localCommunities.length} communities',
+      );
+    } catch (e) {
+      debugPrint('⚠️ Error reading local DB: $e');
+    }
+
+    try {
+      debugPrint('📥 Loading groups and communities from server...');
+
       // Load groups
       final groupResponse = await _userService.GetChatList('group');
 
@@ -68,6 +227,7 @@ class _GroupsPageState extends State<GroupsPage> {
 
       List<GroupModel> groups = [];
       List<CommunityModel> communities = [];
+      bool hasServerData = false;
 
       // Process groups
       if (groupResponse['success']) {
@@ -95,6 +255,15 @@ class _GroupsPageState extends State<GroupsPage> {
             .where((json) => json['type'] == 'group')
             .map((json) => _convertToGroupModel(json))
             .toList();
+
+        if (groups.isNotEmpty) {
+          hasServerData = true;
+          // Only persist if we got data from server
+          await _groupsRepo.insertOrUpdateGroups(groups);
+          debugPrint('✅ Persisted ${groups.length} groups to local DB');
+        } else {
+          debugPrint('⚠️ Server returned 0 groups - keeping local cache');
+        }
       }
 
       // Process communities
@@ -106,17 +275,60 @@ class _GroupsPageState extends State<GroupsPage> {
               (json) => CommunityModel.fromJson(json as Map<String, dynamic>),
             )
             .toList();
+
+        if (communities.isNotEmpty) {
+          hasServerData = true;
+          // Only persist if we got data from server
+          await _communitiesRepo.insertOrUpdateCommunities(communities);
+          debugPrint(
+            '✅ Persisted ${communities.length} communities to local DB',
+          );
+        } else {
+          debugPrint('⚠️ Server returned 0 communities - keeping local cache');
+        }
       }
 
-      setState(() {
-        _allGroups = groups;
-        _allCommunities = communities;
-        _filteredItems = [...groups, ...communities];
-      });
+      // If server returned empty but we have local data, use local data
+      if (!hasServerData &&
+          (localGroups.isNotEmpty || localCommunities.isNotEmpty)) {
+        debugPrint('📦 Server returned no data - using cached data instead');
+        groups = localGroups;
+        communities = localCommunities;
+      }
 
-      return {'groups': groups, 'communities': communities};
+      if (mounted) {
+        setState(() {
+          _allGroups = groups.isNotEmpty ? groups : localGroups;
+          _allCommunities = communities.isNotEmpty
+              ? communities
+              : localCommunities;
+          _filteredItems = [..._allGroups, ..._allCommunities];
+          _isLoaded = true;
+        });
+      }
+
+      debugPrint(
+        '✅ Displaying ${_allGroups.length} groups and ${_allCommunities.length} communities',
+      );
+      return {'groups': _allGroups, 'communities': _allCommunities};
     } catch (e) {
-      throw Exception('Error loading data: ${e.toString()}');
+      debugPrint('❌ Error loading from server: $e');
+      debugPrint('📦 Using local DB data as fallback...');
+
+      // Use local data on error
+      if (mounted) {
+        setState(() {
+          _allGroups = localGroups;
+          _allCommunities = localCommunities;
+          _filteredItems = [...localGroups, ...localCommunities];
+          _isLoaded = true;
+        });
+      }
+
+      debugPrint(
+        '📦 Displaying ${localGroups.length} groups and ${localCommunities.length} communities from local DB',
+      );
+      return {'groups': localGroups, 'communities': localCommunities};
     }
   }
 
@@ -151,6 +363,7 @@ class _GroupsPageState extends State<GroupsPage> {
   void _refreshData() {
     setState(() {
       _dataFuture = _loadGroupsAndCommunities();
+      _isLoaded = false; // Reset to show loading state
     });
   }
 
@@ -233,22 +446,7 @@ class _GroupsPageState extends State<GroupsPage> {
             ),
 
             // Groups and Communities List
-            Expanded(
-              child: FutureBuilder<Map<String, dynamic>>(
-                future: _dataFuture,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return _buildSkeletonLoader();
-                  } else if (!snapshot.hasData || _filteredItems.isEmpty) {
-                    return _buildEmptyState();
-                  } else if (snapshot.hasError) {
-                    return _buildErrorState(snapshot.error.toString());
-                  } else {
-                    return _buildItemsList();
-                  }
-                },
-              ),
-            ),
+            Expanded(child: _buildContent()),
           ],
         ),
       ),
@@ -268,6 +466,41 @@ class _GroupsPageState extends State<GroupsPage> {
         backgroundColor: Colors.teal,
         child: Icon(Icons.group_add, color: Colors.white),
       ),
+    );
+  }
+
+  Widget _buildContent() {
+    debugPrint(
+      '🏗️ Building content: _isLoaded=$_isLoaded, filteredItems=${_filteredItems.length}',
+    );
+
+    // If we have loaded data, show it directly
+    if (_isLoaded && _filteredItems.isNotEmpty) {
+      return _buildItemsList();
+    }
+
+    // If we have loaded but no items, show appropriate empty state
+    if (_isLoaded && _filteredItems.isEmpty) {
+      return _buildEmptyState();
+    }
+
+    // Otherwise, use FutureBuilder for initial load
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _dataFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting && !_isLoaded) {
+          return _buildSkeletonLoader();
+        } else if (snapshot.hasError && !_isLoaded) {
+          return _buildErrorState(snapshot.error.toString());
+        } else if (snapshot.hasData || _isLoaded) {
+          if (_filteredItems.isEmpty) {
+            return _buildEmptyState();
+          }
+          return _buildItemsList();
+        } else {
+          return _buildSkeletonLoader();
+        }
+      },
     );
   }
 

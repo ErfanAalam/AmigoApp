@@ -20,7 +20,7 @@ class DatabaseHelper {
     final path = join(dbPath, fileName);
     return await openDatabase(
       path,
-      version: 1,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -68,6 +68,59 @@ class DatabaseHelper {
       created_at TEXT NOT NULL
     );
   ''');
+
+    await db.execute('''
+      CREATE TABLE conversations (
+        conversation_id INTEGER PRIMARY KEY,
+        type TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        user_name TEXT NOT NULL,
+        user_profile_pic TEXT,
+        joined_at TEXT NOT NULL,
+        unread_count INTEGER NOT NULL DEFAULT 0,
+        last_message_id INTEGER,
+        last_message_body TEXT,
+        last_message_type TEXT,
+        last_message_sender_id INTEGER,
+        last_message_created_at TEXT,
+        last_message_at TEXT,
+        is_online INTEGER DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE groups (
+        conversation_id INTEGER PRIMARY KEY,
+        title TEXT NOT NULL,
+        type TEXT NOT NULL,
+        role TEXT,
+        joined_at TEXT NOT NULL,
+        last_message_at TEXT,
+        last_message_id INTEGER,
+        last_message_body TEXT,
+        last_message_type TEXT,
+        last_message_sender_id INTEGER,
+        last_message_sender_name TEXT,
+        last_message_created_at TEXT,
+        total_messages INTEGER DEFAULT 0,
+        created_at TEXT,
+        created_by INTEGER,
+        members TEXT,
+        updated_at INTEGER NOT NULL
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE communities (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        group_ids TEXT NOT NULL,
+        metadata TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    ''');
   }
 
   // simple migration example
@@ -101,6 +154,64 @@ class DatabaseHelper {
         reason TEXT,
         call_type TEXT NOT NULL,
         created_at TEXT NOT NULL
+      );
+    ''');
+
+      // create conversations table for existing DB
+      await db.execute('''
+      CREATE TABLE IF NOT EXISTS conversations (
+        conversation_id INTEGER PRIMARY KEY,
+        type TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        user_name TEXT NOT NULL,
+        user_profile_pic TEXT,
+        joined_at TEXT NOT NULL,
+        unread_count INTEGER NOT NULL DEFAULT 0,
+        last_message_id INTEGER,
+        last_message_body TEXT,
+        last_message_type TEXT,
+        last_message_sender_id INTEGER,
+        last_message_created_at TEXT,
+        last_message_at TEXT,
+        is_online INTEGER DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      );
+    ''');
+    }
+
+    if (oldVersion < 3) {
+      // create groups table for existing DB
+      await db.execute('''
+      CREATE TABLE IF NOT EXISTS groups (
+        conversation_id INTEGER PRIMARY KEY,
+        title TEXT NOT NULL,
+        type TEXT NOT NULL,
+        role TEXT,
+        joined_at TEXT NOT NULL,
+        last_message_at TEXT,
+        last_message_id INTEGER,
+        last_message_body TEXT,
+        last_message_type TEXT,
+        last_message_sender_id INTEGER,
+        last_message_sender_name TEXT,
+        last_message_created_at TEXT,
+        total_messages INTEGER DEFAULT 0,
+        created_at TEXT,
+        created_by INTEGER,
+        members TEXT,
+        updated_at INTEGER NOT NULL
+      );
+    ''');
+
+      // create communities table for existing DB
+      await db.execute('''
+      CREATE TABLE IF NOT EXISTS communities (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        group_ids TEXT NOT NULL,
+        metadata TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       );
     ''');
     }

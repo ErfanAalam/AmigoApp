@@ -356,11 +356,7 @@ class _MyAppState extends material.State<MyApp> {
 
   /// Wait for navigator to be available and then navigate
   void _waitForNavigatorAndNavigate(ConversationModel conversation) {
-    NavigationHelper.pushRouteWithRetry(
-      InnerChatPage(conversation: conversation),
-      maxRetries: 15,
-      retryDelay: const Duration(milliseconds: 500),
-    );
+    NavigationHelper.pushRoute(InnerChatPage(conversation: conversation));
   }
 
   @override
