@@ -7,6 +7,7 @@ import '../../services/user_status_service.dart';
 import '../../services/chat_preferences_service.dart';
 import '../../widgets/chat_action_menu.dart';
 import '../../repositories/conversations_repository.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'inner_chat_page.dart';
 
 class ChatsPage extends StatefulWidget {
@@ -96,10 +97,12 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
       _filteredConversations = List.from(_conversations);
     } else {
       _filteredConversations = _conversations.where((conversation) {
-        return conversation.userName.toLowerCase().contains(_searchQuery) ||
-            (conversation.metadata?.lastMessage.body ?? '')
-                .toLowerCase()
-                .contains(_searchQuery);
+        // Add null safety checks
+        final userName = conversation.userName;
+        final lastMessageBody = conversation.metadata?.lastMessage.body ?? '';
+
+        return userName.toLowerCase().contains(_searchQuery) ||
+            lastMessageBody.toLowerCase().contains(_searchQuery);
       }).toList();
     }
   }
@@ -429,9 +432,31 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
       final chunk = conversationsList.sublist(i, end);
 
       final chunkProcessed = chunk
-          .map(
-            (json) => ConversationModel.fromJson(json as Map<String, dynamic>),
-          )
+          .map((json) {
+            try {
+              // Add validation before creating ConversationModel
+              if (json is Map<String, dynamic>) {
+                final conversationId = json['conversationId'];
+                final userName = json['userName'];
+
+                // Skip invalid conversations
+                if (conversationId == null ||
+                    userName == null ||
+                    userName.toString().isEmpty) {
+                  debugPrint('⚠️ Skipping invalid conversation: $json');
+                  return null;
+                }
+
+                return ConversationModel.fromJson(json);
+              }
+              return null;
+            } catch (e) {
+              debugPrint('❌ Error processing conversation: $e, data: $json');
+              return null;
+            }
+          })
+          .where((conversation) => conversation != null)
+          .cast<ConversationModel>()
           .toList();
 
       processedConversations.addAll(chunkProcessed);
@@ -1246,14 +1271,30 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   }
 
   Widget _buildChatsList(List<ConversationModel> conversations) {
+    // Add safety check for empty conversations
+    if (conversations.isEmpty) {
+      return _buildEmptyState();
+    }
+
     return RefreshIndicator(
       onRefresh: () async => _refreshConversations(),
       child: ListView.builder(
         itemCount: conversations.length,
-        itemExtent: 80, // Fixed height for better performance
-        cacheExtent: 500, // Cache more items for smoother scrolling
+        itemExtent: 80,
+        cacheExtent: 500,
         itemBuilder: (context, index) {
+          // Add bounds checking
+          if (index >= conversations.length) {
+            return Container(); // Return empty container if index is out of bounds
+          }
+
           final conversation = conversations[index];
+
+          // Add null safety check for conversation
+          if (conversation.userName.isEmpty) {
+            return Container(); // Skip invalid conversations
+          }
+
           final isTyping = _typingUsers[conversation.conversationId] ?? false;
           final typingUserName = _typingUserNames[conversation.conversationId];
 
@@ -1348,10 +1389,19 @@ class ChatListItem extends StatelessWidget {
   }
 
   String _getInitials(String name) {
+    if (name.isEmpty || name.trim().isEmpty) {
+      return '?';
+    }
+
     final words = name.trim().split(' ');
     if (words.length >= 2) {
-      return '${words[0][0]}${words[1][0]}'.toUpperCase();
-    } else if (words.isNotEmpty) {
+      // Check if both words have at least one character
+      if (words[0].isNotEmpty && words[1].isNotEmpty) {
+        return '${words[0][0]}${words[1][0]}'.toUpperCase();
+      } else if (words[0].isNotEmpty) {
+        return words[0][0].toUpperCase();
+      }
+    } else if (words.isNotEmpty && words[0].isNotEmpty) {
       return words[0][0].toUpperCase();
     }
     return '?';
@@ -1362,7 +1412,7 @@ class ChatListItem extends StatelessWidget {
     final hasUnreadMessages = conversation.unreadCount > 0 && !isMuted;
     final lastMessageText =
         conversation.metadata?.lastMessage.body ?? 'No messages yet';
-    final timeText = conversation.metadata != null
+    final timeText = conversation.metadata?.lastMessage.createdAt != null
         ? _formatTime(conversation.metadata!.lastMessage.createdAt)
         : _formatTime(conversation.joinedAt);
 
@@ -1435,7 +1485,7 @@ class ChatListItem extends StatelessWidget {
           radius: 25,
           backgroundColor: Colors.teal[100],
           backgroundImage: conversation.userProfilePic != null
-              ? NetworkImage(conversation.userProfilePic!)
+              ? CachedNetworkImageProvider(conversation.userProfilePic!)
               : null,
           child: conversation.userProfilePic == null
               ? Text(

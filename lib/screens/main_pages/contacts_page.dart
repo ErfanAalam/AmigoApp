@@ -1236,7 +1236,7 @@ class _FindUserDialogState extends State<FindUserDialog> {
                                             ).withOpacity(0.1),
                                             backgroundImage:
                                                 user.profilePic != null
-                                                ? NetworkImage(user.profilePic!)
+                                                ? CachedNetworkImageProvider(user.profilePic!)
                                                 : null,
                                             child: user.profilePic == null
                                                 ? Icon(

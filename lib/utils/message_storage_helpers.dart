@@ -1,19 +1,20 @@
 import 'package:flutter/material.dart';
-import '../services/message_storage_service.dart';
+import '../repositories/messages_repository.dart';
 import '../models/message_model.dart';
 
 class MessageStorageHelpers {
-  static final MessageStorageService _storageService = MessageStorageService();
+  static final MessagesRepository _messagesRepo = MessagesRepository();
 
   /// Load pinned message from storage for a conversation
   static Future<int?> loadPinnedMessageFromStorage(int conversationId) async {
     try {
-      final pinnedMessageId = await _storageService.getPinnedMessage(
+      // Try local DB first
+      final pinnedMessageId = await _messagesRepo.getPinnedMessage(
         conversationId,
       );
 
       if (pinnedMessageId != null) {
-        debugPrint('📌 Loaded pinned message $pinnedMessageId from storage');
+        debugPrint('📌 Loaded pinned message $pinnedMessageId from local DB');
         return pinnedMessageId;
       }
       return null;
@@ -28,13 +29,14 @@ class MessageStorageHelpers {
     int conversationId,
   ) async {
     try {
-      final starredMessages = await _storageService.getStarredMessages(
+      // Try local DB first
+      final starredMessages = await _messagesRepo.getStarredMessages(
         conversationId,
       );
 
       if (starredMessages.isNotEmpty) {
         debugPrint(
-          '⭐ Loaded ${starredMessages.length} starred messages from storage',
+          '⭐ Loaded ${starredMessages.length} starred messages from local DB',
         );
         return starredMessages;
       }
@@ -56,78 +58,13 @@ class MessageStorageHelpers {
     if (optimisticId == null || serverId == null) return null;
 
     try {
-      // Get current cached messages
-      final cachedData = await _storageService.getCachedMessages(
+      // Use local DB repository
+      return await _messagesRepo.updateOptimisticMessage(
         conversationId,
+        optimisticId,
+        serverId,
+        messageData,
       );
-
-      if (cachedData == null || cachedData.messages.isEmpty) {
-        debugPrint('⚠️ No cached messages found to update');
-        return null;
-      }
-
-      // Find the optimistic message in cached data
-      final messageIndex = cachedData.messages.indexWhere(
-        (msg) => msg.id == optimisticId,
-      );
-
-      if (messageIndex == -1) {
-        debugPrint('⚠️ Optimistic message $optimisticId not found in cache');
-        return null;
-      }
-
-      // Create updated message with server ID
-      final data = messageData['data'] as Map<String, dynamic>? ?? {};
-      final originalMessage = cachedData.messages[messageIndex];
-
-      // Handle reply messages specifically
-      final messageType = messageData['type'];
-      String messageBody;
-
-      if (messageType == 'message_reply') {
-        // For reply messages, use new_message as the body
-        messageBody = data['new_message'] ?? originalMessage.body;
-      } else {
-        messageBody = data['body'] ?? originalMessage.body;
-      }
-
-      final updatedMessage = MessageModel(
-        id: serverId, // Use server ID instead of optimistic ID
-        body: messageBody,
-        type: data['type'] ?? originalMessage.type,
-        senderId: originalMessage.senderId,
-        conversationId: originalMessage.conversationId,
-        createdAt:
-            data['created_at'] ??
-            messageData['timestamp'] ??
-            originalMessage.createdAt,
-        editedAt: data['edited_at'] ?? originalMessage.editedAt,
-        metadata: data['metadata'] ?? originalMessage.metadata,
-        attachments: data['attachments'] ?? originalMessage.attachments,
-        deleted: data['deleted'] == true,
-        senderName: originalMessage.senderName,
-        senderProfilePic: originalMessage.senderProfilePic,
-        replyToMessage:
-            originalMessage.replyToMessage, // Preserve reply relationship
-        replyToMessageId: originalMessage.replyToMessageId,
-      );
-
-      // Update the message in the cached messages list
-      final updatedMessages = List<MessageModel>.from(cachedData.messages);
-      updatedMessages[messageIndex] = updatedMessage;
-
-      // Save updated messages back to storage
-      await _storageService.saveMessages(
-        conversationId: conversationId,
-        messages: updatedMessages,
-        meta: cachedData.meta,
-      );
-
-      debugPrint(
-        '✅ Updated message ID from $optimisticId to $serverId in local storage',
-      );
-
-      return updatedMessage;
     } catch (e) {
       debugPrint('❌ Error updating optimistic message in storage: $e');
       return null;

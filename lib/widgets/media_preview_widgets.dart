@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:photo_view/photo_view.dart';
@@ -12,12 +13,14 @@ class ImagePreviewScreen extends StatefulWidget {
   final List<String> imageUrls;
   final int initialIndex;
   final List<String>? captions;
+  final List<String>? localPaths;
 
   const ImagePreviewScreen({
     Key? key,
     required this.imageUrls,
     this.initialIndex = 0,
     this.captions,
+    this.localPaths,
   }) : super(key: key);
 
   @override
@@ -72,8 +75,26 @@ class _ImagePreviewScreenState extends State<ImagePreviewScreen> {
           PhotoViewGallery.builder(
             scrollPhysics: const BouncingScrollPhysics(),
             builder: (BuildContext context, int index) {
+              // Check if we have a local path for this image
+              final localPath =
+                  widget.localPaths != null && index < widget.localPaths!.length
+                  ? widget.localPaths![index]
+                  : null;
+
+              // Use FileImage if local file exists, otherwise use NetworkImage
+              ImageProvider imageProvider;
+              if (localPath != null && File(localPath).existsSync()) {
+                debugPrint('📷 Using local image: $localPath');
+                imageProvider = FileImage(File(localPath));
+              } else {
+                debugPrint(
+                  '📷 Using network image: ${widget.imageUrls[index]}',
+                );
+                imageProvider = NetworkImage(widget.imageUrls[index]);
+              }
+
               return PhotoViewGalleryPageOptions(
-                imageProvider: NetworkImage(widget.imageUrls[index]),
+                imageProvider: imageProvider,
                 initialScale: PhotoViewComputedScale.contained,
                 minScale: PhotoViewComputedScale.contained * 0.5,
                 maxScale: PhotoViewComputedScale.covered * 2.0,
@@ -83,22 +104,33 @@ class _ImagePreviewScreenState extends State<ImagePreviewScreen> {
                 errorBuilder: (context, error, stackTrace) {
                   return Container(
                     color: Colors.black,
-                    child: const Center(
+                    child: Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(
+                          const Icon(
                             Icons.broken_image,
                             size: 64,
                             color: Colors.white54,
                           ),
-                          SizedBox(height: 16),
-                          Text(
+                          const SizedBox(height: 16),
+                          const Text(
                             'Failed to load image',
                             style: TextStyle(
                               color: Colors.white54,
                               fontSize: 16,
                             ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            localPath != null
+                                ? 'Local: $localPath'
+                                : 'URL: ${widget.imageUrls[index]}',
+                            style: const TextStyle(
+                              color: Colors.white38,
+                              fontSize: 12,
+                            ),
+                            textAlign: TextAlign.center,
                           ),
                         ],
                       ),
@@ -327,12 +359,14 @@ class VideoPreviewScreen extends StatefulWidget {
   final String videoUrl;
   final String? caption;
   final String? fileName;
+  final String? localPath;
 
   const VideoPreviewScreen({
     Key? key,
     required this.videoUrl,
     this.caption,
     this.fileName,
+    this.localPath,
   }) : super(key: key);
 
   @override
@@ -345,6 +379,7 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
   bool _isInitialized = false;
   bool _hasError = false;
   String? _errorMessage;
+  bool _useLocalFile = false;
 
   @override
   void initState() {
@@ -354,11 +389,44 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
 
   void _initializeVideoPlayer() async {
     try {
-      _videoPlayerController = VideoPlayerController.networkUrl(
-        Uri.parse(widget.videoUrl),
-      );
+      debugPrint('🎬 Initializing video player...');
+      debugPrint('🎬 Local path: ${widget.localPath}');
+      debugPrint('🎬 Video URL: ${widget.videoUrl}');
 
+      // Check if we have a local file, if so use it; otherwise use network
+      _useLocalFile = false;
+      if (widget.localPath != null) {
+        final fileExists = await _fileExists(widget.localPath!);
+        debugPrint('🎬 Local file exists check: $fileExists');
+
+        if (fileExists) {
+          final file = File(widget.localPath!);
+          final fileSize = await file.length();
+          debugPrint('🎬 Local file size: $fileSize bytes');
+
+          if (fileSize > 0) {
+            _useLocalFile = true;
+          } else {
+            debugPrint('⚠️ Local file is empty, falling back to network');
+          }
+        }
+      }
+
+      if (_useLocalFile) {
+        debugPrint('✅ Using local video file: ${widget.localPath}');
+        _videoPlayerController = VideoPlayerController.file(
+          File(widget.localPath!),
+        );
+      } else {
+        debugPrint('🌐 Using network video URL: ${widget.videoUrl}');
+        _videoPlayerController = VideoPlayerController.networkUrl(
+          Uri.parse(widget.videoUrl),
+        );
+      }
+
+      debugPrint('⏳ Initializing video controller...');
       await _videoPlayerController.initialize();
+      debugPrint('✅ Video controller initialized successfully');
 
       if (mounted) {
         _chewieController = ChewieController(
@@ -383,6 +451,7 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
             ),
           ),
           errorBuilder: (context, errorMessage) {
+            debugPrint('❌ Video player error: $errorMessage');
             return Container(
               color: Colors.black,
               child: Center(
@@ -395,12 +464,9 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
                       color: Colors.white54,
                     ),
                     const SizedBox(height: 16),
-                    Text(
+                    const Text(
                       'Failed to load video',
-                      style: const TextStyle(
-                        color: Colors.white54,
-                        fontSize: 16,
-                      ),
+                      style: TextStyle(color: Colors.white54, fontSize: 16),
                     ),
                     const SizedBox(height: 8),
                     Text(
@@ -410,6 +476,14 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
                         fontSize: 12,
                       ),
                       textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Source: ${_useLocalFile ? 'Local' : 'Network'}',
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 10,
+                      ),
                     ),
                   ],
                 ),
@@ -421,12 +495,27 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
         setState(() {
           _isInitialized = true;
         });
+        debugPrint('✅ Chewie controller created successfully');
       }
     } catch (e) {
+      debugPrint('❌ Error initializing video player: $e');
       setState(() {
         _hasError = true;
-        _errorMessage = e.toString();
+        _errorMessage =
+            'Error: $e\nLocal path: ${widget.localPath}\nURL: ${widget.videoUrl}';
       });
+    }
+  }
+
+  Future<bool> _fileExists(String path) async {
+    try {
+      debugPrint('🔍 Checking if file exists: $path');
+      final exists = await File(path).exists();
+      debugPrint('🔍 File exists result: $exists');
+      return exists;
+    } catch (e) {
+      debugPrint('❌ Error checking file existence: $e');
+      return false;
     }
   }
 

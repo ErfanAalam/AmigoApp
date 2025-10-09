@@ -132,7 +132,7 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
       return;
     }
 
-    final response = await apiService.generateSignupOtp(_completePhoneNumber);
+    final response = await apiService.generateSignupOtp(_completePhoneNumber.replaceAll(' ', ''));
 
     if (response['success']) {
       setState(() {
@@ -176,7 +176,7 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
     });
 
     final response = await apiService.verifySignupOtp(
-      _completePhoneNumber,
+      _completePhoneNumber.replaceAll(' ', ''),
       int.parse(_otpController.text),
       _firstNameController.text,
       _lastNameController.text,

@@ -20,7 +20,7 @@ class DatabaseHelper {
     final path = join(dbPath, fileName);
     return await openDatabase(
       path,
-      version: 3,
+      version: 5,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -121,6 +121,57 @@ class DatabaseHelper {
         updated_at TEXT NOT NULL
       );
     ''');
+
+    await db.execute('''
+      CREATE TABLE messages (
+        id INTEGER PRIMARY KEY,
+        conversation_id INTEGER NOT NULL,
+        sender_id INTEGER NOT NULL,
+        sender_name TEXT,
+        sender_profile_pic TEXT,
+        body TEXT NOT NULL,
+        type TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        edited_at TEXT,
+        deleted INTEGER DEFAULT 0,
+        is_delivered INTEGER DEFAULT 0,
+        is_read INTEGER DEFAULT 0,
+        reply_to_message_id INTEGER,
+        reply_to_body TEXT,
+        reply_to_sender_id INTEGER,
+        reply_to_sender_name TEXT,
+        reply_to_sender_profile_pic TEXT,
+        reply_to_type TEXT,
+        reply_to_created_at TEXT,
+        attachments TEXT,
+        metadata TEXT,
+        pinned INTEGER DEFAULT 0,
+        starred INTEGER DEFAULT 0,
+        local_media_path TEXT,
+        updated_at INTEGER NOT NULL
+      );
+    ''');
+
+    await db.execute('''
+      CREATE INDEX idx_messages_conversation ON messages(conversation_id, created_at);
+    ''');
+
+    await db.execute('''
+      CREATE INDEX idx_messages_id ON messages(id);
+    ''');
+
+    await db.execute('''
+      CREATE TABLE conversation_meta (
+        conversation_id INTEGER PRIMARY KEY,
+        total_count INTEGER NOT NULL,
+        current_page INTEGER NOT NULL,
+        total_pages INTEGER NOT NULL,
+        has_next_page INTEGER NOT NULL,
+        has_previous_page INTEGER NOT NULL,
+        last_sync_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    ''');
   }
 
   // simple migration example
@@ -215,8 +266,103 @@ class DatabaseHelper {
       );
     ''');
     }
+
+    if (oldVersion < 4) {
+      // create messages table for existing DB
+      await db.execute('''
+      CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY,
+        conversation_id INTEGER NOT NULL,
+        sender_id INTEGER NOT NULL,
+        sender_name TEXT,
+        sender_profile_pic TEXT,
+        body TEXT NOT NULL,
+        type TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        edited_at TEXT,
+        deleted INTEGER DEFAULT 0,
+        is_delivered INTEGER DEFAULT 0,
+        is_read INTEGER DEFAULT 0,
+        reply_to_message_id INTEGER,
+        reply_to_body TEXT,
+        reply_to_sender_id INTEGER,
+        reply_to_sender_name TEXT,
+        reply_to_sender_profile_pic TEXT,
+        reply_to_type TEXT,
+        reply_to_created_at TEXT,
+        attachments TEXT,
+        metadata TEXT,
+        pinned INTEGER DEFAULT 0,
+        starred INTEGER DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      );
+    ''');
+
+      await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
+    ''');
+
+      await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_messages_id ON messages(id);
+    ''');
+
+      // create conversation_meta table for existing DB
+      await db.execute('''
+      CREATE TABLE IF NOT EXISTS conversation_meta (
+        conversation_id INTEGER PRIMARY KEY,
+        total_count INTEGER NOT NULL,
+        current_page INTEGER NOT NULL,
+        total_pages INTEGER NOT NULL,
+        has_next_page INTEGER NOT NULL,
+        has_previous_page INTEGER NOT NULL,
+        last_sync_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    ''');
+    }
+
+    if (oldVersion < 5) {
+      // Add local_media_path column to messages table
+      await db.execute('''
+        ALTER TABLE messages ADD COLUMN local_media_path TEXT;
+      ''');
+    }
   }
 
+  /// Clear all data from all tables (used during logout)
+  Future<void> clearAllData() async {
+    final db = await instance.database;
+
+    try {
+      await db.transaction((txn) async {
+        // Clear all tables in the correct order (respecting foreign key constraints)
+        await txn.delete('messages');
+        await txn.delete('conversation_meta');
+        await txn.delete('conversations');
+        await txn.delete('groups');
+        await txn.delete('communities');
+        await txn.delete('calls');
+        await txn.delete('contacts');
+        await txn.delete('users');
+
+        print('✅ All database tables cleared successfully');
+      });
+    } catch (e) {
+      print('❌ Error clearing database: $e');
+      rethrow;
+    }
+  }
+
+  /// Reset database instance (close and clear cached instance)
+  Future<void> resetInstance() async {
+    if (_db != null) {
+      await _db!.close();
+      _db = null;
+      print('✅ Database instance reset successfully');
+    }
+  }
+
+  /// Close database connection and reset instance
   Future close() async {
     final db = await instance.database;
     await db.close();

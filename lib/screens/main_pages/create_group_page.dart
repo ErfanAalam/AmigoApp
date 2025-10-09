@@ -151,13 +151,13 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
             ),
           );
 
-           await _websocketService.sendMessage({
-          'type': 'join_conversation',
-          'conversation_id': response['data']['id'],
-          'data':{
-          'recipient_id': [_selectedUserIds.toList()],
-          }
-        });
+          await _websocketService.sendMessage({
+            'type': 'join_conversation',
+            'conversation_id': response['data']['id'],
+            'data': {
+              'recipient_id': [_selectedUserIds.toList()],
+            },
+          });
 
           // Go back to groups page
           Navigator.pop(
@@ -361,10 +361,14 @@ class UserListItem extends StatelessWidget {
   }) : super(key: key);
 
   String _getInitials(String name) {
-    final words = name.trim().split(' ');
-    if (words.length >= 2) {
+    final words = name
+        .trim()
+        .split(' ')
+        .where((word) => word.isNotEmpty)
+        .toList();
+    if (words.length >= 2 && words[0].isNotEmpty && words[1].isNotEmpty) {
       return '${words[0][0]}${words[1][0]}'.toUpperCase();
-    } else if (words.isNotEmpty) {
+    } else if (words.isNotEmpty && words[0].isNotEmpty) {
       return words[0][0].toUpperCase();
     }
     return '?';

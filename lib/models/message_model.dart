@@ -16,6 +16,7 @@ class MessageModel {
   final MessageModel? replyToMessage; // Reply to message
   final int? replyToMessageId; // Reply to message ID
   final bool isDelivered; // Message delivery status
+  final String? localMediaPath; // Local cached media file path
 
   MessageModel({
     required this.id,
@@ -33,6 +34,7 @@ class MessageModel {
     this.replyToMessage,
     this.replyToMessageId,
     this.isDelivered = false,
+    this.localMediaPath,
   });
 
   factory MessageModel.fromJson(Map<String, dynamic> json) {
@@ -92,6 +94,7 @@ class MessageModel {
               : null),
       isDelivered:
           json['is_delivered'] == true || json['is_delivered'] == 'true',
+      localMediaPath: json['local_media_path']?.toString(),
     );
   }
 
@@ -119,6 +122,7 @@ class MessageModel {
       'reply_to_message': replyToMessage?.toJson(),
       'reply_to_message_id': replyToMessageId,
       'is_delivered': isDelivered,
+      'local_media_path': localMediaPath,
     };
   }
 
@@ -127,7 +131,11 @@ class MessageModel {
   bool get isFile => type == 'file';
 
   /// Create a copy of this message with updated read/delivery status
-  MessageModel copyWith({bool? isDelivered, bool? isRead}) {
+  MessageModel copyWith({
+    bool? isDelivered,
+    bool? isRead,
+    String? localMediaPath,
+  }) {
     return MessageModel(
       id: id,
       body: body,
@@ -144,6 +152,7 @@ class MessageModel {
       replyToMessage: replyToMessage,
       replyToMessageId: replyToMessageId,
       isDelivered: isDelivered ?? this.isDelivered,
+      localMediaPath: localMediaPath ?? this.localMediaPath,
     );
   }
 }

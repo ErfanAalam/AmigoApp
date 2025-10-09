@@ -1,17 +1,20 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../models/conversation_model.dart';
 import '../../models/message_model.dart';
+import '../../models/user_model.dart';
 import '../../api/chats.services.dart';
 import '../../api/user.service.dart';
 import '../../services/message_storage_service.dart';
+import '../../repositories/messages_repository.dart';
+import '../../repositories/user_repository.dart';
 import '../../services/websocket_service.dart';
 import '../../utils/chat_helpers.dart';
 import '../../utils/message_storage_helpers.dart';
@@ -19,6 +22,8 @@ import '../../widgets/media_preview_widgets.dart';
 import '../../services/call_service.dart';
 import 'package:provider/provider.dart';
 import '../../services/user_status_service.dart';
+import '../../services/media_cache_service.dart';
+import 'dart:io' as io;
 
 class InnerChatPage extends StatefulWidget {
   final ConversationModel conversation;
@@ -33,11 +38,13 @@ class _InnerChatPageState extends State<InnerChatPage>
     with TickerProviderStateMixin {
   final ChatsServices _chatsServices = ChatsServices();
   final UserService _userService = UserService();
-  final MessageStorageService _storageService = MessageStorageService();
+  final MessagesRepository _messagesRepo = MessagesRepository();
+  final UserRepository _userRepo = UserRepository();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _messageController = TextEditingController();
   final WebSocketService _websocketService = WebSocketService();
   final ImagePicker _imagePicker = ImagePicker();
+  final MediaCacheService _mediaCacheService = MediaCacheService();
   List<MessageModel> _messages = [];
   bool _isLoading = false; // Start false, will be set true only if no cache
   bool _isLoadingMore = false;
@@ -205,9 +212,9 @@ class _InnerChatPageState extends State<InnerChatPage>
     try {
       final conversationId = widget.conversation.conversationId;
 
-      // Quick synchronous check if cache key exists
-      final prefs = await SharedPreferences.getInstance();
-      if (prefs.containsKey('messages_$conversationId')) {
+      // Quick check if we have cached messages in DB
+      final count = await _messagesRepo.getMessageCount(conversationId);
+      if (count > 0) {
         // Don't load here, just indicate cache is available
         if (mounted) {
           setState(() {
@@ -259,7 +266,7 @@ class _InnerChatPageState extends State<InnerChatPage>
 
           // Add new messages to cache
           _conversationMeta = ConversationMeta.fromResponse(historyResponse);
-          await _storageService.addMessagesToCache(
+          await _messagesRepo.addMessagesToCache(
             conversationId: conversationId,
             newMessages: newMessages,
             updatedMeta: _conversationMeta!,
@@ -290,7 +297,7 @@ class _InnerChatPageState extends State<InnerChatPage>
         } else if (backendCount == cachedCount) {
           // Just update metadata in case pagination info changed
           _conversationMeta = ConversationMeta.fromResponse(historyResponse);
-          await _storageService.saveMessages(
+          await _messagesRepo.saveMessages(
             conversationId: conversationId,
             messages: _messages,
             meta: _conversationMeta!,
@@ -312,7 +319,7 @@ class _InnerChatPageState extends State<InnerChatPage>
         } else {
           // Replace cache with backend data
           _conversationMeta = ConversationMeta.fromResponse(historyResponse);
-          await _storageService.saveMessages(
+          await _messagesRepo.saveMessages(
             conversationId: conversationId,
             messages: backendMessagesWithReadStatus,
             meta: _conversationMeta!,
@@ -346,57 +353,128 @@ class _InnerChatPageState extends State<InnerChatPage>
   }
 
   Future<void> _initializeChat() async {
-    // Get user ID first, then load messages
-    // This ensures we can properly identify sender vs receiver messages
+    // CRITICAL: Get user ID FIRST (must know who "I" am before displaying messages)
     await _getCurrentUserId();
 
-    // Fetch user call access status
+    // Fetch call access (needed for UI button)
     await _fetchUserCallAccess();
 
-    // Notify server that user is active in this conversation
-    await _websocketService.sendMessage({
-      'type': 'active_in_conversation',
-      'conversation_id': widget.conversation.conversationId,
-    });
-
-    await _websocketService.sendMessage({
-      'type': 'online_status',
-      'conversation_id': widget.conversation.conversationId,
-    });
-
-    // Initialize user info cache with conversation participant
+    // Initialize user info cache
     _initializeUserCache();
 
-    // Load pinned message from storage
+    // Load pinned and starred messages from local DB (fast)
     await _loadPinnedMessageFromStorage();
-
-    // Load starred messages from storage
     await _loadStarredMessagesFromStorage();
 
-    // Try to load from cache immediately for instant display
+    // NOW load and display messages (user ID is known, display will be correct)
     await _tryLoadFromCacheFirst();
 
-    // Then load from server if needed
+    // Load from server (in background if we have cache)
     await _loadInitialMessages();
+
+    // Send WebSocket messages in background (non-blocking, non-critical)
+    Future.delayed(Duration.zero, () {
+      _websocketService
+          .sendMessage({
+            'type': 'active_in_conversation',
+            'conversation_id': widget.conversation.conversationId,
+          })
+          .catchError((e) {
+            debugPrint('❌ Error sending active_in_conversation: $e');
+          });
+
+      _websocketService
+          .sendMessage({
+            'type': 'online_status',
+            'conversation_id': widget.conversation.conversationId,
+          })
+          .catchError((e) {
+            debugPrint('❌ Error sending online_status: $e');
+          });
+    });
   }
 
-  /// Fetch user call access status
+  /// Fetch user call access status - prioritize local DB for instant display
   Future<void> _fetchUserCallAccess() async {
     try {
-      final response = await _userService.getUser();
-      if (response['success'] == true && response['data'] != null) {
-        final userData = response['data'];
-        _hasCallAccess = userData['call_access'] == true;
-        debugPrint('✅ User call access: $_hasCallAccess');
-      } else {
-        debugPrint(
-          '❌ Failed to fetch user call access: ${response['message']}',
-        );
-        _hasCallAccess = false; // Default to no access
+      // PRIORITY 1: Check local DB first (INSTANT - 5ms)
+      if (_currentUserId != null) {
+        final localUser = await _userRepo.getUserById(_currentUserId!);
+        if (localUser != null) {
+          _hasCallAccess = localUser.callAccess;
+          debugPrint(
+            '✅ Got call access from local DB: $_hasCallAccess (instant!)',
+          );
+
+          // Update UI immediately with cached value
+          if (mounted) {
+            setState(() {});
+          }
+
+          // PRIORITY 2: Update from server in background (silent sync)
+          _syncCallAccessFromServer(localUser);
+          return;
+        }
       }
+
+      // PRIORITY 3: If no local data, fetch from server
+      debugPrint('🌐 No local call access data, fetching from server...');
+      await _syncCallAccessFromServer(null);
     } catch (e) {
       debugPrint('❌ Error fetching user call access: $e');
       _hasCallAccess = false; // Default to no access
+    }
+  }
+
+  /// Sync call access from server and update local DB if changed
+  Future<void> _syncCallAccessFromServer(dynamic existingUser) async {
+    try {
+      final response = await _userService.getUser().timeout(
+        Duration(seconds: 3),
+        onTimeout: () {
+          debugPrint('⏰ fetchCallAccess from server timed out');
+          return {'success': false, 'message': 'Timeout'};
+        },
+      );
+
+      if (response['success'] == true && response['data'] != null) {
+        final userData = response['data'];
+        final serverCallAccess = userData['call_access'] == true;
+
+        // Check if value changed from local DB
+        final hasChanged =
+            existingUser != null && existingUser.callAccess != serverCallAccess;
+
+        if (hasChanged || existingUser == null) {
+          _hasCallAccess = serverCallAccess;
+          debugPrint(
+            '📡 Call access from server: $_hasCallAccess${hasChanged ? " (CHANGED!)" : ""}',
+          );
+
+          // Update local DB with new value
+          if (_currentUserId != null) {
+            final userModel = UserModel(
+              id: _currentUserId!,
+              name: userData['name'] ?? '',
+              phone: userData['phone'] ?? '',
+              profilePic: userData['profile_pic'],
+              callAccess: serverCallAccess,
+            );
+            await _userRepo.insertOrUpdateUser(userModel);
+            debugPrint('💾 Updated call access in local DB');
+          }
+
+          // Update UI if value changed
+          if (mounted && hasChanged) {
+            setState(() {});
+          }
+        } else {
+          debugPrint('✓ Call access unchanged from server');
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error syncing call access from server: $e');
+      // Keep existing value, don't update
     }
   }
 
@@ -407,9 +485,7 @@ class _InnerChatPageState extends State<InnerChatPage>
     try {
       final conversationId = widget.conversation.conversationId;
 
-      final cachedData = await _storageService.getCachedMessages(
-        conversationId,
-      );
+      final cachedData = await _messagesRepo.getCachedMessages(conversationId);
 
       if (cachedData != null && cachedData.messages.isNotEmpty && mounted) {
         setState(() {
@@ -439,7 +515,7 @@ class _InnerChatPageState extends State<InnerChatPage>
         if (mounted) {
           setState(() {
             _isCheckingCache = false;
-            _isLoading = true; // Now show loading since no cache
+            _isLoading = false; // Don't show loading yet
             _hasCheckedCache = true;
           });
         }
@@ -449,7 +525,7 @@ class _InnerChatPageState extends State<InnerChatPage>
       if (mounted) {
         setState(() {
           _isCheckingCache = false;
-          _isLoading = true; // Show loading since cache check failed
+          _isLoading = false; // Don't show loading on error
           _hasCheckedCache = true;
         });
       }
@@ -458,22 +534,54 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   Future<void> _getCurrentUserId() async {
     try {
-      final response = await _userService.getUser();
+      // FAST PATH: Try to get from local DB first (instant, offline-friendly)
+      final conversationId = widget.conversation.conversationId;
+      final cachedMessages = await _messagesRepo.getMessagesByConversation(
+        conversationId,
+        limit: 20, // Check more messages to ensure we find one from us
+      );
+
+      // Find a message that's from us (senderId != conversation.userId)
+      if (cachedMessages.isNotEmpty) {
+        // In a DM, one user is conversation.userId (the other person)
+        // The other user is us (current user)
+        final otherUserId = widget.conversation.userId;
+
+        for (final msg in cachedMessages) {
+          if (msg.senderId != otherUserId) {
+            _currentUserId = msg.senderId;
+            debugPrint(
+              '✅ Got current user ID from cached messages: $_currentUserId (instant!)',
+            );
+            return; // Found it! Return immediately
+          }
+        }
+
+        // If all messages are from the other person, we haven't sent any yet
+        // In that case, we need to fetch from API
+      }
+
+      // SLOW PATH: Try API with timeout (only if no cache found us)
+      debugPrint('🌐 Fetching current user ID from API...');
+      final response = await _userService.getUser().timeout(
+        Duration(seconds: 2), // Reduced to 2 seconds
+        onTimeout: () {
+          debugPrint('⏰ getUser() timed out after 2 seconds');
+          return {'success': false, 'message': 'Timeout'};
+        },
+      );
+
       if (response['success'] == true && response['data'] != null) {
-        final userData = response['data'] ?? response['data'];
+        final userData = response['data'];
         _currentUserId = _parseToInt(userData['id']);
+        debugPrint('✅ Got current user ID from API: $_currentUserId');
       } else {
-        _currentUserId = widget.conversation.userId;
+        debugPrint('⚠️ Could not get current user ID from API');
+        // Will be determined when user sends first message
       }
     } catch (e) {
       debugPrint('❌ Error getting current user: $e');
-      // Fallback: try to get from conversation if available
-      _currentUserId = widget.conversation.userId;
-    }
-
-    // Final fallback - if still null, log warning
-    if (_currentUserId == null) {
-      // WARNING: Could not determine current user ID. All messages will show as from others.
+      // Continue without user ID - will be inferred when user sends a message
     }
   }
 
@@ -547,7 +655,7 @@ class _InnerChatPageState extends State<InnerChatPage>
           _pinnedMessageId = null;
         });
         // Also clear from storage
-        _storageService.savePinnedMessage(
+        _messagesRepo.savePinnedMessage(
           conversationId: widget.conversation.conversationId,
           pinnedMessageId: null,
         );
@@ -573,7 +681,7 @@ class _InnerChatPageState extends State<InnerChatPage>
         });
 
         // Update storage with cleaned up starred messages
-        _storageService.saveStarredMessages(
+        _messagesRepo.saveStarredMessages(
           conversationId: widget.conversation.conversationId,
           starredMessageIds: _starredMessages,
         );
@@ -628,7 +736,7 @@ class _InnerChatPageState extends State<InnerChatPage>
         }
 
         // Validate storage
-        await _storageService.validateReplyMessageStorage(
+        await _messagesRepo.validateReplyMessageStorage(
           widget.conversation.conversationId,
         );
       } catch (e) {
@@ -887,33 +995,23 @@ class _InnerChatPageState extends State<InnerChatPage>
     try {
       final conversationId = widget.conversation.conversationId;
 
-      // If we already have messages from cache, do smart sync
-      if (_hasCheckedCache && _messages.isNotEmpty) {
-        final cachedData = await _storageService.getCachedMessages(
+      // ALWAYS load from local DB first for instant display
+      if (!_hasCheckedCache) {
+        debugPrint('📦 Loading from local DB first for instant display...');
+
+        final cachedData = await _messagesRepo.getCachedMessages(
           conversationId,
         );
-        final lenn = cachedData?.messages.length;
-
-        // Always check backend for new messages (but silently)
-        await _performSmartSync(conversationId);
-        return;
-      } else if (!_hasCheckedCache) {
-        // This is a fallback if quick cache check didn't work
-        debugPrint('📦 Fallback: checking cache in _loadInitialMessages');
-
-        final cachedData = await _storageService.getCachedMessages(
-          conversationId,
-        );
-        final lenn = cachedData?.messages.length;
 
         if (cachedData != null && cachedData.messages.isNotEmpty) {
-          debugPrint('📦 Found cache in fallback check');
+          debugPrint(
+            '✅ Loaded ${cachedData.messages.length} messages from local DB',
+          );
           if (mounted) {
             setState(() {
               _isCheckingCache = false;
-              _isLoadingFromCache = false; // No loading state for cache
-              _messages = cachedData
-                  .messages; // Don't reverse - keep chronological order
+              _isLoadingFromCache = false;
+              _messages = cachedData.messages;
               _conversationMeta = cachedData.meta;
               _hasMoreMessages = cachedData.meta.hasNextPage;
               _currentPage = cachedData.meta.currentPage;
@@ -923,26 +1021,25 @@ class _InnerChatPageState extends State<InnerChatPage>
               _hasCheckedCache = true;
             });
 
-            // Debug message dates for troubleshooting
+            // Debug message dates
             ChatHelpers.debugMessageDates(_messages);
-          }
 
-          // Check if cache is fresh
-          final isStale = await _storageService.isCacheStale(
-            conversationId,
-            maxAgeMinutes: 5,
-          );
-
-          if (!isStale) {
-            if (mounted) {
-              setState(() {
-                _isLoadingFromCache = false;
-              });
-            }
-            debugPrint('📱 Fallback cache is fresh, no server request needed');
-            return;
+            // Validate messages
+            _validatePinnedMessage();
+            _validateStarredMessages();
+            _validateReplyMessages();
           }
+        } else {
+          debugPrint('ℹ️ No cached messages found in local DB');
+          _hasCheckedCache = true;
         }
+      }
+
+      // If we already have messages from cache, do smart sync silently
+      if (_messages.isNotEmpty) {
+        debugPrint('📡 Silently syncing with server in background...');
+        await _performSmartSync(conversationId);
+        return;
       }
 
       // Show loading only if we don't have cached messages
@@ -962,13 +1059,13 @@ class _InnerChatPageState extends State<InnerChatPage>
           limit: 20,
         );
 
-        if (!mounted) return; // Prevent setState if widget is disposed
+        if (!mounted) return;
+
         if (response['success'] == true && response['data'] != null) {
           final historyResponse = ConversationHistoryResponse.fromJson(
             response['data'],
           );
 
-          // Keep messages in chronological order (oldest first)
           final processedMessages = historyResponse.messages;
           _conversationMeta = ConversationMeta.fromResponse(historyResponse);
 
@@ -984,12 +1081,12 @@ class _InnerChatPageState extends State<InnerChatPage>
             }),
           );
 
-          // // Save to cache
-          // await _storageService.saveMessages(
-          //   conversationId: conversationId,
-          //   messages: messagesWithReadStatus, // Save with read status
-          //   meta: _conversationMeta!,
-          // );
+          // Save to local DB
+          await _messagesRepo.saveMessages(
+            conversationId: conversationId,
+            messages: processedMessages,
+            meta: _conversationMeta!,
+          );
 
           setState(() {
             _messages = processedMessages;
@@ -1000,14 +1097,9 @@ class _InnerChatPageState extends State<InnerChatPage>
             _isInitialized = true;
           });
 
-          // Debug message dates for troubleshooting
           ChatHelpers.debugMessageDates(_messages);
-
-          // Validate pinned message and starred messages exist in loaded messages
           _validatePinnedMessage();
           _validateStarredMessages();
-
-          // Validate reply message storage
           _validateReplyMessages();
         } else {
           setState(() {
@@ -1019,13 +1111,29 @@ class _InnerChatPageState extends State<InnerChatPage>
         }
       } catch (e) {
         debugPrint('❌ Error loading messages from server: $e');
+
+        // On network error, if we have cached data, keep showing it
         if (mounted) {
-          setState(() {
-            _errorMessage = 'Error: ${e.toString()}';
-            _isLoading = false;
-            _isLoadingFromCache = false;
-            _isInitialized = true;
-          });
+          if (_messages.isNotEmpty) {
+            // We have cache, just stop loading
+            debugPrint(
+              '📦 Network error but we have cached data, showing cache',
+            );
+            setState(() {
+              _isLoading = false;
+              _isLoadingFromCache = false;
+              _isInitialized = true;
+              _errorMessage = null; // Don't show error if we have cache
+            });
+          } else {
+            // No cache, show error
+            setState(() {
+              _errorMessage = 'No internet connection';
+              _isLoading = false;
+              _isLoadingFromCache = false;
+              _isInitialized = true;
+            });
+          }
         }
       }
     } catch (e) {
@@ -1035,8 +1143,7 @@ class _InnerChatPageState extends State<InnerChatPage>
           _errorMessage = 'Failed to load messages: ${e.toString()}';
           _isLoading = false;
           _isLoadingFromCache = false;
-          _isInitialized =
-              true; // Ensure we don't stay in loading state forever
+          _isInitialized = true;
         });
       }
     }
@@ -1092,7 +1199,7 @@ class _InnerChatPageState extends State<InnerChatPage>
           _conversationMeta = ConversationMeta.fromResponse(historyResponse);
 
           // Add to cache (insert at beginning for older messages)
-          await _storageService.addMessagesToCache(
+          await _messagesRepo.addMessagesToCache(
             conversationId: conversationId,
             newMessages: historyResponse.messages, // Save with read status
             updatedMeta: _conversationMeta!,
@@ -1347,7 +1454,7 @@ class _InnerChatPageState extends State<InnerChatPage>
     });
 
     // Save to local storage
-    await _storageService.savePinnedMessage(
+    await _messagesRepo.savePinnedMessage(
       conversationId: conversationId,
       pinnedMessageId: newPinnedMessageId,
     );
@@ -1358,7 +1465,6 @@ class _InnerChatPageState extends State<InnerChatPage>
     final data = message['data'] as Map<String, dynamic>? ?? {};
     final messagesIds = message['message_ids'] as List<int>? ?? [];
     final action = data['action'] ?? 'star';
-    final conversationId = widget.conversation.conversationId;
 
     setState(() {
       if (action == 'star') {
@@ -1372,15 +1478,9 @@ class _InnerChatPageState extends State<InnerChatPage>
     try {
       for (final messageId in messagesIds) {
         if (action == 'star') {
-          await _storageService.starMessage(
-            conversationId: conversationId,
-            messageId: messageId,
-          );
+          await _messagesRepo.starMessage(messageId);
         } else {
-          await _storageService.unstarMessage(
-            conversationId: conversationId,
-            messageId: messageId,
-          );
+          await _messagesRepo.unstarMessage(messageId);
         }
       }
     } catch (e) {
@@ -1398,16 +1498,6 @@ class _InnerChatPageState extends State<InnerChatPage>
     bool hasActiveUsers = _onlineUsers
         .where((userId) => userId != _currentUserId)
         .isNotEmpty;
-
-    print(
-      "------------------------------------------------------------\n onlineUsers -> $_onlineUsers \n----------------------------------------------------------------",
-    );
-    print(
-      "------------------------------------------------------------\n hasActiveUsers -> $hasActiveUsers \n----------------------------------------------------------------",
-    );
-    print(
-      "------------------------------------------------------------\n userLastReadMessageIds -> $userLastReadMessageIds \n----------------------------------------------------------------",
-    );
     // Get the last read message id of the other user (not the current user)
     int userReadMsgId = -1;
     if (userLastReadMessageIds.isNotEmpty) {
@@ -1422,10 +1512,6 @@ class _InnerChatPageState extends State<InnerChatPage>
         userReadMsgId = -1;
       }
     }
-    print(
-      "------------------------------------------------------------\n userReadMsgId -> $userReadMsgId \n----------------------------------------------------------------",
-    );
-
     // if ((message.id <= userReadMsgId || hasActiveUsers) && message.id > 0) {
     if (((message.id <= userReadMsgId || hasActiveUsers) && message.id > 0) &&
         userReadMsgId > 0) {
@@ -1537,23 +1623,17 @@ class _InnerChatPageState extends State<InnerChatPage>
         //   }
         // }
 
-        // Update in storage for all messages that the current user sent
-        int updatedCount = 0;
-        for (int i = 0; i < _messages.length; i++) {
-          final message = _messages[i];
-          if (message.senderId == _currentUserId) {
-            await _storageService.updateMessageStatus(
-              conversationId: widget.conversation.conversationId,
-              messageId: message.id,
-              isDelivered: isDelivered || message.isDelivered,
-              // isRead: isRead || message.isRead,
-            );
-            updatedCount++;
-          }
+        // Update in storage for all messages that the current user sent (batch update)
+        if (_currentUserId != null && isDelivered) {
+          await _messagesRepo.updateAllMessagesStatus(
+            conversationId: widget.conversation.conversationId,
+            senderId: _currentUserId!,
+            isDelivered: isDelivered,
+          );
         }
 
         debugPrint(
-          '✅ Updated message $actualMessageId and cascaded status to $updatedCount other messages: delivered=$isDelivered, read=$isRead',
+          '✅ Updated message $actualMessageId and all messages from sender: delivered=$isDelivered, read=$isRead',
         );
       } else {
         debugPrint(
@@ -1636,7 +1716,6 @@ class _InnerChatPageState extends State<InnerChatPage>
     );
     try {
       final data = messageData['data'] as Map<String, dynamic>? ?? {};
-      final conversationId = messageData['conversation_id'];
       final onlineInConversation = data['online_in_conversation'];
 
       // add to active users map if not present and update if present
@@ -2195,7 +2274,7 @@ class _InnerChatPageState extends State<InnerChatPage>
       // For now, we'll show a snackbar
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to send message: $error'),
+          content: Text('Failed to send message, please check your internet!'),
           backgroundColor: Colors.teal,
           action: SnackBarAction(
             label: 'Retry',
@@ -2238,6 +2317,9 @@ class _InnerChatPageState extends State<InnerChatPage>
     if (index != -1) {
       final message = _messages[index];
 
+      if (!_websocketService.isConnected) {
+        _websocketService.connect();
+      }
       // Re-send the message
       _websocketService
           .sendMessage({
@@ -2257,7 +2339,7 @@ class _InnerChatPageState extends State<InnerChatPage>
     Future.microtask(() async {
       try {
         if (_conversationMeta != null) {
-          await _storageService.addMessageToCache(
+          await _messagesRepo.addMessageToCache(
             conversationId: widget.conversation.conversationId,
             newMessage: message,
             updatedMeta: _conversationMeta!.copyWith(
@@ -2277,7 +2359,7 @@ class _InnerChatPageState extends State<InnerChatPage>
 
           // Validate reply message storage periodically
           if (message.replyToMessage != null) {
-            await _storageService.validateReplyMessageStorage(
+            await _messagesRepo.validateReplyMessageStorage(
               widget.conversation.conversationId,
             );
           }
@@ -2395,7 +2477,9 @@ class _InnerChatPageState extends State<InnerChatPage>
                     radius: 18,
                     backgroundColor: Colors.white,
                     backgroundImage: widget.conversation.userProfilePic != null
-                        ? NetworkImage(widget.conversation.userProfilePic!)
+                        ? CachedNetworkImageProvider(
+                            widget.conversation.userProfilePic!,
+                          )
                         : null,
                     child: widget.conversation.userProfilePic == null
                         ? Text(
@@ -2543,8 +2627,10 @@ class _InnerChatPageState extends State<InnerChatPage>
       orElse: () => throw StateError('Pinned message not found'),
     );
 
-    final isMyMessage =
-        _currentUserId != null && pinnedMessage.senderId == _currentUserId;
+    // Determine if pinned message is from current user (same logic as message list)
+    final isMyMessage = _currentUserId != null
+        ? pinnedMessage.senderId == _currentUserId
+        : pinnedMessage.senderId != widget.conversation.userId;
     final messageTime = ChatHelpers.formatMessageTime(pinnedMessage.createdAt);
 
     return GestureDetector(
@@ -2810,16 +2896,12 @@ class _InnerChatPageState extends State<InnerChatPage>
 
           // Keep pinned message in regular list - it will also be shown in pinned section
 
-          // Debug: Check user ID comparison
-          final isMyMessage =
-              _currentUserId != null && message.senderId == _currentUserId;
-
-          // Debug logging for first few messages to troubleshoot
-          // if (index < 3) {
-          //   debugPrint(
-          //     '🔍 Message ${message.id}: senderId=${message.senderId}, currentUserId=$_currentUserId, isMyMessage=$isMyMessage',
-          //   );
-          // }
+          // Determine if message is from current user
+          // If _currentUserId is known, use it
+          // If not, infer: in a DM, any message NOT from conversation.userId is from us
+          final isMyMessage = _currentUserId != null
+              ? message.senderId == _currentUserId
+              : message.senderId != widget.conversation.userId;
 
           return _buildMessageWithActions(message, isMyMessage);
         },
@@ -3271,8 +3353,10 @@ class _InnerChatPageState extends State<InnerChatPage>
   }
 
   Widget _buildReplyPreview(MessageModel replyMessage, bool isMyMessage) {
-    final isRepliedMessageMine =
-        _currentUserId != null && replyMessage.senderId == _currentUserId;
+    // Determine if the replied-to message is from current user
+    final isRepliedMessageMine = _currentUserId != null
+        ? replyMessage.senderId == _currentUserId
+        : replyMessage.senderId != widget.conversation.userId;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -3425,51 +3509,10 @@ class _InnerChatPageState extends State<InnerChatPage>
                   onTap: () => _openImagePreview(imageUrl, message.body),
                   child: Hero(
                     tag: imageUrl,
-                    child: Image.network(
+                    child: _buildCachedImage(
                       imageUrl,
-                      width: 200,
-                      height: 200,
-                      fit: BoxFit.cover,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return Container(
-                          width: 200,
-                          height: 200,
-                          color: Colors.grey[200],
-                          child: Center(
-                            child: CircularProgressIndicator(
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                Colors.teal,
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          width: 200,
-                          height: 200,
-                          color: Colors.grey[200],
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.broken_image,
-                                size: 30,
-                                color: Colors.grey[600],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Failed to load',
-                                style: TextStyle(
-                                  color: Colors.grey[600],
-                                  fontSize: 10,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
+                      message.localMediaPath,
+                      message.id,
                     ),
                   ),
                 ),
@@ -5161,7 +5204,7 @@ class _InnerChatPageState extends State<InnerChatPage>
               hasPreviousPage: false,
             );
 
-        await _storageService.addMessageToCache(
+        await _messagesRepo.addMessageToCache(
           conversationId: widget.conversation.conversationId,
           newMessage: imageMessage,
           updatedMeta: updatedMeta,
@@ -5290,7 +5333,7 @@ class _InnerChatPageState extends State<InnerChatPage>
               hasPreviousPage: false,
             );
 
-        await _storageService.addMessageToCache(
+        await _messagesRepo.addMessageToCache(
           conversationId: widget.conversation.conversationId,
           newMessage: videoMessage,
           updatedMeta: updatedMeta,
@@ -5423,7 +5466,7 @@ class _InnerChatPageState extends State<InnerChatPage>
               hasPreviousPage: false,
             );
 
-        await _storageService.addMessageToCache(
+        await _messagesRepo.addMessageToCache(
           conversationId: widget.conversation.conversationId,
           newMessage: documentMessage,
           updatedMeta: updatedMeta,
@@ -5487,7 +5530,7 @@ class _InnerChatPageState extends State<InnerChatPage>
     });
 
     // Save to local storage
-    await _storageService.savePinnedMessage(
+    await _messagesRepo.savePinnedMessage(
       conversationId: conversationId,
       pinnedMessageId: _pinnedMessageId,
     );
@@ -5519,10 +5562,7 @@ class _InnerChatPageState extends State<InnerChatPage>
 
     // Save to local storage
     try {
-      await _storageService.toggleStarMessage(
-        conversationId: conversationId,
-        messageId: messageId,
-      );
+      await _messagesRepo.toggleStarMessage(messageId);
       debugPrint(
         '⭐ ${isCurrentlyStarred ? 'Unstarred' : 'Starred'} message $messageId in local storage',
       );
@@ -5589,7 +5629,7 @@ class _InnerChatPageState extends State<InnerChatPage>
       });
 
       // Remove from local storage cache
-      await _storageService.removeMessageFromCache(
+      await _messagesRepo.removeMessageFromCache(
         conversationId: widget.conversation.conversationId,
         messageIds: [messageId],
       );
@@ -5624,15 +5664,9 @@ class _InnerChatPageState extends State<InnerChatPage>
     try {
       for (final messageId in messagesToStar) {
         if (areAllStarred) {
-          await _storageService.unstarMessage(
-            conversationId: conversationId,
-            messageId: messageId,
-          );
+          await _messagesRepo.unstarMessage(messageId);
         } else {
-          await _storageService.starMessage(
-            conversationId: conversationId,
-            messageId: messageId,
-          );
+          await _messagesRepo.starMessage(messageId);
         }
       }
       debugPrint(
@@ -5684,7 +5718,7 @@ class _InnerChatPageState extends State<InnerChatPage>
           (message) => _selectedMessages.contains(message.id),
         );
       });
-      await _storageService.removeMessageFromCache(
+      await _messagesRepo.removeMessageFromCache(
         conversationId: widget.conversation.conversationId,
         messageIds: _selectedMessages.map((id) => id).toList(),
       );
@@ -5765,8 +5799,10 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   Widget _buildReplyContainer() {
     final replyMessage = _replyToMessageData!;
-    final isRepliedMessageMine =
-        _currentUserId != null && replyMessage.senderId == _currentUserId;
+    // Determine if replied message is from current user
+    final isRepliedMessageMine = _currentUserId != null
+        ? replyMessage.senderId == _currentUserId
+        : replyMessage.senderId != widget.conversation.userId;
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -5849,7 +5885,9 @@ class _InnerChatPageState extends State<InnerChatPage>
             radius: 12,
             backgroundColor: Colors.grey[300],
             backgroundImage: widget.conversation.userProfilePic != null
-                ? NetworkImage(widget.conversation.userProfilePic!)
+                ? CachedNetworkImageProvider(
+                    widget.conversation.userProfilePic!,
+                  )
                 : null,
             child: widget.conversation.userProfilePic == null
                 ? Text(
@@ -5914,28 +5952,174 @@ class _InnerChatPageState extends State<InnerChatPage>
   }
 
   // Media preview methods
-  void _openImagePreview(String imageUrl, String? caption) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => ImagePreviewScreen(
-          imageUrls: [imageUrl],
-          initialIndex: 0,
-          captions: caption != null && caption.isNotEmpty ? [caption] : null,
+  void _openImagePreview(String imageUrl, String? caption) async {
+    try {
+      // Find the message to get localMediaPath
+      final message = _messages.firstWhere(
+        (msg) =>
+            msg.attachments != null &&
+            (msg.attachments as Map<String, dynamic>)['url'] == imageUrl,
+        orElse: () => _messages.first,
+      );
+
+      debugPrint('🖼️ Opening image preview for message ${message.id}');
+      debugPrint('🖼️ Image URL: $imageUrl');
+      debugPrint('🖼️ Local path from message: ${message.localMediaPath}');
+
+      // Get local path or download if needed
+      String? localPath = message.localMediaPath;
+
+      // Check if local file exists
+      if (localPath != null && io.File(localPath).existsSync()) {
+        debugPrint('✅ Local image file exists: $localPath');
+      } else {
+        debugPrint('⏬ Local file not found, checking cache...');
+
+        // Try to get from cache first
+        localPath = await _mediaCacheService.getCachedFilePath(imageUrl);
+
+        if (localPath == null) {
+          debugPrint('📥 Image not in cache, will download in background');
+          // Start caching in background (don't wait for it)
+          _cacheMediaForMessage(imageUrl, message.id);
+        } else {
+          debugPrint('✅ Image found in cache: $localPath');
+          // Update database with local path if not already set
+          if (message.localMediaPath == null) {
+            await _messagesRepo.updateLocalMediaPath(message.id, localPath);
+          }
+        }
+      }
+
+      if (!mounted) return;
+
+      debugPrint('🖼️ Opening image viewer with localPath: $localPath');
+
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => ImagePreviewScreen(
+            imageUrls: [imageUrl],
+            initialIndex: 0,
+            captions: caption != null && caption.isNotEmpty ? [caption] : null,
+            localPaths: localPath != null ? [localPath] : null,
+          ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      debugPrint('❌ Error opening image preview: $e');
+
+      // Show error message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to open image: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
-  void _openVideoPreview(String videoUrl, String? caption, String? fileName) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => VideoPreviewScreen(
-          videoUrl: videoUrl,
-          caption: caption,
-          fileName: fileName,
-        ),
-      ),
+  void _openVideoPreview(
+    String videoUrl,
+    String? caption,
+    String? fileName,
+  ) async {
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) =>
+          const Center(child: CircularProgressIndicator(color: Colors.white)),
     );
+
+    try {
+      // Find the message to get localMediaPath and cache if needed
+      final message = _messages.firstWhere(
+        (msg) =>
+            msg.attachments != null &&
+            (msg.attachments as Map<String, dynamic>)['url'] == videoUrl,
+        orElse: () => _messages.first,
+      );
+
+      debugPrint('🎬 Opening video preview for message ${message.id}');
+      debugPrint('🎬 Video URL: $videoUrl');
+      debugPrint('🎬 Local path from message: ${message.localMediaPath}');
+
+      // Get local path or download if needed
+      String? localPath = message.localMediaPath;
+
+      // Check if local file exists
+      if (localPath != null && io.File(localPath).existsSync()) {
+        debugPrint('✅ Local video file exists: $localPath');
+      } else {
+        debugPrint('⏬ Local file not found, checking cache or downloading...');
+
+        // Try to get from cache first
+        localPath = await _mediaCacheService.getCachedFilePath(videoUrl);
+
+        if (localPath == null) {
+          debugPrint('📥 Downloading video to cache...');
+          // Download and wait for completion
+          localPath = await _mediaCacheService.downloadAndCacheMedia(videoUrl);
+
+          if (localPath != null) {
+            debugPrint('✅ Video downloaded successfully: $localPath');
+            // Update database with local path
+            await _messagesRepo.updateLocalMediaPath(message.id, localPath);
+
+            // Update the message in memory
+            final index = _messages.indexWhere((m) => m.id == message.id);
+            if (index != -1 && mounted) {
+              setState(() {
+                _messages[index] = message.copyWith(localMediaPath: localPath);
+              });
+            }
+          } else {
+            debugPrint('⚠️ Video download failed, will use network URL');
+          }
+        } else {
+          debugPrint('✅ Video found in cache: $localPath');
+        }
+      }
+
+      // Close loading dialog
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+      if (!mounted) return;
+
+      debugPrint('🎬 Opening video player with localPath: $localPath');
+
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => VideoPreviewScreen(
+            videoUrl: videoUrl,
+            caption: caption,
+            fileName: fileName,
+            localPath: localPath,
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('❌ Error opening video preview: $e');
+
+      // Close loading dialog
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+
+      // Show error message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to open video: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   void _openDocumentPreview(
@@ -6430,7 +6614,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                 hasPreviousPage: false,
               );
 
-          await _storageService.addMessageToCache(
+          await _messagesRepo.addMessageToCache(
             conversationId: widget.conversation.conversationId,
             newMessage: voiceMessage,
             updatedMeta: updatedMeta,
@@ -6539,10 +6723,30 @@ class _InnerChatPageState extends State<InnerChatPage>
         final controller = _getAudioAnimationController(audioKey);
         controller.repeat(reverse: true);
 
+        // Get local cached path or use remote URL
+        // Extract message ID from audioKey (format: messageId_url)
+        final messageId = int.tryParse(audioKey.split('_').first);
+        String playbackUrl = audioUrl;
+
+        if (messageId != null) {
+          final message = _messages.firstWhere(
+            (msg) => msg.id == messageId,
+            orElse: () => _messages.first,
+          );
+
+          // Try to use local cached file
+          playbackUrl = await _getMediaPath(audioUrl, message.localMediaPath);
+
+          // If using remote URL and not cached yet, cache it in background
+          if (playbackUrl == audioUrl && message.localMediaPath == null) {
+            _cacheMediaForMessage(audioUrl, messageId);
+          }
+        }
+
         // Start new playback
-        print('🎬 Starting audio player with URL: $audioUrl');
+        print('🎬 Starting audio player with: $playbackUrl');
         await _audioPlayer.startPlayer(
-          fromURI: audioUrl,
+          fromURI: playbackUrl,
           whenFinished: () {
             if (mounted) {
               print('🏁 Audio finished callback triggered');
@@ -7061,6 +7265,111 @@ class _InnerChatPageState extends State<InnerChatPage>
       }
     }
   }
+
+  // ==================== MEDIA CACHING METHODS ====================
+
+  /// Build a cached image widget that loads from local storage when available
+  Widget _buildCachedImage(String imageUrl, String? localPath, int messageId) {
+    // If we have a local path and the file exists, use it
+    if (localPath != null && io.File(localPath).existsSync()) {
+      return Image.file(
+        io.File(localPath),
+        width: 200,
+        height: 200,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          // If local file fails, fall back to network
+          return _buildNetworkImage(imageUrl, messageId);
+        },
+      );
+    }
+
+    // Otherwise load from network and cache
+    return _buildNetworkImage(imageUrl, messageId);
+  }
+
+  Widget _buildNetworkImage(String imageUrl, int messageId) {
+    return CachedNetworkImage(
+      imageUrl: imageUrl,
+      width: 200,
+      height: 200,
+      fit: BoxFit.cover,
+      placeholder: (context, url) => Container(
+        width: 200,
+        height: 200,
+        color: Colors.grey[200],
+        child: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
+          ),
+        ),
+      ),
+      errorWidget: (context, url, error) => Container(
+        width: 200,
+        height: 200,
+        color: Colors.grey[200],
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.broken_image, size: 30, color: Colors.grey[600]),
+            const SizedBox(height: 4),
+            Text(
+              'Failed to load',
+              style: TextStyle(color: Colors.grey[600], fontSize: 10),
+            ),
+          ],
+        ),
+      ),
+      // Cache the image and save path to database
+      imageBuilder: (context, imageProvider) {
+        // Try to cache the media file
+        _cacheMediaForMessage(imageUrl, messageId);
+        return Image(
+          image: imageProvider,
+          width: 200,
+          height: 200,
+          fit: BoxFit.cover,
+        );
+      },
+    );
+  }
+
+  /// Cache media file for a message
+  Future<void> _cacheMediaForMessage(String url, int messageId) async {
+    try {
+      // Check if already cached in DB
+      if (await _messagesRepo.hasLocalMedia(messageId)) {
+        return;
+      }
+
+      // Download and cache
+      final localPath = await _mediaCacheService.downloadAndCacheMedia(url);
+      if (localPath != null) {
+        // Update database with local path
+        await _messagesRepo.updateLocalMediaPath(messageId, localPath);
+        debugPrint('✅ Cached media for message $messageId');
+      }
+    } catch (e) {
+      debugPrint('❌ Error caching media: $e');
+    }
+  }
+
+  /// Get media file path (local or remote)
+  Future<String> _getMediaPath(String url, String? localPath) async {
+    // Check if local file exists
+    if (localPath != null && io.File(localPath).existsSync()) {
+      return localPath;
+    }
+
+    // Try to get from cache service
+    final cachedPath = await _mediaCacheService.getCachedFilePath(url);
+    if (cachedPath != null) {
+      return cachedPath;
+    }
+
+    // Return remote URL as fallback
+    return url;
+  }
 }
 
 class _VoiceRecordingModal extends StatefulWidget {
@@ -7435,7 +7744,7 @@ class _ForwardMessageModalState extends State<_ForwardMessageModal>
         radius: 25,
         backgroundColor: Colors.teal[100],
         backgroundImage: conversation.displayAvatar != null
-            ? NetworkImage(conversation.displayAvatar!)
+            ? CachedNetworkImageProvider(conversation.displayAvatar!)
             : null,
         child: conversation.displayAvatar == null
             ? Text(

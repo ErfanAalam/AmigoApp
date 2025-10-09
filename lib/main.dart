@@ -1,18 +1,22 @@
+import 'dart:async';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/main_screen.dart';
 import 'screens/call/in_call_screen.dart';
 import 'screens/call/incoming_call_screen.dart';
 import 'screens/main_pages/inner_chat_page.dart';
+import 'screens/share_handler_screen.dart';
 import 'services/auth_service.dart';
 import 'services/cookie_service.dart';
 import 'services/websocket_service.dart';
 import 'services/user_status_service.dart';
 import 'services/call_service.dart';
 import 'services/notification_service.dart';
+import 'services/shared_media_service.dart';
 // import 'services/call_notification_handler.dart';
 import 'widgets/call_manager.dart';
 import 'api/api_service.dart';
@@ -68,6 +72,7 @@ class _MyAppState extends material.State<MyApp> {
   final ApiService _apiService = ApiService();
   bool _isLoading = true;
   bool _isAuthenticated = false;
+  StreamSubscription? _intentDataStreamSubscription;
 
   @override
   void initState() {
@@ -75,6 +80,7 @@ class _MyAppState extends material.State<MyApp> {
     _requestPermissions();
     _checkAuthentication();
     _setupWebSocketListeners();
+    _initializeSharing();
   }
 
   Future<void> _checkAuthentication() async {
@@ -359,8 +365,65 @@ class _MyAppState extends material.State<MyApp> {
     NavigationHelper.pushRoute(InnerChatPage(conversation: conversation));
   }
 
+  /// Initialize sharing intent listeners
+  void _initializeSharing() {
+    // Listen for shared media while the app is running
+    _intentDataStreamSubscription = ReceiveSharingIntent.instance
+        .getMediaStream()
+        .listen(
+          (List<SharedMediaFile> value) {
+            if (value.isNotEmpty) {
+              _handleSharedMedia(value);
+            }
+          },
+          onError: (err) {
+            print("❌ Error receiving shared files: $err");
+          },
+        );
+
+    // Handle shared media when app is opened from the share sheet (app was closed)
+    ReceiveSharingIntent.instance.getInitialMedia().then((
+      List<SharedMediaFile> value,
+    ) {
+      if (value.isNotEmpty) {
+        // Wait for authentication to complete and navigator to be ready
+        Future.delayed(const Duration(milliseconds: 500), () {
+          _handleSharedMedia(value);
+          ReceiveSharingIntent.instance.reset();
+        });
+      }
+    });
+  }
+
+  /// Handle shared media files
+  void _handleSharedMedia(List<SharedMediaFile> files) {
+    // Only handle if user is authenticated
+    if (!_isAuthenticated) {
+      print("⚠️ User not authenticated, ignoring shared media");
+      return;
+    }
+
+    print("📤 Received ${files.length} shared file(s)");
+
+    // Store files in the shared media service
+    SharedMediaService().setSharedFiles(files);
+
+    // Navigate to ShareHandlerScreen
+    if (NavigationHelper.navigatorKey.currentContext != null) {
+      material.Navigator.of(NavigationHelper.navigatorKey.currentContext!).push(
+        material.MaterialPageRoute(builder: (_) => const ShareHandlerScreen()),
+      );
+    } else {
+      // If navigator is not ready, wait and try again
+      Future.delayed(const Duration(milliseconds: 500), () {
+        _handleSharedMedia(files);
+      });
+    }
+  }
+
   @override
   void dispose() {
+    _intentDataStreamSubscription?.cancel();
     _websocketService.dispose();
     _userStatusService.dispose();
     _notificationService.dispose();

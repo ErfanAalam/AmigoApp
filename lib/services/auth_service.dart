@@ -13,6 +13,8 @@ import 'package:amigo/api/user.service.dart' as userService;
 import 'package:amigo/utils/navigation_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:amigo/screens/auth/login_screen.dart';
+import 'package:amigo/db/database_helper.dart';
+import 'media_cache_service.dart';
 
 class AuthService {
   static const String _authStatusKey = 'auth_status';
@@ -98,6 +100,12 @@ class AuthService {
       final messageStorage = MessageStorageService();
       await messageStorage.clearAllCache();
 
+      // 4.1 Clear media cache
+      print('💾 Clearing media cache...');
+      final mediaCacheService = MediaCacheService();
+      await mediaCacheService.clearAllCache();
+      
+
       // 5. Clear chat preferences
       print('⚙️ Clearing chat preferences...');
       final chatPreferences = ChatPreferencesService();
@@ -118,11 +126,17 @@ class AuthService {
       final contactService = ContactService();
       contactService.clearCache();
 
-      // 9. Clear app cache directories
+      // 9. Clear local database
+      print('🗄️ Clearing local database...');
+      final databaseHelper = DatabaseHelper.instance;
+      await databaseHelper.clearAllData();
+      await databaseHelper.resetInstance();
+
+      // 10. Clear app cache directories
       print('🗂️ Clearing app cache directories...');
       await _clearAppCacheDirectories();
 
-      // 10. Clear temporary files
+      // 11. Clear temporary files
       print('🗑️ Clearing temporary files...');
       await _clearTemporaryFiles();
 
@@ -131,7 +145,7 @@ class AuthService {
       print("📡 Notifying server to logout...");
       await ApiService().authenticatedGet("/auth/logout");
 
-      // 11. Restart the app
+      // 12. Restart the app
       print('🔄 Restarting app...');
       if (NavigationHelper.navigatorKey.currentContext != null) {
         Navigator.pushAndRemoveUntil(

@@ -13,6 +13,7 @@ import 'deleted_chats_page.dart';
 import '../../api/api_service.dart';
 import '../../services/chat_preferences_service.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 // import 'package:cached_network_image/cached_network_image.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -35,6 +36,8 @@ class _ProfilePageState extends State<ProfilePage> {
   bool isLoading = true;
   bool isUpdatingProfilePic = false;
   int deletedChatsCount = 0;
+  String appVersion = '';
+  String buildNumber = '';
 
   final UserRepository _userRepo = UserRepository();
 
@@ -43,6 +46,7 @@ class _ProfilePageState extends State<ProfilePage> {
     super.initState();
     _loadUserData();
     _loadDeletedChatsCount();
+    _loadAppVersion();
     // _checkPermissions();
     _requestPermissions();
   }
@@ -57,6 +61,20 @@ class _ProfilePageState extends State<ProfilePage> {
       }
     } catch (e) {
       debugPrint('❌ Error loading deleted chats count: $e');
+    }
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() {
+          appVersion = packageInfo.version;
+          buildNumber = packageInfo.buildNumber;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading app version: $e');
     }
   }
 
@@ -123,12 +141,19 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   String _getInitials(String name) {
-    if (name.isEmpty) return 'U';
-    List<String> nameParts = name.split(' ');
+    if (name.isEmpty || name.trim().isEmpty) return 'U';
+    List<String> nameParts = name.trim().split(' ');
     if (nameParts.length >= 2) {
-      return '${nameParts[0][0]}${nameParts[1][0]}'.toUpperCase();
+      // Check if both words have at least one character
+      if (nameParts[0].isNotEmpty && nameParts[1].isNotEmpty) {
+        return '${nameParts[0][0]}${nameParts[1][0]}'.toUpperCase();
+      } else if (nameParts[0].isNotEmpty) {
+        return nameParts[0][0].toUpperCase();
+      }
+    } else if (nameParts.isNotEmpty && nameParts[0].isNotEmpty) {
+      return nameParts[0][0].toUpperCase();
     }
-    return name[0].toUpperCase();
+    return 'U';
   }
 
   String _formatDate(String? dateString) {
@@ -253,7 +278,6 @@ class _ProfilePageState extends State<ProfilePage> {
       // 3) Create/Update local user model
       // Try to get existing local user id or use remote id from updateResponse
       UserModel? local = await _userRepo.getFirstUser();
-      int id = local?.id ?? (updateResponse['data']?['id'] ?? 0);
 
       // If updateResponse succeeded, use data from it; else fallback to local info
       if (updateResponse['success'] == true) {
@@ -596,7 +620,8 @@ class _ProfilePageState extends State<ProfilePage> {
                     Text(
                       isLoading
                           ? 'Loading...'
-                          : ((userData?['name'].toString() ?? 'User')),
+                          : ((userData?['name']?.toString() ??
+                                'User')), // Add null safety
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 24,
@@ -799,6 +824,42 @@ class _ProfilePageState extends State<ProfilePage> {
                       );
                     }
                   },
+                ),
+              ),
+
+              SizedBox(height: 16),
+
+              // App Version Section
+              Container(
+                margin: EdgeInsets.symmetric(horizontal: 16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.grey.withOpacity(0.1),
+                      spreadRadius: 1,
+                      blurRadius: 5,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    _buildInfoSection(
+                      title: 'About',
+                      children: [
+                        _buildInfoItem(
+                          icon: Icons.info_outline,
+                          label: 'App Version',
+                          value: appVersion.isNotEmpty
+                              ? 'v$appVersion (Build $buildNumber)'
+                              : 'Loading...',
+                          valueColor: Colors.grey[700],
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
 

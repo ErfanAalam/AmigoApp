@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -11,10 +10,14 @@ import '../../models/group_model.dart';
 import '../../models/message_model.dart';
 import '../../models/conversation_model.dart';
 import '../../models/community_model.dart';
+import '../../models/user_model.dart';
 import '../../api/groups.services.dart';
 import '../../api/user.service.dart';
 import '../../api/chats.services.dart';
 import '../../services/message_storage_service.dart';
+import '../../repositories/messages_repository.dart';
+import '../../repositories/user_repository.dart';
+import '../../repositories/groups_repository.dart';
 import '../../services/websocket_service.dart';
 import '../../utils/chat_helpers.dart';
 import '../../utils/message_storage_helpers.dart';
@@ -42,7 +45,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   final GroupsService _groupsService = GroupsService();
   final UserService _userService = UserService();
   final ChatsServices _chatsServices = ChatsServices();
-  final MessageStorageService _storageService = MessageStorageService();
+  final MessagesRepository _messagesRepo = MessagesRepository();
+  final UserRepository _userRepo = UserRepository();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _messageController = TextEditingController();
   final WebSocketService _websocketService = WebSocketService();
@@ -100,20 +104,46 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     return 'User $senderId';
   }
 
-  /// Get user info from conversation metadata or fallback to cache
+  /// Get user info from cache, metadata, or local DB
   Map<String, String?> _getUserInfo(int userId) {
-    // First try to get from conversation metadata members data
+    // PRIORITY 1: Check in-memory cache (INSTANT - populated during init)
+    if (_userInfoCache.containsKey(userId)) {
+      return _userInfoCache[userId]!;
+    }
+
+    // PRIORITY 2: Check conversation metadata members data
     if (_conversationMeta != null && _conversationMeta!.members.isNotEmpty) {
       final senderName = _conversationMeta!.getSenderName(userId);
       final senderProfilePic = _conversationMeta!.getSenderProfilePic(userId);
       if (senderName != 'Unknown User') {
+        // Cache it for next time
+        _userInfoCache[userId] = {
+          'name': senderName,
+          'profile_pic': senderProfilePic,
+        };
         return {'name': senderName, 'profile_pic': senderProfilePic};
       }
     }
 
-    // Fallback to user info cache
-    return _userInfoCache[userId] ??
-        {'name': 'Unknown User', 'profile_pic': null};
+    // PRIORITY 3: Check local DB asynchronously and update cache
+    Future.microtask(() async {
+      final user = await _userRepo.getUserById(userId);
+      if (user != null && mounted) {
+        _userInfoCache[userId] = {
+          'name': user.name,
+          'profile_pic': user.profilePic,
+        };
+        debugPrint('💾 Loaded user $userId (${user.name}) from local DB');
+        // Trigger rebuild to show updated names
+        setState(() {});
+      } else {
+        debugPrint('⚠️ User $userId not found in local DB');
+      }
+    });
+
+    // PRIORITY 4: Return fallback immediately (will update when DB lookup completes)
+    debugPrint('⚠️ Using fallback for user $userId - will check DB');
+    return {'name': 'User $userId', 'profile_pic': null};
   }
 
   // Message selection and actions
@@ -303,10 +333,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     try {
       final conversationId = widget.group.conversationId;
 
-      // Quick synchronous check if cache key exists
-      final prefs = await SharedPreferences.getInstance();
-      if (prefs.containsKey('messages_$conversationId')) {
-        debugPrint('🚀 Group cache exists, will load shortly...');
+      // Quick check if we have cached messages in DB
+      final count = await _messagesRepo.getMessageCount(conversationId);
+      if (count > 0) {
+        debugPrint(
+          '🚀 Group cache exists ($count messages), will load shortly...',
+        );
         // Don't load here, just indicate cache is available
         if (mounted) {
           setState(() {
@@ -322,13 +354,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   /// Smart sync: Compare cached message count with backend and add only new messages
   Future<void> _performSmartSync(int conversationId) async {
     try {
-      debugPrint(
-        '🔄 Starting group smart sync for conversation $conversationId',
-      );
-
       // Get current cached message count
       final cachedCount = _messages.length;
-      debugPrint('📊 Current cached group messages: $cachedCount');
 
       // Fetch latest data from backend (silently)
       final response = await _groupsService.getGroupConversationHistory(
@@ -344,15 +371,15 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
         final backendMessages = historyResponse.messages;
         final backendCount = backendMessages.length;
-        debugPrint('📊 Backend group messages: $backendCount');
 
         if (backendCount > cachedCount) {
           // Backend has more messages - add only the new ones
           final newMessages = backendMessages.skip(cachedCount).toList();
+          debugPrint('➕ Added ${newMessages.length} new group messages');
 
           // Add new messages to cache
           _conversationMeta = ConversationMeta.fromResponse(historyResponse);
-          await _storageService.addMessagesToCache(
+          await _messagesRepo.addMessagesToCache(
             conversationId: conversationId,
             newMessages: newMessages,
             updatedMeta: _conversationMeta!,
@@ -371,25 +398,17 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             });
           }
         } else if (backendCount == cachedCount) {
-          // Same count - no new messages
-          debugPrint('✅ Group smart sync: No new messages found');
-
           // Just update metadata in case pagination info changed
           _conversationMeta = ConversationMeta.fromResponse(historyResponse);
-          await _storageService.saveMessages(
+          await _messagesRepo.saveMessages(
             conversationId: conversationId,
             messages: _messages,
             meta: _conversationMeta!,
           );
         } else {
-          // Backend has fewer messages (unlikely but handle it)
-          debugPrint(
-            '⚠️ Backend has fewer group messages than cache, using backend data',
-          );
-
           // Replace cache with backend data
           _conversationMeta = ConversationMeta.fromResponse(historyResponse);
-          await _storageService.saveMessages(
+          await _messagesRepo.saveMessages(
             conversationId: conversationId,
             messages: backendMessages,
             meta: _conversationMeta!,
@@ -405,8 +424,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             });
           }
         }
-      } else {
-        debugPrint('❌ Group smart sync failed: ${response['message']}');
+
+        // Cache user info from metadata for offline access
+        await _cacheUsersFromMetadata();
       }
     } catch (e) {
       debugPrint('❌ Error in group smart sync: $e');
@@ -415,27 +435,33 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   }
 
   Future<void> _initializeChat() async {
-    // Get user ID first, then load messages
+    // CRITICAL: Get user ID FIRST (must know who "I" am before displaying messages)
     await _getCurrentUserId();
 
-    // Initialize user info cache with group members
-    _initializeUserCache();
+    // CRITICAL: Initialize and AWAIT user info cache with group members
+    // This MUST complete BEFORE displaying messages so names show correctly
+    await _initializeUserCache();
 
-    // Load pinned message from storage
+    // Load pinned and starred messages from local DB (fast)
     await _loadPinnedMessageFromStorage();
-
-    // Load starred messages from storage
     await _loadStarredMessagesFromStorage();
 
-    // Try to load from cache immediately for instant display
+    // NOW load and display messages (user ID and user names are known)
     await _tryLoadFromCacheFirst();
 
-    // Then load from server if needed
+    // Load from server (in background if we have cache)
     await _loadInitialMessages();
 
-    _websocketService.sendMessage({
-      'type': 'active_in_conversation',
-      'conversation_id': widget.group.conversationId,
+    // Send WebSocket messages in background (non-blocking, non-critical)
+    Future.delayed(Duration.zero, () {
+      _websocketService
+          .sendMessage({
+            'type': 'active_in_conversation',
+            'conversation_id': widget.group.conversationId,
+          })
+          .catchError((e) {
+            debugPrint('❌ Error sending active_in_conversation for group: $e');
+          });
     });
   }
 
@@ -445,19 +471,14 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
     try {
       final conversationId = widget.group.conversationId;
-      debugPrint('⚡ Quick group cache check for instant display...');
 
-      final cachedData = await _storageService.getCachedMessages(
-        conversationId,
-      );
+      final cachedData = await _messagesRepo.getCachedMessages(conversationId);
 
       if (cachedData != null && cachedData.messages.isNotEmpty && mounted) {
-        debugPrint('⚡ Found group cache, displaying immediately!');
         setState(() {
-          _isCheckingCache = false; // Stop cache checking state
-          _isLoadingFromCache = false; // No loading state needed for cache
-          _messages =
-              cachedData.messages; // Don't reverse - keep chronological order
+          _isCheckingCache = false;
+          _isLoadingFromCache = false;
+          _messages = cachedData.messages;
           _conversationMeta = cachedData.meta;
           _hasMoreMessages = cachedData.meta.hasNextPage;
           _currentPage = cachedData.meta.currentPage;
@@ -467,21 +488,20 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           _hasCheckedCache = true;
         });
 
-        // Validate pinned message and starred messages exist in cached messages
+        // Validate messages
         _validatePinnedMessage();
         _validateStarredMessages();
-
-        // Validate reply message storage
         _validateReplyMessages();
-
-        // Fix reply message sender names after loading from cache
         _populateReplyMessageSenderNames();
+
+        debugPrint(
+          '✅ Loaded ${cachedData.messages.length} group messages from local DB',
+        );
       } else {
-        debugPrint('⚡ No group cache found, will load from server');
         if (mounted) {
           setState(() {
             _isCheckingCache = false;
-            _isLoading = true; // Now show loading since no cache
+            _isLoading = false; // Don't show loading yet
             _hasCheckedCache = true;
           });
         }
@@ -491,7 +511,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       if (mounted) {
         setState(() {
           _isCheckingCache = false;
-          _isLoading = true; // Show loading since cache check failed
+          _isLoading = false;
           _hasCheckedCache = true;
         });
       }
@@ -500,28 +520,63 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
   Future<void> _getCurrentUserId() async {
     try {
-      final response = await _userService.getUser();
+      // FAST PATH: Try to get from local DB first (instant)
+      final conversationId = widget.group.conversationId;
+      final cachedMessages = await _messagesRepo.getMessagesByConversation(
+        conversationId,
+        limit: 20,
+      );
+
+      // For groups, find messages we sent by checking local DB
+      if (cachedMessages.isNotEmpty) {
+        // Find a message from someone in the conversation
+        for (final msg in cachedMessages) {
+          // Check if we have a cached user with this sender ID
+          final cachedUser = await _userRepo.getUserById(msg.senderId);
+          if (cachedUser != null) {
+            // Assume the first user we find in local cache is us
+            _currentUserId = cachedUser.id;
+            debugPrint(
+              '✅ Got current user ID from local DB: $_currentUserId (instant!)',
+            );
+            return;
+          }
+        }
+      }
+
+      // SLOW PATH: Fetch from API (only if not found in cache)
+      debugPrint('🌐 Fetching current user ID from API...');
+      final response = await _userService.getUser().timeout(
+        Duration(seconds: 2),
+        onTimeout: () {
+          debugPrint('⏰ getUser() timed out after 2 seconds');
+          return {'success': false, 'message': 'Timeout'};
+        },
+      );
+
       if (response['success'] == true && response['data'] != null) {
-        final userData = response['data'] ?? response['data'];
+        final userData = response['data'];
         _currentUserId = _parseToInt(userData['id']);
-        debugPrint('✅ Got current user ID from service: $_currentUserId');
+        debugPrint('✅ Got current user ID from API: $_currentUserId');
+
+        // Save to local DB for next time
+        final userModel = UserModel(
+          id: _currentUserId!,
+          name: userData['name'] ?? '',
+          phone: userData['phone'] ?? '',
+          profilePic: userData['profile_pic'],
+          callAccess: userData['call_access'] == true,
+        );
+        await _userRepo.insertOrUpdateUser(userModel);
       } else {
-        debugPrint('❌ Failed to get user from service, trying fallback...');
-        // For groups, we can't use a single user ID as fallback
-        _currentUserId = null;
+        debugPrint('⚠️ Could not get current user ID from API');
       }
     } catch (e) {
       debugPrint('❌ Error getting current user: $e');
-      _currentUserId = null;
     }
 
-    // Final fallback - if still null, log warning
     if (_currentUserId == null) {
-      debugPrint(
-        '⚠️ WARNING: Could not determine current user ID for group. All messages will show as from others.',
-      );
-    } else {
-      debugPrint('👤 Final current user ID for group: $_currentUserId');
+      debugPrint('⚠️ WARNING: Could not determine current user ID for group');
     }
   }
 
@@ -532,27 +587,61 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     return 0;
   }
 
-  /// Initialize user info cache with known group members
-  void _initializeUserCache() {
-    // Cache all group members' info
-    for (final member in widget.group.members) {
+  /// Initialize user info cache with known group members and save to DB
+  /// MUST be awaited to ensure names are available before displaying messages
+  Future<void> _initializeUserCache() async {
+    debugPrint('👥 Loading group members for caching...');
+
+    // STEP 1: Load latest group info from local DB (might have more up-to-date member list)
+    GroupModel? cachedGroup;
+    try {
+      final groupsRepo = GroupsRepository();
+      cachedGroup = await groupsRepo.getGroupById(widget.group.conversationId);
+      if (cachedGroup != null && cachedGroup.members.isNotEmpty) {
+        debugPrint(
+          '📦 Using ${cachedGroup.members.length} members from local DB',
+        );
+      }
+    } catch (e) {
+      debugPrint('⚠️ Could not load group from local DB: $e');
+    }
+
+    // Use cached group members if available, otherwise use widget.group.members
+    final membersToCache = cachedGroup?.members ?? widget.group.members;
+
+    debugPrint('👥 Caching ${membersToCache.length} group members...');
+
+    // STEP 2: Cache all members to BOTH memory AND local DB
+    for (final member in membersToCache) {
+      // 1. Cache in memory FIRST (synchronous, instant lookup)
       _userInfoCache[member.userId] = {
         'name': member.name,
         'profile_pic': member.profilePic,
       };
-      debugPrint(
-        '👤 Cached group member info for ${member.userId}: ${member.name}',
-      );
+
+      // 2. Save to local DB for offline access
+      try {
+        final userModel = UserModel(
+          id: member.userId,
+          name: member.name,
+          phone: '', // We don't have phone for group members
+          profilePic: member.profilePic,
+        );
+        await _userRepo.insertOrUpdateUser(userModel);
+      } catch (e) {
+        debugPrint('❌ Error caching member ${member.userId} to DB: $e');
+      }
     }
 
-    // Cache current user info
+    // STEP 3: Cache current user info in memory
     if (_currentUserId != null) {
-      _userInfoCache[_currentUserId!] = {
-        'name': 'You',
-        'profile_pic':
-            null, // We don't have current user's profile pic readily available
-      };
+      _userInfoCache[_currentUserId!] = {'name': 'You', 'profile_pic': null};
     }
+
+    debugPrint(
+      '✅ Cached ${membersToCache.length} group members to local DB and memory',
+    );
+    debugPrint('✅ _userInfoCache now has ${_userInfoCache.length} users');
   }
 
   /// Load pinned message from storage
@@ -598,7 +687,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           _pinnedMessageId = null;
         });
         // Also clear from storage
-        _storageService.savePinnedMessage(
+        _messagesRepo.savePinnedMessage(
           conversationId: widget.group.conversationId,
           pinnedMessageId: null,
         );
@@ -624,7 +713,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         });
 
         // Update storage with cleaned up starred messages
-        _storageService.saveStarredMessages(
+        _messagesRepo.saveStarredMessages(
           conversationId: widget.group.conversationId,
           starredMessageIds: _starredMessages,
         );
@@ -679,13 +768,48 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         }
 
         // Validate storage
-        await _storageService.validateReplyMessageStorage(
+        await _messagesRepo.validateReplyMessageStorage(
           widget.group.conversationId,
         );
       } catch (e) {
         debugPrint('❌ Error validating group reply messages: $e');
       }
     });
+  }
+
+  /// Cache user info from conversation metadata to local DB
+  Future<void> _cacheUsersFromMetadata() async {
+    if (_conversationMeta == null || _conversationMeta!.members.isEmpty) return;
+
+    try {
+      for (final member in _conversationMeta!.members) {
+        final userId = member['user_id'] as int?;
+        final userName = member['name'] as String?;
+        final profilePic = member['profile_pic'] as String?;
+
+        if (userId != null && userName != null) {
+          // Cache in memory
+          _userInfoCache[userId] = {
+            'name': userName,
+            'profile_pic': profilePic,
+          };
+
+          // Save to local DB for offline access
+          final userModel = UserModel(
+            id: userId,
+            name: userName,
+            phone: '', // Not available from conversation metadata
+            profilePic: profilePic,
+          );
+          await _userRepo.insertOrUpdateUser(userModel);
+        }
+      }
+      debugPrint(
+        '✅ Cached ${_conversationMeta!.members.length} users from metadata to local DB',
+      );
+    } catch (e) {
+      debugPrint('❌ Error caching users from metadata: $e');
+    }
   }
 
   /// Populate sender names for reply messages loaded from cache
@@ -922,35 +1046,24 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   Future<void> _loadInitialMessages() async {
     try {
       final conversationId = widget.group.conversationId;
-      debugPrint(
-        '🔄 Loading initial group messages for conversation $conversationId',
-      );
 
-      // If we already have messages from cache, do smart sync
-      if (_hasCheckedCache && _messages.isNotEmpty) {
-        debugPrint(
-          '📦 Already have cached group messages, doing smart sync...',
-        );
+      // ALWAYS load from local DB first for instant display
+      if (!_hasCheckedCache) {
+        debugPrint('📦 Loading from local DB first for instant display...');
 
-        // Always check backend for new messages (but silently)
-        await _performSmartSync(conversationId);
-        return;
-      } else if (!_hasCheckedCache) {
-        // This is a fallback if quick cache check didn't work
-        debugPrint('📦 Fallback: checking group cache in _loadInitialMessages');
-
-        final cachedData = await _storageService.getCachedMessages(
+        final cachedData = await _messagesRepo.getCachedMessages(
           conversationId,
         );
 
         if (cachedData != null && cachedData.messages.isNotEmpty) {
-          debugPrint('📦 Found group cache in fallback check');
+          debugPrint(
+            '✅ Loaded ${cachedData.messages.length} group messages from local DB',
+          );
           if (mounted) {
             setState(() {
               _isCheckingCache = false;
-              _isLoadingFromCache = false; // No loading state for cache
-              _messages = cachedData
-                  .messages; // Don't reverse - keep chronological order
+              _isLoadingFromCache = false;
+              _messages = cachedData.messages;
               _conversationMeta = cachedData.meta;
               _hasMoreMessages = cachedData.meta.hasNextPage;
               _currentPage = cachedData.meta.currentPage;
@@ -959,26 +1072,23 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               _errorMessage = null;
               _hasCheckedCache = true;
             });
-          }
 
-          // Check if cache is fresh
-          final isStale = await _storageService.isCacheStale(
-            conversationId,
-            maxAgeMinutes: 5,
-          );
-
-          if (!isStale) {
-            if (mounted) {
-              setState(() {
-                _isLoadingFromCache = false;
-              });
-            }
-            debugPrint(
-              '📱 Fallback group cache is fresh, no server request needed',
-            );
-            return;
+            // Validate messages
+            _validatePinnedMessage();
+            _validateStarredMessages();
+            _validateReplyMessages();
           }
+        } else {
+          debugPrint('ℹ️ No cached group messages found in local DB');
+          _hasCheckedCache = true;
         }
+      }
+
+      // If we already have messages from cache, do smart sync silently
+      if (_messages.isNotEmpty) {
+        debugPrint('📡 Silently syncing group with server in background...');
+        await _performSmartSync(conversationId);
+        return;
       }
 
       // Show loading only if we don't have cached messages
@@ -998,22 +1108,20 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           limit: 20,
         );
 
-        if (!mounted) return; // Prevent setState if widget is disposed
+        if (!mounted) return;
 
-        debugPrint('🌐 Group server response received: ${response['success']}');
         if (response['success'] == true && response['data'] != null) {
           final historyResponse = ConversationHistoryResponse.fromJson(
             response['data'],
           );
 
-          // Keep messages in chronological order (oldest first)
           final processedMessages = historyResponse.messages;
           _conversationMeta = ConversationMeta.fromResponse(historyResponse);
 
-          // Save to cache
-          await _storageService.saveMessages(
+          // Save to local DB
+          await _messagesRepo.saveMessages(
             conversationId: conversationId,
-            messages: historyResponse.messages, // Save in chronological order
+            messages: processedMessages,
             meta: _conversationMeta!,
           );
 
@@ -1026,19 +1134,13 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             _isInitialized = true;
           });
 
-          // Validate pinned message and starred messages exist in loaded messages
           _validatePinnedMessage();
           _validateStarredMessages();
-
-          // Validate reply message storage
           _validateReplyMessages();
-
-          // Fix reply message sender names after loading from server
           _populateReplyMessageSenderNames();
 
-          debugPrint(
-            '🌐 Loaded ${processedMessages.length} group messages from server and cached',
-          );
+          // Cache user info from metadata for offline access
+          await _cacheUsersFromMetadata();
         } else {
           setState(() {
             _errorMessage =
@@ -1050,13 +1152,27 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         }
       } catch (e) {
         debugPrint('❌ Error loading group messages from server: $e');
+
+        // On network error, if we have cached data, keep showing it
         if (mounted) {
-          setState(() {
-            _errorMessage = 'Error: ${e.toString()}';
-            _isLoading = false;
-            _isLoadingFromCache = false;
-            _isInitialized = true;
-          });
+          if (_messages.isNotEmpty) {
+            debugPrint(
+              '📦 Network error but we have cached data, showing cache',
+            );
+            setState(() {
+              _isLoading = false;
+              _isLoadingFromCache = false;
+              _isInitialized = true;
+              _errorMessage = null; // Don't show error if we have cache
+            });
+          } else {
+            setState(() {
+              _errorMessage = 'No internet connection';
+              _isLoading = false;
+              _isLoadingFromCache = false;
+              _isInitialized = true;
+            });
+          }
         }
       }
     } catch (e) {
@@ -1066,8 +1182,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           _errorMessage = 'Failed to load group messages: ${e.toString()}';
           _isLoading = false;
           _isLoadingFromCache = false;
-          _isInitialized =
-              true; // Ensure we don't stay in loading state forever
+          _isInitialized = true;
         });
       }
     }
@@ -1094,16 +1209,15 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         final historyResponse = ConversationHistoryResponse.fromJson(
           response['data'],
         );
-        // Keep chronological order for older messages
         final newMessages = historyResponse.messages;
 
         // Update conversation metadata
         _conversationMeta = ConversationMeta.fromResponse(historyResponse);
 
         // Add to cache (insert at beginning for older messages)
-        await _storageService.addMessagesToCache(
+        await _messagesRepo.addMessagesToCache(
           conversationId: conversationId,
-          newMessages: historyResponse.messages, // Save in chronological order
+          newMessages: newMessages,
           updatedMeta: _conversationMeta!,
           insertAtBeginning: true,
         );
@@ -1116,9 +1230,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           _isLoadingMore = false;
         });
 
-        debugPrint(
-          '📄 Loaded ${newMessages.length} more group messages and cached',
-        );
+        debugPrint('📄 Loaded ${newMessages.length} more group messages');
+
+        // Cache user info from metadata for offline access
+        await _cacheUsersFromMetadata();
       } else {
         if (mounted) {
           setState(() {
@@ -1759,7 +1874,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     });
 
     // Save to local storage
-    await _storageService.savePinnedMessage(
+    await _messagesRepo.savePinnedMessage(
       conversationId: conversationId,
       pinnedMessageId: newPinnedMessageId,
     );
@@ -1770,7 +1885,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     final data = message['data'] as Map<String, dynamic>? ?? {};
     final messagesIds = message['message_ids'] as List<int>? ?? [];
     final action = data['action'] ?? 'star';
-    final conversationId = widget.group.conversationId;
 
     setState(() {
       if (action == 'star') {
@@ -1784,15 +1898,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     try {
       for (final messageId in messagesIds) {
         if (action == 'star') {
-          await _storageService.starMessage(
-            conversationId: conversationId,
-            messageId: messageId,
-          );
+          await _messagesRepo.starMessage(messageId);
         } else {
-          await _storageService.unstarMessage(
-            conversationId: conversationId,
-            messageId: messageId,
-          );
+          await _messagesRepo.unstarMessage(messageId);
         }
       }
     } catch (e) {
@@ -1905,8 +2013,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       // For now, we'll show a snackbar
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to send group message: $error'),
-          backgroundColor: Colors.red,
+          content: Text(
+            'Failed to send group message: Please check your internet!',
+          ),
+          backgroundColor: Colors.teal,
           action: SnackBarAction(
             label: 'Retry',
             textColor: Colors.white,
@@ -1919,6 +2029,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
   /// Retry sending a failed message
   void _retryMessage(int messageId) {
+    if (!_websocketService.isConnected) {
+      _websocketService.connect();
+    }
+
     final index = _messages.indexWhere((msg) => msg.id == messageId);
     if (index != -1) {
       final message = _messages[index];
@@ -1946,7 +2060,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     Future.microtask(() async {
       try {
         if (_conversationMeta != null) {
-          await _storageService.addMessageToCache(
+          await _messagesRepo.addMessageToCache(
             conversationId: widget.group.conversationId,
             newMessage: message,
             updatedMeta: _conversationMeta!.copyWith(
@@ -4916,7 +5030,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               hasPreviousPage: false,
             );
 
-        await _storageService.addMessageToCache(
+        await _messagesRepo.addMessageToCache(
           conversationId: widget.group.conversationId,
           newMessage: imageMessage,
           updatedMeta: updatedMeta,
@@ -5043,7 +5157,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               hasPreviousPage: false,
             );
 
-        await _storageService.addMessageToCache(
+        await _messagesRepo.addMessageToCache(
           conversationId: widget.group.conversationId,
           newMessage: videoMessage,
           updatedMeta: updatedMeta,
@@ -5177,7 +5291,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               hasPreviousPage: false,
             );
 
-        await _storageService.addMessageToCache(
+        await _messagesRepo.addMessageToCache(
           conversationId: widget.group.conversationId,
           newMessage: documentMessage,
           updatedMeta: updatedMeta,
@@ -5530,7 +5644,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                 hasPreviousPage: false,
               );
 
-          await _storageService.addMessageToCache(
+          await _messagesRepo.addMessageToCache(
             conversationId: widget.group.conversationId,
             newMessage: voiceMessage,
             updatedMeta: updatedMeta,
@@ -5985,7 +6099,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     });
 
     // Save to local storage
-    await _storageService.savePinnedMessage(
+    await _messagesRepo.savePinnedMessage(
       conversationId: conversationId,
       pinnedMessageId: _pinnedMessageId,
     );
@@ -6017,10 +6131,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
     // Save to local storage
     try {
-      await _storageService.toggleStarMessage(
-        conversationId: conversationId,
-        messageId: messageId,
-      );
+      await _messagesRepo.toggleStarMessage(messageId);
       debugPrint(
         '⭐ ${isCurrentlyStarred ? 'Unstarred' : 'Starred'} group message $messageId in local storage',
       );
@@ -6070,7 +6181,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       });
 
       // Remove from local storage cache
-      await _storageService.removeMessageFromCache(
+      await _messagesRepo.removeMessageFromCache(
         conversationId: widget.group.conversationId,
         messageIds: [messageId],
       );
@@ -6105,15 +6216,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     try {
       for (final messageId in messagesToStar) {
         if (areAllStarred) {
-          await _storageService.unstarMessage(
-            conversationId: conversationId,
-            messageId: messageId,
-          );
+          await _messagesRepo.unstarMessage(messageId);
         } else {
-          await _storageService.starMessage(
-            conversationId: conversationId,
-            messageId: messageId,
-          );
+          await _messagesRepo.starMessage(messageId);
         }
       }
       debugPrint(
@@ -6165,7 +6270,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           (message) => _selectedMessages.contains(message.id),
         );
       });
-      await _storageService.removeMessageFromCache(
+      await _messagesRepo.removeMessageFromCache(
         conversationId: widget.group.conversationId,
         messageIds: _selectedMessages.map((id) => id).toList(),
       );

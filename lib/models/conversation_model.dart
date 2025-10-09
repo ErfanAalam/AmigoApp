@@ -42,7 +42,7 @@ class ConversationModel {
 
     return ConversationModel(
       conversationId: _parseToInt(json['conversationId']),
-      type: json['type'] ?? '',
+      type: json['type'] ?? 'dm', // Default to 'dm' if null
       title: json['title'],
       metadata: json['metadata'] != null
           ? ConversationMetadata.fromJson(json['metadata'])
@@ -50,9 +50,11 @@ class ConversationModel {
       lastMessageAt: json['lastMessageAt'],
       role: json['role'],
       unreadCount: _parseToInt(json['unreadCount']),
-      joinedAt: json['joinedAt'] ?? '',
+      joinedAt:
+          json['joinedAt'] ??
+          DateTime.now().toIso8601String(), // Default to current time
       userId: _parseToInt(json['userId']),
-      userName: json['userName'] ?? 'Unknown User',
+      userName: json['userName'] ?? 'Unknown User', // Ensure this is never null
       userProfilePic: json['userProfilePic'],
       isOnline: onlineStatus,
     );
