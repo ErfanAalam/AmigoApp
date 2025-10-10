@@ -106,18 +106,22 @@ class WebSocketService {
 
   /// Build WebSocket URL with access token as query parameter
   String _buildWebSocketUrl(String accessToken) {
-    // Extract the base host and port from the API URL
+    // Use the configured WebSocket URL directly
     final websocketUrl = Environment.websocketUrl;
     final uri = Uri.parse(websocketUrl);
 
     print('🔍 Base URL: $websocketUrl');
     print(
-      '🔍 Parsed URI - Scheme: ${uri.scheme}, Host: ${uri.host}, Port: ${uri.port}',
+      '🔍 Parsed URI - Scheme: ${uri.scheme}, Host: ${uri.host}, Port: ${uri.port}, Path: ${uri.path}',
     );
 
-    // Build WebSocket URL with the correct protocol and path
-    final wsUrl =
-        '${uri.scheme == 'https' ? 'wss' : 'ws'}://${uri.host}:${uri.port}/chat';
+    // Build WebSocket URL preserving the original scheme, host, port, and path
+    String wsUrl;
+    if (uri.hasPort && uri.port != 80 && uri.port != 443) {
+      wsUrl = '${uri.scheme}://${uri.host}${uri.path}';
+    } else {
+      wsUrl = '${uri.scheme}://${uri.host}${uri.path}';
+    }
 
     print('🔍 Built WebSocket URL: $wsUrl');
 
@@ -232,7 +236,6 @@ class WebSocketService {
     _reconnectAttempts = 0;
     await connect();
   }
-
 
   /// Dispose resources
   void dispose() {

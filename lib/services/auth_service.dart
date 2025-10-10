@@ -80,72 +80,78 @@ class AuthService {
     try {
       print('🚪 Starting comprehensive logout process...');
 
-      // 1. Clear authentication status and secure storage
+      // 1. Notify server to logout (before clearing cookies!)
+      print("📡 Notifying server to logout...");
+      try {
+        await ApiService().authenticatedGet("/auth/logout");
+        print('✅ Server logout successful');
+      } catch (e) {
+        print('⚠️ Server logout failed (continuing with local logout): $e');
+        // Continue with logout even if server call fails
+      }
+
+      // 2. Clear authentication status and secure storage
       print('🔐 Clearing secure storage...');
       await _secureStorage.delete(key: _authStatusKey);
       await _secureStorage.deleteAll();
 
-      // 2. Clear SharedPreferences (includes login timestamp and all app preferences)
+      // 3. Clear SharedPreferences (includes login timestamp and all app preferences)
       print('📱 Clearing SharedPreferences...');
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_lastLoginTimeKey);
       await prefs.clear();
 
-      // 3. Clear cookies using the cookie service
+      // 4. Clear cookies using the cookie service
       print('🍪 Clearing cookies...');
       await _cookieService.clearAllCookies();
 
-      // 4. Clear message storage cache
+      // 5. Clear message storage cache
       print('💬 Clearing message storage cache...');
       final messageStorage = MessageStorageService();
       await messageStorage.clearAllCache();
 
-      // 4.1 Clear media cache
+      // 6. Clear media cache
       print('💾 Clearing media cache...');
       final mediaCacheService = MediaCacheService();
       await mediaCacheService.clearAllCache();
-      
 
-      // 5. Clear chat preferences
+      // 7. Clear chat preferences
       print('⚙️ Clearing chat preferences...');
       final chatPreferences = ChatPreferencesService();
       await chatPreferences.clearAllPreferences();
 
-      // 6. Clear notification data
+      // 8. Clear notification data
       print('🔔 Clearing notification data...');
       final notificationService = NotificationService();
       await notificationService.clearNotificationData();
 
-      // 7. Clear user status data
+      // 9. Clear user status data
       print('👤 Clearing user status data...');
       final userStatusService = UserStatusService();
       userStatusService.clearAllStatus();
 
-      // 8. Clear contact cache
+      // 10. Clear contact cache
       print('📞 Clearing contact cache...');
       final contactService = ContactService();
       contactService.clearCache();
 
-      // 9. Clear local database
+      // 11. Clear local database
       print('🗄️ Clearing local database...');
       final databaseHelper = DatabaseHelper.instance;
       await databaseHelper.clearAllData();
       await databaseHelper.resetInstance();
 
-      // 10. Clear app cache directories
+      // 12. Clear app cache directories
       print('🗂️ Clearing app cache directories...');
       await _clearAppCacheDirectories();
 
-      // 11. Clear temporary files
+      // 13. Clear temporary files
       print('🗑️ Clearing temporary files...');
       await _clearTemporaryFiles();
 
       print('✅ Comprehensive logout completed successfully');
 
-      print("📡 Notifying server to logout...");
-      await ApiService().authenticatedGet("/auth/logout");
-
-      // 12. Restart the app
+      // 14. Restart the app
       print('🔄 Restarting app...');
       if (NavigationHelper.navigatorKey.currentContext != null) {
         Navigator.pushAndRemoveUntil(
