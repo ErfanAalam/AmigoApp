@@ -16,6 +16,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../models/call_model.dart';
 import '../services/websocket_service.dart';
 import '../services/notification_service.dart';
+import '../services/call_foreground_service.dart';
 import '../api/user.service.dart';
 import '../utils/ringing_tone.dart';
 
@@ -361,6 +362,11 @@ class CallService extends ChangeNotifier {
       _activeCall = _activeCall!.copyWith(status: CallStatus.answered);
       // Start timer immediately when call is accepted
       _startCallTimer();
+
+      // Start foreground service to keep microphone active in background
+      await CallForegroundService.startService(
+        callerName: _activeCall!.userName,
+      );
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('current_call_id');
@@ -743,6 +749,12 @@ class CallService extends ChangeNotifier {
           }
           // Start timer immediately when call is accepted
           _startCallTimer();
+
+          // Start foreground service to keep microphone active in background
+          await CallForegroundService.startService(
+            callerName: _activeCall!.userName,
+          );
+
           notifyListeners();
         }
         break;
@@ -931,6 +943,9 @@ class CallService extends ChangeNotifier {
   /// Cleanup call resources
   Future<void> _cleanup() async {
     try {
+      // Stop foreground service first to remove notification
+      await CallForegroundService.stopService();
+
       // Stop timers
       _callDurationTimer?.cancel();
       _callDurationTimer = null;

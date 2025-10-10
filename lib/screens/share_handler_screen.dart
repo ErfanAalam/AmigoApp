@@ -731,10 +731,10 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
   }
 
   String _getInitials(String name) {
-    final words = name.trim().split(' ');
-    if (words.length >= 2) {
+    final words = name.trim().split(' ').where((w) => w.isNotEmpty).toList();
+    if (words.length >= 2 && words[0].isNotEmpty && words[1].isNotEmpty) {
       return '${words[0][0]}${words[1][0]}'.toUpperCase();
-    } else if (words.isNotEmpty) {
+    } else if (words.isNotEmpty && words[0].isNotEmpty) {
       return words[0][0].toUpperCase();
     }
     return '?';
@@ -743,75 +743,76 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
   Widget _buildSendButton() {
     return SafeArea(
       child: Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Selected count indicator
-          if (_selectedConversations.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Selected count indicator
+            if (_selectedConversations.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.teal.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.teal.withOpacity(0.3)),
+                  ),
+                  child: Text(
+                    '${_selectedConversations.length} chat(s) selected',
+                    style: TextStyle(
+                      color: Colors.teal[700],
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
                 ),
-                decoration: BoxDecoration(
-                  color: Colors.teal.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.teal.withOpacity(0.3)),
+              ),
+
+            // Send button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _selectedConversations.isEmpty
+                    ? null
+                    : _sendToSelectedConversations,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.teal,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(25),
+                  ),
+                  elevation: 0,
                 ),
-                child: Text(
-                  '${_selectedConversations.length} chat(s) selected',
-                  style: TextStyle(
-                    color: Colors.teal[700],
+                icon: const Icon(Icons.send, size: 20),
+                label: Text(
+                  _selectedConversations.isEmpty
+                      ? 'Select chats to send'
+                      : 'Send to ${_selectedConversations.length} chat(s)',
+                  style: const TextStyle(
+                    fontSize: 16,
                     fontWeight: FontWeight.w600,
-                    fontSize: 14,
                   ),
                 ),
               ),
             ),
-
-          // Send button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _selectedConversations.isEmpty
-                  ? null
-                  : _sendToSelectedConversations,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.teal,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(25),
-                ),
-                elevation: 0,
-              ),
-              icon: const Icon(Icons.send, size: 20),
-              label: Text(
-                _selectedConversations.isEmpty
-                    ? 'Select chats to send'
-                    : 'Send to ${_selectedConversations.length} chat(s)',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
-    ));
+    );
   }
 }

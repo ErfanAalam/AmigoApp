@@ -16,6 +16,7 @@ import 'services/websocket_service.dart';
 import 'services/user_status_service.dart';
 import 'services/call_service.dart';
 import 'services/notification_service.dart';
+import 'services/call_foreground_service.dart';
 // import 'services/call_notification_handler.dart';
 import 'widgets/call_manager.dart';
 import 'api/api_service.dart';
@@ -39,6 +40,9 @@ void main() async {
   // Initialize NotificationService
   final notificationService = NotificationService();
   await notificationService.initialize();
+
+  // Initialize Foreground Service for keeping microphone active during calls
+  await CallForegroundService.initialize();
 
   // Initialize RingtoneManager for call audio
   await RingtoneManager.init();

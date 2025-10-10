@@ -1360,12 +1360,6 @@ class _InnerChatPageState extends State<InnerChatPage>
         debugPrint(
           '🔄 Updating own reply message from optimistic ID to server ID in local storage',
         );
-        print(
-          "------------------------------------------------------------\n optimisticId -> $optimisticId \n----------------------------------------------------------------",
-        );
-        print(
-          "------------------------------------------------------------\n newMessageId -> $newMessageId \n----------------------------------------------------------------",
-        );
         await _updateOptimisticMessageInStorage(
           optimisticId,
           newMessageId,
@@ -1495,6 +1489,7 @@ class _InnerChatPageState extends State<InnerChatPage>
     // Check if any user is currently active in the conversation
     // Check if any other user's online status is true (excluding current user)
     // bool hasActiveUsers = _activeUsers.values.any((isActive) => isActive);
+
     bool hasActiveUsers = _onlineUsers
         .where((userId) => userId != _currentUserId)
         .isNotEmpty;
@@ -1512,6 +1507,7 @@ class _InnerChatPageState extends State<InnerChatPage>
         userReadMsgId = -1;
       }
     }
+
     // if ((message.id <= userReadMsgId || hasActiveUsers) && message.id > 0) {
     if (((message.id <= userReadMsgId || hasActiveUsers) && message.id > 0) &&
         userReadMsgId > 0) {
@@ -1648,7 +1644,11 @@ class _InnerChatPageState extends State<InnerChatPage>
   /// Handle read receipt from WebSocket (for active/inactive conversation status)
   void _handleReadReceipt(Map<String, dynamic> messageData) async {
     print(
-      "------------------------------------------------------------\n messageData handle RR -> $messageData \n----------------------------------------------------------------",
+      "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
+    );
+    print("_handleReadReceipt called with data: $messageData");
+    print(
+      "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
     );
     try {
       final data = messageData['data'] as Map<String, dynamic>? ?? {};
@@ -1686,7 +1686,7 @@ class _InnerChatPageState extends State<InnerChatPage>
           if (lastReadMessageId != null && userId != null) {
             userLastReadMessageIds[userId] = lastReadMessageId;
             debugPrint(
-              '📖 Updated userLastReadMessageIds[$userId] = $lastReadMessageId',
+              '📖 @@@@@@@@@@@@@ Updated userLastReadMessageIds[$userId] = $lastReadMessageId',
             );
           }
 
@@ -1742,12 +1742,6 @@ class _InnerChatPageState extends State<InnerChatPage>
           }
         });
       }
-      print(
-        "------------------------------------------------------------\n _onlineUsers -> $_onlineUsers \n----------------------------------------------------------------",
-      );
-      print(
-        "------------------------------------------------------------\n Updated userLastReadMessageIds -> $userLastReadMessageIds \n----------------------------------------------------------------",
-      );
     } catch (e) {
       debugPrint('❌ Error handling online status: $e');
     }
@@ -1755,10 +1749,6 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   /// Handle incoming message from WebSocket
   void _handleIncomingMessage(Map<String, dynamic> messageData) async {
-    print('🔍 Handling incoming message: $messageData');
-    print('🔍 Current user ID: $_currentUserId');
-    print('🔍 Conversation ID: ${widget.conversation.conversationId}');
-
     try {
       // Extract message data from WebSocket payload
       final data = messageData['data'] as Map<String, dynamic>? ?? {};
@@ -1923,6 +1913,19 @@ class _InnerChatPageState extends State<InnerChatPage>
         setState(() {
           _messages[uiMessageIndex] = updatedMessage;
         });
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print("optimisticId ----> ${optimisticId}");
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print(
+          "--------------------------------------------------------------------------------",
+        );
         debugPrint(
           '✅ Updated message ID from $optimisticId to ${updatedMessage.id} in UI',
         );
@@ -1984,7 +1987,8 @@ class _InnerChatPageState extends State<InnerChatPage>
       // Extract message data from WebSocket payload
       final data = messageData['data'] as Map<String, dynamic>? ?? {};
       final senderId = _parseToInt(data['user_id'] ?? data['user_id']);
-      final messageId = data['id'] ?? data['messageId'];
+      final messageId =
+          data['id'] ?? data['messageId'] ?? data['media_message_id'];
       final optimisticId = data['optimistic_id'] ?? data['optimisticId'];
 
       final senderInfo = _getUserInfo(senderId);
@@ -2000,9 +2004,6 @@ class _InnerChatPageState extends State<InnerChatPage>
 
       // If this is our own message (sender), update the optimistic message in local storage
       if (_currentUserId != null && senderId == _currentUserId) {
-        debugPrint(
-          '🔄 Updating own media message from optimistic ID to server ID in local storage',
-        );
         await _updateOptimisticMessageInStorage(
           optimisticId,
           messageId,
@@ -2238,22 +2239,12 @@ class _InnerChatPageState extends State<InnerChatPage>
           'optimistic_id': _optimisticMessageId,
         };
 
-        print(
-          'aaaaaaa------------------------------- \n sending new message to webscoket ${widget.conversation.conversationId} \n ------------------------',
-        );
-        print(
-          'conversation_id: ${widget.conversation.conversationId} ----------',
-        );
-
         await _websocketService.sendMessage({
           'type': 'message',
           'data': messageData,
           'conversation_id': widget.conversation.conversationId,
         });
       }
-      print(
-        'aaaaaaaa------------------------------- \n sending new message to webscoket ${widget.conversation.conversationId} \n ------------------------',
-      );
       _optimisticMessageId--;
     } catch (e) {
       debugPrint('❌ Error sending message: $e');
@@ -5211,14 +5202,13 @@ class _InnerChatPageState extends State<InnerChatPage>
           insertAtBeginning: false, // Add at end (newest)
         );
 
-        debugPrint('💾 Image message stored locally and displayed');
-
         // Send to websocket for real-time messaging
         await _websocketService.sendMessage({
           'type': 'media',
           'data': {
             ...response['data'],
             'conversation_id': widget.conversation.conversationId,
+            'optimistic_id': _optimisticMessageId,
             'reply_to_message_id': replyMessageId,
           },
           'conversation_id': widget.conversation.conversationId,
@@ -5349,6 +5339,7 @@ class _InnerChatPageState extends State<InnerChatPage>
             ...response['data'],
             'conversation_id': widget.conversation.conversationId,
             'message_type': 'video',
+            'optimistic_id': _optimisticMessageId,
             'reply_to_message_id': replyMessageId,
           },
           'conversation_id': widget.conversation.conversationId,
@@ -5480,6 +5471,7 @@ class _InnerChatPageState extends State<InnerChatPage>
             ...response['data'],
             'conversation_id': widget.conversation.conversationId,
             'message_type': 'document',
+            'optimistic_id': _optimisticMessageId,
             'reply_to_message_id': replyMessageId,
           },
           'conversation_id': widget.conversation.conversationId,
@@ -6628,6 +6620,7 @@ class _InnerChatPageState extends State<InnerChatPage>
               ...response['data'],
               'conversation_id': widget.conversation.conversationId,
               'message_type': 'audio',
+              'optimistic_id': _optimisticMessageId,
               'reply_to_message_id': replyMessageId,
             },
             'conversation_id': widget.conversation.conversationId,
