@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:amigo/screens/auth/login_screen.dart';
 import 'package:amigo/db/database_helper.dart';
 import 'media_cache_service.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 class AuthService {
   static const String _authStatusKey = 'auth_status';
@@ -115,43 +116,47 @@ class AuthService {
       final mediaCacheService = MediaCacheService();
       await mediaCacheService.clearAllCache();
 
-      // 7. Clear chat preferences
+      // 7. Clear CachedNetworkImage cache
+      print('🖼️ Clearing cached network images...');
+      await _clearCachedNetworkImages();
+
+      // 8. Clear chat preferences
       print('⚙️ Clearing chat preferences...');
       final chatPreferences = ChatPreferencesService();
       await chatPreferences.clearAllPreferences();
 
-      // 8. Clear notification data
+      // 9. Clear notification data
       print('🔔 Clearing notification data...');
       final notificationService = NotificationService();
       await notificationService.clearNotificationData();
 
-      // 9. Clear user status data
+      // 10. Clear user status data
       print('👤 Clearing user status data...');
       final userStatusService = UserStatusService();
       userStatusService.clearAllStatus();
 
-      // 10. Clear contact cache
+      // 11. Clear contact cache
       print('📞 Clearing contact cache...');
       final contactService = ContactService();
       contactService.clearCache();
 
-      // 11. Clear local database
+      // 12. Clear local database
       print('🗄️ Clearing local database...');
       final databaseHelper = DatabaseHelper.instance;
       await databaseHelper.clearAllData();
       await databaseHelper.resetInstance();
 
-      // 12. Clear app cache directories
+      // 13. Clear app cache directories
       print('🗂️ Clearing app cache directories...');
       await _clearAppCacheDirectories();
 
-      // 13. Clear temporary files
+      // 14. Clear temporary files
       print('🗑️ Clearing temporary files...');
       await _clearTemporaryFiles();
 
       print('✅ Comprehensive logout completed successfully');
 
-      // 14. Restart the app
+      // 15. Restart the app
       print('🔄 Restarting app...');
       if (NavigationHelper.navigatorKey.currentContext != null) {
         Navigator.pushAndRemoveUntil(
@@ -163,6 +168,18 @@ class AuthService {
     } catch (e) {
       print('❌ Error during logout: $e');
       // Continue with logout even if some steps fail
+    }
+  }
+
+  /// Clear CachedNetworkImage cache
+  Future<void> _clearCachedNetworkImages() async {
+    try {
+      // Clear both the cache and file system for CachedNetworkImage
+      final cacheManager = DefaultCacheManager();
+      await cacheManager.emptyCache();
+      print('🖼️ CachedNetworkImage cache cleared successfully');
+    } catch (e) {
+      print('❌ Error clearing CachedNetworkImage cache: $e');
     }
   }
 
