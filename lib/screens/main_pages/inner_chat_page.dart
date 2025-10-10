@@ -7764,8 +7764,9 @@ class _ForwardMessageModalState extends State<_ForwardMessageModal>
   Widget build(BuildContext context) {
     return FadeTransition(
       opacity: _fadeAnimation,
-      child: Container(
-        color: Colors.black.withOpacity(0.5),
+      child: SafeArea(
+        child: Container(
+          color: Colors.black.withOpacity(0.5),
         child: SlideTransition(
           position: _slideAnimation,
           child: DraggableScrollableSheet(
@@ -8114,6 +8115,7 @@ class _ForwardMessageModalState extends State<_ForwardMessageModal>
                 ),
               );
             },
+          ),
           ),
         ),
       ),

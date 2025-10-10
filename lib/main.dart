@@ -16,7 +16,6 @@ import 'services/websocket_service.dart';
 import 'services/user_status_service.dart';
 import 'services/call_service.dart';
 import 'services/notification_service.dart';
-import 'services/shared_media_service.dart';
 // import 'services/call_notification_handler.dart';
 import 'widgets/call_manager.dart';
 import 'api/api_service.dart';
@@ -404,14 +403,14 @@ class _MyAppState extends material.State<MyApp> {
     }
 
     print("📤 Received ${files.length} shared file(s)");
+    print("📤 Files: ${files.map((f) => f.path).join(", ")}");
 
-    // Store files in the shared media service
-    SharedMediaService().setSharedFiles(files);
-
-    // Navigate to ShareHandlerScreen
+    // Navigate to ShareHandlerScreen with files
     if (NavigationHelper.navigatorKey.currentContext != null) {
       material.Navigator.of(NavigationHelper.navigatorKey.currentContext!).push(
-        material.MaterialPageRoute(builder: (_) => const ShareHandlerScreen()),
+        material.MaterialPageRoute(
+          builder: (_) => ShareHandlerScreen(initialFiles: files),
+        ),
       );
     } else {
       // If navigator is not ready, wait and try again
