@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -20,10 +21,12 @@ import '../../repositories/user_repository.dart';
 import '../../repositories/groups_repository.dart';
 import '../../repositories/group_members_repository.dart';
 import '../../services/websocket_service.dart';
+import '../../services/media_cache_service.dart';
 import '../../utils/chat_helpers.dart';
 import '../../utils/message_storage_helpers.dart';
 import '../../widgets/media_preview_widgets.dart';
 import 'group_info_page.dart';
+import 'dart:io' as io;
 
 class InnerGroupChatPage extends StatefulWidget {
   final GroupModel group;
@@ -53,6 +56,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   final TextEditingController _messageController = TextEditingController();
   final WebSocketService _websocketService = WebSocketService();
   final ImagePicker _imagePicker = ImagePicker();
+  final MediaCacheService _mediaCacheService = MediaCacheService();
   List<MessageModel> _messages = [];
   bool _isLoading = false;
   bool _isLoadingMore = false;
@@ -73,6 +77,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   StreamSubscription<Map<String, dynamic>>? _websocketSubscription;
   StreamSubscription? _audioProgressSubscription;
   Timer? _audioProgressTimer;
+  DateTime? _audioStartTime;
+  Duration _customPosition = Duration.zero;
   int _optimisticMessageId = -1;
   final Set<int> _optimisticMessageIds = {};
 
@@ -80,7 +86,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   final Map<int, Map<String, String?>> _userInfoCache = {};
 
   /// Get sender name from conversation metadata or fallback to message senderName
-  String _getSenderName(int senderId) {
+  String _getSenderName(int senderId, {String? storedSenderName}) {
     // First try to get from conversation metadata members data
     if (_conversationMeta != null && _conversationMeta!.members.isNotEmpty) {
       final senderName = _conversationMeta!.getSenderName(senderId);
@@ -99,6 +105,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         '🔍 Using cached user info: ${userInfo['name']} for ID $senderId',
       );
       return userInfo['name']!;
+    }
+
+    // Use stored sender name from message (for offline support)
+    if (storedSenderName != null && storedSenderName.isNotEmpty) {
+      debugPrint('✅ Using stored sender name: $storedSenderName for ID $senderId (offline fallback)');
+      return storedSenderName;
     }
 
     // Final fallback - return a default name
@@ -2354,11 +2366,128 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             insertAtBeginning: false, // Add new messages at the end
           );
           debugPrint('💾 Group message stored asynchronously: ${message.id}');
+          
+          // Trigger background media caching for media messages
+          if (message.type == 'image' || message.type == 'video' || message.type == 'audio') {
+            String? mediaUrl;
+            if (message.attachments != null) {
+              if (message.type == 'image') {
+                mediaUrl = (message.attachments!['image_url'] ?? message.attachments!['url']) as String?;
+              } else if (message.type == 'video') {
+                mediaUrl = (message.attachments!['video_url'] ?? message.attachments!['url']) as String?;
+              } else if (message.type == 'audio') {
+                mediaUrl = (message.attachments!['audio_url'] ?? message.attachments!['url']) as String?;
+              }
+              
+              if (mediaUrl != null && mediaUrl.isNotEmpty) {
+                _cacheMediaForMessage(mediaUrl, message.id);
+              }
+            }
+          }
         }
       } catch (e) {
         debugPrint('❌ Error storing group message asynchronously: $e');
       }
     });
+  }
+
+  /// Cache media file for a message in background
+  Future<void> _cacheMediaForMessage(String url, int messageId) async {
+    try {
+      // Download and cache
+      final localPath = await _mediaCacheService.downloadAndCacheMedia(url);
+      if (localPath != null) {
+        // Update database with local path
+        await _messagesRepo.updateLocalMediaPath(messageId, localPath);
+        debugPrint('✅ Cached media for group message $messageId');
+      }
+    } catch (e) {
+      debugPrint('❌ Error caching media for group message: $e');
+    }
+  }
+
+  /// Get media file path (local or remote)
+  Future<String> _getMediaPath(String url, String? localPath) async {
+    // Check if local file exists
+    if (localPath != null && io.File(localPath).existsSync()) {
+      return localPath;
+    }
+
+    // Try to get from cache service
+    final cachedPath = await _mediaCacheService.getCachedFilePath(url);
+    if (cachedPath != null) {
+      return cachedPath;
+    }
+
+    // Return remote URL as fallback
+    return url;
+  }
+
+  /// Build image widget that uses cached local file if available
+  Widget _buildCachedImage(String imageUrl, String? localPath, int messageId) {
+    // If we have a local path and the file exists, use it
+    if (localPath != null && io.File(localPath).existsSync()) {
+      return Image.file(
+        io.File(localPath),
+        width: 200,
+        height: 200,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          // If local file fails, fall back to network
+          return _buildNetworkImage(imageUrl, messageId);
+        },
+      );
+    }
+
+    // Otherwise load from network and cache
+    return _buildNetworkImage(imageUrl, messageId);
+  }
+
+  /// Build network image widget with caching
+  Widget _buildNetworkImage(String imageUrl, int messageId) {
+    return CachedNetworkImage(
+      imageUrl: imageUrl,
+      width: 200,
+      height: 200,
+      fit: BoxFit.cover,
+      placeholder: (context, url) => Container(
+        width: 200,
+        height: 200,
+        color: Colors.grey[200],
+        child: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
+          ),
+        ),
+      ),
+      errorWidget: (context, url, error) => Container(
+        width: 200,
+        height: 200,
+        color: Colors.grey[200],
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.broken_image, size: 30, color: Colors.grey[600]),
+            const SizedBox(height: 4),
+            Text(
+              'Failed to load',
+              style: TextStyle(color: Colors.grey[600], fontSize: 10),
+            ),
+          ],
+        ),
+      ),
+      // Cache the image and save path to database
+      imageBuilder: (context, imageProvider) {
+        // Try to cache the media file
+        _cacheMediaForMessage(imageUrl, messageId);
+        return Image(
+          image: imageProvider,
+          width: 200,
+          height: 200,
+          fit: BoxFit.cover,
+        );
+      },
+    );
   }
 
   /// Scroll to bottom of message list
@@ -2479,6 +2608,76 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     setState(() {
       _replyToMessageData = null;
       _isReplying = false;
+    });
+  }
+
+  void _startAudioProgressTimer(String audioKey) {
+    _audioProgressTimer?.cancel();
+
+    // Get current position for resume functionality
+    final currentPosition = _audioPositions[audioKey] ?? Duration.zero;
+
+    // Adjust start time to account for current position (for resume)
+    _audioStartTime = DateTime.now().subtract(currentPosition);
+    _customPosition = currentPosition;
+
+    _audioProgressTimer = Timer.periodic(const Duration(milliseconds: 100), (
+      timer,
+    ) async {
+      if (!mounted ||
+          _currentPlayingAudioKey != audioKey ||
+          !(_playingAudios[audioKey] ?? false)) {
+        timer.cancel();
+        _audioStartTime = null;
+        return;
+      }
+
+      try {
+        if (_audioPlayer.isPlaying && _audioStartTime != null) {
+          // Calculate custom position based on elapsed time
+          final elapsed = DateTime.now().difference(_audioStartTime!);
+          _customPosition = elapsed;
+
+          // Get duration from getProgress (this part works)
+          final progress = await _audioPlayer.getProgress();
+          final duration = progress['duration'] ?? Duration.zero;
+
+          if (mounted && duration.inMilliseconds > 0) {
+            // Don't let position exceed duration
+            final clampedPosition = Duration(
+              milliseconds: _customPosition.inMilliseconds.clamp(
+                0,
+                duration.inMilliseconds,
+              ),
+            );
+
+            setState(() {
+              _audioDurations[audioKey] = duration;
+              _audioPositions[audioKey] = clampedPosition;
+            });
+
+            // Only log every second to reduce console spam
+            if (clampedPosition.inSeconds % 1 == 0 &&
+                clampedPosition.inMilliseconds % 1000 < 200) {
+              print(
+                '🎵 Progress: ${clampedPosition.inSeconds}s / ${duration.inSeconds}s',
+              );
+            }
+
+            // Check if we've reached the end
+            if (clampedPosition.inMilliseconds >=
+                duration.inMilliseconds - 100) {
+              print('🏁 Audio should be finishing soon...');
+            }
+          }
+        } else {
+          print('⚠️ Player not playing - stopping timer');
+          timer.cancel();
+        }
+      } catch (e) {
+        print('❌ Error in audio progress timer: $e');
+        timer.cancel();
+      }
     });
   }
 
@@ -2987,7 +3186,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                       Padding(
                         padding: const EdgeInsets.only(left: 12, bottom: 4),
                         child: Text(
-                          _getSenderName(message.senderId),
+                          _getSenderName(message.senderId, storedSenderName: message.senderName),
                           style: TextStyle(
                             color: Colors.teal[700],
                             fontSize: 12,
@@ -4476,51 +4675,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                   onTap: () => _openImagePreview(imageUrl, message.body),
                   child: Hero(
                     tag: imageUrl,
-                    child: Image.network(
+                    child: _buildCachedImage(
                       imageUrl,
-                      width: 200,
-                      height: 200,
-                      fit: BoxFit.cover,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return Container(
-                          width: 200,
-                          height: 200,
-                          color: Colors.grey[200],
-                          child: Center(
-                            child: CircularProgressIndicator(
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                Colors.teal,
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          width: 200,
-                          height: 200,
-                          color: Colors.grey[200],
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.broken_image,
-                                size: 30,
-                                color: Colors.grey[600],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Failed to load',
-                                style: TextStyle(
-                                  color: Colors.grey[600],
-                                  fontSize: 10,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
+                      message.localMediaPath,
+                      message.id,
                     ),
                   ),
                 ),
@@ -4858,7 +5016,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     }
 
     final audioData = message.attachments as Map<String, dynamic>;
-    final audioUrl = audioData['url'] as String?;
+    // Check both 'audio_url' (from server) and 'url' (fallback) for audio files
+    final audioUrl = (audioData['audio_url'] ?? audioData['url']) as String?;
     final fileSize = audioData['file_size'] as int?;
 
     if (audioUrl == null || audioUrl.isEmpty) {
@@ -5062,28 +5221,170 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   }
 
   // Media preview methods
-  void _openImagePreview(String imageUrl, String? caption) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => ImagePreviewScreen(
-          imageUrls: [imageUrl],
-          initialIndex: 0,
-          captions: caption != null && caption.isNotEmpty ? [caption] : null,
+  void _openImagePreview(String imageUrl, String? caption) async {
+    try {
+      // Find the message to get localMediaPath
+      final message = _messages.firstWhere(
+        (msg) =>
+            msg.attachments != null &&
+            (msg.attachments as Map<String, dynamic>)['url'] == imageUrl,
+        orElse: () => _messages.first,
+      );
+
+      debugPrint('🖼️ Opening image preview for message ${message.id}');
+      debugPrint('🖼️ Image URL: $imageUrl');
+      debugPrint('🖼️ Local path from message: ${message.localMediaPath}');
+
+      // Get local path or download if needed
+      String? localPath = message.localMediaPath;
+
+      // Check if local file exists
+      if (localPath != null && io.File(localPath).existsSync()) {
+        debugPrint('✅ Local image file exists: $localPath');
+      } else {
+        debugPrint('⏬ Local file not found, checking cache...');
+
+        // Try to get from cache first
+        localPath = await _mediaCacheService.getCachedFilePath(imageUrl);
+
+        if (localPath == null) {
+          debugPrint('📥 Image not in cache, will download in background');
+          // Start caching in background (don't wait for it)
+          _cacheMediaForMessage(imageUrl, message.id);
+        } else {
+          debugPrint('✅ Image found in cache: $localPath');
+          // Update database with local path if not already set
+          if (message.localMediaPath == null) {
+            await _messagesRepo.updateLocalMediaPath(message.id, localPath);
+          }
+        }
+      }
+
+      if (!mounted) return;
+
+      debugPrint('🖼️ Opening image viewer with localPath: $localPath');
+
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => ImagePreviewScreen(
+            imageUrls: [imageUrl],
+            initialIndex: 0,
+            captions: caption != null && caption.isNotEmpty ? [caption] : null,
+            localPaths: localPath != null ? [localPath] : null,
+          ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      debugPrint('❌ Error opening image preview: $e');
+
+      // Show error message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to open image: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
-  void _openVideoPreview(String videoUrl, String? caption, String? fileName) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => VideoPreviewScreen(
-          videoUrl: videoUrl,
-          caption: caption,
-          fileName: fileName,
-        ),
-      ),
+  void _openVideoPreview(String videoUrl, String? caption, String? fileName) async {
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) =>
+          const Center(child: CircularProgressIndicator(color: Colors.white)),
     );
+
+    try {
+      // Find the message to get localMediaPath and cache if needed
+      final message = _messages.firstWhere(
+        (msg) =>
+            msg.attachments != null &&
+            (msg.attachments as Map<String, dynamic>)['url'] == videoUrl,
+        orElse: () => _messages.first,
+      );
+
+      debugPrint('🎬 Opening video preview for message ${message.id}');
+      debugPrint('🎬 Video URL: $videoUrl');
+      debugPrint('🎬 Local path from message: ${message.localMediaPath}');
+
+      // Get local path or download if needed
+      String? localPath = message.localMediaPath;
+
+      // Check if local file exists
+      if (localPath != null && io.File(localPath).existsSync()) {
+        debugPrint('✅ Local video file exists: $localPath');
+      } else {
+        debugPrint('⏬ Local file not found, checking cache or downloading...');
+
+        // Try to get from cache first
+        localPath = await _mediaCacheService.getCachedFilePath(videoUrl);
+
+        if (localPath == null) {
+          debugPrint('📥 Downloading video to cache...');
+          // Download and wait for completion
+          localPath = await _mediaCacheService.downloadAndCacheMedia(videoUrl);
+
+          if (localPath != null) {
+            debugPrint('✅ Video downloaded successfully: $localPath');
+            // Update database with local path
+            await _messagesRepo.updateLocalMediaPath(message.id, localPath);
+
+            // Update the message in memory
+            final index = _messages.indexWhere((m) => m.id == message.id);
+            if (index != -1 && mounted) {
+              setState(() {
+                _messages[index] = message.copyWith(localMediaPath: localPath);
+              });
+            }
+          } else {
+            debugPrint('⚠️ Video download failed, will use network URL');
+          }
+        } else {
+          debugPrint('✅ Video found in cache: $localPath');
+        }
+      }
+
+      // Close loading dialog
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+      if (!mounted) return;
+
+      debugPrint('🎬 Opening video player with localPath: $localPath');
+
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => VideoPreviewScreen(
+            videoUrl: videoUrl,
+            caption: caption,
+            fileName: fileName,
+            localPath: localPath,
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('❌ Error opening video preview: $e');
+
+      // Close loading dialog
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+
+      // Show error message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to open video: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   void _openDocumentPreview(
@@ -5172,6 +5473,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         setState(() {
           _playingAudios[audioKey] = false;
           _currentPlayingAudioKey = null;
+          // Keep the current position when paused
         });
         print('🔇 Stopped audio playback for: $audioKey');
       } else {
@@ -5180,6 +5482,19 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         for (final key in _playingAudios.keys) {
           _playingAudios[key] = false;
         }
+
+        // Only reset position if this is a fresh start (not resume)
+        final currentPosition = _audioPositions[audioKey] ?? Duration.zero;
+        final currentDuration = _audioDurations[audioKey] ?? Duration.zero;
+
+        // If we're at the end, start from beginning; otherwise resume from current position
+        if (currentPosition.inMilliseconds >=
+            currentDuration.inMilliseconds - 100) {
+          setState(() {
+            _audioPositions[audioKey] = Duration.zero;
+          });
+        }
+        // If resuming, we'll adjust the start time to account for current position
 
         setState(() {
           _playingAudios[audioKey] = true;
@@ -5190,10 +5505,30 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         final controller = _getAudioAnimationController(audioKey);
         controller.repeat(reverse: true);
 
+        // Get local cached path or use remote URL
+        // Extract message ID from audioKey (format: messageId_url)
+        final messageId = int.tryParse(audioKey.split('_').first);
+        String playbackUrl = audioUrl;
+
+        if (messageId != null) {
+          final message = _messages.firstWhere(
+            (msg) => msg.id == messageId,
+            orElse: () => _messages.first,
+          );
+
+          // Try to use local cached file
+          playbackUrl = await _getMediaPath(audioUrl, message.localMediaPath);
+
+          // If using remote URL and not cached yet, cache it in background
+          if (playbackUrl == audioUrl && message.localMediaPath == null) {
+            _cacheMediaForMessage(audioUrl, messageId);
+          }
+        }
+
         // Start new playback
-        print('🎬 Starting audio player with URL: $audioUrl');
+        print('🎬 Starting audio player with: $playbackUrl');
         await _audioPlayer.startPlayer(
-          fromURI: audioUrl,
+          fromURI: playbackUrl,
           whenFinished: () {
             if (mounted) {
               print('🏁 Audio finished callback triggered');
@@ -5216,11 +5551,34 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           },
         );
 
+        // Verify player is actually playing
+        await Future.delayed(const Duration(milliseconds: 100));
+        print(
+          '🎵 Player state after start: isPlaying=${_audioPlayer.isPlaying}, isStopped=${_audioPlayer.isStopped}',
+        );
+
+        // Start progress timer as fallback
+        _startAudioProgressTimer(audioKey);
+
         print('🔊 Started audio playback for: $audioKey');
       }
     } catch (e) {
       print('❌ Error toggling audio playback: $e');
-      _showErrorDialog('Failed to play audio. Please try again.');
+      if (e.toString().contains('has not been initialized')) {
+        print('❌ Audio player not initialized, trying to initialize...');
+        try {
+          await _audioPlayer.openPlayer();
+          print('✅ Audio player initialized successfully, try playing again');
+          _showErrorDialog(
+            'Audio player initialized. Please try playing the audio again.',
+          );
+        } catch (initError) {
+          print('❌ Failed to initialize audio player: $initError');
+          _showErrorDialog('Failed to initialize audio player: $initError');
+        }
+      } else {
+        _showErrorDialog('Failed to play audio. Please try again.');
+      }
     }
   }
 
