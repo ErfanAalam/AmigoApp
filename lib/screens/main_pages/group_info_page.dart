@@ -9,6 +9,7 @@ import '../../api/user.service.dart';
 import '../../services/contact_service.dart';
 import '../../repositories/groups_repository.dart';
 import '../../repositories/user_repository.dart';
+import '../../repositories/group_members_repository.dart';
 
 class GroupInfoPage extends StatefulWidget {
   final GroupModel group;
@@ -26,6 +27,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
   final ContactService _contactService = ContactService();
   final GroupsRepository _groupsRepo = GroupsRepository();
   final UserRepository _userRepo = UserRepository();
+  final GroupMembersRepository _groupMembersRepo = GroupMembersRepository();
 
   Map<String, dynamic>? _groupInfo;
   List<UserModel> _availableUsers = [];
@@ -120,20 +122,24 @@ class _GroupInfoPageState extends State<GroupInfoPage>
           await _cacheGroupMembers(serverGroupInfo['members']);
         }
 
-        // Cache creator info if available
+        // Cache creator info if available (to group_members table)
         if (serverGroupInfo != null &&
             serverGroupInfo['group'] != null &&
             serverGroupInfo['group']['createrName'] != null &&
             serverGroupInfo['group']['createrId'] != null) {
           try {
-            final creatorUser = UserModel(
-              id: serverGroupInfo['group']['createrId'],
-              name: serverGroupInfo['group']['createrName'],
-              phone: '',
+            final creatorInfo = GroupMemberInfo(
+              userId: serverGroupInfo['group']['createrId'],
+              userName: serverGroupInfo['group']['createrName'],
               profilePic: serverGroupInfo['group']['createrProfilePic'],
+              role: 'admin', // Creator is typically an admin
+              joinedAt: serverGroupInfo['group']['createdAt'],
             );
-            await _userRepo.insertOrUpdateUser(creatorUser);
-            debugPrint('✅ Cached creator info: ${creatorUser.name}');
+            await _groupMembersRepo.insertOrUpdateGroupMember(
+              widget.group.conversationId,
+              creatorInfo,
+            );
+            debugPrint('✅ Cached creator info: ${creatorInfo.userName}');
           } catch (e) {
             debugPrint('❌ Error caching creator info: $e');
           }
@@ -163,6 +169,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
           metadata: metadata ?? widget.group.metadata,
           lastMessageAt: widget.group.lastMessageAt,
           role: serverGroupInfo?['role'] ?? widget.group.role,
+          unreadCount: widget.group.unreadCount,
           joinedAt: widget.group.joinedAt,
         );
         await _groupsRepo.insertOrUpdateGroup(updatedGroup);
@@ -224,18 +231,19 @@ class _GroupInfoPageState extends State<GroupInfoPage>
             creatorName = creator.name;
             debugPrint('✅ Found creator in members: $creatorName');
           } catch (e) {
-            // Creator not found in members, try loading from users table
+            // Creator not found in members, try loading from group_members table
             debugPrint(
-              '⚠️ Creator not in members list, checking users table...',
+              '⚠️ Creator not in members list, checking group_members table...',
             );
             try {
-              final creatorUser = await _userRepo.getUserById(
+              final creatorMember = await _groupMembersRepo.getGroupMember(
+                localGroup.conversationId,
                 localGroup.metadata!.createdBy,
               );
-              creatorName = creatorUser?.name;
-              debugPrint('✅ Found creator in users table: $creatorName');
+              creatorName = creatorMember?.userName;
+              debugPrint('✅ Found creator in group_members table: $creatorName');
             } catch (dbError) {
-              debugPrint('⚠️ Creator not found in users table either');
+              debugPrint('⚠️ Creator not found in group_members table either');
               creatorName = null;
             }
           }
@@ -279,16 +287,21 @@ class _GroupInfoPageState extends State<GroupInfoPage>
 
     try {
       final members = _parseMembers(membersData);
-      for (final member in members) {
-        // Cache to users table for offline access
-        final userModel = UserModel(
-          id: member.userId,
-          name: member.name,
-          phone: '', // Not available
-          profilePic: member.profilePic,
-        );
-        await _userRepo.insertOrUpdateUser(userModel);
-      }
+      
+      // Cache to group_members table (not users table)
+      final memberInfoList = members.map((m) => GroupMemberInfo(
+        userId: m.userId,
+        userName: m.name,
+        profilePic: m.profilePic,
+        role: m.role,
+        joinedAt: m.joinedAt,
+      )).toList();
+      
+      await _groupMembersRepo.insertOrUpdateGroupMembers(
+        widget.group.conversationId,
+        memberInfoList,
+      );
+      
       debugPrint('✅ Cached ${members.length} group members to local DB');
     } catch (e) {
       debugPrint('❌ Error caching group members: $e');

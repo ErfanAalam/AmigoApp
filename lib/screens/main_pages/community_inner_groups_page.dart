@@ -331,6 +331,7 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
                     : null,
                 lastMessageAt: innerGroup.lastMessageAt,
                 role: innerGroup.role,
+                unreadCount: 0, // Community inner groups don't track unread count
                 joinedAt: innerGroup.joinedAt,
               );
 

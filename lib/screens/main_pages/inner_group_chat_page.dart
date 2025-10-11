@@ -18,6 +18,7 @@ import '../../services/message_storage_service.dart';
 import '../../repositories/messages_repository.dart';
 import '../../repositories/user_repository.dart';
 import '../../repositories/groups_repository.dart';
+import '../../repositories/group_members_repository.dart';
 import '../../services/websocket_service.dart';
 import '../../utils/chat_helpers.dart';
 import '../../utils/message_storage_helpers.dart';
@@ -32,7 +33,7 @@ class InnerGroupChatPage extends StatefulWidget {
   const InnerGroupChatPage({
     Key? key,
     required this.group,
-    this.isCommunityGroup = false,
+    this.isCommunityGroup= false,
     this.communityGroupMetadata,
   }) : super(key: key);
 
@@ -47,6 +48,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   final ChatsServices _chatsServices = ChatsServices();
   final MessagesRepository _messagesRepo = MessagesRepository();
   final UserRepository _userRepo = UserRepository();
+  final GroupMembersRepository _groupMembersRepo = GroupMembersRepository();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _messageController = TextEditingController();
   final WebSocketService _websocketService = WebSocketService();
@@ -127,13 +129,27 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
     // PRIORITY 3: Check local DB asynchronously and update cache
     Future.microtask(() async {
+      // Try group_members table first (for group member info)
+      final groupMember = await _groupMembersRepo.getMemberByUserId(userId);
+      if (groupMember != null && mounted) {
+        _userInfoCache[userId] = {
+          'name': groupMember.userName,
+          'profile_pic': groupMember.profilePic,
+        };
+        debugPrint('💾 Loaded user $userId (${groupMember.userName}) from group_members DB');
+        // Trigger rebuild to show updated names
+        setState(() {});
+        return;
+      }
+      
+      // Fallback to users table (only for current user)
       final user = await _userRepo.getUserById(userId);
       if (user != null && mounted) {
         _userInfoCache[userId] = {
           'name': user.name,
           'profile_pic': user.profilePic,
         };
-        debugPrint('💾 Loaded user $userId (${user.name}) from local DB');
+        debugPrint('💾 Loaded user $userId (${user.name}) from users DB');
         // Trigger rebuild to show updated names
         setState(() {});
       } else {
@@ -475,10 +491,40 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       final cachedData = await _messagesRepo.getCachedMessages(conversationId);
 
       if (cachedData != null && cachedData.messages.isNotEmpty && mounted) {
+        // Filter out old orphaned optimistic messages (messages with negative IDs older than 5 minutes)
+        final now = DateTime.now();
+        final fiveMinutesAgo = now.subtract(const Duration(minutes: 5));
+        
+        final cleanedMessages = cachedData.messages.where((msg) {
+          // Keep all messages with positive IDs (server-confirmed)
+          if (msg.id >= 0) return true;
+          
+          // For optimistic messages (negative IDs), only keep recent ones
+          try {
+            final createdAt = DateTime.parse(msg.createdAt);
+            return createdAt.isAfter(fiveMinutesAgo);
+          } catch (e) {
+            // If we can't parse the date, keep the message to be safe
+            return true;
+          }
+        }).toList();
+        
+        // Remove duplicates by ID (keep the one with positive ID if both exist)
+        final messageMap = <int, MessageModel>{};
+        for (final msg in cleanedMessages) {
+          final existingMsg = messageMap[msg.id.abs()];
+          // Prefer positive IDs (server-confirmed) over negative IDs (optimistic)
+          if (existingMsg == null || msg.id > 0) {
+            messageMap[msg.id.abs()] = msg;
+          }
+        }
+        final deduplicatedMessages = messageMap.values.toList()
+          ..sort((a, b) => a.id.compareTo(b.id));
+        
         setState(() {
           _isCheckingCache = false;
           _isLoadingFromCache = false;
-          _messages = cachedData.messages;
+          _messages = deduplicatedMessages;
           _conversationMeta = cachedData.meta;
           _hasMoreMessages = cachedData.meta.hasNextPage;
           _currentPage = cachedData.meta.currentPage;
@@ -495,7 +541,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         _populateReplyMessageSenderNames();
 
         debugPrint(
-          '✅ Loaded ${cachedData.messages.length} group messages from local DB',
+          '✅ Loaded ${deduplicatedMessages.length} group messages from local DB (cleaned ${cachedData.messages.length - deduplicatedMessages.length} duplicates)',
         );
       } else {
         if (mounted) {
@@ -522,26 +568,20 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     try {
       // FAST PATH: Try to get from local DB first (instant)
       final conversationId = widget.group.conversationId;
-      final cachedMessages = await _messagesRepo.getMessagesByConversation(
-        conversationId,
-        limit: 20,
-      );
+      // final cachedMessages = await _messagesRepo.getMessagesByConversation(
+      //   conversationId,
+      //   limit: 20,
+      // );
 
       // For groups, find messages we sent by checking local DB
-      if (cachedMessages.isNotEmpty) {
-        // Find a message from someone in the conversation
-        for (final msg in cachedMessages) {
-          // Check if we have a cached user with this sender ID
-          final cachedUser = await _userRepo.getUserById(msg.senderId);
-          if (cachedUser != null) {
-            // Assume the first user we find in local cache is us
-            _currentUserId = cachedUser.id;
-            debugPrint(
-              '✅ Got current user ID from local DB: $_currentUserId (instant!)',
-            );
-            return;
-          }
-        }
+      final cachedUser = await _userRepo.getFirstUser();
+      if (cachedUser != null) {
+        // Assume the first user we find in local cache is us
+        _currentUserId = cachedUser.id;
+        debugPrint(
+          '✅ Got current user ID from local DB: $_currentUserId (instant!)',
+        );
+        return;
       }
 
       // SLOW PATH: Fetch from API (only if not found in cache)
@@ -619,15 +659,19 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         'profile_pic': member.profilePic,
       };
 
-      // 2. Save to local DB for offline access
+      // 2. Save to group_members table (not users table) for offline access
       try {
-        final userModel = UserModel(
-          id: member.userId,
-          name: member.name,
-          phone: '', // We don't have phone for group members
+        final memberInfo = GroupMemberInfo(
+          userId: member.userId,
+          userName: member.name,
           profilePic: member.profilePic,
+          role: member.role,
+          joinedAt: member.joinedAt,
         );
-        await _userRepo.insertOrUpdateUser(userModel);
+        await _groupMembersRepo.insertOrUpdateGroupMember(
+          widget.group.conversationId,
+          memberInfo,
+        );
       } catch (e) {
         debugPrint('❌ Error caching member ${member.userId} to DB: $e');
       }
@@ -794,18 +838,22 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             'profile_pic': profilePic,
           };
 
-          // Save to local DB for offline access
-          final userModel = UserModel(
-            id: userId,
-            name: userName,
-            phone: '', // Not available from conversation metadata
+          // Save to group_members table (not users table) for offline access
+          final memberInfo = GroupMemberInfo(
+            userId: userId,
+            userName: userName,
             profilePic: profilePic,
+            role: 'member', // Default role from metadata
+            joinedAt: null,
           );
-          await _userRepo.insertOrUpdateUser(userModel);
+          await _groupMembersRepo.insertOrUpdateGroupMember(
+            widget.group.conversationId,
+            memberInfo,
+          );
         }
       }
       debugPrint(
-        '✅ Cached ${_conversationMeta!.members.length} users from metadata to local DB',
+        '✅ Cached ${_conversationMeta!.members.length} users from metadata to group_members DB',
       );
     } catch (e) {
       debugPrint('❌ Error caching users from metadata: $e');
@@ -897,6 +945,22 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     );
   }
 
+    @override
+  void deactivate() {
+    // Send inactive message when user navigates away from the page
+    _websocketService
+        .sendMessage({
+          'type': 'inactive_in_conversation',
+          'conversation_id': widget.group.conversationId,
+        })
+        .catchError((e) {
+          debugPrint(
+            '❌ Error sending inactive_in_conversation in deactivate: $e',
+          );
+        });
+    super.deactivate();
+  }
+
   @override
   void dispose() {
     _scrollController.dispose();
@@ -935,6 +999,16 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     _recordingTimer?.cancel();
     _timerStreamController.close();
     _recorder.closeRecorder();
+
+    _websocketService
+        .sendMessage({
+          'type': 'inactive_in_conversation',
+          'conversation_id': widget.group.conversationId,
+        })
+        .catchError((e) {
+          debugPrint('❌ Error sending inactive_in_conversation: $e');
+        });
+
 
     // Properly close the audio player
     try {
@@ -1056,14 +1130,44 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         );
 
         if (cachedData != null && cachedData.messages.isNotEmpty) {
+          // Filter out old orphaned optimistic messages (messages with negative IDs older than 5 minutes)
+          final now = DateTime.now();
+          final fiveMinutesAgo = now.subtract(const Duration(minutes: 5));
+          
+          final cleanedMessages = cachedData.messages.where((msg) {
+            // Keep all messages with positive IDs (server-confirmed)
+            if (msg.id >= 0) return true;
+            
+            // For optimistic messages (negative IDs), only keep recent ones
+            try {
+              final createdAt = DateTime.parse(msg.createdAt);
+              return createdAt.isAfter(fiveMinutesAgo);
+            } catch (e) {
+              // If we can't parse the date, keep the message to be safe
+              return true;
+            }
+          }).toList();
+          
+          // Remove duplicates by ID (keep the one with positive ID if both exist)
+          final messageMap = <int, MessageModel>{};
+          for (final msg in cleanedMessages) {
+            final existingMsg = messageMap[msg.id.abs()];
+            // Prefer positive IDs (server-confirmed) over negative IDs (optimistic)
+            if (existingMsg == null || msg.id > 0) {
+              messageMap[msg.id.abs()] = msg;
+            }
+          }
+          final deduplicatedMessages = messageMap.values.toList()
+            ..sort((a, b) => a.id.compareTo(b.id));
+          
           debugPrint(
-            '✅ Loaded ${cachedData.messages.length} group messages from local DB',
+            '✅ Loaded ${deduplicatedMessages.length} group messages from local DB (cleaned ${cachedData.messages.length - deduplicatedMessages.length} duplicates)',
           );
           if (mounted) {
             setState(() {
               _isCheckingCache = false;
               _isLoadingFromCache = false;
-              _messages = cachedData.messages;
+              _messages = deduplicatedMessages;
               _conversationMeta = cachedData.meta;
               _hasMoreMessages = cachedData.meta.hasNextPage;
               _currentPage = cachedData.meta.currentPage;
@@ -1304,11 +1408,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
       final optimisticId = data['optimistic_id'] ?? data['optimisticId'];
 
-      // Get sender info from conversation metadata or cache
-      final senderInfo = _getUserInfo(senderId);
-      final senderName = senderInfo['name'] ?? 'Unknown User';
-      final senderProfilePic = senderInfo['profile_pic'];
-
       // Skip if this is our own optimistic message being echoed back
       if (_optimisticMessageIds.contains(optimisticId)) {
         debugPrint('🔄 Replacing optimistic group message with server message');
@@ -1327,6 +1426,45 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           messageData,
         );
         return;
+      }
+
+      // Check for duplicate message before processing
+      if (messageId != null && _messages.any((msg) => msg.id == messageId)) {
+        debugPrint('⚠️ Duplicate message detected (ID: $messageId), skipping');
+        return;
+      }
+
+      // Get sender info from conversation metadata or cache - try DB first for accuracy
+      Map<String, String?> senderInfo;
+      String senderName;
+      String? senderProfilePic;
+      
+      // First try memory cache and metadata (fast)
+      senderInfo = _getUserInfo(senderId);
+      senderName = senderInfo['name'] ?? 'Unknown User';
+      senderProfilePic = senderInfo['profile_pic'];
+      
+      // If we got a fallback name (User X), try to load from DB synchronously
+      if (senderName.startsWith('User ') && senderId > 0) {
+        try {
+          // Try group members DB first (synchronous-ish)
+          final groupMember = await _groupMembersRepo.getGroupMember(
+            widget.group.conversationId,
+            senderId,
+          );
+          if (groupMember != null) {
+            senderName = groupMember.userName;
+            senderProfilePic = groupMember.profilePic;
+            // Cache it for future use
+            _userInfoCache[senderId] = {
+              'name': senderName,
+              'profile_pic': senderProfilePic,
+            };
+            debugPrint('💾 Loaded sender info from DB: $senderName (ID: $senderId)');
+          }
+        } catch (e) {
+          debugPrint('⚠️ Could not load sender info from DB: $e');
+        }
       }
 
       // Handle reply message data
@@ -1460,8 +1598,87 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         final data = messageData['data'] as Map<String, dynamic>? ?? {};
         final messageType = messageData['type'];
 
-        // Handle reply messages differently
-        if (messageType == 'message_reply') {
+        // Handle media messages
+        if (messageType == 'media') {
+          final optimisticMessage = _messages[index];
+          final mediaType = data['message_type'] ?? data['type'] ?? 'image';
+          final mediaData = data['media'] as Map<String, dynamic>? ?? data;
+          final serverId = data['id'] ?? data['messageId'];
+
+          // Determine the actual message type based on loading type or media type
+          String actualType;
+          if (optimisticMessage.type == 'image_loading') {
+            actualType = 'image';
+          } else if (optimisticMessage.type == 'video_loading') {
+            actualType = 'video';
+          } else if (optimisticMessage.type == 'document_loading') {
+            actualType = 'document';
+          } else if (optimisticMessage.type == 'audio_loading') {
+            actualType = 'audios'; // Use 'audios' to match the UI rendering logic
+          } else {
+            // Use the media type from server
+            actualType = mediaType.toLowerCase();
+            // Audio messages use 'audios' type
+            if (actualType == 'audio' || actualType == 'voice') {
+              actualType = 'audios';
+            }
+          }
+
+          // Create confirmed media message preserving all optimistic data
+          final confirmedMessage = MessageModel(
+            id: serverId ?? optimisticMessage.id,
+            body: optimisticMessage.body,
+            type: actualType,
+            senderId: optimisticMessage.senderId,
+            conversationId: optimisticMessage.conversationId,
+            createdAt: data['created_at'] ?? optimisticMessage.createdAt,
+            editedAt: data['edited_at'],
+            metadata: data['metadata'] ?? optimisticMessage.metadata,
+            attachments: mediaData,
+            deleted: data['deleted'] == true,
+            senderName: optimisticMessage.senderName,
+            senderProfilePic: optimisticMessage.senderProfilePic,
+            replyToMessage: optimisticMessage.replyToMessage,
+            replyToMessageId: optimisticMessage.replyToMessageId,
+          );
+
+          if (mounted) {
+            setState(() {
+              _messages[index] = confirmedMessage;
+            });
+          }
+
+          // Delete old optimistic message and add confirmed message to database
+          Future.microtask(() async {
+            try {
+              // Delete the old optimistic message from database
+              await _messagesRepo.deleteMessage(optimisticMessage.id);
+              debugPrint(
+                '🗑️ Deleted optimistic media message ${optimisticMessage.id} from DB',
+              );
+
+              // Store confirmed message with server ID
+              if (_conversationMeta != null) {
+                await _messagesRepo.addMessageToCache(
+                  conversationId: widget.group.conversationId,
+                  newMessage: confirmedMessage,
+                  updatedMeta: _conversationMeta!,
+                  insertAtBeginning: false,
+                );
+                debugPrint(
+                  '💾 Stored confirmed media message ${confirmedMessage.id} to DB',
+                );
+              }
+            } catch (e) {
+              debugPrint('❌ Error replacing optimistic media message in DB: $e');
+            }
+          });
+
+          debugPrint(
+            '✅ Replaced optimistic group media message with server-confirmed message',
+          );
+        } else if (messageType == 'message_reply') {
+          // Handle reply messages differently
           final newMessageId = data['new_message_id'];
           final messageBody = data['new_message'] ?? _messages[index].body;
           final timestamp =
@@ -1499,7 +1716,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             '✅ Replaced optimistic group reply message with server-confirmed message',
           );
         } else {
-          // Handle regular messages
+          // Handle regular text messages
           final senderId = data['sender_id'] != null
               ? _parseToInt(data['sender_id'])
               : _messages[index].senderId;
@@ -1571,10 +1788,44 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         return;
       }
 
-      // Get sender info
-      final senderInfo = _getUserInfo(userId);
-      final senderName = senderInfo['name'] ?? 'Unknown User';
-      final senderProfilePic = senderInfo['profile_pic'];
+      // Check for duplicate message before processing
+      if (newMessageId != null && _messages.any((msg) => msg.id == newMessageId)) {
+        debugPrint('⚠️ Duplicate reply message detected (ID: $newMessageId), skipping');
+        return;
+      }
+
+      // Get sender info from conversation metadata or cache - try DB first for accuracy
+      Map<String, String?> senderInfo;
+      String senderName;
+      String? senderProfilePic;
+      
+      // First try memory cache and metadata (fast)
+      senderInfo = _getUserInfo(userId);
+      senderName = senderInfo['name'] ?? 'Unknown User';
+      senderProfilePic = senderInfo['profile_pic'];
+      
+      // If we got a fallback name (User X), try to load from DB synchronously
+      if (senderName.startsWith('User ') && userId > 0) {
+        try {
+          // Try group members DB first (synchronous-ish)
+          final groupMember = await _groupMembersRepo.getGroupMember(
+            widget.group.conversationId,
+            userId,
+          );
+          if (groupMember != null) {
+            senderName = groupMember.userName;
+            senderProfilePic = groupMember.profilePic;
+            // Cache it for future use
+            _userInfoCache[userId] = {
+              'name': senderName,
+              'profile_pic': senderProfilePic,
+            };
+            debugPrint('💾 Loaded sender info from DB: $senderName (ID: $userId)');
+          }
+        } catch (e) {
+          debugPrint('⚠️ Could not load sender info from DB: $e');
+        }
+      }
 
       // Find the original message being replied to
       MessageModel? replyToMessage;
@@ -1643,7 +1894,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       // Extract message data from WebSocket payload
       final data = messageData['data'] as Map<String, dynamic>? ?? {};
       final senderId = _parseToInt(data['sender_id'] ?? data['senderId']);
-      final messageId = data['id'] ?? data['messageId'];
+      final messageId = data['id'] ?? data['messageId'] ??  data['media_message_id'];
       final optimisticId = data['optimistic_id'] ?? data['optimisticId'];
 
       // Skip if this is our own optimistic message being echoed back
@@ -1668,10 +1919,44 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         return;
       }
 
-      // Get sender info from conversation metadata or cache
-      final senderInfo = _getUserInfo(senderId);
-      final senderName = senderInfo['name'] ?? 'Unknown User';
-      final senderProfilePic = senderInfo['profile_pic'];
+      // Check for duplicate message before processing
+      if (messageId != null && _messages.any((msg) => msg.id == messageId)) {
+        debugPrint('⚠️ Duplicate media message detected (ID: $messageId), skipping');
+        return;
+      }
+
+      // Get sender info from conversation metadata or cache - try DB first for accuracy
+      Map<String, String?> senderInfo;
+      String senderName;
+      String? senderProfilePic;
+      
+      // First try memory cache and metadata (fast)
+      senderInfo = _getUserInfo(senderId);
+      senderName = senderInfo['name'] ?? 'Unknown User';
+      senderProfilePic = senderInfo['profile_pic'];
+      
+      // If we got a fallback name (User X), try to load from DB synchronously
+      if (senderName.startsWith('User ') && senderId > 0) {
+        try {
+          // Try group members DB first (synchronous-ish)
+          final groupMember = await _groupMembersRepo.getGroupMember(
+            widget.group.conversationId,
+            senderId,
+          );
+          if (groupMember != null) {
+            senderName = groupMember.userName;
+            senderProfilePic = groupMember.profilePic;
+            // Cache it for future use
+            _userInfoCache[senderId] = {
+              'name': senderName,
+              'profile_pic': senderProfilePic,
+            };
+            debugPrint('💾 Loaded sender info from DB: $senderName (ID: $senderId)');
+          }
+        } catch (e) {
+          debugPrint('⚠️ Could not load sender info from DB: $e');
+        }
+      }
 
       // Handle reply message data for media messages
       MessageModel? replyToMessage;
@@ -5045,6 +5330,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           'data': {
             ...response['data'],
             'conversation_id': widget.group.conversationId,
+            'optimistic_id': loadingMessage.id,
             'reply_to_message_id': replyMessageId,
           },
           'conversation_id': widget.group.conversationId,
@@ -5173,6 +5459,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             ...response['data'],
             'conversation_id': widget.group.conversationId,
             'message_type': 'video',
+            'optimistic_id': loadingMessage.id,
             'reply_to_message_id': replyMessageId,
           },
           'conversation_id': widget.group.conversationId,
@@ -5305,6 +5592,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             ...response['data'],
             'conversation_id': widget.group.conversationId,
             'message_type': 'document',
+            'optimistic_id': loadingMessage.id,
             'reply_to_message_id': replyMessageId,
           },
           'conversation_id': widget.group.conversationId,
@@ -5613,7 +5901,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             senderId: _currentUserId ?? 0,
             senderName: 'You',
             body: '',
-            type: 'audio', // Change to actual audio type
+            type: 'audios', // Use 'audios' to match the UI rendering logic
             createdAt: DateTime.now().toIso8601String(),
             deleted: false,
             attachments: mediaData,
@@ -5658,6 +5946,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               ...response['data'],
               'conversation_id': widget.group.conversationId,
               'message_type': 'audio',
+              'optimistic_id': loadingMessage.id,
               'reply_to_message_id': replyMessageId,
             },
             'conversation_id': widget.group.conversationId,

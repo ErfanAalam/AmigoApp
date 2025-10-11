@@ -32,6 +32,9 @@ class _GroupsPageState extends State<GroupsPage> {
   List<dynamic> _filteredItems = []; // Can contain both groups and communities
   bool _isLoaded = false;
 
+  // Track which group user is currently viewing
+  int? _activeConversationId;
+
   StreamSubscription<Map<String, dynamic>>? _websocketSubscription;
 
   @override
@@ -48,6 +51,8 @@ class _GroupsPageState extends State<GroupsPage> {
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     _websocketSubscription?.cancel();
+    // Clear active conversation
+    _activeConversationId = null;
     super.dispose();
   }
 
@@ -116,6 +121,61 @@ class _GroupsPageState extends State<GroupsPage> {
     }
   }
 
+  /// Clear unread count for a specific group
+  void _clearUnreadCount(int conversationId) {
+    if (!mounted) return;
+
+    final groupIndex = _allGroups.indexWhere(
+      (group) => group.conversationId == conversationId,
+    );
+
+    if (groupIndex != -1) {
+      final group = _allGroups[groupIndex];
+      if (group.unreadCount > 0) {
+        setState(() {
+          final updatedGroup = GroupModel(
+            conversationId: group.conversationId,
+            title: group.title,
+            type: group.type,
+            members: group.members,
+            metadata: group.metadata,
+            lastMessageAt: group.lastMessageAt,
+            role: group.role,
+            unreadCount: 0,
+            joinedAt: group.joinedAt,
+          );
+          _allGroups[groupIndex] = updatedGroup;
+          // Persist to local DB
+          _groupsRepo.insertOrUpdateGroup(updatedGroup);
+          // Update filtered items
+          _onSearchChanged();
+        });
+        debugPrint(
+          '✅ Cleared unread count for group $conversationId (was ${group.unreadCount})',
+        );
+      } else {
+        debugPrint(
+          'ℹ️ Group $conversationId already has 0 unread count',
+        );
+      }
+    } else {
+      debugPrint(
+        '⚠️ Group $conversationId not found when trying to clear unread count',
+      );
+    }
+  }
+
+  /// Set the currently active group (when user enters inner group chat)
+  void _setActiveConversation(int? conversationId) {
+    debugPrint(
+      '📍 Setting active group from $_activeConversationId to: $conversationId',
+    );
+    _activeConversationId = conversationId;
+    if (conversationId != null) {
+      _clearUnreadCount(conversationId);
+    }
+  }
+
   /// Handle new message for groups
   void _handleNewGroupMessage(Map<String, dynamic> message) {
     try {
@@ -134,12 +194,20 @@ class _GroupsPageState extends State<GroupsPage> {
         setState(() {
           final group = _allGroups[groupIndex];
 
-          // Create new last message
+          // Create new last message with better media handling
+          String messageBody = data['body'] ?? '';
+          
+          // If body is empty and it's a media message, extract from nested data
+          if (messageBody.isEmpty && data['data'] != null) {
+            final nestedData = data['data'] as Map<String, dynamic>;
+            messageBody = nestedData['message_type'] ?? nestedData['file_name'] ?? '';
+          }
+          
           final lastMessage = GroupLastMessage(
-            id: data['id'] ?? 0,
-            body: data['body'] ?? data['data']?['message_type'] ?? '',
-            type: data['type'] ?? 'text',
-            senderId: data['sender_id'] ?? 0,
+            id: data['id'] ?? data['media_message_id'] ?? 0,
+            body: messageBody,
+            type: data['type'] ?? message['type'] ?? 'text',
+            senderId: data['sender_id'] ?? data['user_id'] ?? 0,
             senderName: data['sender_name'] ?? '',
             createdAt: data['created_at'] ?? DateTime.now().toIso8601String(),
             conversationId: conversationId,
@@ -152,6 +220,11 @@ class _GroupsPageState extends State<GroupsPage> {
             createdBy: group.metadata?.createdBy ?? 0,
           );
 
+          // Only increment unread count if this is not the currently active group
+          final newUnreadCount = _activeConversationId == conversationId
+              ? group.unreadCount // Don't increment if user is viewing this group
+              : group.unreadCount + 1; // Increment if user is not viewing this group
+
           // Create updated group
           final updatedGroup = GroupModel(
             conversationId: group.conversationId,
@@ -159,6 +232,7 @@ class _GroupsPageState extends State<GroupsPage> {
             type: group.type,
             members: group.members,
             metadata: updatedMetadata,
+            unreadCount: newUnreadCount,
             lastMessageAt: lastMessage.createdAt,
             role: group.role,
             joinedAt: group.joinedAt,
@@ -345,7 +419,7 @@ class _GroupsPageState extends State<GroupsPage> {
           : null,
       lastMessageAt: json['lastMessageAt'],
       role: json['role'],
-      // unreadCount: json['unreadCount'] ?? 0,
+      unreadCount: json['unreadCount'] ?? 0,
       joinedAt: json['joinedAt'] ?? DateTime.now().toIso8601String(),
     );
   }
@@ -633,13 +707,34 @@ class _GroupsPageState extends State<GroupsPage> {
           if (item is GroupModel) {
             return GroupListItem(
               group: item,
-              onTap: () {
-                Navigator.push(
+              onTap: () async {
+                // Set this group as active and clear unread count
+                _setActiveConversation(item.conversationId);
+
+                // Navigate to inner group chat page
+                await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) => InnerGroupChatPage(group: item),
                   ),
                 );
+
+                // Clear unread count again when returning from inner chat
+                // This ensures the count is cleared even if it was updated while in the chat
+                _clearUnreadCount(item.conversationId);
+
+                // Send inactive message before clearing active conversation
+                try {
+                  await _websocketService.sendMessage({
+                    'type': 'inactive_in_conversation',
+                    'conversation_id': item.conversationId,
+                  });
+                } catch (e) {
+                  debugPrint('❌ Error sending inactive_in_conversation: $e');
+                }
+
+                // Clear active conversation when returning from inner chat
+                _setActiveConversation(null);
               },
             );
           } else if (item is CommunityModel) {
@@ -693,11 +788,44 @@ class GroupListItem extends StatelessWidget {
     }
   }
 
+  String _formatLastMessageText(GroupLastMessage? lastMessage) {
+    if (lastMessage == null) return 'No messages yet';
+
+    // If body is not empty, return it
+    if (lastMessage.body.isNotEmpty) {
+      return lastMessage.body;
+    }
+
+    // Handle media messages based on type
+    switch (lastMessage.type.toLowerCase()) {
+      case 'image':
+      case 'images':
+        return '📷 Photo';
+      case 'video':
+      case 'videos':
+        return '📹 Video';
+      case 'audio':
+      case 'audios':
+      case 'voice':
+        return '🎵 Audio';
+      case 'file':
+      case 'document':
+        return '📎 File';
+      case 'location':
+        return '📍 Location';
+      case 'contact':
+        return '👤 Contact';
+      case 'media':
+        return '📎 Media';
+      default:
+        return 'New message';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // final hasUnreadMessages = group.unreadCount > 0;
-    final lastMessageText =
-        group.metadata?.lastMessage?.body ?? 'No messages yet';
+    final hasUnreadMessages = group.unreadCount > 0;
+    final lastMessageText = _formatLastMessageText(group.metadata?.lastMessage);
     final timeText = _formatTime(group.lastMessageAt ?? group.joinedAt);
 
     return Container(
@@ -734,9 +862,9 @@ class GroupListItem extends StatelessWidget {
                     Text(
                       group.title,
                       style: TextStyle(
-                        // fontWeight: false
-                        //     ? FontWeight.bold
-                        //     : FontWeight.normal,
+                        fontWeight: hasUnreadMessages
+                            ? FontWeight.bold
+                            : FontWeight.normal,
                         fontSize: 16,
                       ),
                       maxLines: 1,
@@ -762,27 +890,27 @@ class GroupListItem extends StatelessWidget {
                     timeText,
                     style: TextStyle(color: Colors.grey[500], fontSize: 12),
                   ),
-                  // if (hasUnreadMessages) ...[
-                  //   const SizedBox(height: 4),
-                  //   Container(
-                  //     padding: const EdgeInsets.symmetric(
-                  //       horizontal: 8,
-                  //       vertical: 2,
-                  //     ),
-                  //     decoration: BoxDecoration(
-                  //       color: Colors.teal,
-                  //       borderRadius: BorderRadius.circular(10),
-                  //     ),
-                  //     child: Text(
-                  //       group.unreadCount.toString(),
-                  //       style: const TextStyle(
-                  //         color: Colors.white,
-                  //         fontSize: 12,
-                  //         fontWeight: FontWeight.bold,
-                  //       ),
-                  //     ),
-                  //   ),
-                  // ],
+                  if (hasUnreadMessages) ...[
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.teal,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        group.unreadCount.toString(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ],

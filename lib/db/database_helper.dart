@@ -1,5 +1,6 @@
 // lib/db/database_helper.dart
 import 'dart:async';
+import 'dart:convert';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -20,7 +21,7 @@ class DatabaseHelper {
     final path = join(dbPath, fileName);
     return await openDatabase(
       path,
-      version: 5,
+      version: 7,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -107,6 +108,7 @@ class DatabaseHelper {
         created_at TEXT,
         created_by INTEGER,
         members TEXT,
+        unread_count INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL
       );
     ''');
@@ -171,6 +173,28 @@ class DatabaseHelper {
         last_sync_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE group_members (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        user_name TEXT NOT NULL,
+        profile_pic TEXT,
+        role TEXT NOT NULL DEFAULT 'member',
+        joined_at TEXT,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(conversation_id, user_id)
+      );
+    ''');
+
+    await db.execute('''
+      CREATE INDEX idx_group_members_conversation ON group_members(conversation_id);
+    ''');
+
+    await db.execute('''
+      CREATE INDEX idx_group_members_user ON group_members(user_id);
     ''');
   }
 
@@ -327,6 +351,88 @@ class DatabaseHelper {
         ALTER TABLE messages ADD COLUMN local_media_path TEXT;
       ''');
     }
+
+    if (oldVersion < 6) {
+      // Create group_members table for existing DB
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS group_members (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          conversation_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          user_name TEXT NOT NULL,
+          profile_pic TEXT,
+          role TEXT NOT NULL DEFAULT 'member',
+          joined_at TEXT,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(conversation_id, user_id)
+        );
+      ''');
+
+      await db.execute('''
+        CREATE INDEX IF NOT EXISTS idx_group_members_conversation ON group_members(conversation_id);
+      ''');
+
+      await db.execute('''
+        CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id);
+      ''');
+
+      // Migrate existing group members from users table to group_members table
+      // Note: This assumes members are stored in the groups.members JSON field
+      // We'll populate this from the groups table members field
+      final groups = await db.query('groups');
+      for (final group in groups) {
+        final membersJson = group['members'] as String?;
+        if (membersJson != null && membersJson.isNotEmpty) {
+          try {
+            final members = jsonDecode(membersJson) as List;
+            for (final member in members) {
+              final memberMap = member as Map<String, dynamic>;
+              await db.insert(
+                'group_members',
+                {
+                  'conversation_id': group['conversation_id'],
+                  'user_id': memberMap['userId'] ?? memberMap['user_id'] ?? 0,
+                  'user_name': memberMap['name'] ?? memberMap['userName'] ?? '',
+                  'profile_pic': memberMap['profilePic'] ?? memberMap['profile_pic'],
+                  'role': memberMap['role'] ?? 'member',
+                  'joined_at': memberMap['joinedAt'] ?? memberMap['joined_at'],
+                  'updated_at': DateTime.now().millisecondsSinceEpoch,
+                },
+                conflictAlgorithm: ConflictAlgorithm.ignore,
+              );
+            }
+          } catch (e) {
+            print('Error migrating members for group ${group['conversation_id']}: $e');
+          }
+        }
+      }
+
+      // Clean up users table - keep only users with call_access (likely the current user)
+      // or keep the first user if none have call_access
+      final users = await db.query('users', orderBy: 'id ASC');
+      if (users.isNotEmpty) {
+        final currentUser = users.firstWhere(
+          (u) => (u['call_access'] as int? ?? 0) == 1,
+          orElse: () => users.first,
+        );
+        // Delete all users except the current user
+        await db.delete('users', where: 'id != ?', whereArgs: [currentUser['id']]);
+        print('✅ Cleaned up users table, kept only current user: ${currentUser['id']}');
+      }
+    }
+
+    if (oldVersion < 7) {
+      // Add unread_count column to groups table
+      try {
+        await db.execute('''
+          ALTER TABLE groups ADD COLUMN unread_count INTEGER NOT NULL DEFAULT 0;
+        ''');
+        print('✅ Added unread_count column to groups table');
+      } catch (e) {
+        // Column might already exist, ignore error
+        print('⚠️ Error adding unread_count column (might already exist): $e');
+      }
+    }
   }
 
   /// Clear all data from all tables (used during logout)
@@ -339,6 +445,7 @@ class DatabaseHelper {
         await txn.delete('messages');
         await txn.delete('conversation_meta');
         await txn.delete('conversations');
+        await txn.delete('group_members');
         await txn.delete('groups');
         await txn.delete('communities');
         await txn.delete('calls');

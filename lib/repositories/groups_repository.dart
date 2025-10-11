@@ -82,6 +82,7 @@ class GroupsRepository {
       'created_at': group.metadata?.createdAt,
       'created_by': group.metadata?.createdBy,
       'members': jsonEncode(group.members.map((m) => m.toJson()).toList()),
+      'unread_count': group.unreadCount,
       'updated_at': DateTime.now().millisecondsSinceEpoch,
     };
   }
@@ -133,6 +134,7 @@ class GroupsRepository {
       metadata: metadata,
       lastMessageAt: map['last_message_at'] as String?,
       role: map['role'] as String?,
+      unreadCount: map['unread_count'] as int? ?? 0,
       joinedAt: map['joined_at'] as String,
     );
   }
