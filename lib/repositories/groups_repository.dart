@@ -29,10 +29,13 @@ class GroupsRepository {
     await batch.commit(noResult: true);
   }
 
+  /// Get all normal groups (excludes community_group type)
   Future<List<GroupModel>> getAllGroups() async {
     final db = await dbHelper.database;
     final rows = await db.query(
       'groups',
+      where: 'type = ?',
+      whereArgs: ['group'],
       orderBy: 'last_message_at DESC, joined_at DESC',
     );
     return rows.map((r) => _mapToGroup(r)).toList();
@@ -62,6 +65,30 @@ class GroupsRepository {
   Future<void> clearGroups() async {
     final db = await dbHelper.database;
     await db.delete('groups');
+  }
+
+  /// Get all community inner groups (type = 'community_group')
+  Future<List<GroupModel>> getCommunityInnerGroups(int communityId) async {
+    final db = await dbHelper.database;
+    final rows = await db.query(
+      'groups',
+      where: 'type = ?',
+      whereArgs: ['community_group'],
+      orderBy: 'last_message_at DESC, joined_at DESC',
+    );
+    return rows.map((r) => _mapToGroup(r)).toList();
+  }
+
+  /// Get all community inner groups (all community groups regardless of community)
+  Future<List<GroupModel>> getAllCommunityInnerGroups() async {
+    final db = await dbHelper.database;
+    final rows = await db.query(
+      'groups',
+      where: 'type = ?',
+      whereArgs: ['community_group'],
+      orderBy: 'last_message_at DESC, joined_at DESC',
+    );
+    return rows.map((r) => _mapToGroup(r)).toList();
   }
 
   Map<String, dynamic> _groupToMap(GroupModel group) {

@@ -36,7 +36,7 @@ class InnerGroupChatPage extends StatefulWidget {
   const InnerGroupChatPage({
     Key? key,
     required this.group,
-    this.isCommunityGroup= false,
+    this.isCommunityGroup = false,
     this.communityGroupMetadata,
   }) : super(key: key);
 
@@ -109,7 +109,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
     // Use stored sender name from message (for offline support)
     if (storedSenderName != null && storedSenderName.isNotEmpty) {
-      debugPrint('✅ Using stored sender name: $storedSenderName for ID $senderId (offline fallback)');
+      debugPrint(
+        '✅ Using stored sender name: $storedSenderName for ID $senderId (offline fallback)',
+      );
       return storedSenderName;
     }
 
@@ -148,12 +150,14 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           'name': groupMember.userName,
           'profile_pic': groupMember.profilePic,
         };
-        debugPrint('💾 Loaded user $userId (${groupMember.userName}) from group_members DB');
+        debugPrint(
+          '💾 Loaded user $userId (${groupMember.userName}) from group_members DB',
+        );
         // Trigger rebuild to show updated names
         setState(() {});
         return;
       }
-      
+
       // Fallback to users table (only for current user)
       final user = await _userRepo.getUserById(userId);
       if (user != null && mounted) {
@@ -506,11 +510,11 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         // Filter out old orphaned optimistic messages (messages with negative IDs older than 5 minutes)
         final now = DateTime.now();
         final fiveMinutesAgo = now.subtract(const Duration(minutes: 5));
-        
+
         final cleanedMessages = cachedData.messages.where((msg) {
           // Keep all messages with positive IDs (server-confirmed)
           if (msg.id >= 0) return true;
-          
+
           // For optimistic messages (negative IDs), only keep recent ones
           try {
             final createdAt = DateTime.parse(msg.createdAt);
@@ -520,7 +524,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             return true;
           }
         }).toList();
-        
+
         // Remove duplicates by ID (keep the one with positive ID if both exist)
         final messageMap = <int, MessageModel>{};
         for (final msg in cleanedMessages) {
@@ -532,7 +536,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         }
         final deduplicatedMessages = messageMap.values.toList()
           ..sort((a, b) => a.id.compareTo(b.id));
-        
+
         setState(() {
           _isCheckingCache = false;
           _isLoadingFromCache = false;
@@ -957,7 +961,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     );
   }
 
-    @override
+  @override
   void deactivate() {
     // Send inactive message when user navigates away from the page
     _websocketService
@@ -1020,7 +1024,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         .catchError((e) {
           debugPrint('❌ Error sending inactive_in_conversation: $e');
         });
-
 
     // Properly close the audio player
     try {
@@ -1145,11 +1148,11 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           // Filter out old orphaned optimistic messages (messages with negative IDs older than 5 minutes)
           final now = DateTime.now();
           final fiveMinutesAgo = now.subtract(const Duration(minutes: 5));
-          
+
           final cleanedMessages = cachedData.messages.where((msg) {
             // Keep all messages with positive IDs (server-confirmed)
             if (msg.id >= 0) return true;
-            
+
             // For optimistic messages (negative IDs), only keep recent ones
             try {
               final createdAt = DateTime.parse(msg.createdAt);
@@ -1159,7 +1162,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               return true;
             }
           }).toList();
-          
+
           // Remove duplicates by ID (keep the one with positive ID if both exist)
           final messageMap = <int, MessageModel>{};
           for (final msg in cleanedMessages) {
@@ -1171,7 +1174,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           }
           final deduplicatedMessages = messageMap.values.toList()
             ..sort((a, b) => a.id.compareTo(b.id));
-          
+
           debugPrint(
             '✅ Loaded ${deduplicatedMessages.length} group messages from local DB (cleaned ${cachedData.messages.length - deduplicatedMessages.length} duplicates)',
           );
@@ -1450,12 +1453,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       Map<String, String?> senderInfo;
       String senderName;
       String? senderProfilePic;
-      
+
       // First try memory cache and metadata (fast)
       senderInfo = _getUserInfo(senderId);
       senderName = senderInfo['name'] ?? 'Unknown User';
       senderProfilePic = senderInfo['profile_pic'];
-      
+
       // If we got a fallback name (User X), try to load from DB synchronously
       if (senderName.startsWith('User ') && senderId > 0) {
         try {
@@ -1472,7 +1475,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               'name': senderName,
               'profile_pic': senderProfilePic,
             };
-            debugPrint('💾 Loaded sender info from DB: $senderName (ID: $senderId)');
+            debugPrint(
+              '💾 Loaded sender info from DB: $senderName (ID: $senderId)',
+            );
           }
         } catch (e) {
           debugPrint('⚠️ Could not load sender info from DB: $e');
@@ -1626,7 +1631,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           } else if (optimisticMessage.type == 'document_loading') {
             actualType = 'document';
           } else if (optimisticMessage.type == 'audio_loading') {
-            actualType = 'audios'; // Use 'audios' to match the UI rendering logic
+            actualType =
+                'audios'; // Use 'audios' to match the UI rendering logic
           } else {
             // Use the media type from server
             actualType = mediaType.toLowerCase();
@@ -1682,7 +1688,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                 );
               }
             } catch (e) {
-              debugPrint('❌ Error replacing optimistic media message in DB: $e');
+              debugPrint(
+                '❌ Error replacing optimistic media message in DB: $e',
+              );
             }
           });
 
@@ -1801,8 +1809,11 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       }
 
       // Check for duplicate message before processing
-      if (newMessageId != null && _messages.any((msg) => msg.id == newMessageId)) {
-        debugPrint('⚠️ Duplicate reply message detected (ID: $newMessageId), skipping');
+      if (newMessageId != null &&
+          _messages.any((msg) => msg.id == newMessageId)) {
+        debugPrint(
+          '⚠️ Duplicate reply message detected (ID: $newMessageId), skipping',
+        );
         return;
       }
 
@@ -1810,12 +1821,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       Map<String, String?> senderInfo;
       String senderName;
       String? senderProfilePic;
-      
+
       // First try memory cache and metadata (fast)
       senderInfo = _getUserInfo(userId);
       senderName = senderInfo['name'] ?? 'Unknown User';
       senderProfilePic = senderInfo['profile_pic'];
-      
+
       // If we got a fallback name (User X), try to load from DB synchronously
       if (senderName.startsWith('User ') && userId > 0) {
         try {
@@ -1832,7 +1843,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               'name': senderName,
               'profile_pic': senderProfilePic,
             };
-            debugPrint('💾 Loaded sender info from DB: $senderName (ID: $userId)');
+            debugPrint(
+              '💾 Loaded sender info from DB: $senderName (ID: $userId)',
+            );
           }
         } catch (e) {
           debugPrint('⚠️ Could not load sender info from DB: $e');
@@ -1906,7 +1919,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       // Extract message data from WebSocket payload
       final data = messageData['data'] as Map<String, dynamic>? ?? {};
       final senderId = _parseToInt(data['sender_id'] ?? data['senderId']);
-      final messageId = data['id'] ?? data['messageId'] ??  data['media_message_id'];
+      final messageId =
+          data['id'] ?? data['messageId'] ?? data['media_message_id'];
       final optimisticId = data['optimistic_id'] ?? data['optimisticId'];
 
       // Skip if this is our own optimistic message being echoed back
@@ -1933,7 +1947,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
       // Check for duplicate message before processing
       if (messageId != null && _messages.any((msg) => msg.id == messageId)) {
-        debugPrint('⚠️ Duplicate media message detected (ID: $messageId), skipping');
+        debugPrint(
+          '⚠️ Duplicate media message detected (ID: $messageId), skipping',
+        );
         return;
       }
 
@@ -1941,12 +1957,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       Map<String, String?> senderInfo;
       String senderName;
       String? senderProfilePic;
-      
+
       // First try memory cache and metadata (fast)
       senderInfo = _getUserInfo(senderId);
       senderName = senderInfo['name'] ?? 'Unknown User';
       senderProfilePic = senderInfo['profile_pic'];
-      
+
       // If we got a fallback name (User X), try to load from DB synchronously
       if (senderName.startsWith('User ') && senderId > 0) {
         try {
@@ -1963,7 +1979,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               'name': senderName,
               'profile_pic': senderProfilePic,
             };
-            debugPrint('💾 Loaded sender info from DB: $senderName (ID: $senderId)');
+            debugPrint(
+              '💾 Loaded sender info from DB: $senderName (ID: $senderId)',
+            );
           }
         } catch (e) {
           debugPrint('⚠️ Could not load sender info from DB: $e');
@@ -2366,19 +2384,30 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             insertAtBeginning: false, // Add new messages at the end
           );
           debugPrint('💾 Group message stored asynchronously: ${message.id}');
-          
+
           // Trigger background media caching for media messages
-          if (message.type == 'image' || message.type == 'video' || message.type == 'audio') {
+          if (message.type == 'image' ||
+              message.type == 'video' ||
+              message.type == 'audio') {
             String? mediaUrl;
             if (message.attachments != null) {
               if (message.type == 'image') {
-                mediaUrl = (message.attachments!['image_url'] ?? message.attachments!['url']) as String?;
+                mediaUrl =
+                    (message.attachments!['image_url'] ??
+                            message.attachments!['url'])
+                        as String?;
               } else if (message.type == 'video') {
-                mediaUrl = (message.attachments!['video_url'] ?? message.attachments!['url']) as String?;
+                mediaUrl =
+                    (message.attachments!['video_url'] ??
+                            message.attachments!['url'])
+                        as String?;
               } else if (message.type == 'audio') {
-                mediaUrl = (message.attachments!['audio_url'] ?? message.attachments!['url']) as String?;
+                mediaUrl =
+                    (message.attachments!['audio_url'] ??
+                            message.attachments!['url'])
+                        as String?;
               }
-              
+
               if (mediaUrl != null && mediaUrl.isNotEmpty) {
                 _cacheMediaForMessage(mediaUrl, message.id);
               }
@@ -3186,7 +3215,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                       Padding(
                         padding: const EdgeInsets.only(left: 12, bottom: 4),
                         child: Text(
-                          _getSenderName(message.senderId, storedSenderName: message.senderName),
+                          _getSenderName(
+                            message.senderId,
+                            storedSenderName: message.senderName,
+                          ),
                           style: TextStyle(
                             color: Colors.teal[700],
                             fontSize: 12,
@@ -3814,13 +3846,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
     final metadata = widget.communityGroupMetadata!;
     final now = DateTime.now();
-    final currentDay = now.weekday % 7; // Convert to 0-6 where Sunday = 0
     final currentTime = TimeOfDay.fromDateTime(now);
 
     // Check if today is an active day
-    if (!metadata.activeDays.contains(currentDay)) {
-      return false;
-    }
+    // if (!metadata.activeDays.contains(currentDay)) {
+    //   return false;
+    // }
 
     // Check if current time is within any active time slot
     for (final timeSlot in metadata.activeTimeSlots) {
@@ -3884,7 +3915,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Active: $activeDaysText, $activeTimeSlotsText',
+                  'Active: $activeTimeSlotsText',
                   style: TextStyle(color: Colors.orange[700], fontSize: 12),
                 ),
               ],
@@ -5289,7 +5320,11 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     }
   }
 
-  void _openVideoPreview(String videoUrl, String? caption, String? fileName) async {
+  void _openVideoPreview(
+    String videoUrl,
+    String? caption,
+    String? fileName,
+  ) async {
     // Show loading indicator
     showDialog(
       context: context,

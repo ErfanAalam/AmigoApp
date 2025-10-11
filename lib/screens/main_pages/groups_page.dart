@@ -154,9 +154,7 @@ class _GroupsPageState extends State<GroupsPage> {
           '✅ Cleared unread count for group $conversationId (was ${group.unreadCount})',
         );
       } else {
-        debugPrint(
-          'ℹ️ Group $conversationId already has 0 unread count',
-        );
+        debugPrint('ℹ️ Group $conversationId already has 0 unread count');
       }
     } else {
       debugPrint(
@@ -196,13 +194,14 @@ class _GroupsPageState extends State<GroupsPage> {
 
           // Create new last message with better media handling
           String messageBody = data['body'] ?? '';
-          
+
           // If body is empty and it's a media message, extract from nested data
           if (messageBody.isEmpty && data['data'] != null) {
             final nestedData = data['data'] as Map<String, dynamic>;
-            messageBody = nestedData['message_type'] ?? nestedData['file_name'] ?? '';
+            messageBody =
+                nestedData['message_type'] ?? nestedData['file_name'] ?? '';
           }
-          
+
           final lastMessage = GroupLastMessage(
             id: data['id'] ?? data['media_message_id'] ?? 0,
             body: messageBody,
@@ -222,8 +221,10 @@ class _GroupsPageState extends State<GroupsPage> {
 
           // Only increment unread count if this is not the currently active group
           final newUnreadCount = _activeConversationId == conversationId
-              ? group.unreadCount // Don't increment if user is viewing this group
-              : group.unreadCount + 1; // Increment if user is not viewing this group
+              ? group
+                    .unreadCount // Don't increment if user is viewing this group
+              : group.unreadCount +
+                    1; // Increment if user is not viewing this group
 
           // Create updated group
           final updatedGroup = GroupModel(
@@ -294,10 +295,23 @@ class _GroupsPageState extends State<GroupsPage> {
 
       // Load groups
       final groupResponse = await _userService.GetChatList('group');
+      print(
+        "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
+      );
+      print('group response: $groupResponse');
+      print(
+        "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
+      );
 
       // Load communities
       final communityResponse = await _userService.GetCommunityChatList();
+      print(
+        "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
+      );
       print('Community response: $communityResponse');
+      print(
+        "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
+      );
 
       List<GroupModel> groups = [];
       List<CommunityModel> communities = [];
