@@ -46,12 +46,22 @@ class CallService extends ChangeNotifier {
   // WebRTC configuration - using Plan B for compatibility
   final Map<String, dynamic> _configuration = {
     'iceServers': [
-      {'urls': 'stun:stun.l.google.com:19302'}, // STUN fallback
+      // Public STUN fallback
+      {'urls': 'stun:stun.l.google.com:19302'},
+
+      // TURN server over UDP and TCP
       {
         'urls': [
-          'turn:43.205.144.169:3478?transport=udp',
-          'turn:43.205.144.169:3478?transport=tcp',
+          'turn:turn.amigochats.com:3478?transport=udp',
+          'turn:turn.amigochats.com:3478?transport=tcp',
         ],
+        'username': 'amigo',
+        'credential': 'amigopass',
+      },
+
+      // TURN server over TLS (secure)
+      {
+        'urls': ['turns:turn.amigochats.com:5349?transport=tcp'],
         'username': 'amigo',
         'credential': 'amigopass',
       },
