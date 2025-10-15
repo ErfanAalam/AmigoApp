@@ -94,14 +94,23 @@ class _InnerChatPageState extends State<InnerChatPage>
   MessageModel? _replyToMessageData;
   bool _isReplying = false;
 
-  // Sticky date separator state
-  String? _currentStickyDate;
-  bool _showStickyDate = false;
+  // Highlighted message state (for scroll-to effect)
+  int? _highlightedMessageId;
+  Timer? _highlightTimer;
+
+  // Sticky date separator state - using ValueNotifier to avoid setState during scroll
+  final ValueNotifier<String?> _currentStickyDate = ValueNotifier<String?>(
+    null,
+  );
+  final ValueNotifier<bool> _showStickyDate = ValueNotifier<bool>(false);
 
   // Typing animation controllers
   late AnimationController _typingAnimationController;
   late List<Animation<double>> _typingDotAnimations;
   Timer? _typingTimeout;
+
+  // Scroll debounce timer
+  Timer? _scrollDebounceTimer;
 
   // Message animation controllers
   final Map<int, AnimationController> _messageAnimationControllers = {};
@@ -240,6 +249,8 @@ class _InnerChatPageState extends State<InnerChatPage>
         limit: 50, // Get more messages to check for new ones
       );
 
+      print('🚀 Smart sync response: ${response['metadata']}');
+
       if (response['success'] == true && response['data'] != null) {
         final historyResponse = ConversationHistoryResponse.fromJson(
           response['data'],
@@ -362,12 +373,14 @@ class _InnerChatPageState extends State<InnerChatPage>
     // Initialize user info cache
     _initializeUserCache();
 
+    // NOW load and display messages (user ID is known, display will be correct)
+    // This also loads _conversationMeta which contains pinned message info
+    await _tryLoadFromCacheFirst();
+
     // Load pinned and starred messages from local DB (fast)
+    // Must be called AFTER _tryLoadFromCacheFirst to access _conversationMeta
     await _loadPinnedMessageFromStorage();
     await _loadStarredMessagesFromStorage();
-
-    // NOW load and display messages (user ID is known, display will be correct)
-    await _tryLoadFromCacheFirst();
 
     // Load from server (in background if we have cache)
     await _loadInitialMessages();
@@ -457,6 +470,7 @@ class _InnerChatPageState extends State<InnerChatPage>
               id: _currentUserId!,
               name: userData['name'] ?? '',
               phone: userData['phone'] ?? '',
+              role: userData['role'] ?? '',
               profilePic: userData['profile_pic'],
               callAccess: serverCallAccess,
             );
@@ -612,9 +626,26 @@ class _InnerChatPageState extends State<InnerChatPage>
     }
   }
 
-  /// Load pinned message from storage
+  /// Load pinned message from storage or conversation metadata
   Future<void> _loadPinnedMessageFromStorage() async {
     final conversationId = widget.conversation.conversationId;
+
+    // First check if conversation metadata has pinned message
+    if (widget.conversation.metadata?.pinnedMessage != null) {
+      final pinnedMessageId =
+          widget.conversation.metadata!.pinnedMessage!.messageId;
+      if (mounted) {
+        setState(() {
+          _pinnedMessageId = pinnedMessageId;
+        });
+        debugPrint(
+          '✅ Loaded pinned message from conversation metadata: $pinnedMessageId',
+        );
+        return;
+      }
+    }
+
+    // Fallback to local storage
     final pinnedMessageId =
         await MessageStorageHelpers.loadPinnedMessageFromStorage(
           conversationId,
@@ -624,6 +655,9 @@ class _InnerChatPageState extends State<InnerChatPage>
       setState(() {
         _pinnedMessageId = pinnedMessageId;
       });
+      debugPrint(
+        '✅ Loaded pinned message from local storage: $pinnedMessageId',
+      );
     }
   }
 
@@ -645,20 +679,17 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   /// Validate pinned message exists in current messages and clean up if not
   void _validatePinnedMessage() {
-    if (_pinnedMessageId != null && _messages.isNotEmpty) {
+    // Don't validate if we don't have a full message set yet
+    // Only validate if we've loaded a significant number of messages
+    // This prevents clearing pinned messages during initial load or pagination
+    if (_pinnedMessageId != null && _messages.length > 20) {
       final messageExists = _messages.any((msg) => msg.id == _pinnedMessageId);
       if (!messageExists && mounted) {
         debugPrint(
-          '⚠️ Pinned message $_pinnedMessageId not found in current messages, clearing',
+          '⚠️ Pinned message $_pinnedMessageId not found in current messages, but keeping it (might be paginated)',
         );
-        setState(() {
-          _pinnedMessageId = null;
-        });
-        // Also clear from storage
-        _messagesRepo.savePinnedMessage(
-          conversationId: widget.conversation.conversationId,
-          pinnedMessageId: null,
-        );
+        // Don't clear the pinned message - it might just be in a different page
+        // Only clear if we explicitly receive an unpin action via WebSocket
       }
     }
   }
@@ -864,12 +895,10 @@ class _InnerChatPageState extends State<InnerChatPage>
         currentMessage.createdAt,
       );
 
-      // Only update if the date has changed
-      if (_currentStickyDate != currentDateString) {
-        setState(() {
-          _currentStickyDate = currentDateString;
-          _showStickyDate = true;
-        });
+      // Only update if the date has changed - using ValueNotifier to avoid setState
+      if (_currentStickyDate.value != currentDateString) {
+        _currentStickyDate.value = currentDateString;
+        _showStickyDate.value = true;
       }
     }
   }
@@ -901,6 +930,10 @@ class _InnerChatPageState extends State<InnerChatPage>
     _websocketSubscription?.cancel();
     _typingAnimationController.dispose();
     _typingTimeout?.cancel();
+    _scrollDebounceTimer?.cancel();
+    _highlightTimer?.cancel();
+    _currentStickyDate.dispose();
+    _showStickyDate.dispose();
 
     // Send inactive message when actually disposing (leaving the page)
     _websocketService
@@ -965,14 +998,19 @@ class _InnerChatPageState extends State<InnerChatPage>
     _isScrolling = true;
 
     // Reset scrolling flag after a short delay
-    Future.delayed(const Duration(milliseconds: 100), () {
+    Future.delayed(const Duration(milliseconds: 150), () {
       if (mounted) {
         _isScrolling = false;
       }
     });
 
-    // Update sticky date separator
-    _updateStickyDateSeparator();
+    // Debounce sticky date separator updates to reduce frequency (increased to 100ms)
+    _scrollDebounceTimer?.cancel();
+    _scrollDebounceTimer = Timer(const Duration(milliseconds: 100), () {
+      if (mounted && _scrollController.hasClients) {
+        _updateStickyDateSeparator();
+      }
+    });
 
     // With reverse: true, when scrolling to see older messages (scrolling "up" in the UI),
     // we're actually scrolling towards maxScrollExtent
@@ -1431,8 +1469,17 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   /// Handle incoming message pin from WebSocket
   void _handleMessagePin(Map<String, dynamic> message) async {
+    print(
+      '-------------------------------------------------------------------------',
+    );
+    print('🔍 handleMessagePin called with message: $message');
+    print(
+      '-------------------------------------------------------------------------',
+    );
     final data = message['data'] as Map<String, dynamic>? ?? {};
-    final messageId = data['message_id'] ?? data['messageId'];
+    // Get message ID from message_ids array
+    final messageIds = message['message_ids'] as List<dynamic>? ?? [];
+    final messageId = messageIds.isNotEmpty ? messageIds[0] as int? : null;
     final action = data['action'] ?? 'pin';
     final conversationId = widget.conversation.conversationId;
 
@@ -1451,6 +1498,10 @@ class _InnerChatPageState extends State<InnerChatPage>
     await _messagesRepo.savePinnedMessage(
       conversationId: conversationId,
       pinnedMessageId: newPinnedMessageId,
+    );
+
+    debugPrint(
+      '📌 ${action == 'pin' ? 'Pinned' : 'Unpinned'} message $messageId for conversation $conversationId',
     );
   }
 
@@ -1868,12 +1919,12 @@ class _InnerChatPageState extends State<InnerChatPage>
       if (mounted) {
         setState(() {
           _messages.add(newMessage);
-          // Update sticky date separator for new messages
-          _currentStickyDate = ChatHelpers.getMessageDateString(
-            newMessage.createdAt,
-          );
-          _showStickyDate = true;
         });
+        // Update sticky date separator for new messages - using ValueNotifier
+        _currentStickyDate.value = ChatHelpers.getMessageDateString(
+          newMessage.createdAt,
+        );
+        _showStickyDate.value = true;
 
         _animateNewMessage(newMessage.id);
         _scrollToBottom();
@@ -2384,13 +2435,34 @@ class _InnerChatPageState extends State<InnerChatPage>
       // Calculate the scroll position (since we're using reverse: true)
       final targetPosition =
           (_messages.length - 1 - messageIndex) *
-          100.0; // Approximate height per message
+          75.0; // Approximate height per message
 
       _scrollController.animateTo(
         targetPosition,
         duration: const Duration(milliseconds: 500),
         curve: Curves.easeInOut,
       );
+
+      // Highlight the message after scrolling
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          setState(() {
+            _highlightedMessageId = messageId;
+          });
+
+          // Cancel any existing timer
+          _highlightTimer?.cancel();
+
+          // Remove highlight after 2 seconds
+          _highlightTimer = Timer(const Duration(milliseconds: 1000), () {
+            if (mounted) {
+              setState(() {
+                _highlightedMessageId = null;
+              });
+            }
+          });
+        }
+      });
     }
   }
 
@@ -2615,7 +2687,7 @@ class _InnerChatPageState extends State<InnerChatPage>
   Widget _buildPinnedMessageSection() {
     final pinnedMessage = _messages.firstWhere(
       (message) => message.id == _pinnedMessageId,
-      orElse: () => throw StateError('Pinned message not found'),
+      // orElse: () => throw StateError('Pinned message not found'),
     );
 
     // Determine if pinned message is from current user (same logic as message list)
@@ -2631,7 +2703,7 @@ class _InnerChatPageState extends State<InnerChatPage>
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: Colors.blue[50],
-          borderRadius: BorderRadius.circular(12),
+          // borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.blue[200]!, width: 1),
           boxShadow: [
             BoxShadow(
@@ -2815,6 +2887,12 @@ class _InnerChatPageState extends State<InnerChatPage>
         controller: _scrollController,
         reverse: true, // Start from bottom (newest messages)
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        physics:
+            const ClampingScrollPhysics(), // Better performance than bouncing
+        cacheExtent: 100, // Reduce cache extent to save memory
+        addAutomaticKeepAlives: false, // Don't keep all items alive
+        addRepaintBoundaries:
+            true, // Add repaint boundaries for better performance
         itemCount: _messages.length + (_isLoadingMore ? 1 : 0),
         // (_isLoadingMore ? 1 : 0) +
         // (!_hasMoreMessages && _messages.isNotEmpty ? 1 : 0),
@@ -2871,13 +2949,8 @@ class _InnerChatPageState extends State<InnerChatPage>
 
           // Bounds check to prevent index out of bounds errors
           if (messageIndex < 0 || messageIndex >= _messages.length) {
-            debugPrint(
-              '❌ Invalid message index: $messageIndex, messages length: ${_messages.length}',
-            );
-            print(
-              "------------------------------------------------------------\n _messages -> $_messages \n----------------------------------------------------------------",
-            );
-            return Container(); // Return empty container for invalid indices
+            // Removed expensive debug prints during scroll - causes lag
+            return const SizedBox.shrink(); // Return empty widget for invalid indices
           }
 
           final message =
@@ -2902,47 +2975,64 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   /// Build sticky date separator that appears at the top when scrolling
   Widget _buildStickyDateSeparator() {
-    if (!_showStickyDate || _currentStickyDate == null) {
-      return const SizedBox.shrink();
-    }
+    return ValueListenableBuilder<bool>(
+      valueListenable: _showStickyDate,
+      builder: (context, showDate, child) {
+        if (!showDate) {
+          return const SizedBox.shrink();
+        }
 
-    // Find a message with the current date to get the formatted date string
-    final messageWithCurrentDate = _messages.firstWhere(
-      (message) =>
-          ChatHelpers.getMessageDateString(message.createdAt) ==
-          _currentStickyDate,
-      orElse: () => _messages.first,
-    );
+        return ValueListenableBuilder<String?>(
+          valueListenable: _currentStickyDate,
+          builder: (context, currentDate, child) {
+            if (currentDate == null) {
+              return const SizedBox.shrink();
+            }
 
-    return Center(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        decoration: BoxDecoration(
-          color: Colors.teal[600],
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.teal.withOpacity(0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        // show a loading indicator when  _isLoadingMore is true else day
-        child: Text(
-          _isLoadingMore
-              ? "Loading more chats..."
-              : ChatHelpers.formatDateSeparator(
-                  messageWithCurrentDate.createdAt,
+            // Find a message with the current date to get the formatted date string
+            final messageWithCurrentDate = _messages.firstWhere(
+              (message) =>
+                  ChatHelpers.getMessageDateString(message.createdAt) ==
+                  currentDate,
+              orElse: () => _messages.first,
+            );
+
+            return Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
                 ),
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.5,
-          ),
-        ),
-      ),
+                decoration: BoxDecoration(
+                  color: Colors.teal[600],
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.teal.withOpacity(0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                // show a loading indicator when  _isLoadingMore is true else day
+                child: Text(
+                  _isLoadingMore
+                      ? "Loading more chats..."
+                      : ChatHelpers.formatDateSeparator(
+                          messageWithCurrentDate.createdAt,
+                        ),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -2951,46 +3041,50 @@ class _InnerChatPageState extends State<InnerChatPage>
     final isPinned = _pinnedMessageId == message.id;
     final isStarred = _starredMessages.contains(message.id);
 
-    return GestureDetector(
-      onLongPress: () => _showMessageActions(message, isMyMessage),
-      onTap: _isSelectionMode
-          ? () => _toggleMessageSelection(message.id)
-          : null,
-      onPanStart: (details) => _onSwipeStart(message, details),
-      onPanUpdate: (details) => _onSwipeUpdate(message, details, isMyMessage),
-      onPanEnd: (details) => _onSwipeEnd(message, details, isMyMessage),
-      child: Container(
-        color: isSelected ? Colors.teal.withOpacity(0.1) : Colors.transparent,
-        child: Stack(
-          children: [
-            _buildSwipeableMessageBubble(
-              message,
-              isMyMessage,
-              isPinned,
-              isStarred,
-            ),
-            if (_isSelectionMode)
-              Positioned(
-                left: isMyMessage ? 8 : null,
-                right: isMyMessage ? null : 8,
-                top: 8,
-                child: Container(
-                  width: 24,
-                  height: 24,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isSelected ? Colors.teal : Colors.white,
-                    border: Border.all(
-                      color: isSelected ? Colors.teal : Colors.grey[400]!,
-                      width: 2,
-                    ),
-                  ),
-                  child: isSelected
-                      ? const Icon(Icons.check, size: 16, color: Colors.white)
-                      : null,
-                ),
+    // Wrap in RepaintBoundary to isolate repaints and improve scroll performance
+    return RepaintBoundary(
+      key: ValueKey(message.id), // Add key for better widget identification
+      child: GestureDetector(
+        onLongPress: () => _showMessageActions(message, isMyMessage),
+        onTap: _isSelectionMode
+            ? () => _toggleMessageSelection(message.id)
+            : null,
+        onPanStart: (details) => _onSwipeStart(message, details),
+        onPanUpdate: (details) => _onSwipeUpdate(message, details, isMyMessage),
+        onPanEnd: (details) => _onSwipeEnd(message, details, isMyMessage),
+        child: Container(
+          color: isSelected ? Colors.teal.withOpacity(0.1) : Colors.transparent,
+          child: Stack(
+            children: [
+              _buildSwipeableMessageBubble(
+                message,
+                isMyMessage,
+                isPinned,
+                isStarred,
               ),
-          ],
+              if (_isSelectionMode)
+                Positioned(
+                  left: isMyMessage ? 8 : null,
+                  right: isMyMessage ? null : 8,
+                  top: 8,
+                  child: Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isSelected ? Colors.teal : Colors.white,
+                      border: Border.all(
+                        color: isSelected ? Colors.teal : Colors.grey[400]!,
+                        width: 2,
+                      ),
+                    ),
+                    child: isSelected
+                        ? const Icon(Icons.check, size: 16, color: Colors.white)
+                        : null,
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -3159,6 +3253,9 @@ class _InnerChatPageState extends State<InnerChatPage>
     final slideAnimation = _messageSlideAnimations[message.id];
     final fadeAnimation = _messageFadeAnimations[message.id];
 
+    // Check if this message is currently highlighted
+    final isHighlighted = _highlightedMessageId == message.id;
+
     Widget messageContent = RepaintBoundary(
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
@@ -3169,13 +3266,23 @@ class _InnerChatPageState extends State<InnerChatPage>
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Flexible(
-              child: Container(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
                 constraints: BoxConstraints(
                   maxWidth: MediaQuery.of(context).size.width * 0.75,
                 ),
                 margin: EdgeInsets.only(
                   left: isMyMessage ? 40 : 8,
                   right: isMyMessage ? 8 : 40,
+                ),
+                padding: isHighlighted
+                    ? const EdgeInsets.all(4)
+                    : EdgeInsets.zero,
+                decoration: BoxDecoration(
+                  color: isHighlighted
+                      ? Colors.amber.withOpacity(0.3)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(24),
                 ),
                 child: Stack(
                   children: [
@@ -3349,46 +3456,66 @@ class _InnerChatPageState extends State<InnerChatPage>
         ? replyMessage.senderId == _currentUserId
         : replyMessage.senderId != widget.conversation.userId;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: isMyMessage ? Colors.white.withOpacity(0.15) : Colors.grey[200],
-        borderRadius: BorderRadius.circular(8),
-        border: Border(
-          left: BorderSide(
-            color: isMyMessage ? Colors.white : Colors.teal,
-            width: 3,
+    return GestureDetector(
+      onTap: () => _scrollToMessage(replyMessage.id),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: isMyMessage
+              ? Colors.white.withOpacity(0.15)
+              : Colors.grey[200],
+          borderRadius: BorderRadius.circular(8),
+          border: Border(
+            left: BorderSide(
+              color: isMyMessage ? Colors.white : Colors.teal,
+              width: 3,
+            ),
           ),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            isRepliedMessageMine ? 'You' : replyMessage.senderName,
-            style: TextStyle(
-              color: isMyMessage ? Colors.white : Colors.teal,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              isRepliedMessageMine ? 'You' : replyMessage.senderName,
+              style: TextStyle(
+                color: isMyMessage ? Colors.white : Colors.teal,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
             ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            replyMessage.body.length > 50
-                ? '${replyMessage.body.substring(0, 50)}...'
-                : replyMessage.body,
-            style: TextStyle(
-              color: isMyMessage
-                  ? Colors.white.withOpacity(0.8)
-                  : Colors.grey[600],
-              fontSize: 13,
-              height: 1.2,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
+            const SizedBox(height: 2),
+            if (replyMessage.body.isNotEmpty) ...[
+              Text(
+                replyMessage.body.length > 50
+                    ? '${replyMessage.body.substring(0, 50)}...'
+                    : replyMessage.body,
+                style: TextStyle(
+                  color: isMyMessage
+                      ? Colors.white.withOpacity(0.8)
+                      : Colors.grey[600],
+                  fontSize: 13,
+                  height: 1.2,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ] else ...[
+              Text(
+                '📎media message',
+                style: TextStyle(
+                  color: isMyMessage
+                      ? Colors.white.withOpacity(0.8)
+                      : Colors.grey[600],
+                  fontSize: 13,
+                  height: 1.2,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -3445,6 +3572,7 @@ class _InnerChatPageState extends State<InnerChatPage>
             color: isMyMessage ? Colors.white : Colors.black87,
             fontSize: 16,
             height: 1.4,
+            fontWeight: FontWeight.w500,
           ),
         );
     }
@@ -5840,18 +5968,35 @@ class _InnerChatPageState extends State<InnerChatPage>
                   ],
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  replyMessage.body.length > 60
-                      ? '${replyMessage.body.substring(0, 60)}...'
-                      : replyMessage.body,
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 13,
-                    height: 1.2,
+                if (replyMessage.body.isNotEmpty) ...[
+                  Text(
+                    replyMessage.body.length > 50
+                        ? '${replyMessage.body.substring(0, 50)}...'
+                        : replyMessage.body,
+                    style: TextStyle(
+                      color: isRepliedMessageMine
+                          ? Colors.white.withOpacity(0.8)
+                          : Colors.grey[600],
+                      fontSize: 13,
+                      height: 1.2,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                ] else ...[
+                  Text(
+                    '📎media message',
+                    style: TextStyle(
+                      color: isRepliedMessageMine
+                          ? Colors.white.withOpacity(0.8)
+                          : Colors.grey[600],
+                      fontSize: 13,
+                      height: 1.2,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
               ],
             ),
           ),
@@ -7760,355 +7905,361 @@ class _ForwardMessageModalState extends State<_ForwardMessageModal>
       child: SafeArea(
         child: Container(
           color: Colors.black.withOpacity(0.5),
-        child: SlideTransition(
-          position: _slideAnimation,
-          child: DraggableScrollableSheet(
-            initialChildSize: 0.7,
-            minChildSize: 0.5,
-            maxChildSize: 0.9,
-            builder: (context, scrollController) {
-              return Container(
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(25),
-                    topRight: Radius.circular(25),
+          child: SlideTransition(
+            position: _slideAnimation,
+            child: DraggableScrollableSheet(
+              initialChildSize: 0.7,
+              minChildSize: 0.5,
+              maxChildSize: 0.9,
+              builder: (context, scrollController) {
+                return Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(25),
+                      topRight: Radius.circular(25),
+                    ),
                   ),
-                ),
-                child: Column(
-                  children: [
-                    // Handle bar
-                    Container(
-                      margin: const EdgeInsets.only(top: 12, bottom: 8),
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.grey[300],
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-
-                    // Header
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 16,
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.forward, color: Colors.teal, size: 28),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Forward Message${widget.messagesToForward.length > 1 ? 's' : ''}',
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                                Text(
-                                  '${widget.messagesToForward.length} message${widget.messagesToForward.length > 1 ? 's' : ''} selected',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            onPressed: _handleCancel,
-                            icon: Icon(Icons.close, color: Colors.grey[600]),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // Search bar
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: TextField(
-                        controller: _searchController,
-                        decoration: InputDecoration(
-                          hintText: 'Search chats...',
-                          prefixIcon: Icon(
-                            Icons.search,
-                            color: Colors.grey[500],
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(25),
-                            borderSide: BorderSide.none,
-                          ),
-                          filled: true,
-                          fillColor: Colors.grey[100],
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 12,
-                          ),
+                  child: Column(
+                    children: [
+                      // Handle bar
+                      Container(
+                        margin: const EdgeInsets.only(top: 12, bottom: 8),
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[300],
+                          borderRadius: BorderRadius.circular(2),
                         ),
-                        onChanged: _filterConversations,
                       ),
-                    ),
 
-                    const SizedBox(height: 16),
-
-                    // Selected count
-                    if (_selectedConversations.isNotEmpty)
+                      // Header
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 16,
+                        ),
                         child: Row(
                           children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
+                            Icon(Icons.forward, color: Colors.teal, size: 28),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Forward Message${widget.messagesToForward.length > 1 ? 's' : ''}',
+                                    style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                  Text(
+                                    '${widget.messagesToForward.length} message${widget.messagesToForward.length > 1 ? 's' : ''} selected',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                ],
                               ),
-                              decoration: BoxDecoration(
-                                color: Colors.teal.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: Colors.teal.withOpacity(0.3),
+                            ),
+                            IconButton(
+                              onPressed: _handleCancel,
+                              icon: Icon(Icons.close, color: Colors.grey[600]),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Search bar
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: TextField(
+                          controller: _searchController,
+                          decoration: InputDecoration(
+                            hintText: 'Search chats...',
+                            prefixIcon: Icon(
+                              Icons.search,
+                              color: Colors.grey[500],
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(25),
+                              borderSide: BorderSide.none,
+                            ),
+                            filled: true,
+                            fillColor: Colors.grey[100],
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 12,
+                            ),
+                          ),
+                          onChanged: _filterConversations,
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Selected count
+                      if (_selectedConversations.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.teal.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: Colors.teal.withOpacity(0.3),
+                                  ),
+                                ),
+                                child: Text(
+                                  '${_selectedConversations.length} selected',
+                                  style: TextStyle(
+                                    color: Colors.teal[700],
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12,
+                                  ),
                                 ),
                               ),
-                              child: Text(
-                                '${_selectedConversations.length} selected',
-                                style: TextStyle(
-                                  color: Colors.teal[700],
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 12,
+                            ],
+                          ),
+                        ),
+
+                      const SizedBox(height: 16),
+
+                      // Conversations list
+                      Expanded(
+                        child: widget.isLoading
+                            ? const Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    CircularProgressIndicator(
+                                      color: Colors.teal,
+                                    ),
+                                    SizedBox(height: 16),
+                                    Text('Loading chats...'),
+                                  ],
+                                ),
+                              )
+                            : _filteredConversations.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.search_off,
+                                      size: 64,
+                                      color: Colors.grey[400],
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      _searchQuery.isEmpty
+                                          ? 'No chats available'
+                                          : 'No chats found for "$_searchQuery"',
+                                      style: TextStyle(
+                                        color: Colors.grey[600],
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : ListView.builder(
+                                controller: scrollController,
+                                physics: const ClampingScrollPhysics(),
+                                addAutomaticKeepAlives: false,
+                                addRepaintBoundaries: true,
+                                itemCount: _filteredConversations.length,
+                                itemBuilder: (context, index) {
+                                  final conversation =
+                                      _filteredConversations[index];
+                                  final isSelected = _selectedConversations
+                                      .contains(conversation.conversationId);
+
+                                  return AnimatedContainer(
+                                    duration: const Duration(milliseconds: 200),
+                                    margin: const EdgeInsets.symmetric(
+                                      horizontal: 20,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isSelected
+                                          ? Colors.teal.withOpacity(0.1)
+                                          : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: isSelected
+                                            ? Colors.teal.withOpacity(0.3)
+                                            : Colors.transparent,
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: ListTile(
+                                      onTap: () => _toggleConversationSelection(
+                                        conversation.conversationId,
+                                      ),
+                                      leading: _buildConversationAvatar(
+                                        conversation,
+                                      ),
+                                      title: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              conversation.displayName,
+                                              style: TextStyle(
+                                                fontWeight: isSelected
+                                                    ? FontWeight.bold
+                                                    : FontWeight.w500,
+                                                fontSize: 16,
+                                                color: isSelected
+                                                    ? Colors.teal[700]
+                                                    : Colors.black87,
+                                              ),
+                                            ),
+                                          ),
+                                          if (conversation.isGroup)
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 6,
+                                                    vertical: 2,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.orange[100],
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
+                                                border: Border.all(
+                                                  color: Colors.orange[300]!,
+                                                  width: 1,
+                                                ),
+                                              ),
+                                              child: Text(
+                                                'GROUP',
+                                                style: TextStyle(
+                                                  color: Colors.orange[700],
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                      subtitle:
+                                          conversation
+                                                  .metadata
+                                                  ?.lastMessage
+                                                  .body !=
+                                              null
+                                          ? Text(
+                                              conversation
+                                                  .metadata!
+                                                  .lastMessage
+                                                  .body,
+                                              style: TextStyle(
+                                                color: Colors.grey[600],
+                                                fontSize: 14,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            )
+                                          : null,
+                                      trailing: AnimatedContainer(
+                                        duration: const Duration(
+                                          milliseconds: 200,
+                                        ),
+                                        width: 24,
+                                        height: 24,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: isSelected
+                                              ? Colors.teal
+                                              : Colors.transparent,
+                                          border: Border.all(
+                                            color: isSelected
+                                                ? Colors.teal
+                                                : Colors.grey[400]!,
+                                            width: 2,
+                                          ),
+                                        ),
+                                        child: isSelected
+                                            ? const Icon(
+                                                Icons.check,
+                                                size: 16,
+                                                color: Colors.white,
+                                              )
+                                            : null,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+
+                      // Forward button
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.grey.withOpacity(0.1),
+                              blurRadius: 10,
+                              offset: const Offset(0, -2),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: _selectedConversations.isEmpty
+                                    ? null
+                                    : _handleForward,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.teal,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(25),
+                                  ),
+                                  elevation: 0,
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(Icons.send, size: 20),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      _selectedConversations.isEmpty
+                                          ? 'Select chats to forward'
+                                          : 'Forward to ${_selectedConversations.length} chat${_selectedConversations.length > 1 ? 's' : ''}',
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
                           ],
                         ),
                       ),
-
-                    const SizedBox(height: 16),
-
-                    // Conversations list
-                    Expanded(
-                      child: widget.isLoading
-                          ? const Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  CircularProgressIndicator(color: Colors.teal),
-                                  SizedBox(height: 16),
-                                  Text('Loading chats...'),
-                                ],
-                              ),
-                            )
-                          : _filteredConversations.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.search_off,
-                                    size: 64,
-                                    color: Colors.grey[400],
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    _searchQuery.isEmpty
-                                        ? 'No chats available'
-                                        : 'No chats found for "$_searchQuery"',
-                                    style: TextStyle(
-                                      color: Colors.grey[600],
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : ListView.builder(
-                              controller: scrollController,
-                              itemCount: _filteredConversations.length,
-                              itemBuilder: (context, index) {
-                                final conversation =
-                                    _filteredConversations[index];
-                                final isSelected = _selectedConversations
-                                    .contains(conversation.conversationId);
-
-                                return AnimatedContainer(
-                                  duration: const Duration(milliseconds: 200),
-                                  margin: const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isSelected
-                                        ? Colors.teal.withOpacity(0.1)
-                                        : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: isSelected
-                                          ? Colors.teal.withOpacity(0.3)
-                                          : Colors.transparent,
-                                      width: 1,
-                                    ),
-                                  ),
-                                  child: ListTile(
-                                    onTap: () => _toggleConversationSelection(
-                                      conversation.conversationId,
-                                    ),
-                                    leading: _buildConversationAvatar(
-                                      conversation,
-                                    ),
-                                    title: Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            conversation.displayName,
-                                            style: TextStyle(
-                                              fontWeight: isSelected
-                                                  ? FontWeight.bold
-                                                  : FontWeight.w500,
-                                              fontSize: 16,
-                                              color: isSelected
-                                                  ? Colors.teal[700]
-                                                  : Colors.black87,
-                                            ),
-                                          ),
-                                        ),
-                                        if (conversation.isGroup)
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 6,
-                                              vertical: 2,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.orange[100],
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
-                                              border: Border.all(
-                                                color: Colors.orange[300]!,
-                                                width: 1,
-                                              ),
-                                            ),
-                                            child: Text(
-                                              'GROUP',
-                                              style: TextStyle(
-                                                color: Colors.orange[700],
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                    subtitle:
-                                        conversation
-                                                .metadata
-                                                ?.lastMessage
-                                                .body !=
-                                            null
-                                        ? Text(
-                                            conversation
-                                                .metadata!
-                                                .lastMessage
-                                                .body,
-                                            style: TextStyle(
-                                              color: Colors.grey[600],
-                                              fontSize: 14,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          )
-                                        : null,
-                                    trailing: AnimatedContainer(
-                                      duration: const Duration(
-                                        milliseconds: 200,
-                                      ),
-                                      width: 24,
-                                      height: 24,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: isSelected
-                                            ? Colors.teal
-                                            : Colors.transparent,
-                                        border: Border.all(
-                                          color: isSelected
-                                              ? Colors.teal
-                                              : Colors.grey[400]!,
-                                          width: 2,
-                                        ),
-                                      ),
-                                      child: isSelected
-                                          ? const Icon(
-                                              Icons.check,
-                                              size: 16,
-                                              color: Colors.white,
-                                            )
-                                          : null,
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                    ),
-
-                    // Forward button
-                    Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.grey.withOpacity(0.1),
-                            blurRadius: 10,
-                            offset: const Offset(0, -2),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: ElevatedButton(
-                              onPressed: _selectedConversations.isEmpty
-                                  ? null
-                                  : _handleForward,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.teal,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 16,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(25),
-                                ),
-                                elevation: 0,
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(Icons.send, size: 20),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    _selectedConversations.isEmpty
-                                        ? 'Select chats to forward'
-                                        : 'Forward to ${_selectedConversations.length} chat${_selectedConversations.length > 1 ? 's' : ''}',
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ),
         ),
       ),

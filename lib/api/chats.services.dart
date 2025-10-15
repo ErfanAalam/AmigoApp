@@ -1,4 +1,3 @@
-
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'api_service.dart';
@@ -87,14 +86,12 @@ class ChatsServices {
       return {'success': false, 'error': e.toString(), 'message': e.toString()};
     }
   }
-  
+
   Future<Map<String, dynamic>> deleteMessage(List<int> messageIds) async {
     try {
       final response = await _apiService.authenticatedDelete(
-        '/chat/mark-as-delete-message',
-        body: {
-          'message_ids': messageIds,
-        },
+        '/chat/soft-delete-message',
+        body: {'message_ids': messageIds},
       );
       return response.data;
     } catch (e) {
@@ -106,4 +103,33 @@ class ChatsServices {
     }
   }
 
+  Future<Map<String, dynamic>> deleteDm(int conversationId) async {
+    try {
+      final response = await _apiService.authenticatedDelete(
+        '/chat/soft-delete-dm/$conversationId',
+      );
+      return response.data;
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Failed to delete dm',
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> reviveChat(int conversationId) async {
+    try {
+      final response = await _apiService.authenticatedPost(
+        '/chat/revive-chat/$conversationId',
+      );
+      return response.data;
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Failed to revive chat',
+      };
+    }
+  }
 }

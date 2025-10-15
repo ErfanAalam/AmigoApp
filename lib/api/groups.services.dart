@@ -209,15 +209,10 @@ class GroupsService {
   Future<Map<String, dynamic>> deleteGroup(int conversationId) async {
     try {
       final response = await _apiService.authenticatedDelete(
-        '/chat/delete-conversation/$conversationId',
+        '/chat/soft-delete-chat/$conversationId',
       );
 
-      return {
-        'success': response.statusCode == 200,
-        'statusCode': response.statusCode,
-        'data': response.data,
-        'message': 'Group deleted successfully',
-      };
+      return response.data;
     } on DioException catch (e) {
       return {
         'success': false,
@@ -231,6 +226,61 @@ class GroupsService {
         'success': false,
         'error': e.toString(),
         'message': 'Failed to delete group',
+      };
+    }
+  }
+
+
+  // Delete group conversation
+  Future<Map<String, dynamic>> promoteToAdmin(int conversationId, int userId) async {
+    print('group promote to admin request: $conversationId, $userId');
+    try {
+      final response = await _apiService.authenticatedPost(
+        '/chat/promote-to-admin',
+        data: {'user_id': userId, 'conversation_id': conversationId},
+      );
+
+      print('group promote to admin response: $response');
+
+      return response.data;
+    } on DioException catch (e) {
+      return {
+        'success': false,
+        'error': e.message,
+        'type': e.type.toString(),
+        'statusCode': e.response?.statusCode,
+        'message': 'Failed to make admin: ${e.message}',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Failed to make admin',
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> demoteToAdmin(int conversationId, int userId) async {
+    try {
+      final response = await _apiService.authenticatedPost(
+        '/chat/demote-to-member',
+        data: {'user_id': userId, 'conversation_id': conversationId},
+      );
+
+      return response.data;
+    } on DioException catch (e) {
+      return {
+        'success': false,
+        'error': e.message,
+        'type': e.type.toString(),
+        'statusCode': e.response?.statusCode,
+        'message': 'Failed to demote to member: ${e.message}',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Failed to demote to member',
       };
     }
   }

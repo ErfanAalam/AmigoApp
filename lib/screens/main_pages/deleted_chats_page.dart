@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/chat_preferences_service.dart';
+import '../../api/chats.services.dart';
+import '../../api/user.service.dart';
 
 class DeletedChatsPage extends StatefulWidget {
   const DeletedChatsPage({Key? key}) : super(key: key);
@@ -11,7 +13,9 @@ class DeletedChatsPage extends StatefulWidget {
 class _DeletedChatsPageState extends State<DeletedChatsPage> {
   final ChatPreferencesService _chatPreferencesService =
       ChatPreferencesService();
-  List<Map<String, dynamic>> _deletedChats = [];
+  final ChatsServices _chatsServices = ChatsServices();
+  final UserService _userService = UserService();
+  List<dynamic> _deletedChats = [];
   bool _isLoading = true;
 
   @override
@@ -22,10 +26,12 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
 
   Future<void> _loadDeletedChats() async {
     try {
-      final deletedChats = await _chatPreferencesService.getDeletedChats();
+      // final deletedChats = await _chatPreferencesService.getDeletedChats();
+      final deletedChats = await _userService.GetChatList('deleted_dm');
+
       if (mounted) {
         setState(() {
-          _deletedChats = deletedChats;
+          _deletedChats = deletedChats['data'];
           _isLoading = false;
         });
       }
@@ -41,12 +47,14 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
 
   Future<void> _restoreChat(Map<String, dynamic> chatData) async {
     try {
-      final conversationId = chatData['conversation_id'] as int;
+      print('conversationId: $chatData');
+      final conversationId = chatData['conversationId'] as int;
       await _chatPreferencesService.restoreChat(conversationId);
+      await _chatsServices.reviveChat(conversationId);
 
       setState(() {
         _deletedChats.removeWhere(
-          (chat) => chat['conversation_id'] == conversationId,
+          (chat) => chat['conversationId'] == conversationId,
         );
       });
 
@@ -306,20 +314,20 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
                 ],
               ),
             ),
-            PopupMenuDivider(),
-            PopupMenuItem(
-              value: 'delete_permanently',
-              child: Row(
-                children: [
-                  Icon(Icons.delete_forever, color: Colors.red, size: 20),
-                  SizedBox(width: 12),
-                  Text(
-                    'Delete Permanently',
-                    style: TextStyle(color: Colors.red),
-                  ),
-                ],
-              ),
-            ),
+            // PopupMenuDivider(),
+            // PopupMenuItem(
+            //   value: 'delete_permanently',
+            //   child: Row(
+            //     children: [
+            //       Icon(Icons.delete_forever, color: Colors.red, size: 20),
+            //       SizedBox(width: 12),
+            //       Text(
+            //         'Delete Permanently',
+            //         style: TextStyle(color: Colors.red),
+            //       ),
+            //     ],
+            //   ),
+            // ),
           ],
         ),
         onTap: () {

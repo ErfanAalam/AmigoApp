@@ -67,7 +67,6 @@ class _LoginScreenState extends material.State<LoginScreen> {
     }
 
     final response = await apiService.send_login_otp(_completePhoneNumber);
-    print("response - $response");
     // print('this is the response: $response');
 
     if (response['success']) {

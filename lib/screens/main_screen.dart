@@ -91,32 +91,32 @@ class _MainScreenState extends State<MainScreen> {
         selectedIndex: _currentPageIndex,
         backgroundColor: Colors.grey[100],
         labelTextStyle: WidgetStateProperty.all(
-          const TextStyle(fontSize: 12, color: Colors.black),
+          const TextStyle(fontSize: 14, color: Colors.black, fontWeight: FontWeight.bold),
         ),
         destinations: const <Widget>[
           NavigationDestination(
             selectedIcon: Icon(Icons.message, color: Colors.teal),
-            icon: Icon(Icons.message_outlined, color: Colors.grey),
+            icon: Icon(Icons.message_outlined, color: Color.fromARGB(255, 65, 64, 64)),
             label: 'Chats',
           ),
           NavigationDestination(
             selectedIcon: Icon(Icons.group, color: Colors.teal),
-            icon: Icon(Icons.group_outlined, color: Colors.grey),
+            icon: Icon(Icons.group_outlined, color: Color.fromARGB(255, 65, 64, 64)),
             label: 'Groups',
           ),
           NavigationDestination(
             selectedIcon: Icon(Icons.contacts_rounded, color: Colors.teal),
-            icon: Icon(Icons.contacts_outlined, color: Colors.grey),
+            icon: Icon(Icons.contacts_outlined, color: Color.fromARGB(255, 65, 64, 64)),
             label: 'Contacts',
           ),
           NavigationDestination(
             selectedIcon: Icon(Icons.call, color: Colors.teal),
-            icon: Icon(Icons.call_outlined, color: Colors.grey),
+            icon: Icon(Icons.call_outlined, color: Color.fromARGB(255, 65, 64, 64)),
             label: 'Calls',
           ),
           NavigationDestination(
             selectedIcon: Icon(Icons.person_rounded, color: Colors.teal),
-            icon: Icon(Icons.person_outline, color: Colors.grey),
+            icon: Icon(Icons.person_outline, color: Color.fromARGB(255, 65, 64, 64)),
             label: 'Profile',
           ),
         ],

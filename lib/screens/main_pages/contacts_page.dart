@@ -2,6 +2,7 @@
 import 'package:amigo/screens/main_pages/inner_chat_page.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
 import '../../models/contact_model.dart';
 import '../../models/conversation_model.dart';
 import '../../models/user_model.dart';
@@ -191,9 +192,6 @@ class _ContactsPageState extends State<ContactsPage>
       final response = await _userService.getAvailableUsers(contactsData);
 
       if (response['success'] == true && response['data'] != null) {
-        print('-----------------------------');
-        print(response['data']);
-        print('-----------------------------');
         // Handle both response structures: direct array or nested data
         List<dynamic> usersData = response['data'] is List
             ? response['data']
@@ -301,6 +299,35 @@ class _ContactsPageState extends State<ContactsPage>
     });
   }
 
+  /// Open native phone's add contact screen
+  Future<void> _openNativeAddContact() async {
+    try {
+      // Request permission if not already granted
+      if (await FlutterContacts.requestPermission()) {
+        // Open the native add contact screen
+        await FlutterContacts.openExternalInsert();
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Contact permission is required to add contacts'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to open add contact: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   void _startConversationFromDialog(UserModel user) async {
     final response = await _chatsServices.createChat(user.id.toString());
     if (response['success'] && response['data'] != null) {
@@ -362,6 +389,7 @@ class _ContactsPageState extends State<ContactsPage>
           orElse: () => UserModel(
             id: int.tryParse(userId) ?? 0,
             name: 'Unknown User',
+            role: 'User',
             phone: '',
             profilePic: null,
           ),
@@ -482,6 +510,25 @@ class _ContactsPageState extends State<ContactsPage>
                       ),
                     ),
                     onPressed: _toggleSearch,
+                  ),
+                ),
+                Container(
+                  margin: EdgeInsets.only(right: 8),
+                  child: IconButton(
+                    icon: Container(
+                      padding: EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withAlpha(40),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.person_add_alt_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    ),
+                    onPressed: _openNativeAddContact,
+                    tooltip: 'Add to Phone Contacts',
                   ),
                 ),
                 Container(
@@ -1236,7 +1283,9 @@ class _FindUserDialogState extends State<FindUserDialog> {
                                             ).withOpacity(0.1),
                                             backgroundImage:
                                                 user.profilePic != null
-                                                ? CachedNetworkImageProvider(user.profilePic!)
+                                                ? CachedNetworkImageProvider(
+                                                    user.profilePic!,
+                                                  )
                                                 : null,
                                             child: user.profilePic == null
                                                 ? Icon(

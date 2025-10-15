@@ -117,12 +117,14 @@ class GroupMetadata {
   final int totalMessages;
   final String? createdAt;
   final int createdBy;
+  final GroupPinnedMessage? pinnedMessage;
 
   GroupMetadata({
     this.lastMessage,
     required this.totalMessages,
     this.createdAt,
     required this.createdBy,
+    this.pinnedMessage,
   });
 
   factory GroupMetadata.fromJson(Map<String, dynamic> json) {
@@ -133,6 +135,9 @@ class GroupMetadata {
       totalMessages: json['total_messages'] ?? json['totalMessages'] ?? 0,
       createdAt: json['created_at'] ?? json['createdAt'],
       createdBy: json['created_by'] ?? json['createdBy'] ?? 0,
+      pinnedMessage: json['pinned_message'] != null
+          ? GroupPinnedMessage.fromJson(json['pinned_message'])
+          : null,
     );
   }
 
@@ -142,6 +147,7 @@ class GroupMetadata {
       'total_messages': totalMessages,
       'created_at': createdAt,
       'created_by': createdBy,
+      'pinned_message': pinnedMessage?.toJson(),
     };
   }
 }
@@ -220,5 +226,36 @@ class GroupMemberAction {
       'user_id': userId,
       if (role != null) 'role': role,
     };
+  }
+}
+
+class GroupPinnedMessage {
+  final int userId;
+  final int messageId;
+  final String pinnedAt;
+
+  GroupPinnedMessage({
+    required this.userId,
+    required this.messageId,
+    required this.pinnedAt,
+  });
+
+  factory GroupPinnedMessage.fromJson(Map<String, dynamic> json) {
+    return GroupPinnedMessage(
+      userId: _parseToInt(json['user_id']),
+      messageId: _parseToInt(json['message_id']),
+      pinnedAt: json['pinned_at'] ?? DateTime.now().toIso8601String(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {'user_id': userId, 'message_id': messageId, 'pinned_at': pinnedAt};
+  }
+
+  static int _parseToInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
   }
 }

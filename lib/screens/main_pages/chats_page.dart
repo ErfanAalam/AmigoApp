@@ -7,6 +7,7 @@ import '../../services/user_status_service.dart';
 import '../../services/chat_preferences_service.dart';
 import '../../widgets/chat_action_menu.dart';
 import '../../repositories/conversations_repository.dart';
+import '../../api/chats.services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'inner_chat_page.dart';
 
@@ -25,7 +26,7 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
       ChatPreferencesService();
   final ConversationsRepository _conversationsRepo = ConversationsRepository();
   late Future<List<ConversationModel>> _conversationsFuture;
-
+  final ChatsServices _chatsServices = ChatsServices();
   // Search functionality
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
@@ -206,24 +207,30 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
             conversation.userName,
           );
           if (shouldDelete == true) {
-            await _chatPreferencesService.deleteChat(
+            final response = await _chatsServices.deleteDm(
               conversation.conversationId,
-              conversation.toJson(),
             );
-            setState(() {
-              _deletedChats.add(conversation.conversationId);
-              _conversations.removeWhere(
-                (conv) => conv.conversationId == conversation.conversationId,
-              );
-              _pinnedChats.remove(conversation.conversationId);
-              _mutedChats.remove(conversation.conversationId);
-              _favoriteChats.remove(conversation.conversationId);
-              // Delete from local DB
-              _conversationsRepo.deleteConversation(
+
+            if (response['success']) {
+              await _chatPreferencesService.deleteChat(
                 conversation.conversationId,
+                conversation.toJson(),
               );
-            });
-            _showSnackBar('Chat deleted', Colors.red);
+              setState(() {
+                _deletedChats.add(conversation.conversationId);
+                _conversations.removeWhere(
+                  (conv) => conv.conversationId == conversation.conversationId,
+                );
+                _pinnedChats.remove(conversation.conversationId);
+                _mutedChats.remove(conversation.conversationId);
+                _favoriteChats.remove(conversation.conversationId);
+                // Delete from local DB
+                _conversationsRepo.deleteConversation(
+                  conversation.conversationId,
+                );
+              });
+              _showSnackBar('Chat deleted', Colors.teal);
+            }
           }
           break;
       }
@@ -637,19 +644,38 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
           // Update the last message if provided
           ConversationMetadata? updatedMetadata = conversation.metadata;
           if (messageData.isNotEmpty) {
+            // Extract message details with proper handling for media messages
+            String messageBody = messageData['body'] ?? '';
+            String messageTypeValue = messageData['type'] ?? 'text';
+            int senderId = messageData['sender_id'] ?? 0;
+            int messageId = messageData['id'] ?? 0;
+            String createdAt =
+                messageData['created_at'] ?? DateTime.now().toIso8601String();
+
+            // If body is empty and it's a media message, extract from nested data
+            if (messageBody.isEmpty && messageData['data'] != null) {
+              final nestedData = messageData['data'] as Map<String, dynamic>;
+              messageBody =
+                  nestedData['message_type'] ?? nestedData['file_name'] ?? '';
+              messageTypeValue = nestedData['message_type'] ?? messageTypeValue;
+              senderId = nestedData['user_id'] ?? senderId;
+              messageId = nestedData['media_message_id'] ?? messageId;
+              createdAt = nestedData['created_at'] ?? createdAt;
+            }
+
             final lastMessage = LastMessage(
-              id: messageData['id'] ?? 0,
-              body:
-                  messageData['body'] ??
-                  messageData['data']['message_type'] ??
-                  '',
-              type: messageData['type'] ?? 'text',
-              senderId: messageData['sender_id'] ?? 0,
-              createdAt:
-                  messageData['created_at'] ?? DateTime.now().toIso8601String(),
+              id: messageId,
+              body: messageBody,
+              type: messageTypeValue,
+              senderId: senderId,
+              createdAt: createdAt,
               conversationId: conversationId,
             );
-            updatedMetadata = ConversationMetadata(lastMessage: lastMessage);
+            // Preserve pinnedMessage from existing metadata
+            updatedMetadata = ConversationMetadata(
+              lastMessage: lastMessage,
+              pinnedMessage: conversation.metadata?.pinnedMessage,
+            );
           }
 
           // Update unread count (only increment if not the active conversation)
@@ -691,8 +717,12 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
             return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
           });
 
-          // Update filtered conversations
+          // Update filtered conversations to immediately show the updated list
           _filterConversations();
+
+          debugPrint(
+            '✅ Delivery receipt processed for conversation $conversationId - unread: $newUnreadCount',
+          );
         });
       } else {
         debugPrint(
@@ -710,6 +740,7 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
       debugPrint('📨 ChatsPage handling new message: $message');
 
       final conversationId = message['conversation_id'] as int?;
+      final messageType = message['type'] as String?;
       final data = message['data'] as Map<String, dynamic>? ?? {};
 
       if (conversationId == null) {
@@ -726,9 +757,7 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         '------------------------------------------------------------------',
       );
       print('messageData: $data');
-      print(
-        '------------------------------------------------------------------',
-      );
+      print('messageType: $messageType');
       print(
         '------------------------------------------------------------------',
       );
@@ -748,25 +777,45 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         setState(() {
           final conversation = _conversations[conversationIndex];
 
+          // Extract message details with proper handling for media messages
+          String messageBody = data['body'] ?? '';
+          String messageTypeValue = data['type'] ?? messageType ?? 'text';
+          int senderId = data['sender_id'] ?? 0;
+          int messageId = data['id'] ?? 0;
+          String createdAt =
+              data['created_at'] ??
+              message['timestamp'] ??
+              DateTime.now().toIso8601String();
+
+          // If body is empty and it's a media message, extract from nested data
+          if (messageBody.isEmpty && data['data'] != null) {
+            final nestedData = data['data'] as Map<String, dynamic>;
+            messageBody =
+                nestedData['message_type'] ?? nestedData['file_name'] ?? '';
+            messageTypeValue =
+                nestedData['message_type'] ?? messageType ?? 'media';
+            senderId = nestedData['user_id'] ?? senderId;
+            messageId =
+                nestedData['media_message_id'] ??
+                data['media_message_id'] ??
+                messageId;
+            createdAt = nestedData['created_at'] ?? createdAt;
+          }
+
           // Create new last message from the message data
           final lastMessage = LastMessage(
-            id: data['id'] ?? data['user_id'] ?? 0,
-            body:
-                data['body'] ??
-                data['data']['message_type'] ??
-                data['data']['file_name'] ??
-                '',
-            type: data['type'] ?? data['data']['message_type'] ?? 'text',
-            senderId: data['sender_id'] ?? data['data']['user_id'] ?? 0,
-            createdAt:
-                data['created_at'] ??
-                data['data']['created_at'] ??
-                DateTime.now().toIso8601String(),
+            id: messageId,
+            body: messageBody,
+            type: messageTypeValue,
+            senderId: senderId,
+            createdAt: createdAt,
             conversationId: conversationId,
           );
 
+          // Preserve pinnedMessage from existing metadata
           final updatedMetadata = ConversationMetadata(
             lastMessage: lastMessage,
+            pinnedMessage: conversation.metadata?.pinnedMessage,
           );
 
           // Only increment unread count if this is not the currently active conversation
@@ -804,8 +853,12 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
             return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
           });
 
-          // Update filtered conversations
+          // Update filtered conversations to immediately show the updated list
           _filterConversations();
+
+          debugPrint(
+            '✅ Updated conversation $conversationId - new unread: $newUnreadCount, last message: ${lastMessage.body}',
+          );
         });
       } else {
         debugPrint(
@@ -1407,11 +1460,63 @@ class ChatListItem extends StatelessWidget {
     return '?';
   }
 
+  String _formatLastMessageText(String lastMessageBody, String? messageType) {
+    // If body is not empty and not a media type identifier, return it
+    if (lastMessageBody.isNotEmpty &&
+        ![
+          'image',
+          'images',
+          'video',
+          'videos',
+          'audio',
+          'audios',
+          'voice',
+          'file',
+          'document',
+          'location',
+          'contact',
+          'media',
+        ].contains(lastMessageBody.toLowerCase())) {
+      return lastMessageBody;
+    }
+
+    // Handle media messages based on type or body
+    final type = (messageType ?? lastMessageBody).toLowerCase();
+    switch (type) {
+      case 'image':
+      case 'images':
+        return '📷 Photo';
+      case 'video':
+      case 'videos':
+        return '📹 Video';
+      case 'audio':
+      case 'audios':
+      case 'voice':
+        return '🎵 Audio';
+      case 'file':
+      case 'document':
+        return '📎 File';
+      case 'location':
+        return '📍 Location';
+      case 'contact':
+        return '👤 Contact';
+      case 'media':
+        return '📎 Media';
+      default:
+        return lastMessageBody.isNotEmpty ? lastMessageBody : 'New message';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasUnreadMessages = conversation.unreadCount > 0 && !isMuted;
-    final lastMessageText =
+    final lastMessageBody =
         conversation.metadata?.lastMessage.body ?? 'No messages yet';
+    final lastMessageType = conversation.metadata?.lastMessage.type;
+    final lastMessageText = _formatLastMessageText(
+      lastMessageBody,
+      lastMessageType,
+    );
     final timeText = conversation.metadata?.lastMessage.createdAt != null
         ? _formatTime(conversation.metadata!.lastMessage.createdAt)
         : _formatTime(conversation.joinedAt);
@@ -1449,7 +1554,7 @@ class ChatListItem extends StatelessWidget {
                 style: TextStyle(
                   fontWeight: hasUnreadMessages
                       ? FontWeight.bold
-                      : FontWeight.normal,
+                      : FontWeight.bold,
                   fontSize: 16,
                 ),
                 maxLines: 1,

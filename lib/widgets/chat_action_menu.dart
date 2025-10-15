@@ -232,8 +232,10 @@ class ChatActionBottomSheet {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        margin: EdgeInsets.only(left: 0, right: 0, top: 16, bottom: 40),
+      builder: (context) => SafeArea(
+        top: false,
+        bottom: true,
+        // minimum: EdgeInsets.only(left: 0, right: 0, top: 16, bottom: 40),
         child: ChatActionMenu(
           conversation: conversation,
           isPinned: isPinned,

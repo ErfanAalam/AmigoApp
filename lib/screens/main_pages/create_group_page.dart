@@ -91,8 +91,8 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error loading users: ${e.toString()}'),
-            backgroundColor: Colors.red,
+            content: Text('NO Contact found please add some contacts to your phone: ${e.toString()}'),
+            backgroundColor: Colors.teal,
           ),
         );
       }
@@ -172,8 +172,8 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error creating group: ${e.toString()}'),
-            backgroundColor: Colors.red,
+            content: Text('Error creating group please try again: ${e.toString()}'),
+            backgroundColor: Colors.teal,
           ),
         );
       }

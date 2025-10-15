@@ -100,15 +100,29 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
   // }
 
   Future<void> _loadCallHistory({bool showLoading = true}) async {
-    if (showLoading) {
-      setState(() {
-        _isLoading = true;
-        _error = null;
-      });
-    }
-
     final callRepo = CallRepository();
 
+    // Step 1: Load from local DB immediately (no loading spinner)
+    try {
+      final List<CallModel> localCalls = await callRepo.getAllCalls();
+      if (mounted) {
+        setState(() {
+          _callHistory = localCalls.map(_mapCallModelToHistoryItem).toList();
+          _isLoading = false;
+          _error = null;
+        });
+      }
+    } catch (e) {
+      // If local DB fails, show loading
+      if (mounted) {
+        setState(() {
+          _isLoading = true;
+          _error = null;
+        });
+      }
+    }
+
+    // Step 2: Fetch from server in background and update
     try {
       final response = await _apiService.authenticatedGet(
         '/call/history?limit=50',
@@ -124,26 +138,33 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
         // Save to local DB
         await callRepo.insertOrUpdateCallList(calls);
 
-        // Update UI
-        setState(() {
-          _callHistory = calls.map(_mapCallModelToHistoryItem).toList();
-          _isLoading = false;
-        });
+        // Update UI with fresh data from server
+        if (mounted) {
+          setState(() {
+            _callHistory = calls.map(_mapCallModelToHistoryItem).toList();
+            _isLoading = false;
+            _error = null;
+          });
+        }
       } else {
+        // Server returned error but we already have local data, so just log it
+        if (mounted && _callHistory.isEmpty) {
+          setState(() {
+            _error = data['message'] ?? 'Failed to load call history';
+            _isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      // Server fetch failed, but we already showed local data
+      // Only show error if we have no data at all
+      if (mounted && _callHistory.isEmpty) {
         setState(() {
-          _error = data['message'] ?? 'Failed to load call history';
+          _error = 'Failed to load call history';
           _isLoading = false;
         });
       }
-    } catch (e) {
-      // If server fails, fallback to local DB
-      final List<CallModel> localCalls = await CallRepository().getAllCalls();
-      setState(() {
-        _callHistory = localCalls.map(_mapCallModelToHistoryItem).toList();
-        // Show no error if we have local data
-        _error = _callHistory.isEmpty ? 'Failed to load call history' : null;
-        _isLoading = false;
-      });
+      // If we have local data, silently fail the background update
     }
   }
 
@@ -440,7 +461,9 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to start call: Please check your internet connection'),
+            content: Text(
+              'Failed to start call: Please check your internet connection',
+            ),
             backgroundColor: Colors.teal,
           ),
         );

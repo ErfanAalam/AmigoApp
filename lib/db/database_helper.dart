@@ -21,7 +21,7 @@ class DatabaseHelper {
     final path = join(dbPath, fileName);
     return await openDatabase(
       path,
-      version: 7,
+      version: 9,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -34,6 +34,7 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
         phone TEXT NOT NULL,
+        role TEXT NOT NULL,
         profile_pic TEXT,
         call_access INTEGER NOT NULL DEFAULT 0,
         needs_sync INTEGER NOT NULL DEFAULT 0, -- 0/1 flag for pending local updates
@@ -85,6 +86,9 @@ class DatabaseHelper {
         last_message_sender_id INTEGER,
         last_message_created_at TEXT,
         last_message_at TEXT,
+        pinned_message_id INTEGER,
+        pinned_message_user_id INTEGER,
+        pinned_message_pinned_at TEXT,
         is_online INTEGER DEFAULT 0,
         updated_at INTEGER NOT NULL
       );
@@ -109,6 +113,9 @@ class DatabaseHelper {
         created_by INTEGER,
         members TEXT,
         unread_count INTEGER NOT NULL DEFAULT 0,
+        pinned_message_id INTEGER,
+        pinned_message_user_id INTEGER,
+        pinned_message_pinned_at TEXT,
         updated_at INTEGER NOT NULL
       );
     ''');
@@ -207,6 +214,7 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
         phone TEXT NOT NULL,
+        role TEXT NOT NULL,
         profile_pic TEXT,
         updated_at INTEGER
       );
@@ -387,22 +395,21 @@ class DatabaseHelper {
             final members = jsonDecode(membersJson) as List;
             for (final member in members) {
               final memberMap = member as Map<String, dynamic>;
-              await db.insert(
-                'group_members',
-                {
-                  'conversation_id': group['conversation_id'],
-                  'user_id': memberMap['userId'] ?? memberMap['user_id'] ?? 0,
-                  'user_name': memberMap['name'] ?? memberMap['userName'] ?? '',
-                  'profile_pic': memberMap['profilePic'] ?? memberMap['profile_pic'],
-                  'role': memberMap['role'] ?? 'member',
-                  'joined_at': memberMap['joinedAt'] ?? memberMap['joined_at'],
-                  'updated_at': DateTime.now().millisecondsSinceEpoch,
-                },
-                conflictAlgorithm: ConflictAlgorithm.ignore,
-              );
+              await db.insert('group_members', {
+                'conversation_id': group['conversation_id'],
+                'user_id': memberMap['userId'] ?? memberMap['user_id'] ?? 0,
+                'user_name': memberMap['name'] ?? memberMap['userName'] ?? '',
+                'profile_pic':
+                    memberMap['profilePic'] ?? memberMap['profile_pic'],
+                'role': memberMap['role'] ?? 'member',
+                'joined_at': memberMap['joinedAt'] ?? memberMap['joined_at'],
+                'updated_at': DateTime.now().millisecondsSinceEpoch,
+              }, conflictAlgorithm: ConflictAlgorithm.ignore);
             }
           } catch (e) {
-            print('Error migrating members for group ${group['conversation_id']}: $e');
+            print(
+              'Error migrating members for group ${group['conversation_id']}: $e',
+            );
           }
         }
       }
@@ -416,8 +423,14 @@ class DatabaseHelper {
           orElse: () => users.first,
         );
         // Delete all users except the current user
-        await db.delete('users', where: 'id != ?', whereArgs: [currentUser['id']]);
-        print('✅ Cleaned up users table, kept only current user: ${currentUser['id']}');
+        await db.delete(
+          'users',
+          where: 'id != ?',
+          whereArgs: [currentUser['id']],
+        );
+        print(
+          '✅ Cleaned up users table, kept only current user: ${currentUser['id']}',
+        );
       }
     }
 
@@ -431,6 +444,54 @@ class DatabaseHelper {
       } catch (e) {
         // Column might already exist, ignore error
         print('⚠️ Error adding unread_count column (might already exist): $e');
+      }
+    }
+
+    if (oldVersion < 8) {
+      // Add role column to users table
+      await db.execute('''
+        ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user';
+      ''');
+      print('✅ Added role column to users table');
+    }
+
+    if (oldVersion < 9) {
+      // Add pinned message columns to conversations table
+      try {
+        await db.execute('''
+          ALTER TABLE conversations ADD COLUMN pinned_message_id INTEGER;
+        ''');
+        await db.execute('''
+          ALTER TABLE conversations ADD COLUMN pinned_message_user_id INTEGER;
+        ''');
+        await db.execute('''
+          ALTER TABLE conversations ADD COLUMN pinned_message_pinned_at TEXT;
+        ''');
+        print('✅ Added pinned message columns to conversations table');
+      } catch (e) {
+        // Columns might already exist, ignore error
+        print(
+          '⚠️ Error adding pinned message columns to conversations (might already exist): $e',
+        );
+      }
+
+      // Add pinned message columns to groups table
+      try {
+        await db.execute('''
+          ALTER TABLE groups ADD COLUMN pinned_message_id INTEGER;
+        ''');
+        await db.execute('''
+          ALTER TABLE groups ADD COLUMN pinned_message_user_id INTEGER;
+        ''');
+        await db.execute('''
+          ALTER TABLE groups ADD COLUMN pinned_message_pinned_at TEXT;
+        ''');
+        print('✅ Added pinned message columns to groups table');
+      } catch (e) {
+        // Columns might already exist, ignore error
+        print(
+          '⚠️ Error adding pinned message columns to groups (might already exist): $e',
+        );
       }
     }
   }

@@ -106,6 +106,10 @@ class ConversationsRepository {
       'last_message_sender_id': conversation.metadata?.lastMessage.senderId,
       'last_message_created_at': conversation.metadata?.lastMessage.createdAt,
       'last_message_at': conversation.lastMessageAt,
+      'pinned_message_id': conversation.metadata?.pinnedMessage?.messageId,
+      'pinned_message_user_id': conversation.metadata?.pinnedMessage?.userId,
+      'pinned_message_pinned_at':
+          conversation.metadata?.pinnedMessage?.pinnedAt,
       'is_online': conversation.isOnline == true ? 1 : 0,
       'updated_at': DateTime.now().millisecondsSinceEpoch,
     };
@@ -114,16 +118,29 @@ class ConversationsRepository {
   ConversationModel _mapToConversation(Map<String, dynamic> map) {
     ConversationMetadata? metadata;
     if (map['last_message_id'] != null) {
+      PinnedMessage? pinnedMessage;
+      if (map['pinned_message_id'] != null) {
+        pinnedMessage = PinnedMessage(
+          userId: map['pinned_message_user_id'] as int? ?? 0,
+          messageId: map['pinned_message_id'] as int,
+          pinnedAt:
+              map['pinned_message_pinned_at'] as String? ??
+              DateTime.now().toIso8601String(),
+        );
+      }
+
       metadata = ConversationMetadata(
         lastMessage: LastMessage(
           id: map['last_message_id'] as int,
           body: map['last_message_body'] as String? ?? '',
           type: map['last_message_type'] as String? ?? 'text',
           senderId: map['last_message_sender_id'] as int? ?? 0,
-          createdAt: map['last_message_created_at'] as String? ??
+          createdAt:
+              map['last_message_created_at'] as String? ??
               DateTime.now().toIso8601String(),
           conversationId: map['conversation_id'] as int,
         ),
+        pinnedMessage: pinnedMessage,
       );
     }
 

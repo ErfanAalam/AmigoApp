@@ -100,7 +100,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
     // Fallback to user info cache
     final userInfo = _userInfoCache[senderId];
-    if (userInfo != null && userInfo['name'] != null) {
+    if (userInfo != null &&
+        userInfo['name'] != null &&
+        !userInfo['name']!.startsWith('User ')) {
       debugPrint(
         '🔍 Using cached user info: ${userInfo['name']} for ID $senderId',
       );
@@ -108,7 +110,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     }
 
     // Use stored sender name from message (for offline support)
-    if (storedSenderName != null && storedSenderName.isNotEmpty) {
+    if (storedSenderName != null &&
+        storedSenderName.isNotEmpty &&
+        !storedSenderName.startsWith('User ')) {
       debugPrint(
         '✅ Using stored sender name: $storedSenderName for ID $senderId (offline fallback)',
       );
@@ -117,7 +121,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
     // Final fallback - return a default name
     debugPrint('⚠️ Using fallback name for ID $senderId');
-    return 'User $senderId';
+    return 'Unknown User';
   }
 
   /// Get user info from cache, metadata, or local DB
@@ -142,6 +146,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     }
 
     // PRIORITY 3: Check local DB asynchronously and update cache
+    // (Runs in background, will update UI when complete)
     Future.microtask(() async {
       // Try group_members table first (for group member info)
       final groupMember = await _groupMembersRepo.getMemberByUserId(userId);
@@ -151,7 +156,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           'profile_pic': groupMember.profilePic,
         };
         debugPrint(
-          '💾 Loaded user $userId (${groupMember.userName}) from group_members DB',
+          '💾 Loaded user $userId (${groupMember.userName}) from group_members DB - updating UI',
         );
         // Trigger rebuild to show updated names
         setState(() {});
@@ -165,17 +170,19 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           'name': user.name,
           'profile_pic': user.profilePic,
         };
-        debugPrint('💾 Loaded user $userId (${user.name}) from users DB');
+        debugPrint(
+          '💾 Loaded user $userId (${user.name}) from users DB - updating UI',
+        );
         // Trigger rebuild to show updated names
         setState(() {});
       } else {
-        debugPrint('⚠️ User $userId not found in local DB');
+        debugPrint('! User $userId not found in local DB');
       }
     });
 
-    // PRIORITY 4: Return fallback immediately (will update when DB lookup completes)
-    debugPrint('⚠️ Using fallback for user $userId - will check DB');
-    return {'name': 'User $userId', 'profile_pic': null};
+    // PRIORITY 4: Return temporary fallback (will update when DB lookup completes)
+    debugPrint('! Using fallback for user $userId - will check DB');
+    return {'name': 'Unknown User', 'profile_pic': null};
   }
 
   // Message selection and actions
@@ -192,6 +199,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   // Reply message state
   MessageModel? _replyToMessageData;
   bool _isReplying = false;
+
+  // Highlighted message state (for scroll-to effect)
+  int? _highlightedMessageId;
+  Timer? _highlightTimer;
 
   // Sticky date separator state
   String? _currentStickyDate;
@@ -474,12 +485,14 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     // This MUST complete BEFORE displaying messages so names show correctly
     await _initializeUserCache();
 
+    // NOW load and display messages (user ID and user names are known)
+    // This also loads _conversationMeta which contains pinned message info
+    await _tryLoadFromCacheFirst();
+
     // Load pinned and starred messages from local DB (fast)
+    // Must be called AFTER _tryLoadFromCacheFirst to access _conversationMeta
     await _loadPinnedMessageFromStorage();
     await _loadStarredMessagesFromStorage();
-
-    // NOW load and display messages (user ID and user names are known)
-    await _tryLoadFromCacheFirst();
 
     // Load from server (in background if we have cache)
     await _loadInitialMessages();
@@ -620,6 +633,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           id: _currentUserId!,
           name: userData['name'] ?? '',
           phone: userData['phone'] ?? '',
+          role: userData['role'] ?? '',
           profilePic: userData['profile_pic'],
           callAccess: userData['call_access'] == true,
         );
@@ -704,9 +718,25 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     debugPrint('✅ _userInfoCache now has ${_userInfoCache.length} users');
   }
 
-  /// Load pinned message from storage
+  /// Load pinned message from storage or conversation metadata
   Future<void> _loadPinnedMessageFromStorage() async {
     final conversationId = widget.group.conversationId;
+
+    // First check if group metadata has pinned message
+    if (widget.group.metadata?.pinnedMessage != null) {
+      final pinnedMessageId = widget.group.metadata!.pinnedMessage!.messageId;
+      if (mounted) {
+        setState(() {
+          _pinnedMessageId = pinnedMessageId;
+        });
+        debugPrint(
+          '✅ Loaded pinned message from group metadata: $pinnedMessageId',
+        );
+        return;
+      }
+    }
+
+    // Fallback to local storage
     final pinnedMessageId =
         await MessageStorageHelpers.loadPinnedMessageFromStorage(
           conversationId,
@@ -716,6 +746,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       setState(() {
         _pinnedMessageId = pinnedMessageId;
       });
+      debugPrint(
+        '✅ Loaded pinned message from local storage: $pinnedMessageId',
+      );
     }
   }
 
@@ -737,20 +770,17 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
   /// Validate pinned message exists in current messages and clean up if not
   void _validatePinnedMessage() {
-    if (_pinnedMessageId != null && _messages.isNotEmpty) {
+    // Don't validate if we don't have a full message set yet
+    // Only validate if we've loaded a significant number of messages
+    // This prevents clearing pinned messages during initial load or pagination
+    if (_pinnedMessageId != null && _messages.length > 20) {
       final messageExists = _messages.any((msg) => msg.id == _pinnedMessageId);
       if (!messageExists && mounted) {
         debugPrint(
-          '⚠️ Pinned message $_pinnedMessageId not found in current group messages, clearing',
+          '⚠️ Pinned message $_pinnedMessageId not found in current group messages, but keeping it (might be paginated)',
         );
-        setState(() {
-          _pinnedMessageId = null;
-        });
-        // Also clear from storage
-        _messagesRepo.savePinnedMessage(
-          conversationId: widget.group.conversationId,
-          pinnedMessageId: null,
-        );
+        // Don't clear the pinned message - it might just be in a different page
+        // Only clear if we explicitly receive an unpin action via WebSocket
       }
     }
   }
@@ -985,6 +1015,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     _websocketSubscription?.cancel();
     _typingAnimationController.dispose();
     _typingTimeout?.cancel();
+    _highlightTimer?.cancel();
 
     // Dispose message animation controllers
     for (final controller in _messageAnimationControllers.values) {
@@ -1563,8 +1594,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           _showStickyDate = true;
         });
 
-        _animateNewMessage(newMessage.id);
-        _scrollToBottom();
+        // _animateNewMessage(newMessage.id);
+        // _scrollToBottom();
       }
 
       // Store message asynchronously
@@ -1918,7 +1949,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     try {
       // Extract message data from WebSocket payload
       final data = messageData['data'] as Map<String, dynamic>? ?? {};
-      final senderId = _parseToInt(data['sender_id'] ?? data['senderId']);
+      final senderId = _parseToInt(
+        data['sender_id'] ?? data['senderId'] ?? data['user_id'],
+      );
       final messageId =
           data['id'] ?? data['messageId'] ?? data['media_message_id'];
       final optimisticId = data['optimistic_id'] ?? data['optimisticId'];
@@ -1985,6 +2018,30 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           }
         } catch (e) {
           debugPrint('⚠️ Could not load sender info from DB: $e');
+        }
+      }
+
+      // Cache sender info to group_members table for offline support
+      if (senderId > 0 &&
+          senderName != 'Unknown User' &&
+          !senderName.startsWith('User ')) {
+        try {
+          final memberInfo = GroupMemberInfo(
+            userId: senderId,
+            userName: senderName,
+            profilePic: senderProfilePic,
+            role: 'member', // Default role
+            joinedAt: null,
+          );
+          await _groupMembersRepo.insertOrUpdateGroupMember(
+            widget.group.conversationId,
+            memberInfo,
+          );
+          debugPrint(
+            '💾 Cached sender info to group_members DB: $senderName (ID: $senderId)',
+          );
+        } catch (e) {
+          debugPrint('⚠️ Could not cache sender info to DB: $e');
         }
       }
 
@@ -2173,7 +2230,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   /// Handle incoming message pin from WebSocket
   void _handleMessagePin(Map<String, dynamic> message) async {
     final data = message['data'] as Map<String, dynamic>? ?? {};
-    final messageId = data['message_id'] ?? data['messageId'];
+    // Get message ID from message_ids array
+    final messageIds = message['message_ids'] as List<dynamic>? ?? [];
+    final messageId = messageIds.isNotEmpty ? messageIds[0] as int? : null;
     final action = data['action'] ?? 'pin';
     final conversationId = widget.group.conversationId;
 
@@ -2192,6 +2251,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     await _messagesRepo.savePinnedMessage(
       conversationId: conversationId,
       pinnedMessageId: newPinnedMessageId,
+    );
+
+    debugPrint(
+      '📌 ${action == 'pin' ? 'Pinned' : 'Unpinned'} message $messageId for group conversation $conversationId',
     );
   }
 
@@ -2715,13 +2778,21 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     _audioProgressTimer = null;
   }
 
-  void _openGroupInfo() {
-    Navigator.push(
+  void _openGroupInfo() async {
+    final result = await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => GroupInfoPage(group: widget.group),
       ),
     );
+
+    // Check if the group was deleted
+    if (result is Map && result['action'] == 'deleted') {
+      // Group was deleted, navigate back to groups page with the same result
+      if (mounted) {
+        Navigator.pop(context, {'action': 'deleted'});
+      }
+    }
   }
 
   @override
@@ -3187,6 +3258,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     final slideAnimation = _messageSlideAnimations[message.id];
     final fadeAnimation = _messageFadeAnimations[message.id];
 
+    // Check if this message is currently highlighted
+    final isHighlighted = _highlightedMessageId == message.id;
+
     Widget messageContent = RepaintBoundary(
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
@@ -3197,13 +3271,23 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Flexible(
-              child: Container(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
                 constraints: BoxConstraints(
                   maxWidth: MediaQuery.of(context).size.width * 0.75,
                 ),
                 margin: EdgeInsets.only(
                   left: isMyMessage ? 40 : 8,
                   right: isMyMessage ? 8 : 40,
+                ),
+                padding: isHighlighted
+                    ? const EdgeInsets.all(4)
+                    : EdgeInsets.zero,
+                decoration: BoxDecoration(
+                  color: isHighlighted
+                      ? Colors.amber.withOpacity(0.3)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(24),
                 ),
                 child: Column(
                   crossAxisAlignment: isMyMessage
@@ -3324,14 +3408,14 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                                         fontWeight: FontWeight.w400,
                                       ),
                                     ),
-                                    if (isMyMessage) ...[
-                                      const SizedBox(width: 4),
-                                      Icon(
-                                        Icons.done_all,
-                                        size: 16,
-                                        color: Colors.white70,
-                                      ),
-                                    ],
+                                    // if (isMyMessage) ...[
+                                    //   const SizedBox(width: 4),
+                                    //   Icon(
+                                    //     Icons.done_all,
+                                    //     size: 16,
+                                    //     color: Colors.white70,
+                                    //   ),
+                                    // ],
                                   ],
                                 ),
                               ],
@@ -3366,46 +3450,66 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     final isRepliedMessageMine =
         _currentUserId != null && replyMessage.senderId == _currentUserId;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: isMyMessage ? Colors.white.withOpacity(0.15) : Colors.grey[200],
-        borderRadius: BorderRadius.circular(8),
-        border: Border(
-          left: BorderSide(
-            color: isMyMessage ? Colors.white : Colors.teal,
-            width: 3,
+    return GestureDetector(
+      onTap: () => _scrollToMessage(replyMessage.id),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: isMyMessage
+              ? Colors.white.withOpacity(0.15)
+              : Colors.grey[200],
+          borderRadius: BorderRadius.circular(8),
+          border: Border(
+            left: BorderSide(
+              color: isMyMessage ? Colors.white : Colors.teal,
+              width: 3,
+            ),
           ),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            isRepliedMessageMine ? 'You' : replyMessage.senderName,
-            style: TextStyle(
-              color: isMyMessage ? Colors.white : Colors.teal,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              isRepliedMessageMine ? 'You' : replyMessage.senderName,
+              style: TextStyle(
+                color: isMyMessage ? Colors.white : Colors.teal,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
             ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            replyMessage.body.length > 50
-                ? '${replyMessage.body.substring(0, 50)}...'
-                : replyMessage.body,
-            style: TextStyle(
-              color: isMyMessage
-                  ? Colors.white.withOpacity(0.8)
-                  : Colors.grey[600],
-              fontSize: 13,
-              height: 1.2,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
+            const SizedBox(height: 2),
+            if (replyMessage.body.isNotEmpty) ...[
+              Text(
+                replyMessage.body.length > 50
+                    ? '${replyMessage.body.substring(0, 50)}...'
+                    : replyMessage.body,
+                style: TextStyle(
+                  color: isMyMessage
+                      ? Colors.white.withOpacity(0.8)
+                      : Colors.grey[600],
+                  fontSize: 13,
+                  height: 1.2,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ] else ...[
+              Text(
+                '📎media message',
+                style: TextStyle(
+                  color: isMyMessage
+                      ? Colors.white.withOpacity(0.8)
+                      : Colors.grey[600],
+                  fontSize: 13,
+                  height: 1.2,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -3462,6 +3566,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             color: isMyMessage ? Colors.white : Colors.black87,
             fontSize: 16,
             height: 1.4,
+            fontWeight: FontWeight.w500,
           ),
         );
     }
@@ -3995,18 +4100,35 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                   ],
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  replyMessage.body.length > 60
-                      ? '${replyMessage.body.substring(0, 60)}...'
-                      : replyMessage.body,
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 13,
-                    height: 1.2,
+                if (replyMessage.body.isNotEmpty) ...[
+                  Text(
+                    replyMessage.body.length > 50
+                        ? '${replyMessage.body.substring(0, 50)}...'
+                        : replyMessage.body,
+                    style: TextStyle(
+                      color: isRepliedMessageMine
+                          ? Colors.white.withOpacity(0.8)
+                          : Colors.grey[600],
+                      fontSize: 13,
+                      height: 1.2,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                ] else ...[
+                  Text(
+                    '📎media message',
+                    style: TextStyle(
+                      color: isRepliedMessageMine
+                          ? Colors.white.withOpacity(0.8)
+                          : Colors.grey[600],
+                      fontSize: 13,
+                      height: 1.2,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
               ],
             ),
           ),
@@ -4722,6 +4844,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                       right: 8.0,
                       top: 4.0,
                     ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     child: Text(
                       message.body,
                       style: TextStyle(
@@ -4754,10 +4880,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                         fontWeight: FontWeight.w400,
                       ),
                     ),
-                    if (isMyMessage) ...[
-                      const SizedBox(width: 4),
-                      Icon(Icons.done_all, size: 14, color: Colors.white),
-                    ],
+                    // if (isMyMessage) ...[
+                    //   const SizedBox(width: 4),
+                    //   Icon(Icons.done_all, size: 14, color: Colors.white),
+                    // ],
                   ],
                 ),
               ),
@@ -4801,9 +4927,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         decoration: BoxDecoration(
           color: Colors.white,
           border: Border.all(
-            color: isMyMessage
-                ? const Color(0xFF4CAF50)
-                : const Color(0xFF4CAF50),
+            color: isMyMessage ? Colors.teal : Colors.teal,
             width: 6,
           ),
           borderRadius: BorderRadius.circular(12),
@@ -4874,10 +4998,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                         fontWeight: FontWeight.w400,
                       ),
                     ),
-                    if (isMyMessage) ...[
-                      const SizedBox(width: 4),
-                      Icon(Icons.done_all, size: 14, color: Colors.white),
-                    ],
+                    // if (isMyMessage) ...[
+                    //   const SizedBox(width: 4),
+                    //   Icon(Icons.done_all, size: 14, color: Colors.white),
+                    // ],
                   ],
                 ),
               ),
@@ -6979,13 +7103,34 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         duration: const Duration(milliseconds: 500),
         curve: Curves.easeInOut,
       );
+
+      // Highlight the message after scrolling
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          setState(() {
+            _highlightedMessageId = messageId;
+          });
+
+          // Cancel any existing timer
+          _highlightTimer?.cancel();
+
+          // Remove highlight after 1 second
+          _highlightTimer = Timer(const Duration(milliseconds: 1000), () {
+            if (mounted) {
+              setState(() {
+                _highlightedMessageId = null;
+              });
+            }
+          });
+        }
+      });
     }
   }
 
   Widget _buildPinnedMessageSection() {
     final pinnedMessage = _messages.firstWhere(
       (message) => message.id == _pinnedMessageId,
-      orElse: () => throw StateError('Pinned message not found'),
+      // orElse: () => throw StateError('Pinned message not found'),
     );
 
     final isMyMessage =
@@ -6998,7 +7143,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: Colors.blue[50],
-          borderRadius: BorderRadius.circular(12),
+          // borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.blue[200]!, width: 1),
           boxShadow: [
             BoxShadow(

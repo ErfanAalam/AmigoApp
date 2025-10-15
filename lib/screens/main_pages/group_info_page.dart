@@ -241,7 +241,9 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                 localGroup.metadata!.createdBy,
               );
               creatorName = creatorMember?.userName;
-              debugPrint('✅ Found creator in group_members table: $creatorName');
+              debugPrint(
+                '✅ Found creator in group_members table: $creatorName',
+              );
             } catch (dbError) {
               debugPrint('⚠️ Creator not found in group_members table either');
               creatorName = null;
@@ -287,21 +289,25 @@ class _GroupInfoPageState extends State<GroupInfoPage>
 
     try {
       final members = _parseMembers(membersData);
-      
+
       // Cache to group_members table (not users table)
-      final memberInfoList = members.map((m) => GroupMemberInfo(
-        userId: m.userId,
-        userName: m.name,
-        profilePic: m.profilePic,
-        role: m.role,
-        joinedAt: m.joinedAt,
-      )).toList();
-      
+      final memberInfoList = members
+          .map(
+            (m) => GroupMemberInfo(
+              userId: m.userId,
+              userName: m.name,
+              profilePic: m.profilePic,
+              role: m.role,
+              joinedAt: m.joinedAt,
+            ),
+          )
+          .toList();
+
       await _groupMembersRepo.insertOrUpdateGroupMembers(
         widget.group.conversationId,
         memberInfoList,
       );
-      
+
       debugPrint('✅ Cached ${members.length} group members to local DB');
     } catch (e) {
       debugPrint('❌ Error caching group members: $e');
@@ -371,21 +377,21 @@ class _GroupInfoPageState extends State<GroupInfoPage>
 
   Future<void> _loadAvailableUsers({bool forceRefresh = false}) async {
     try {
-      if (!forceRefresh) {
-        // First try to get from local storage
-        final storedUsers = await _getAvailableUsersFromLocalStorage();
-        if (storedUsers.isNotEmpty) {
-          // Filter out users who are already members of this group
-          final filteredUsers = storedUsers
-              .where((user) => !_isUserAlreadyMember(user.id))
-              .toList();
-          _availableUsers = filteredUsers;
-          debugPrint(
-            'Using ${filteredUsers.length} contacts from local storage',
-          );
-          return;
-        }
-      }
+      // if (!forceRefresh) {
+      //   // First try to get from local storage
+      //   final storedUsers = await _getAvailableUsersFromLocalStorage();
+      //   if (storedUsers.isNotEmpty) {
+      //     // Filter out users who are already members of this group
+      //     final filteredUsers = storedUsers
+      //         .where((user) => !_isUserAlreadyMember(user.id))
+      //         .toList();
+      //     _availableUsers = filteredUsers;
+      //     debugPrint(
+      //       'Using ${filteredUsers.length} contacts from local storage',
+      //     );
+      //     return;
+      //   }
+      // }
 
       // If no stored data or force refresh, fetch from backend
       debugPrint('Fetching contacts from backend...');
@@ -1184,6 +1190,526 @@ class _GroupInfoPageState extends State<GroupInfoPage>
     }
   }
 
+  bool _isGroupCreator(int userId) {
+    // Check if the user is the creator of the group
+    final creatorId =
+        _groupInfo?['group']?['createrId'] ?? _groupInfo?['created_by'];
+    return userId == creatorId;
+  }
+
+  Future<void> _promoteToAdmin(int userId, String userName) async {
+    if (!_isCurrentUserAdmin()) {
+      _showSnackBar('Only admins can promote members', isError: true);
+      return;
+    }
+
+    if (userId == _currentUserId) {
+      _showSnackBar('You are already an admin', isError: true);
+      return;
+    }
+
+    final bool? confirmed = await _showPromoteToAdminDialog(userName);
+
+    if (confirmed == true) {
+      try {
+        // Show loading indicator
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            content: Row(
+              children: [
+                const CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
+                ),
+                const SizedBox(width: 16),
+                Expanded(child: Text('Promoting $userName to admin...')),
+              ],
+            ),
+          ),
+        );
+
+        final response = await _groupsService.promoteToAdmin(
+          widget.group.conversationId,
+          userId,
+        );
+
+        // Close loading dialog
+        Navigator.pop(context);
+
+        if (response['success'] == true) {
+          _showSnackBar('$userName is now an admin');
+          await _loadGroupInfo(); // Refresh group info
+        } else {
+          _showSnackBar(
+            response['message'] ?? 'Failed to promote member',
+            isError: true,
+          );
+        }
+      } catch (e) {
+        // Close loading dialog if still open
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+        _showSnackBar('Error promoting member: $e', isError: true);
+      }
+    }
+  }
+
+  Future<void> _demoteToMember(int userId, String userName) async {
+    if (!_isCurrentUserAdmin()) {
+      _showSnackBar('Only admins can demote members', isError: true);
+      return;
+    }
+
+    if (_isGroupCreator(userId)) {
+      _showSnackBar('Cannot demote the group creator', isError: true);
+      return;
+    }
+
+    if (userId == _currentUserId) {
+      _showSnackBar('You cannot demote yourself', isError: true);
+      return;
+    }
+
+    final bool? confirmed = await _showDemoteToMemberDialog(userName);
+
+    if (confirmed == true) {
+      try {
+        // Show loading indicator
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            content: Row(
+              children: [
+                const CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
+                ),
+                const SizedBox(width: 16),
+                Expanded(child: Text('Demoting $userName to member...')),
+              ],
+            ),
+          ),
+        );
+
+        final response = await _groupsService.demoteToAdmin(
+          widget.group.conversationId,
+          userId,
+        );
+
+        // Close loading dialog
+        Navigator.pop(context);
+
+        if (response['success'] == true) {
+          _showSnackBar('$userName is now a member');
+          await _loadGroupInfo(); // Refresh group info
+        } else {
+          _showSnackBar(
+            response['message'] ?? 'Failed to demote member',
+            isError: true,
+          );
+        }
+      } catch (e) {
+        // Close loading dialog if still open
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context);
+        }
+        _showSnackBar('Error demoting member: $e', isError: true);
+      }
+    }
+  }
+
+  Future<bool?> _showPromoteToAdminDialog(String userName) async {
+    return showGeneralDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, animation1, animation2) => Container(),
+      transitionBuilder: (context, animation1, animation2, child) {
+        return ScaleTransition(
+          scale: CurvedAnimation(parent: animation1, curve: Curves.easeOutBack),
+          child: FadeTransition(
+            opacity: animation1,
+            child: AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              contentPadding: EdgeInsets.zero,
+              content: Container(
+                width: MediaQuery.of(context).size.width * 0.85,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Colors.white, Colors.teal.shade50],
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Content
+                    Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.teal.shade50,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.admin_panel_settings,
+                              size: 48,
+                              color: Colors.teal.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Promote to Admin',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          RichText(
+                            textAlign: TextAlign.center,
+                            text: TextSpan(
+                              style: TextStyle(
+                                color: Colors.grey.shade800,
+                                fontSize: 16,
+                                height: 1.5,
+                              ),
+                              children: [
+                                const TextSpan(
+                                  text: 'Are you sure you want to make ',
+                                ),
+                                TextSpan(
+                                  text: userName,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.teal,
+                                  ),
+                                ),
+                                const TextSpan(
+                                  text: ' an admin of this group?',
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.shade50,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.amber.shade200),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.info_outline,
+                                  color: Colors.amber.shade700,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Admins can add/remove members and edit group settings.',
+                                    style: TextStyle(
+                                      color: Colors.amber.shade900,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Action buttons
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: const BorderRadius.only(
+                          bottomLeft: Radius.circular(20),
+                          bottomRight: Radius.circular(20),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  side: BorderSide(color: Colors.grey.shade300),
+                                ),
+                              ),
+                              child: Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade700,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.teal,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                elevation: 2,
+                                shadowColor: Colors.teal.withOpacity(0.3),
+                              ),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.check_circle, size: 20),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Yes, Promote',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<bool?> _showDemoteToMemberDialog(String userName) async {
+    return showGeneralDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, animation1, animation2) => Container(),
+      transitionBuilder: (context, animation1, animation2, child) {
+        return ScaleTransition(
+          scale: CurvedAnimation(parent: animation1, curve: Curves.easeOutBack),
+          child: FadeTransition(
+            opacity: animation1,
+            child: AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              contentPadding: EdgeInsets.zero,
+              content: Container(
+                width: MediaQuery.of(context).size.width * 0.85,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Colors.white, Colors.orange.shade50],
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Content
+                    Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade50,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.person_remove,
+                              size: 48,
+                              color: Colors.orange.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Demote to Member',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          RichText(
+                            textAlign: TextAlign.center,
+                            text: TextSpan(
+                              style: TextStyle(
+                                color: Colors.grey.shade800,
+                                fontSize: 16,
+                                height: 1.5,
+                              ),
+                              children: [
+                                const TextSpan(
+                                  text: 'Are you sure you want to demote ',
+                                ),
+                                TextSpan(
+                                  text: userName,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.orange.shade700,
+                                  ),
+                                ),
+                                const TextSpan(text: ' to a regular member?'),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade50,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.orange.shade200),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.warning_amber_outlined,
+                                  color: Colors.orange.shade700,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'They will lose admin privileges and cannot manage the group.',
+                                    style: TextStyle(
+                                      color: Colors.orange.shade900,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Action buttons
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: const BorderRadius.only(
+                          bottomLeft: Radius.circular(20),
+                          bottomRight: Radius.circular(20),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  side: BorderSide(color: Colors.grey.shade300),
+                                ),
+                              ),
+                              child: Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade700,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                elevation: 2,
+                                shadowColor: Colors.orange.withOpacity(0.3),
+                              ),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.check_circle, size: 20),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Yes, Demote',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _removeMember(int userId, String userName) async {
     if (!_isCurrentUserAdmin()) {
       _showSnackBar('Only admins can remove members', isError: true);
@@ -1239,6 +1765,258 @@ class _GroupInfoPageState extends State<GroupInfoPage>
       } catch (e) {
         _showSnackBar('Error removing member: $e', isError: true);
       }
+    }
+  }
+
+  Future<void> _showDeleteGroupDialog() async {
+    final groupTitle = _groupInfo?['group']?['title'] ?? 'this group';
+
+    final bool? confirmed = await showGeneralDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, animation1, animation2) => Container(),
+      transitionBuilder: (context, animation1, animation2, child) {
+        return ScaleTransition(
+          scale: CurvedAnimation(parent: animation1, curve: Curves.easeOutBack),
+          child: FadeTransition(
+            opacity: animation1,
+            child: AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              contentPadding: EdgeInsets.zero,
+              content: Container(
+                width: MediaQuery.of(context).size.width * 0.85,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Colors.white, Colors.red.shade50],
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Content
+                    Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.delete_forever,
+                              size: 48,
+                              color: Colors.red.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Delete Group',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          RichText(
+                            textAlign: TextAlign.center,
+                            text: TextSpan(
+                              style: TextStyle(
+                                color: Colors.grey.shade800,
+                                fontSize: 16,
+                                height: 1.5,
+                              ),
+                              children: [
+                                const TextSpan(
+                                  text: 'Are you sure you want to delete ',
+                                ),
+                                TextSpan(
+                                  text: groupTitle,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.red.shade700,
+                                  ),
+                                ),
+                                const TextSpan(text: '?'),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade100,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.red.shade300),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.warning_rounded,
+                                  color: Colors.red.shade700,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'This action cannot be undone. All messages will be permanently deleted.',
+                                    style: TextStyle(
+                                      color: Colors.red.shade900,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Action buttons
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: const BorderRadius.only(
+                          bottomLeft: Radius.circular(20),
+                          bottomRight: Radius.circular(20),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  side: BorderSide(color: Colors.grey.shade300),
+                                ),
+                              ),
+                              child: Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade700,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                elevation: 2,
+                                shadowColor: Colors.red.withOpacity(0.3),
+                              ),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.delete_forever, size: 20),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Delete',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      await _deleteGroup();
+    }
+  }
+
+  Future<void> _deleteGroup() async {
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          content: const Row(
+            children: [
+              CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
+              ),
+              SizedBox(width: 16),
+              Expanded(child: Text('Deleting group...')),
+            ],
+          ),
+        ),
+      );
+
+      final response = await _groupsService.deleteGroup(
+        widget.group.conversationId,
+      );
+
+      // Close loading dialog
+      Navigator.pop(context);
+
+      if (response['success'] == true) {
+        // Delete from local database
+        await _groupsRepo.deleteGroup(widget.group.conversationId);
+        
+
+        _showSnackBar('Group deleted successfully');
+
+        // Navigate back with deletion result
+        // This will be handled by InnerGroupChatPage
+        Navigator.pop(context, {'action': 'deleted'});
+      } else {
+        _showSnackBar(
+          response['message'] ?? 'Failed to delete group',
+          isError: true,
+        );
+      }
+    } catch (e) {
+      // Close loading dialog if still open
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+      _showSnackBar('Error deleting group: $e', isError: true);
     }
   }
 
@@ -1506,6 +2284,64 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                               const SizedBox(height: 2),
                                               Row(
                                                 children: [
+                                                  // Creator badge
+                                                  if (_isGroupCreator(
+                                                    member['userId'],
+                                                  ))
+                                                    Container(
+                                                      margin:
+                                                          const EdgeInsets.only(
+                                                            right: 6,
+                                                          ),
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 8,
+                                                            vertical: 2,
+                                                          ),
+                                                      decoration: BoxDecoration(
+                                                        gradient:
+                                                            LinearGradient(
+                                                              colors: [
+                                                                Colors
+                                                                    .purple
+                                                                    .shade400,
+                                                                Colors
+                                                                    .purple
+                                                                    .shade600,
+                                                              ],
+                                                            ),
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              8,
+                                                            ),
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            Icons.star,
+                                                            size: 12,
+                                                            color: Colors.white,
+                                                          ),
+                                                          const SizedBox(
+                                                            width: 4,
+                                                          ),
+                                                          Text(
+                                                            'Creator',
+                                                            style: TextStyle(
+                                                              fontSize: 12,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                              color:
+                                                                  Colors.white,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  // Admin/Member badge
                                                   Container(
                                                     padding:
                                                         const EdgeInsets.symmetric(
@@ -1550,16 +2386,106 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                         ),
                                         if (_isCurrentUserAdmin() &&
                                             !isCurrentUser)
-                                          IconButton(
-                                            onPressed: () => _removeMember(
-                                              member['userId'],
-                                              member['userName'] ?? 'Unknown',
-                                            ),
-                                            icon: const Icon(
-                                              Icons.remove_circle_outline,
-                                              color: Colors.teal,
-                                            ),
-                                            tooltip: 'Remove member',
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              // Show "Make Admin" button only for non-admin members
+                                              if (!isAdmin)
+                                                Container(
+                                                  margin: const EdgeInsets.only(
+                                                    right: 4,
+                                                  ),
+                                                  child: Material(
+                                                    color: Colors.amber.shade50,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          8,
+                                                        ),
+                                                    child: InkWell(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            8,
+                                                          ),
+                                                      onTap: () =>
+                                                          _promoteToAdmin(
+                                                            member['userId'],
+                                                            member['userName'] ??
+                                                                'Unknown',
+                                                          ),
+                                                      child: Padding(
+                                                        padding:
+                                                            const EdgeInsets.all(
+                                                              8,
+                                                            ),
+                                                        child: Icon(
+                                                          Icons
+                                                              .admin_panel_settings,
+                                                          size: 20,
+                                                          color: Colors
+                                                              .amber
+                                                              .shade700,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              // Show "Demote to Member" button only for admins (but not creator)
+                                              if (isAdmin &&
+                                                  !_isGroupCreator(
+                                                    member['userId'],
+                                                  ))
+                                                Container(
+                                                  margin: const EdgeInsets.only(
+                                                    right: 4,
+                                                  ),
+                                                  child: Material(
+                                                    color:
+                                                        Colors.orange.shade50,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          8,
+                                                        ),
+                                                    child: InkWell(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            8,
+                                                          ),
+                                                      onTap: () =>
+                                                          _demoteToMember(
+                                                            member['userId'],
+                                                            member['userName'] ??
+                                                                'Unknown',
+                                                          ),
+                                                      child: Padding(
+                                                        padding:
+                                                            const EdgeInsets.all(
+                                                              8,
+                                                            ),
+                                                        child: Icon(
+                                                          Icons.person_remove,
+                                                          size: 20,
+                                                          color: Colors
+                                                              .orange
+                                                              .shade700,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              // Remove button
+                                              IconButton(
+                                                onPressed: () => _removeMember(
+                                                  member['userId'],
+                                                  member['userName'] ??
+                                                      'Unknown',
+                                                ),
+                                                icon: const Icon(
+                                                  Icons.remove_circle_outline,
+                                                  color: Colors.teal,
+                                                ),
+                                                tooltip: 'Remove member',
+                                              ),
+                                            ],
                                           ),
                                       ],
                                     ),
@@ -1569,6 +2495,124 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                           ),
                         ),
                       ),
+
+                      // Danger Zone Section (Admin Only)
+                      if (_isCurrentUserAdmin())
+                        SafeArea(
+                          child: Column(
+                            children: [
+                              const SizedBox(height: 16),
+                              Card(
+                                elevation: 2,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: Colors.red.shade200,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(16),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              Icons.warning_amber_rounded,
+                                              color: Colors.red.shade400,
+                                              size: 20,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              'Danger Zone',
+                                              style: TextStyle(
+                                                fontSize: 18,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.red.shade700,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Container(
+                                          padding: const EdgeInsets.all(12),
+                                          decoration: BoxDecoration(
+                                            color: Colors.red.shade50,
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      'Delete Group',
+                                                      style: TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                        fontSize: 16,
+                                                        color:
+                                                            Colors.red.shade900,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(height: 4),
+                                                    Text(
+                                                      'Permanently delete this group and all its messages',
+                                                      style: TextStyle(
+                                                        fontSize: 13,
+                                                        color:
+                                                            Colors.red.shade700,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              ElevatedButton.icon(
+                                                onPressed:
+                                                    _showDeleteGroupDialog,
+                                                icon: const Icon(
+                                                  Icons.delete_forever,
+                                                  size: 20,
+                                                ),
+                                                label: const Text('Delete'),
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: Colors.red,
+                                                  foregroundColor: Colors.white,
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          10,
+                                                        ),
+                                                  ),
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 16,
+                                                        vertical: 10,
+                                                      ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                     ],
                   ),
                 ),

@@ -43,7 +43,7 @@ class ApiService {
 
       // Configure Dio defaults
       _dio.options.validateStatus = (status) {
-        return status != null && status == 200;
+        return status != null;
       };
 
       // Enable cookie handling for HTTP-only cookies

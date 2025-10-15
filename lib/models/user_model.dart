@@ -2,6 +2,7 @@ class UserModel {
   final int id;
   final String name;
   final String phone;
+  final String role;
   final String? profilePic;
   final bool callAccess;
   final bool needsSync; // local-only flag
@@ -11,6 +12,7 @@ class UserModel {
     required this.id,
     required this.name,
     required this.phone,
+    required this.role,
     this.profilePic,
     this.callAccess = false,
     this.needsSync = false,
@@ -33,6 +35,7 @@ class UserModel {
     return UserModel(
       id: parsedId,
       name: json['name']?.toString() ?? '',
+      role: json['role']?.toString() ?? '',
       phone: json['phone']?.toString() ?? '',
       profilePic: json['profile_pic']?.toString(),
       callAccess: json['call_access'] == true,
@@ -49,6 +52,7 @@ class UserModel {
     return UserModel(
       id: map['id'] as int,
       name: map['name']?.toString() ?? '',
+      role: map['role']?.toString() ?? '',
       phone: map['phone']?.toString() ?? '',
       profilePic: map['profile_pic'] as String?,
       callAccess: map['call_access'] == 1,
@@ -61,6 +65,7 @@ class UserModel {
     return {
       'id': id,
       'name': name,
+      'role': role,
       'phone': phone,
       'profile_pic': profilePic,
       'call_access': callAccess,
@@ -72,6 +77,7 @@ class UserModel {
     return {
       'id': id,
       'name': name,
+      'role': role,
       'phone': phone,
       'profile_pic': profilePic,
       'call_access': callAccess ? 1 : 0,
@@ -82,6 +88,7 @@ class UserModel {
 
   UserModel copyWith({
     String? name,
+    String? role,
     String? phone,
     String? profilePic,
     bool? callAccess,
@@ -91,6 +98,7 @@ class UserModel {
     return UserModel(
       id: id,
       name: name ?? this.name,
+      role: role ?? this.role,
       phone: phone ?? this.phone,
       profilePic: profilePic ?? this.profilePic,
       callAccess: callAccess ?? this.callAccess,
@@ -101,6 +109,6 @@ class UserModel {
 
   @override
   String toString() {
-    return 'UserModel(id: $id, name: $name, phone: $phone, profilePic: $profilePic, callAccess: $callAccess, needsSync: $needsSync)';
+    return 'UserModel(id: $id, name: $name, role: $role, phone: $phone, profilePic: $profilePic, callAccess: $callAccess, needsSync: $needsSync)';
   }
 }

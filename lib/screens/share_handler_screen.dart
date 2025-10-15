@@ -8,6 +8,7 @@ import '../api/user.service.dart';
 import '../api/chats.services.dart';
 import '../services/websocket_service.dart';
 import '../repositories/conversations_repository.dart';
+import '../repositories/groups_repository.dart';
 
 /// A screen that handles incoming shared media (images and videos)
 /// from the Android share sheet and allows selecting conversations to share to.
@@ -44,7 +45,7 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
   final ChatsServices _chatsServices = ChatsServices();
   final WebSocketService _websocketService = WebSocketService();
   final ConversationsRepository _conversationsRepo = ConversationsRepository();
-
+  final GroupsRepository _groupsRepo = GroupsRepository();
   @override
   void initState() {
     super.initState();
@@ -113,8 +114,24 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
       // FIRST: Try to load from local database for instant display
       debugPrint('🔍 Share Handler - Loading from local DB first...');
       try {
-        final localConversations = await _conversationsRepo
+        final chatConversations = await _conversationsRepo
             .getAllConversations();
+
+        print('chatConversations');
+        print(chatConversations);
+
+        final groupConversations = await _groupsRepo.getAllGroups();
+
+        print('groupConversations');
+        print(groupConversations);
+
+        final localConversations = [
+          ...chatConversations,
+          ...groupConversations,
+        ];
+
+        print('localConversations');
+        print(localConversations);
 
         if (localConversations.isNotEmpty) {
           debugPrint(
@@ -122,7 +139,8 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
           );
           if (mounted) {
             setState(() {
-              _availableConversations = localConversations;
+              _availableConversations =
+                  localConversations as List<ConversationModel>;
               _filteredConversations = localConversations;
             });
           }
@@ -136,9 +154,7 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
       // SECOND: Load from API to get latest data
       debugPrint('🔍 Share Handler - Requesting conversations from API...');
       final response = await _userService.GetChatList('all');
-      debugPrint(
-        '🔍 Share Handler - API response success: ${response['success']}',
-      );
+      debugPrint('🔍 Share Handler - API response success: ${response}');
 
       if (response['success'] == true && response['data'] != null) {
         final dynamic responseData = response['data'];

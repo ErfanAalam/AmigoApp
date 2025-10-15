@@ -55,11 +55,42 @@ class GroupsRepository {
 
   Future<int> deleteGroup(int conversationId) async {
     final db = await dbHelper.database;
-    return await db.delete(
-      'groups',
-      where: 'conversation_id = ?',
-      whereArgs: [conversationId],
+
+    // Delete all related data in a transaction to ensure consistency
+    await db.transaction((txn) async {
+      // Delete all messages for this group
+      await txn.delete(
+        'messages',
+        where: 'conversation_id = ?',
+        whereArgs: [conversationId],
+      );
+
+      // Delete all group members
+      await txn.delete(
+        'group_members',
+        where: 'conversation_id = ?',
+        whereArgs: [conversationId],
+      );
+
+      // Delete conversation metadata
+      await txn.delete(
+        'conversation_meta',
+        where: 'conversation_id = ?',
+        whereArgs: [conversationId],
+      );
+
+      // Finally delete the group itself
+      await txn.delete(
+        'groups',
+        where: 'conversation_id = ?',
+        whereArgs: [conversationId],
+      );
+    });
+
+    print(
+      '✅ Group $conversationId and all related data deleted from local database',
     );
+    return 1; // Return success
   }
 
   Future<void> clearGroups() async {
@@ -110,6 +141,9 @@ class GroupsRepository {
       'created_by': group.metadata?.createdBy,
       'members': jsonEncode(group.members.map((m) => m.toJson()).toList()),
       'unread_count': group.unreadCount,
+      'pinned_message_id': group.metadata?.pinnedMessage?.messageId,
+      'pinned_message_user_id': group.metadata?.pinnedMessage?.userId,
+      'pinned_message_pinned_at': group.metadata?.pinnedMessage?.pinnedAt,
       'updated_at': DateTime.now().millisecondsSinceEpoch,
     };
   }
@@ -132,11 +166,23 @@ class GroupsRepository {
         );
       }
 
+      GroupPinnedMessage? pinnedMessage;
+      if (map['pinned_message_id'] != null) {
+        pinnedMessage = GroupPinnedMessage(
+          userId: map['pinned_message_user_id'] as int? ?? 0,
+          messageId: map['pinned_message_id'] as int,
+          pinnedAt:
+              map['pinned_message_pinned_at'] as String? ??
+              DateTime.now().toIso8601String(),
+        );
+      }
+
       metadata = GroupMetadata(
         lastMessage: lastMessage,
         totalMessages: map['total_messages'] as int? ?? 0,
         createdAt: map['created_at'] as String?,
         createdBy: map['created_by'] as int? ?? 0,
+        pinnedMessage: pinnedMessage,
       );
     }
 

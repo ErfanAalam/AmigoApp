@@ -151,17 +151,24 @@ class ConversationModel {
 
 class ConversationMetadata {
   final LastMessage lastMessage;
+  final PinnedMessage? pinnedMessage;
 
-  ConversationMetadata({required this.lastMessage});
+  ConversationMetadata({required this.lastMessage, this.pinnedMessage});
 
   factory ConversationMetadata.fromJson(Map<String, dynamic> json) {
     return ConversationMetadata(
       lastMessage: LastMessage.fromJson(json['last_message']),
+      pinnedMessage: json['pinned_message'] != null
+          ? PinnedMessage.fromJson(json['pinned_message'])
+          : null,
     );
   }
 
   Map<String, dynamic> toJson() {
-    return {'last_message': lastMessage.toJson()};
+    return {
+      'last_message': lastMessage.toJson(),
+      'pinned_message': pinnedMessage?.toJson(),
+    };
   }
 }
 
@@ -202,6 +209,37 @@ class LastMessage {
       'created_at': createdAt,
       'conversation_id': conversationId,
     };
+  }
+
+  static int _parseToInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
+  }
+}
+
+class PinnedMessage {
+  final int userId;
+  final int messageId;
+  final String pinnedAt;
+
+  PinnedMessage({
+    required this.userId,
+    required this.messageId,
+    required this.pinnedAt,
+  });
+
+  factory PinnedMessage.fromJson(Map<String, dynamic> json) {
+    return PinnedMessage(
+      userId: _parseToInt(json['user_id']),
+      messageId: _parseToInt(json['message_id']),
+      pinnedAt: json['pinned_at'] ?? DateTime.now().toIso8601String(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {'user_id': userId, 'message_id': messageId, 'pinned_at': pinnedAt};
   }
 
   static int _parseToInt(dynamic value) {

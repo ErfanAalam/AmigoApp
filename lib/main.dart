@@ -9,6 +9,7 @@ import 'screens/main_screen.dart';
 import 'screens/call/in_call_screen.dart';
 import 'screens/call/incoming_call_screen.dart';
 import 'screens/main_pages/inner_chat_page.dart';
+import 'screens/main_pages/inner_group_chat_page.dart';
 import 'screens/share_handler_screen.dart';
 import 'services/auth_service.dart';
 import 'services/cookie_service.dart';
@@ -23,6 +24,9 @@ import 'api/api_service.dart';
 import 'utils/navigation_helper.dart';
 import 'utils/ringing_tone.dart';
 import 'models/conversation_model.dart';
+import 'models/group_model.dart';
+import 'repositories/conversations_repository.dart';
+import 'repositories/groups_repository.dart';
 
 void main() async {
   material.WidgetsFlutterBinding.ensureInitialized();
@@ -76,6 +80,7 @@ class _MyAppState extends material.State<MyApp> {
   bool _isLoading = true;
   bool _isAuthenticated = false;
   StreamSubscription? _intentDataStreamSubscription;
+  int _notificationRetryCount = 0;
 
   @override
   void initState() {
@@ -84,6 +89,47 @@ class _MyAppState extends material.State<MyApp> {
     _checkAuthentication();
     _setupWebSocketListeners();
     _initializeSharing();
+
+    // Process initial notification after the first frame is rendered
+    // This ensures navigator is ready
+    material.WidgetsBinding.instance.addPostFrameCallback((_) {
+      _processInitialNotification();
+    });
+  }
+
+  /// Process initial notification from terminated state
+  Future<void> _processInitialNotification() async {
+    // Wait for authentication to complete and UI to be ready
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    print(
+      '🔔 Checking for initial notification (attempt ${_notificationRetryCount + 1}/5)...',
+    );
+    print('   Is authenticated: $_isAuthenticated');
+    print(
+      '   Navigator ready: ${NavigationHelper.navigatorKey.currentContext != null}',
+    );
+
+    // Only process if authenticated and navigator is ready
+    if (_isAuthenticated &&
+        NavigationHelper.navigatorKey.currentContext != null) {
+      print('✅ Processing initial notification...');
+      await _notificationService.processInitialMessage();
+      _notificationRetryCount = 0; // Reset counter
+    } else {
+      print('⚠️ Not ready to process initial notification yet');
+      _notificationRetryCount++;
+
+      // Retry up to 5 times
+      if (_notificationRetryCount < 5) {
+        Future.delayed(const Duration(milliseconds: 1000), () {
+          _processInitialNotification();
+        });
+      } else {
+        print('❌ Max retries reached for initial notification processing');
+        _notificationRetryCount = 0; // Reset counter
+      }
+    }
   }
 
   Future<void> _checkAuthentication() async {
@@ -311,61 +357,118 @@ class _MyAppState extends material.State<MyApp> {
 
   /// Handle navigation from notification tap
   void _handleNotificationNavigation(Map<String, dynamic> data) {
-    // Add a delay to ensure the app is fully loaded before navigating
-    Future.delayed(const Duration(milliseconds: 3000), () {
-      try {
-        // Parse string values to integers
-        final conversationIdStr = data['conversationId'] as String?;
-        final senderIdStr = data['senderId'] as String?;
-        final senderName = data['senderName'] as String?;
+    print('🔔 _handleNotificationNavigation called with data: $data');
 
-        if (conversationIdStr == null ||
-            senderIdStr == null ||
-            senderName == null) {
-          print(
-            '❌ Missing required data for navigation: conversationId=$conversationIdStr, senderId=$senderIdStr, senderName=$senderName',
-          );
+    // Add a small delay to ensure navigator is ready
+    Future.delayed(const Duration(milliseconds: 300), () async {
+      try {
+        // Parse conversationId - it can be either String or int
+        final conversationIdStr = data['conversationId']?.toString();
+
+        if (conversationIdStr == null) {
+          print('❌ Missing conversationId in notification data');
           return;
         }
 
-        // Convert string IDs to integers
+        // Convert to integer
         final conversationId = int.tryParse(conversationIdStr);
-        final senderId = int.tryParse(senderIdStr);
 
-        if (conversationId == null || senderId == null) {
-          print(
-            '❌ Invalid ID format: conversationId=$conversationIdStr, senderId=$senderIdStr',
-          );
+        if (conversationId == null) {
+          print('❌ Invalid conversationId format: $conversationIdStr');
           return;
         }
 
         print(
-          '🚀 Navigating to chat from notification: conversationId=$conversationId, senderName=$senderName',
+          '🚀 Navigating to conversation from notification: conversationId=$conversationId',
         );
 
-        // Create a conversation model from the notification data
-        final conversation = ConversationModel(
-          conversationId: conversationId,
-          type: 'dm',
-          unreadCount: 0,
-          joinedAt: DateTime.now().toIso8601String(),
-          userId: senderId,
-          userName: senderName,
-          userProfilePic: data['senderProfilePic'] as String?,
-          isOnline: null,
-        );
-
-        // Wait for navigator to be available before navigating
-        _waitForNavigatorAndNavigate(conversation);
+        // Try to fetch the conversation from local DB
+        await _fetchAndNavigateToConversation(conversationId, data);
       } catch (e) {
-        print('❌ Error navigating to chat from notification: $e');
+        print('❌ Error navigating to conversation from notification: $e');
+        print('   Stack trace: ${StackTrace.current}');
       }
     });
   }
 
-  /// Wait for navigator to be available and then navigate
-  void _waitForNavigatorAndNavigate(ConversationModel conversation) {
-    NavigationHelper.pushRoute(InnerChatPage(conversation: conversation));
+  /// Fetch conversation details and navigate to appropriate page
+  Future<void> _fetchAndNavigateToConversation(
+    int conversationId,
+    Map<String, dynamic> notificationData,
+  ) async {
+    try {
+      print('🔍 Fetching conversation with ID: $conversationId');
+
+      // First, try to get it as a DM conversation
+      final conversationsRepo = ConversationsRepository();
+      print('   Checking DM conversations...');
+      final conversation = await conversationsRepo.getConversationById(
+        conversationId,
+      );
+
+      if (conversation != null) {
+        print('✅ Found DM conversation: ${conversation.userName}');
+        _navigateToDM(conversation);
+        return;
+      }
+
+      print('   Not found in DM conversations, checking groups...');
+
+      // If not found as DM, try to get it as a group
+      final groupsRepo = GroupsRepository();
+      final group = await groupsRepo.getGroupById(conversationId);
+
+      if (group != null) {
+        print('✅ Found group conversation: ${group.title}');
+        _navigateToGroup(group);
+        return;
+      }
+
+      // If not found in local DB
+      print(
+        '⚠️ Conversation $conversationId not found in local DB (neither DM nor Group)',
+      );
+      print(
+        '   This might be a new conversation. The app will sync it on next refresh.',
+      );
+    } catch (e) {
+      print('❌ Error fetching conversation: $e');
+      print('   Stack trace: ${StackTrace.current}');
+    }
+  }
+
+  /// Navigate to DM conversation
+  void _navigateToDM(ConversationModel conversation) {
+    print('🎯 Navigating to DM conversation: ${conversation.userName}');
+
+    if (NavigationHelper.navigatorKey.currentContext != null) {
+      print('   Navigator context is available');
+      material.Navigator.of(NavigationHelper.navigatorKey.currentContext!).push(
+        material.MaterialPageRoute(
+          builder: (_) => InnerChatPage(conversation: conversation),
+        ),
+      );
+      print('✅ Navigation to DM completed');
+    } else {
+      print('❌ Navigator context is null, cannot navigate');
+    }
+  }
+
+  /// Navigate to group conversation
+  void _navigateToGroup(GroupModel group) {
+    print('🎯 Navigating to group conversation: ${group.title}');
+
+    if (NavigationHelper.navigatorKey.currentContext != null) {
+      print('   Navigator context is available');
+      material.Navigator.of(NavigationHelper.navigatorKey.currentContext!).push(
+        material.MaterialPageRoute(
+          builder: (_) => InnerGroupChatPage(group: group),
+        ),
+      );
+      print('✅ Navigation to group completed');
+    } else {
+      print('❌ Navigator context is null, cannot navigate');
+    }
   }
 
   /// Initialize sharing intent listeners

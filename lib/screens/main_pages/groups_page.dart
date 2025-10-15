@@ -67,6 +67,14 @@ class _GroupsPageState extends State<GroupsPage> {
         setState(() {
           _allGroups = localGroups;
           _allCommunities = localCommunities;
+
+          // Sort groups by last message time (most recent first)
+          _allGroups.sort((a, b) {
+            final aTime = a.lastMessageAt ?? a.joinedAt;
+            final bTime = b.lastMessageAt ?? b.joinedAt;
+            return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
+          });
+
           _isLoaded = true;
           _onSearchChanged();
         });
@@ -244,6 +252,13 @@ class _GroupsPageState extends State<GroupsPage> {
           // Persist to local DB
           _groupsRepo.insertOrUpdateGroup(updatedGroup);
 
+          // Sort groups by last message time (most recent first)
+          _allGroups.sort((a, b) {
+            final aTime = a.lastMessageAt ?? a.joinedAt;
+            final bTime = b.lastMessageAt ?? b.joinedAt;
+            return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
+          });
+
           // Update filtered items
           _onSearchChanged();
         });
@@ -390,6 +405,14 @@ class _GroupsPageState extends State<GroupsPage> {
           _allCommunities = communities.isNotEmpty
               ? communities
               : localCommunities;
+
+          // Sort groups by last message time (most recent first)
+          _allGroups.sort((a, b) {
+            final aTime = a.lastMessageAt ?? a.joinedAt;
+            final bTime = b.lastMessageAt ?? b.joinedAt;
+            return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
+          });
+
           _filteredItems = [..._allGroups, ..._allCommunities];
           _isLoaded = true;
         });
@@ -408,6 +431,14 @@ class _GroupsPageState extends State<GroupsPage> {
         setState(() {
           _allGroups = localGroups;
           _allCommunities = localCommunities;
+
+          // Sort groups by last message time (most recent first)
+          _allGroups.sort((a, b) {
+            final aTime = a.lastMessageAt ?? a.joinedAt;
+            final bTime = b.lastMessageAt ?? b.joinedAt;
+            return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
+          });
+
           _filteredItems = [...localGroups, ...localCommunities];
           _isLoaded = true;
         });
@@ -726,12 +757,20 @@ class _GroupsPageState extends State<GroupsPage> {
                 _setActiveConversation(item.conversationId);
 
                 // Navigate to inner group chat page
-                await Navigator.push(
+                final result = await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) => InnerGroupChatPage(group: item),
                   ),
                 );
+
+                // Check if group was deleted
+                if (result is Map && result['action'] == 'deleted') {
+                  debugPrint('🗑️ Group was deleted, refreshing list...');
+                  // Refresh the groups list
+                  _refreshData();
+                  return;
+                }
 
                 // Clear unread count again when returning from inner chat
                 // This ensures the count is cleared even if it was updated while in the chat
@@ -878,7 +917,7 @@ class GroupListItem extends StatelessWidget {
                       style: TextStyle(
                         fontWeight: hasUnreadMessages
                             ? FontWeight.bold
-                            : FontWeight.normal,
+                            : FontWeight.bold,
                         fontSize: 16,
                       ),
                       maxLines: 1,

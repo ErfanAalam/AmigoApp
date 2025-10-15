@@ -117,7 +117,9 @@ class _ProfilePageState extends State<ProfilePage> {
       final response = await _userService.getUser();
       if (response['success'] && mounted) {
         final remote = response['data'] as Map<String, dynamic>;
+        debugPrint('remote: $remote');
         final userModel = UserModel.fromJson(remote);
+        debugPrint('userModel: $userModel');
 
         // save remote to local DB (no need to mark needs_sync)
         await _userRepo.insertOrUpdateUser(userModel, markNeedsSync: false);
@@ -853,7 +855,7 @@ class _ProfilePageState extends State<ProfilePage> {
                           icon: Icons.info_outline,
                           label: 'App Version',
                           value: appVersion.isNotEmpty
-                              ? 'v$appVersion (Build $buildNumber)'
+                              ? 'v$appVersion'
                               : 'Loading...',
                           valueColor: Colors.grey[700],
                         ),

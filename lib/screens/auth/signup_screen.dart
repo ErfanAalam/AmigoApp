@@ -95,10 +95,10 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
     try {
       // Initialize notification service if not already done
       await notificationService.initialize();
-      
+
       // Get the FCM token
       final fcmToken = notificationService.fcmToken;
-      
+
       if (fcmToken != null && fcmToken.isNotEmpty) {
         print('🔑 Sending FCM token to backend: $fcmToken');
         await apiService.updateFCMToken(fcmToken);
@@ -132,7 +132,9 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
       return;
     }
 
-    final response = await apiService.generateSignupOtp(_completePhoneNumber.replaceAll(' ', ''));
+    final response = await apiService.generateSignupOtp(
+      _completePhoneNumber.replaceAll(' ', ''),
+    );
 
     if (response['success']) {
       setState(() {
@@ -549,6 +551,10 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
                                                 material.TextInputType.phone,
                                             textInputAction:
                                                 material.TextInputAction.done,
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter
+                                                  .digitsOnly,
+                                            ],
                                             onChanged: (value) =>
                                                 _updateCompletePhoneNumber(),
                                             style: material.TextStyle(
@@ -614,6 +620,9 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
                                       textAlign: material.TextAlign.center,
                                       textInputAction:
                                           material.TextInputAction.done,
+                                      inputFormatters: [
+                                        FilteringTextInputFormatter.digitsOnly,
+                                      ],
                                       style: material.TextStyle(
                                         fontSize: 18,
                                         fontWeight: material.FontWeight.w600,
