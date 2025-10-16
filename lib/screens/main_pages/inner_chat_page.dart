@@ -7,6 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 import '../../models/conversation_model.dart';
 import '../../models/message_model.dart';
 import '../../models/user_model.dart';
@@ -97,6 +98,9 @@ class _InnerChatPageState extends State<InnerChatPage>
   // Highlighted message state (for scroll-to effect)
   int? _highlightedMessageId;
   Timer? _highlightTimer;
+
+  // GlobalKey map for message widgets to enable precise scrolling
+  final Map<int, GlobalKey> _messageKeys = {};
 
   // Sticky date separator state - using ValueNotifier to avoid setState during scroll
   final ValueNotifier<String?> _currentStickyDate = ValueNotifier<String?>(
@@ -986,6 +990,9 @@ class _InnerChatPageState extends State<InnerChatPage>
     } catch (e) {
       print('Warning: Error closing audio player during dispose: $e');
     }
+
+    // Clear message keys to prevent memory leaks
+    _messageKeys.clear();
 
     super.dispose();
   }
@@ -1961,24 +1968,57 @@ class _InnerChatPageState extends State<InnerChatPage>
         (msg) => msg.id == optimisticId,
       );
       if (uiMessageIndex != -1) {
+        // For media messages, preserve the local path to avoid re-downloading
+        final currentMessage = _messages[uiMessageIndex];
+        MessageModel finalMessage = updatedMessage;
+        
+        // If this is a media message and we have a local path, preserve it
+        if (_isMediaMessage(currentMessage)) {
+          final currentAttachments = currentMessage.attachments;
+          final localPath = currentAttachments?['local_path'] as String?;
+          final currentLocalMediaPath = currentMessage.localMediaPath;
+          
+          if (localPath != null && updatedMessage.attachments != null) {
+            final updatedAttachments = Map<String, dynamic>.from(updatedMessage.attachments!);
+            updatedAttachments['local_path'] = localPath;
+            
+            // Create new MessageModel with preserved local path
+            finalMessage = MessageModel(
+              id: updatedMessage.id,
+              body: updatedMessage.body,
+              type: updatedMessage.type,
+              senderId: updatedMessage.senderId,
+              conversationId: updatedMessage.conversationId,
+              createdAt: updatedMessage.createdAt,
+              editedAt: updatedMessage.editedAt,
+              metadata: updatedMessage.metadata,
+              attachments: updatedAttachments,
+              deleted: updatedMessage.deleted,
+              senderName: updatedMessage.senderName,
+              senderProfilePic: updatedMessage.senderProfilePic,
+              replyToMessage: updatedMessage.replyToMessage,
+              replyToMessageId: updatedMessage.replyToMessageId,
+              isDelivered: updatedMessage.isDelivered,
+              localMediaPath: currentLocalMediaPath ?? localPath,
+            );
+            
+            debugPrint('🔄 Preserved local path for media message: $localPath');
+          } else if (currentLocalMediaPath != null) {
+            // If we don't have local_path in attachments but have localMediaPath, preserve it
+            finalMessage = updatedMessage.copyWith(
+              localMediaPath: currentLocalMediaPath,
+            );
+            
+            debugPrint('🔄 Preserved localMediaPath for media message: $currentLocalMediaPath');
+          }
+        }
+        
         setState(() {
-          _messages[uiMessageIndex] = updatedMessage;
+          _messages[uiMessageIndex] = finalMessage;
         });
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print("optimisticId ----> ${optimisticId}");
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print(
-          "--------------------------------------------------------------------------------",
-        );
+        
         debugPrint(
-          '✅ Updated message ID from $optimisticId to ${updatedMessage.id} in UI',
+          '✅ Updated message ID from $optimisticId to ${finalMessage.id} in UI',
         );
       }
     }
@@ -2428,23 +2468,128 @@ class _InnerChatPageState extends State<InnerChatPage>
   }
 
   /// Scroll to a specific message
-  void _scrollToMessage(int messageId) {
-    // Find the index of the message in the list
-    final messageIndex = _messages.indexWhere((msg) => msg.id == messageId);
-    if (messageIndex != -1 && _scrollController.hasClients) {
-      // Calculate the scroll position (since we're using reverse: true)
-      final targetPosition =
-          (_messages.length - 1 - messageIndex) *
-          75.0; // Approximate height per message
+  Future<void> _scrollToMessage(int messageId, {int retryCount = 0}) async {
+    // Prevent infinite loops
+    const maxRetries = 3;
+    if (retryCount >= maxRetries) {
+      debugPrint('❌ Max retry attempts reached for message $messageId');
+      return;
+    }
 
-      _scrollController.animateTo(
-        targetPosition,
-        duration: const Duration(milliseconds: 500),
-        curve: Curves.easeInOut,
+    debugPrint(
+      '🎯 Attempting to scroll to message: $messageId (retry: $retryCount)',
+    );
+
+    // Check if the message exists in the current loaded messages
+    final messageIndex = _messages.indexWhere((msg) => msg.id == messageId);
+
+    if (messageIndex == -1) {
+      debugPrint('⚠️ Message $messageId not in current loaded messages');
+
+      // Message not loaded yet - we need to load more messages
+      // Keep loading until we find the message or run out of messages
+      bool messageFound = false;
+      int attempts = 0;
+      const maxAttempts = 20; // Prevent infinite loops
+
+      while (!messageFound && _hasMoreMessages && attempts < maxAttempts) {
+        debugPrint(
+          '📥 Loading more messages to find message $messageId (attempt ${attempts + 1})',
+        );
+
+        // Load more messages
+        await _loadMoreMessages();
+
+        // Check if we found the message
+        messageFound = _messages.any((msg) => msg.id == messageId);
+        attempts++;
+
+        // Small delay to allow UI to update
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+
+      if (!messageFound) {
+        debugPrint(
+          '❌ Could not find message $messageId after loading all available messages',
+        );
+
+        // Show a user-friendly message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Message not found'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+        return;
+      }
+
+      debugPrint('✅ Found message $messageId after loading more messages');
+
+      // Update messageIndex after loading
+      final updatedIndex = _messages.indexWhere((msg) => msg.id == messageId);
+      if (updatedIndex == -1) return;
+    }
+
+    // Now the message should be in our list
+    if (!mounted) return;
+
+    // Ensure we have a key for this message
+    if (!_messageKeys.containsKey(messageId)) {
+      _messageKeys[messageId] = GlobalKey();
+    }
+
+    // PHASE 1: Scroll approximately to the message area so it gets built
+    final updatedMessageIndex = _messages.indexWhere(
+      (msg) => msg.id == messageId,
+    );
+    if (updatedMessageIndex != -1 && _scrollController.hasClients) {
+      // Calculate approximate position (reverse list)
+      final approximatePosition =
+          (_messages.length - 1 - updatedMessageIndex) * 100.0;
+
+      // Only scroll if the message is not near the current viewport
+      final currentPosition = _scrollController.position.pixels;
+      final viewportHeight = _scrollController.position.viewportDimension;
+
+      // If message is likely off-screen, scroll approximately to it first
+      if ((approximatePosition - currentPosition).abs() > viewportHeight / 2) {
+        debugPrint('📍 Phase 1: Scrolling approximately to message area');
+
+        try {
+          await _scrollController.animateTo(
+            approximatePosition,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+
+          // Wait for widgets to build
+          await Future.delayed(const Duration(milliseconds: 100));
+        } catch (e) {
+          debugPrint('⚠️ Error in approximate scroll: $e');
+        }
+      }
+    }
+
+    // PHASE 2: Use GlobalKey for precise scrolling
+    final messageKey = _messageKeys[messageId];
+    if (messageKey?.currentContext != null) {
+      debugPrint(
+        '📍 Phase 2: Scrolling precisely using Scrollable.ensureVisible',
       );
 
-      // Highlight the message after scrolling
-      Future.delayed(const Duration(milliseconds: 500), () {
+      try {
+        // Use Scrollable.ensureVisible for precise scrolling
+        await Scrollable.ensureVisible(
+          messageKey!.currentContext!,
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeInOut,
+          alignment: 0.5, // Center the message in the viewport
+        );
+
+        // Highlight the message after scrolling
         if (mounted) {
           setState(() {
             _highlightedMessageId = messageId;
@@ -2454,7 +2599,7 @@ class _InnerChatPageState extends State<InnerChatPage>
           _highlightTimer?.cancel();
 
           // Remove highlight after 2 seconds
-          _highlightTimer = Timer(const Duration(milliseconds: 1000), () {
+          _highlightTimer = Timer(const Duration(milliseconds: 2000), () {
             if (mounted) {
               setState(() {
                 _highlightedMessageId = null;
@@ -2462,7 +2607,43 @@ class _InnerChatPageState extends State<InnerChatPage>
             }
           });
         }
-      });
+
+        debugPrint('✅ Successfully scrolled to message $messageId');
+      } catch (e) {
+        debugPrint('❌ Error in precise scroll: $e');
+      }
+    } else {
+      debugPrint('⚠️ Message key context not found, will retry after rebuild');
+
+      // Only retry if we haven't exceeded max retries
+      if (retryCount < maxRetries - 1 && mounted) {
+        // Force a rebuild and wait a bit longer
+        setState(() {});
+
+        // Try again after a longer delay
+        await Future.delayed(const Duration(milliseconds: 300));
+        _scrollToMessage(messageId, retryCount: retryCount + 1);
+      } else {
+        debugPrint(
+          '⚠️ Could not scroll to message precisely, staying at approximate position',
+        );
+
+        // Still highlight the message even if we can't scroll precisely
+        if (mounted) {
+          setState(() {
+            _highlightedMessageId = messageId;
+          });
+
+          _highlightTimer?.cancel();
+          _highlightTimer = Timer(const Duration(milliseconds: 2000), () {
+            if (mounted) {
+              setState(() {
+                _highlightedMessageId = null;
+              });
+            }
+          });
+        }
+      }
     }
   }
 
@@ -2967,7 +3148,16 @@ class _InnerChatPageState extends State<InnerChatPage>
               ? message.senderId == _currentUserId
               : message.senderId != widget.conversation.userId;
 
-          return _buildMessageWithActions(message, isMyMessage);
+          // Ensure we have a GlobalKey for this message for precise scrolling
+          if (!_messageKeys.containsKey(message.id)) {
+            _messageKeys[message.id] = GlobalKey();
+          }
+
+          // Wrap the message with a container that has a key for scrolling
+          return Container(
+            key: _messageKeys[message.id],
+            child: _buildMessageWithActions(message, isMyMessage),
+          );
         },
       ),
     );
@@ -3005,7 +3195,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                 ),
                 decoration: BoxDecoration(
                   color: Colors.teal[600],
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(100),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.teal.withOpacity(0.3),
@@ -3276,13 +3466,18 @@ class _InnerChatPageState extends State<InnerChatPage>
                   right: isMyMessage ? 8 : 40,
                 ),
                 padding: isHighlighted
-                    ? const EdgeInsets.all(4)
+                    ? const EdgeInsets.all(10)
                     : EdgeInsets.zero,
                 decoration: BoxDecoration(
                   color: isHighlighted
-                      ? Colors.amber.withOpacity(0.3)
+                      ? Colors.blue.withAlpha(100)
                       : Colors.transparent,
-                  borderRadius: BorderRadius.circular(24),
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(24),
+                    topRight: const Radius.circular(24),
+                    bottomLeft: Radius.circular(isMyMessage ? 24 : 0),
+                    bottomRight: Radius.circular(isMyMessage ? 0 : 24),
+                  ),
                 ),
                 child: Stack(
                   children: [
@@ -3320,22 +3515,24 @@ class _InnerChatPageState extends State<InnerChatPage>
                             ],
                           )
                         : Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 6,
+                            padding: const EdgeInsets.only(
+                              top: 5,
+                              bottom: 2,
+                              left: 10,
+                              right: 10,
                             ),
                             decoration: BoxDecoration(
                               color: isMyMessage
                                   ? Colors.teal[600]
                                   : Colors.grey[100],
                               borderRadius: BorderRadius.only(
-                                topLeft: const Radius.circular(20),
-                                topRight: const Radius.circular(20),
+                                topLeft: const Radius.circular(14),
+                                topRight: const Radius.circular(14),
                                 bottomLeft: Radius.circular(
-                                  isMyMessage ? 20 : 4,
+                                  isMyMessage ? 14 : 0,
                                 ),
                                 bottomRight: Radius.circular(
-                                  isMyMessage ? 4 : 20,
+                                  isMyMessage ? 0 : 14,
                                 ),
                               ),
                               boxShadow: [
@@ -3360,7 +3557,9 @@ class _InnerChatPageState extends State<InnerChatPage>
 
                                   // Message content (text, image, or video)
                                   _buildMessageContent(message, isMyMessage),
-                                  const SizedBox(height: 6),
+
+                                  // gap between content and time
+                                  const SizedBox(height: 1),
                                   // Time and status row - aligned to right
                                   Align(
                                     alignment: Alignment.centerRight,
@@ -3383,7 +3582,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                                             color: isMyMessage
                                                 ? Colors.white70
                                                 : Colors.grey[600],
-                                            fontSize: 12,
+                                            fontSize: 11,
                                             fontWeight: FontWeight.w400,
                                           ),
                                         ),
@@ -3459,6 +3658,7 @@ class _InnerChatPageState extends State<InnerChatPage>
     return GestureDetector(
       onTap: () => _scrollToMessage(replyMessage.id),
       child: Container(
+        width: double.infinity,
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
@@ -3469,7 +3669,7 @@ class _InnerChatPageState extends State<InnerChatPage>
           border: Border(
             left: BorderSide(
               color: isMyMessage ? Colors.white : Colors.teal,
-              width: 3,
+              width: 1,
             ),
           ),
         ),
@@ -3605,17 +3805,21 @@ class _InnerChatPageState extends State<InnerChatPage>
     }
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
       child: Container(
         width: 200,
         decoration: BoxDecoration(
           color: Colors.white,
-          // borderRadius: BorderRadius.circular(4),
           border: Border.all(
             color: isMyMessage
                 ? const Color(0xFF008080)
                 : const Color(0xFF008080),
-            width: 6,
+            width: 4,
+          ),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(14),
+            topRight: const Radius.circular(14),
+            bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+            bottomRight: Radius.circular(isMyMessage ? 0 : 14),
           ),
         ),
         child: Stack(
@@ -3624,14 +3828,22 @@ class _InnerChatPageState extends State<InnerChatPage>
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                GestureDetector(
-                  onTap: () => _openImagePreview(imageUrl, message.body),
-                  child: Hero(
-                    tag: imageUrl,
-                    child: _buildCachedImage(
-                      imageUrl,
-                      message.localMediaPath,
-                      message.id,
+                ClipRRect(
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(10),
+                    topRight: const Radius.circular(10),
+                    bottomLeft: Radius.circular(isMyMessage ? 10 : 0),
+                    bottomRight: Radius.circular(isMyMessage ? 0 : 10),
+                  ),
+                  child: GestureDetector(
+                    onTap: () => _openImagePreview(imageUrl, message.body),
+                    child: Hero(
+                      tag: imageUrl,
+                      child: _buildCachedImage(
+                        imageUrl,
+                        message.localMediaPath,
+                        message.id,
+                      ),
                     ),
                   ),
                 ),
@@ -3663,7 +3875,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.6),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -3695,7 +3907,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                   ),
                   decoration: BoxDecoration(
                     color: Colors.black.withOpacity(0.6),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -3772,7 +3984,12 @@ class _InnerChatPageState extends State<InnerChatPage>
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: isMyMessage ? Colors.teal : Colors.white,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(14),
+                topRight: const Radius.circular(14),
+                bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+                bottomRight: Radius.circular(isMyMessage ? 0 : 14),
+              ),
               border: Border.all(
                 color: isMyMessage ? Colors.teal : Colors.grey[300]!,
                 width: 1,
@@ -3812,7 +4029,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                       ),
                       decoration: BoxDecoration(
                         color: Colors.black.withAlpha(60),
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(14),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -3941,7 +4158,12 @@ class _InnerChatPageState extends State<InnerChatPage>
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: isMyMessage ? Colors.teal : Colors.grey[100],
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(14),
+                  topRight: const Radius.circular(14),
+                  bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+                  bottomRight: Radius.circular(isMyMessage ? 0 : 14),
+                ),
               ),
               child: Row(
                 children: [
@@ -3958,7 +4180,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                             : (isMyMessage
                                   ? Colors.white.withAlpha(20)
                                   : Colors.grey[200]),
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius: BorderRadius.circular(100),
                         boxShadow: isPlaying
                             ? [
                                 BoxShadow(
@@ -4047,6 +4269,12 @@ class _InnerChatPageState extends State<InnerChatPage>
                                 fontSize: 12,
                               ),
                             ),
+
+                            // Show delivery/read status ticks for own messages
+                            if (isMyMessage) ...[
+                              const SizedBox(width: 4),
+                              _buildMessageStatusTicks(message),
+                            ],
                           ],
                         ),
                       ],
@@ -4125,7 +4353,6 @@ class _InnerChatPageState extends State<InnerChatPage>
     }
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
       child: Container(
         width: 200,
         decoration: BoxDecoration(
@@ -4134,9 +4361,14 @@ class _InnerChatPageState extends State<InnerChatPage>
             color: isMyMessage
                 ? const Color(0xFF008080)
                 : const Color(0xFF008080),
-            width: 6,
+            width: 4,
           ),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(14),
+            topRight: const Radius.circular(14),
+            bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+            bottomRight: Radius.circular(isMyMessage ? 0 : 14),
+          ),
         ),
         child: Stack(
           children: [
@@ -4150,15 +4382,55 @@ class _InnerChatPageState extends State<InnerChatPage>
                     message.body,
                     videoData['file_name'] as String?,
                   ),
-                  child: Container(
-                    width: 220,
-                    height: 220,
-                    color: Colors.black87,
-                    child: Center(
-                      child: Icon(
-                        Icons.play_circle_filled,
-                        size: 50,
-                        color: Colors.white,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(10),
+                      topRight: const Radius.circular(10),
+                      bottomLeft: Radius.circular(isMyMessage ? 10 : 0),
+                      bottomRight: Radius.circular(isMyMessage ? 0 : 10),
+                    ),
+                    child: Container(
+                      width: 220,
+                      height: 220,
+                      color: Colors.black87,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          // Video thumbnail
+                          FutureBuilder<String?>(
+                            future: _generateVideoThumbnail(videoUrl),
+                            builder: (context, snapshot) {
+                              if (snapshot.connectionState ==
+                                      ConnectionState.done &&
+                                  snapshot.hasData &&
+                                  snapshot.data != null) {
+                                return Image.file(
+                                  File(snapshot.data!),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Container(color: Colors.black87);
+                                  },
+                                );
+                              }
+                              return Container(color: Colors.black87);
+                            },
+                          ),
+                          // Play button overlay
+                          Center(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withAlpha(100),
+                                shape: BoxShape.circle,
+                              ),
+                              padding: const EdgeInsets.all(8),
+                              child: Icon(
+                                Icons.play_circle_filled,
+                                size: 50,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -4191,7 +4463,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: Colors.black.withAlpha(60),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -4223,7 +4495,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                   ),
                   decoration: BoxDecoration(
                     color: Colors.black.withAlpha(60),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -4238,6 +4510,22 @@ class _InnerChatPageState extends State<InnerChatPage>
         ),
       ),
     );
+  }
+
+  Future<String?> _generateVideoThumbnail(String videoUrl) async {
+    try {
+      final thumbnailPath = await VideoThumbnail.thumbnailFile(
+        video: videoUrl,
+        thumbnailPath: (await getTemporaryDirectory()).path,
+        imageFormat: ImageFormat.PNG,
+        maxWidth: 220,
+        quality: 75,
+      );
+      return thumbnailPath;
+    } catch (e) {
+      print('Error generating video thumbnail: $e');
+      return null;
+    }
   }
 
   Widget _buildMinimalLoader() {
@@ -4811,14 +5099,14 @@ class _InnerChatPageState extends State<InnerChatPage>
   // Helper methods for file attachments
 
   bool _isMediaMessage(MessageModel message) {
-    if (message.attachments != null) {
-      final attachmentData = message.attachments as Map<String, dynamic>;
-      final category = attachmentData['category'] as String?;
-      return category?.toLowerCase() == 'images' ||
-          category?.toLowerCase() == 'videos' ||
-          category?.toLowerCase() == 'docs' ||
-          category?.toLowerCase() == 'audios';
-    }
+    // if (message.attachments != null) {
+    //   final attachmentData = message.attachments as Map<String, dynamic>;
+    //   final category = attachmentData['category'] as String?;
+    //   return category?.toLowerCase() == 'images' ||
+    //       category?.toLowerCase() == 'videos' ||
+    //       category?.toLowerCase() == 'docs' ||
+    //       category?.toLowerCase() == 'audios';
+    // }
     return message.type == 'image' ||
         message.type == 'video' ||
         message.type == 'attachment' ||
@@ -6044,7 +6332,7 @@ class _InnerChatPageState extends State<InnerChatPage>
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(14),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -6997,7 +7285,6 @@ class _InnerChatPageState extends State<InnerChatPage>
     final localPath = attachmentData['local_path'] as String?;
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
       child: Container(
         width: 200,
         decoration: BoxDecoration(
@@ -7006,8 +7293,9 @@ class _InnerChatPageState extends State<InnerChatPage>
             color: isMyMessage
                 ? const Color(0xFF008080)
                 : const Color(0xFF008080),
-            width: 6,
+            width: 4,
           ),
+          borderRadius: BorderRadius.circular(14),
         ),
         child: Stack(
           children: [
@@ -7015,9 +7303,17 @@ class _InnerChatPageState extends State<InnerChatPage>
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 200,
-                  height: 200,
+                ClipRRect(
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(10),
+                    topRight: Radius.circular(10),
+                    bottomLeft: message.body.isNotEmpty
+                        ? Radius.zero
+                        : Radius.circular(10),
+                    bottomRight: message.body.isNotEmpty
+                        ? Radius.zero
+                        : Radius.circular(10),
+                  ),
                   child: localPath != null
                       ? Image.file(
                           File(localPath),
@@ -7026,6 +7322,8 @@ class _InnerChatPageState extends State<InnerChatPage>
                           fit: BoxFit.cover,
                         )
                       : Container(
+                          width: 200,
+                          height: 200,
                           color: Colors.grey[200],
                           child: Icon(
                             Icons.image,
@@ -7034,6 +7332,24 @@ class _InnerChatPageState extends State<InnerChatPage>
                           ),
                         ),
                 ),
+                if (message.body.isNotEmpty)
+                  Container(
+                    width: 200,
+                    padding: const EdgeInsets.only(
+                      bottom: 20.0,
+                      left: 8.0,
+                      right: 8.0,
+                      top: 4.0,
+                    ),
+                    child: Text(
+                      message.body,
+                      style: TextStyle(
+                        color: Colors.black87,
+                        fontSize: 14,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
               ],
             ),
             // Loading overlay
@@ -7041,32 +7357,23 @@ class _InnerChatPageState extends State<InnerChatPage>
               child: Container(
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.5),
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(10),
+                    topRight: Radius.circular(10),
+                    bottomLeft: message.body.isNotEmpty
+                        ? Radius.zero
+                        : Radius.circular(10),
+                    bottomRight: message.body.isNotEmpty
+                        ? Radius.zero
+                        : Radius.circular(10),
+                  ),
                 ),
                 child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      SizedBox(
-                        width: 30,
-                        height: 30,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 3,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Uploading...',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      Colors.white,
+                    ),
                   ),
                 ),
               ),
@@ -7078,6 +7385,8 @@ class _InnerChatPageState extends State<InnerChatPage>
   }
 
   Widget _buildVideoLoadingMessage(MessageModel message, bool isMyMessage) {
+    final attachmentData = message.attachments as Map<String, dynamic>;
+    final localPath = attachmentData['local_path'] as String?;
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: Container(
@@ -7088,30 +7397,92 @@ class _InnerChatPageState extends State<InnerChatPage>
             color: isMyMessage
                 ? const Color(0xFF008080)
                 : const Color(0xFF008080),
-            width: 6,
+            width: 4,
           ),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
         ),
         child: Stack(
           children: [
-            Container(
-              width: 220,
-              height: 220,
-              color: Colors.black87,
-              child: Center(
-                child: Icon(
-                  Icons.play_circle_filled,
-                  size: 50,
-                  color: Colors.white.withOpacity(0.7),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(10),
+                    topRight: const Radius.circular(10),
+                    bottomLeft: Radius.circular(isMyMessage ? 10 : 0),
+                    bottomRight: Radius.circular(isMyMessage ? 0 : 10),
+                  ),
+                  child: localPath != null
+                      ? FutureBuilder<String?>(
+                          future: _generateVideoThumbnail(localPath),
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState ==
+                                    ConnectionState.done &&
+                                snapshot.hasData &&
+                                snapshot.data != null) {
+                              return Image.file(
+                                File(snapshot.data!),
+                                width: 200,
+                                height: 200,
+                                fit: BoxFit.cover,
+                              );
+                            }
+                            return Container(
+                              width: 200,
+                              height: 200,
+                              color: Colors.grey[800],
+                              child: Icon(
+                                Icons.videocam,
+                                size: 50,
+                                color: Colors.grey[400],
+                              ),
+                            );
+                          },
+                        )
+                      : Container(
+                          width: 200,
+                          height: 200,
+                          color: Colors.grey[200],
+                          child: Icon(
+                            Icons.videocam,
+                            size: 50,
+                            color: Colors.grey[400],
+                          ),
+                        ),
                 ),
-              ),
+                if (message.body.isNotEmpty)
+                  Container(
+                    width: 200,
+                    padding: const EdgeInsets.only(
+                      bottom: 20.0,
+                      left: 8.0,
+                      right: 8.0,
+                      top: 4.0,
+                    ),
+                    child: Text(
+                      message.body,
+                      style: TextStyle(
+                        color: Colors.black87,
+                        fontSize: 14,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+              ],
             ),
             // Loading overlay
             Positioned.fill(
               child: Container(
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.7),
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(10),
+                    topRight: const Radius.circular(10),
+                    bottomLeft: Radius.circular(isMyMessage ? 10 : 0),
+                    bottomRight: Radius.circular(isMyMessage ? 0 : 10),
+                  ),
                 ),
                 child: Center(
                   child: Column(
