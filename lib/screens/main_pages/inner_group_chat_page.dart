@@ -2217,8 +2217,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           _showStickyDate = true;
         });
 
-        _animateNewMessage(newMediaMessage.id);
-        _scrollToBottom();
+        // _animateNewMessage(newMediaMessage.id);
+        // _scrollToBottom();
       }
 
       // Store message asynchronously in local storage
@@ -2379,9 +2379,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       debugPrint('✅ Group message sent successfully via WebSocket');
     } catch (e) {
       debugPrint('❌ Error sending group message: $e');
-
+      _retryMessage(optimisticMessage.id);
       // Handle send failure - mark message as failed
-      _handleMessageSendFailure(optimisticMessage.id, e.toString());
+      // _handleMessageSendFailure(optimisticMessage.id, e.toString());
     }
   }
 
