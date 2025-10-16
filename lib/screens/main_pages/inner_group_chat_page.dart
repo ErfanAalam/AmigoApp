@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 import '../../models/group_model.dart';
 import '../../models/message_model.dart';
 import '../../models/conversation_model.dart';
@@ -246,6 +247,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   // Audio animation controllers
   final Map<String, AnimationController> _audioAnimationControllers = {};
   final Map<String, Animation<double>> _audioAnimations = {};
+
+  // Video thumbnail cache
+  final Map<String, String?> _videoThumbnailCache = {};
+  final Map<String, Future<String?>> _videoThumbnailFutures = {};
 
   @override
   void initState() {
@@ -3281,13 +3286,18 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                   right: isMyMessage ? 8 : 40,
                 ),
                 padding: isHighlighted
-                    ? const EdgeInsets.all(4)
+                    ? const EdgeInsets.all(10)
                     : EdgeInsets.zero,
                 decoration: BoxDecoration(
                   color: isHighlighted
-                      ? Colors.amber.withOpacity(0.3)
+                      ? Colors.blue.withAlpha(100)
                       : Colors.transparent,
-                  borderRadius: BorderRadius.circular(24),
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(24),
+                    topRight: const Radius.circular(24),
+                    bottomLeft: Radius.circular(isMyMessage ? 24 : 0),
+                    bottomRight: Radius.circular(isMyMessage ? 0 : 24),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: isMyMessage
@@ -3353,13 +3363,13 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                                   ? Colors.teal[600]
                                   : Colors.grey[100],
                               borderRadius: BorderRadius.only(
-                                topLeft: const Radius.circular(20),
-                                topRight: const Radius.circular(20),
+                                topLeft: const Radius.circular(14),
+                                topRight: const Radius.circular(14),
                                 bottomLeft: Radius.circular(
-                                  isMyMessage ? 20 : 4,
+                                  isMyMessage ? 14 : 0,
                                 ),
                                 bottomRight: Radius.circular(
-                                  isMyMessage ? 4 : 20,
+                                  isMyMessage ? 0 : 14,
                                 ),
                               ),
                               boxShadow: [
@@ -3463,7 +3473,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           border: Border(
             left: BorderSide(
               color: isMyMessage ? Colors.white : Colors.teal,
-              width: 3,
+              width: 1,
             ),
           ),
         ),
@@ -3573,14 +3583,14 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   }
 
   bool _isMediaMessage(MessageModel message) {
-    if (message.attachments != null) {
-      final attachmentData = message.attachments as Map<String, dynamic>;
-      final category = attachmentData['category'] as String?;
-      return category?.toLowerCase() == 'images' ||
-          category?.toLowerCase() == 'videos' ||
-          category?.toLowerCase() == 'docs' ||
-          category?.toLowerCase() == 'audios';
-    }
+    // if (message.attachments != null) {
+    //   final attachmentData = message.attachments as Map<String, dynamic>;
+    //   final category = attachmentData['category'] as String?;
+    //   return category?.toLowerCase() == 'images' ||
+    //       category?.toLowerCase() == 'videos' ||
+    //       category?.toLowerCase() == 'docs' ||
+    //       category?.toLowerCase() == 'audios';
+    // }
     return message.type == 'image' ||
         message.type == 'video' ||
         message.type == 'attachment' ||
@@ -3782,6 +3792,94 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         ),
       ),
     );
+  }
+
+  /// Build video thumbnail widget with caching to prevent rebuilds
+  Widget _buildVideoThumbnail(String videoUrl) {
+    // Check if we already have the thumbnail cached
+    if (_videoThumbnailCache.containsKey(videoUrl)) {
+      final thumbnailPath = _videoThumbnailCache[videoUrl];
+      if (thumbnailPath != null && File(thumbnailPath).existsSync()) {
+        return Image.file(
+          File(thumbnailPath),
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return Container(color: Colors.black87);
+          },
+        );
+      } else {
+        // Cached but path is null or file doesn't exist
+        return Container(color: Colors.black87);
+      }
+    }
+
+    // Thumbnail not yet generated - trigger generation and show loading
+    // Use a post-frame callback to avoid calling setState during build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_videoThumbnailCache.containsKey(videoUrl) &&
+          !_videoThumbnailFutures.containsKey(videoUrl)) {
+        _generateVideoThumbnail(videoUrl).then((_) {
+          if (mounted) {
+            setState(() {}); // Rebuild to show the thumbnail
+          }
+        });
+      }
+    });
+
+    // Show loading state
+    return Container(
+      color: Colors.black87,
+      child: Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
+          strokeWidth: 2,
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _generateVideoThumbnail(String videoUrl) async {
+    // Check if thumbnail is already cached
+    if (_videoThumbnailCache.containsKey(videoUrl)) {
+      return _videoThumbnailCache[videoUrl];
+    }
+
+    // Check if thumbnail is currently being generated
+    if (_videoThumbnailFutures.containsKey(videoUrl)) {
+      return await _videoThumbnailFutures[videoUrl];
+    }
+
+    // Generate new thumbnail
+    final future = _performThumbnailGeneration(videoUrl);
+    _videoThumbnailFutures[videoUrl] = future;
+
+    try {
+      final thumbnailPath = await future;
+      _videoThumbnailCache[videoUrl] = thumbnailPath;
+      _videoThumbnailFutures.remove(videoUrl);
+      return thumbnailPath;
+    } catch (e) {
+      _videoThumbnailFutures.remove(videoUrl);
+      _videoThumbnailCache[videoUrl] = null;
+      return null;
+    }
+  }
+
+  Future<String?> _performThumbnailGeneration(String videoUrl) async {
+    try {
+      final thumbnailPath = await VideoThumbnail.thumbnailFile(
+        video: videoUrl,
+        thumbnailPath: (await getTemporaryDirectory()).path,
+        imageFormat: ImageFormat.PNG,
+        maxWidth: 220,
+        quality: 75,
+      );
+      debugPrint('✅ Generated video thumbnail: $thumbnailPath');
+      return thumbnailPath;
+    } catch (e) {
+      debugPrint('❌ Error generating video thumbnail: $e');
+      return null;
+    }
   }
 
   Widget _buildMinimalLoader() {
@@ -4796,26 +4894,21 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     }
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
       child: Container(
         width: 200,
         decoration: BoxDecoration(
           color: Colors.white,
           border: Border.all(
             color: isMyMessage
-                ? const Color.from(
-                    alpha: 1,
-                    red: 0.255,
-                    green: 0.667,
-                    blue: 0.576,
-                  )
-                : const Color.from(
-                    alpha: 1,
-                    red: 0.255,
-                    green: 0.667,
-                    blue: 0.576,
-                  ),
-            width: 6,
+                ? const Color(0xFF008080)
+                : const Color(0xFF008080),
+            width: 4,
+          ),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(14),
+            topRight: const Radius.circular(14),
+            bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+            bottomRight: Radius.circular(isMyMessage ? 0 : 14),
           ),
         ),
         child: Stack(
@@ -4824,14 +4917,22 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                GestureDetector(
-                  onTap: () => _openImagePreview(imageUrl, message.body),
-                  child: Hero(
-                    tag: imageUrl,
-                    child: _buildCachedImage(
-                      imageUrl,
-                      message.localMediaPath,
-                      message.id,
+                ClipRRect(
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(10),
+                    topRight: const Radius.circular(10),
+                    bottomLeft: Radius.circular(isMyMessage ? 10 : 0),
+                    bottomRight: Radius.circular(isMyMessage ? 0 : 10),
+                  ),
+                  child: GestureDetector(
+                    onTap: () => _openImagePreview(imageUrl, message.body),
+                    child: Hero(
+                      tag: imageUrl,
+                      child: _buildCachedImage(
+                        imageUrl,
+                        message.localMediaPath,
+                        message.id,
+                      ),
                     ),
                   ),
                 ),
@@ -4843,10 +4944,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                       left: 8.0,
                       right: 8.0,
                       top: 4.0,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
                       message.body,
@@ -4867,7 +4964,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.6),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -4882,12 +4979,34 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                     ),
                     // if (isMyMessage) ...[
                     //   const SizedBox(width: 4),
-                    //   Icon(Icons.done_all, size: 14, color: Colors.white),
+                    //   _buildMessageStatusTicks(message),
                     // ],
                   ],
                 ),
               ),
             ),
+            if (_starredMessages.contains(message.id))
+              Positioned(
+                bottom: 4,
+                left: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.6),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // const SizedBox(width: 4),
+                      Icon(Icons.star, size: 14, color: Colors.yellow),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -4921,16 +5040,22 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     }
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
       child: Container(
         width: 200,
         decoration: BoxDecoration(
           color: Colors.white,
           border: Border.all(
-            color: isMyMessage ? Colors.teal : Colors.teal,
-            width: 6,
+            color: isMyMessage
+                ? const Color(0xFF008080)
+                : const Color(0xFF008080),
+            width: 4,
           ),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(14),
+            topRight: const Radius.circular(14),
+            bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+            bottomRight: Radius.circular(isMyMessage ? 0 : 14),
+          ),
         ),
         child: Stack(
           children: [
@@ -4944,15 +5069,38 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                     message.body,
                     videoData['file_name'] as String?,
                   ),
-                  child: Container(
-                    width: 220,
-                    height: 220,
-                    color: Colors.black87,
-                    child: Center(
-                      child: Icon(
-                        Icons.play_circle_filled,
-                        size: 50,
-                        color: Colors.white,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(10),
+                      topRight: const Radius.circular(10),
+                      bottomLeft: Radius.circular(isMyMessage ? 10 : 0),
+                      bottomRight: Radius.circular(isMyMessage ? 0 : 10),
+                    ),
+                    child: Container(
+                      width: 220,
+                      height: 220,
+                      color: Colors.black87,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          // Video thumbnail - use cached version
+                          _buildVideoThumbnail(videoUrl),
+                          // Play button overlay
+                          Center(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withAlpha(100),
+                                shape: BoxShape.circle,
+                              ),
+                              padding: const EdgeInsets.all(8),
+                              child: Icon(
+                                Icons.play_circle_filled,
+                                size: 50,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -4985,7 +5133,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: Colors.black.withAlpha(60),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -5000,12 +5148,34 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                     ),
                     // if (isMyMessage) ...[
                     //   const SizedBox(width: 4),
-                    //   Icon(Icons.done_all, size: 14, color: Colors.white),
+                    //   _buildMessageStatusTicks(message),
                     // ],
                   ],
                 ),
               ),
             ),
+            if (_starredMessages.contains(message.id))
+              Positioned(
+                bottom: 4,
+                left: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 2,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withAlpha(60),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // const SizedBox(width: 4),
+                      Icon(Icons.star, size: 14, color: Colors.yellow),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -5072,7 +5242,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: isMyMessage ? Colors.teal : Colors.white,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(14),
+                topRight: const Radius.circular(14),
+                bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+                bottomRight: Radius.circular(isMyMessage ? 0 : 14),
+              ),
               border: Border.all(
                 color: isMyMessage ? Colors.teal : Colors.grey[300]!,
                 width: 1,
@@ -5101,6 +5276,28 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                     color: isMyMessage ? Colors.white : Colors.teal[700],
                   ),
                 ),
+                if (_starredMessages.contains(message.id))
+                  Positioned(
+                    bottom: 4,
+                    left: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 2,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withAlpha(60),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // const SizedBox(width: 4),
+                          Icon(Icons.star, size: 14, color: Colors.yellow),
+                        ],
+                      ),
+                    ),
+                  ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -5171,8 +5368,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     }
 
     final audioData = message.attachments as Map<String, dynamic>;
-    // Check both 'audio_url' (from server) and 'url' (fallback) for audio files
-    final audioUrl = (audioData['audio_url'] ?? audioData['url']) as String?;
+    final audioUrl = audioData['url'] as String?;
     final fileSize = audioData['file_size'] as int?;
 
     if (audioUrl == null || audioUrl.isEmpty) {
@@ -5220,7 +5416,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: isMyMessage ? Colors.teal : Colors.grey[100],
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(14),
+                  topRight: const Radius.circular(14),
+                  bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+                  bottomRight: Radius.circular(isMyMessage ? 0 : 14),
+                ),
               ),
               child: Row(
                 children: [
@@ -5237,7 +5438,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                             : (isMyMessage
                                   ? Colors.white.withAlpha(20)
                                   : Colors.grey[200]),
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius: BorderRadius.circular(100),
                         boxShadow: isPlaying
                             ? [
                                 BoxShadow(
@@ -5305,6 +5506,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                         Row(
                           children: [
                             const SizedBox(width: 8),
+                            if (_starredMessages.contains(message.id))
+                              Icon(Icons.star, size: 14, color: Colors.yellow),
                             Text(
                               _formatDuration(isPlaying ? position : duration),
                               style: TextStyle(
@@ -5324,6 +5527,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                                 fontSize: 12,
                               ),
                             ),
+
+                            // Show delivery/read status ticks for own messages
+                            // if (isMyMessage) ...[
+                            //   const SizedBox(width: 4),
+                            //   _buildMessageStatusTicks(message),
+                            // ],
                           ],
                         ),
                       ],
@@ -6399,17 +6608,11 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         _scrollToBottom();
       }
 
-      print('📤 Sending group voice note: ${voiceFile.path}');
-
       try {
         final response = await _chatsServices.sendMediaMessage(voiceFile);
-        print('📤 Group voice note response: $response');
 
         if (response['success'] == true && response['data'] != null) {
           final mediaData = response['data'];
-          print(
-            '✅ Group voice note uploaded successfully: ${mediaData['url']}',
-          );
 
           // Update the loading message with actual data
           final voiceMessage = MessageModel(
@@ -6509,16 +6712,21 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     final localPath = attachmentData['local_path'] as String?;
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
       child: Container(
         width: 200,
         decoration: BoxDecoration(
           color: Colors.white,
           border: Border.all(
             color: isMyMessage
-                ? const Color.fromARGB(255, 65, 170, 147)
-                : const Color.fromARGB(255, 65, 170, 147),
-            width: 6,
+                ? const Color(0xFF008080)
+                : const Color(0xFF008080),
+            width: 4,
+          ),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(14),
+            topRight: const Radius.circular(14),
+            bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+            bottomRight: Radius.circular(isMyMessage ? 0 : 14),
           ),
         ),
         child: Stack(
@@ -6527,9 +6735,17 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 200,
-                  height: 200,
+                ClipRRect(
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(10),
+                    topRight: Radius.circular(10),
+                    bottomLeft: message.body.isNotEmpty
+                        ? Radius.zero
+                        : Radius.circular(10),
+                    bottomRight: message.body.isNotEmpty
+                        ? Radius.zero
+                        : Radius.circular(10),
+                  ),
                   child: localPath != null
                       ? Image.file(
                           File(localPath),
@@ -6538,6 +6754,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                           fit: BoxFit.cover,
                         )
                       : Container(
+                          width: 200,
+                          height: 200,
                           color: Colors.grey[200],
                           child: Icon(
                             Icons.image,
@@ -6546,6 +6764,24 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                           ),
                         ),
                 ),
+                if (message.body.isNotEmpty)
+                  Container(
+                    width: 200,
+                    padding: const EdgeInsets.only(
+                      bottom: 20.0,
+                      left: 8.0,
+                      right: 8.0,
+                      top: 4.0,
+                    ),
+                    child: Text(
+                      message.body,
+                      style: TextStyle(
+                        color: Colors.black87,
+                        fontSize: 14,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
               ],
             ),
             // Loading overlay
@@ -6553,32 +6789,17 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               child: Container(
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.5),
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(10),
+                    topRight: const Radius.circular(10),
+                    bottomLeft: Radius.circular(isMyMessage ? 10 : 0),
+                    bottomRight: Radius.circular(isMyMessage ? 0 : 10),
+                  ),
                 ),
                 child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      SizedBox(
-                        width: 30,
-                        height: 30,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 3,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Uploading...',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                   ),
                 ),
               ),
@@ -6590,40 +6811,87 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   }
 
   Widget _buildVideoLoadingMessage(MessageModel message, bool isMyMessage) {
+    final attachmentData = message.attachments as Map<String, dynamic>;
+    final localPath = attachmentData['local_path'] as String?;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
       child: Container(
         width: 200,
         decoration: BoxDecoration(
           color: Colors.white,
           border: Border.all(
             color: isMyMessage
-                ? const Color.fromARGB(255, 65, 170, 147)
-                : const Color.fromARGB(255, 65, 170, 147),
-            width: 6,
+                ? const Color(0xFF008080)
+                : const Color(0xFF008080),
+            width: 4,
           ),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(14),
+            topRight: const Radius.circular(14),
+            bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+            bottomRight: Radius.circular(isMyMessage ? 0 : 14),
+          ),
         ),
         child: Stack(
           children: [
-            Container(
-              width: 220,
-              height: 220,
-              color: Colors.black87,
-              child: Center(
-                child: Icon(
-                  Icons.play_circle_filled,
-                  size: 50,
-                  color: Colors.white.withOpacity(0.7),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(10),
+                    topRight: const Radius.circular(10),
+                    bottomLeft: Radius.circular(isMyMessage ? 10 : 0),
+                    bottomRight: Radius.circular(isMyMessage ? 0 : 10),
+                  ),
+                  child: localPath != null
+                      ? Container(
+                          width: 200,
+                          height: 200,
+                          child: _buildVideoThumbnail(localPath),
+                        )
+                      : Container(
+                          width: 200,
+                          height: 200,
+                          color: Colors.grey[200],
+                          child: Icon(
+                            Icons.videocam,
+                            size: 50,
+                            color: Colors.grey[400],
+                          ),
+                        ),
                 ),
-              ),
+                if (message.body.isNotEmpty)
+                  Container(
+                    width: 200,
+                    padding: const EdgeInsets.only(
+                      bottom: 20.0,
+                      left: 8.0,
+                      right: 8.0,
+                      top: 4.0,
+                    ),
+                    child: Text(
+                      message.body,
+                      style: TextStyle(
+                        color: Colors.black87,
+                        fontSize: 14,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+              ],
             ),
             // Loading overlay
             Positioned.fill(
               child: Container(
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.7),
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(10),
+                    topRight: const Radius.circular(10),
+                    bottomLeft: Radius.circular(isMyMessage ? 10 : 0),
+                    bottomRight: Radius.circular(isMyMessage ? 0 : 10),
+                  ),
                 ),
                 child: Center(
                   child: Column(
@@ -6687,7 +6955,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: isMyMessage ? Colors.teal : Colors.white,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(14),
+              topRight: const Radius.circular(14),
+              bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+              bottomRight: Radius.circular(isMyMessage ? 0 : 14),
+            ),
             border: Border.all(
               color: isMyMessage ? Colors.teal : Colors.grey[300]!,
               width: 1,
@@ -6772,7 +7045,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: isMyMessage ? Colors.teal : Colors.grey[100],
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(14),
+              topRight: const Radius.circular(14),
+              bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+              bottomRight: Radius.circular(isMyMessage ? 0 : 14),
+            ),
           ),
           child: Row(
             children: [

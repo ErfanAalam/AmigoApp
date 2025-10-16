@@ -165,6 +165,10 @@ class _InnerChatPageState extends State<InnerChatPage>
   final Map<String, AnimationController> _audioAnimationControllers = {};
   final Map<String, Animation<double>> _audioAnimations = {};
 
+  // Video thumbnail cache
+  final Map<String, String?> _videoThumbnailCache = {};
+  final Map<String, Future<String?>> _videoThumbnailFutures = {};
+
   @override
   void initState() {
     super.initState();
@@ -1328,18 +1332,6 @@ class _InnerChatPageState extends State<InnerChatPage>
   void _handleIncomingWebSocketMessage(Map<String, dynamic> message) {
     try {
       print('🔍 WebSocket message: $message');
-      print(
-        '-------------------------------------------------------------------------',
-      );
-      print(
-        '-------------------------------------------------------------------------',
-      );
-      print(
-        '-------------------------------------------------------------------------',
-      );
-      print(
-        '-------------------------------------------------------------------------',
-      );
 
       // Check if this is a message for our conversation
       final messageConversationId =
@@ -1701,13 +1693,6 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   /// Handle read receipt from WebSocket (for active/inactive conversation status)
   void _handleReadReceipt(Map<String, dynamic> messageData) async {
-    print(
-      "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
-    );
-    print("_handleReadReceipt called with data: $messageData");
-    print(
-      "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
-    );
     try {
       final data = messageData['data'] as Map<String, dynamic>? ?? {};
       final userId = data['user_id'];
@@ -1971,17 +1956,19 @@ class _InnerChatPageState extends State<InnerChatPage>
         // For media messages, preserve the local path to avoid re-downloading
         final currentMessage = _messages[uiMessageIndex];
         MessageModel finalMessage = updatedMessage;
-        
+
         // If this is a media message and we have a local path, preserve it
         if (_isMediaMessage(currentMessage)) {
           final currentAttachments = currentMessage.attachments;
           final localPath = currentAttachments?['local_path'] as String?;
           final currentLocalMediaPath = currentMessage.localMediaPath;
-          
+
           if (localPath != null && updatedMessage.attachments != null) {
-            final updatedAttachments = Map<String, dynamic>.from(updatedMessage.attachments!);
+            final updatedAttachments = Map<String, dynamic>.from(
+              updatedMessage.attachments!,
+            );
             updatedAttachments['local_path'] = localPath;
-            
+
             // Create new MessageModel with preserved local path
             finalMessage = MessageModel(
               id: updatedMessage.id,
@@ -2001,22 +1988,24 @@ class _InnerChatPageState extends State<InnerChatPage>
               isDelivered: updatedMessage.isDelivered,
               localMediaPath: currentLocalMediaPath ?? localPath,
             );
-            
+
             debugPrint('🔄 Preserved local path for media message: $localPath');
           } else if (currentLocalMediaPath != null) {
             // If we don't have local_path in attachments but have localMediaPath, preserve it
             finalMessage = updatedMessage.copyWith(
               localMediaPath: currentLocalMediaPath,
             );
-            
-            debugPrint('🔄 Preserved localMediaPath for media message: $currentLocalMediaPath');
+
+            debugPrint(
+              '🔄 Preserved localMediaPath for media message: $currentLocalMediaPath',
+            );
           }
         }
-        
+
         setState(() {
           _messages[uiMessageIndex] = finalMessage;
         });
-        
+
         debugPrint(
           '✅ Updated message ID from $optimisticId to ${finalMessage.id} in UI',
         );
@@ -4396,25 +4385,8 @@ class _InnerChatPageState extends State<InnerChatPage>
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          // Video thumbnail
-                          FutureBuilder<String?>(
-                            future: _generateVideoThumbnail(videoUrl),
-                            builder: (context, snapshot) {
-                              if (snapshot.connectionState ==
-                                      ConnectionState.done &&
-                                  snapshot.hasData &&
-                                  snapshot.data != null) {
-                                return Image.file(
-                                  File(snapshot.data!),
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return Container(color: Colors.black87);
-                                  },
-                                );
-                              }
-                              return Container(color: Colors.black87);
-                            },
-                          ),
+                          // Video thumbnail - use cached version
+                          _buildVideoThumbnail(videoUrl),
                           // Play button overlay
                           Center(
                             child: Container(
@@ -4512,7 +4484,78 @@ class _InnerChatPageState extends State<InnerChatPage>
     );
   }
 
+  /// Build video thumbnail widget with caching to prevent rebuilds
+  Widget _buildVideoThumbnail(String videoUrl) {
+    // Check if we already have the thumbnail cached
+    if (_videoThumbnailCache.containsKey(videoUrl)) {
+      final thumbnailPath = _videoThumbnailCache[videoUrl];
+      if (thumbnailPath != null && File(thumbnailPath).existsSync()) {
+        return Image.file(
+          File(thumbnailPath),
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return Container(color: Colors.black87);
+          },
+        );
+      } else {
+        // Cached but path is null or file doesn't exist
+        return Container(color: Colors.black87);
+      }
+    }
+
+    // Thumbnail not yet generated - trigger generation and show loading
+    // Use a post-frame callback to avoid calling setState during build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_videoThumbnailCache.containsKey(videoUrl) &&
+          !_videoThumbnailFutures.containsKey(videoUrl)) {
+        _generateVideoThumbnail(videoUrl).then((_) {
+          if (mounted) {
+            setState(() {}); // Rebuild to show the thumbnail
+          }
+        });
+      }
+    });
+
+    // Show loading state
+    return Container(
+      color: Colors.black87,
+      child: Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
+          strokeWidth: 2,
+        ),
+      ),
+    );
+  }
+
   Future<String?> _generateVideoThumbnail(String videoUrl) async {
+    // Check if thumbnail is already cached
+    if (_videoThumbnailCache.containsKey(videoUrl)) {
+      return _videoThumbnailCache[videoUrl];
+    }
+
+    // Check if thumbnail is currently being generated
+    if (_videoThumbnailFutures.containsKey(videoUrl)) {
+      return await _videoThumbnailFutures[videoUrl];
+    }
+
+    // Generate new thumbnail
+    final future = _performThumbnailGeneration(videoUrl);
+    _videoThumbnailFutures[videoUrl] = future;
+
+    try {
+      final thumbnailPath = await future;
+      _videoThumbnailCache[videoUrl] = thumbnailPath;
+      _videoThumbnailFutures.remove(videoUrl);
+      return thumbnailPath;
+    } catch (e) {
+      _videoThumbnailFutures.remove(videoUrl);
+      _videoThumbnailCache[videoUrl] = null;
+      return null;
+    }
+  }
+
+  Future<String?> _performThumbnailGeneration(String videoUrl) async {
     try {
       final thumbnailPath = await VideoThumbnail.thumbnailFile(
         video: videoUrl,
@@ -4521,9 +4564,10 @@ class _InnerChatPageState extends State<InnerChatPage>
         maxWidth: 220,
         quality: 75,
       );
+      debugPrint('✅ Generated video thumbnail: $thumbnailPath');
       return thumbnailPath;
     } catch (e) {
-      print('Error generating video thumbnail: $e');
+      debugPrint('❌ Error generating video thumbnail: $e');
       return null;
     }
   }
@@ -5111,7 +5155,7 @@ class _InnerChatPageState extends State<InnerChatPage>
         message.type == 'video' ||
         message.type == 'attachment' ||
         message.type == 'docs' ||
-        message.type == 'audios' ||
+        message.type == 'audio' ||
         message.type == 'image_loading' ||
         message.type == 'video_loading' ||
         message.type == 'document_loading' ||
@@ -6926,6 +6970,9 @@ class _InnerChatPageState extends State<InnerChatPage>
       if (_recorder.isRecording) {
         final path = await _recorder.stopRecorder();
         _recordingPath = path; // overwrite with final file
+        setState(() {
+          _isRecording = false;
+        });
       }
 
       setState(() {
@@ -7097,7 +7144,6 @@ class _InnerChatPageState extends State<InnerChatPage>
     try {
       // Ensure audio player is initialized
       if (_audioPlayer.isStopped) {
-        print('🔧 Audio player not initialized, initializing now...');
         await _initializeAudioPlayer();
       }
 
@@ -7119,7 +7165,6 @@ class _InnerChatPageState extends State<InnerChatPage>
           _currentPlayingAudioKey = null;
           // Keep the current position when paused
         });
-        print('🔇 Stopped audio playback for: $audioKey');
       } else {
         // Stop any currently playing audio
         _stopAudioProgressTimer();
@@ -7170,12 +7215,10 @@ class _InnerChatPageState extends State<InnerChatPage>
         }
 
         // Start new playback
-        print('🎬 Starting audio player with: $playbackUrl');
         await _audioPlayer.startPlayer(
           fromURI: playbackUrl,
           whenFinished: () {
             if (mounted) {
-              print('🏁 Audio finished callback triggered');
               // Stop animation
               final controller = _audioAnimationControllers[audioKey];
               controller?.stop();
@@ -7190,16 +7233,12 @@ class _InnerChatPageState extends State<InnerChatPage>
                 _audioPositions[audioKey] = duration;
                 _currentPlayingAudioKey = null;
               });
-              print('🔇 Audio playback finished for: $audioKey');
             }
           },
         );
 
         // Verify player is actually playing
         await Future.delayed(const Duration(milliseconds: 100));
-        print(
-          '🎵 Player state after start: isPlaying=${_audioPlayer.isPlaying}, isStopped=${_audioPlayer.isStopped}',
-        );
 
         // Start progress timer as fallback
         _startAudioProgressTimer(audioKey);
@@ -7207,17 +7246,13 @@ class _InnerChatPageState extends State<InnerChatPage>
         print('🔊 Started audio playback for: $audioKey');
       }
     } catch (e) {
-      print('❌ Error toggling audio playback: $e');
       if (e.toString().contains('has not been initialized')) {
-        print('❌ Audio player not initialized, trying to initialize...');
         try {
           await _audioPlayer.openPlayer();
-          print('✅ Audio player initialized successfully, try playing again');
           _showErrorDialog(
             'Audio player was not ready. Please try playing again.',
           );
         } catch (initError) {
-          print('❌ Failed to initialize audio player: $initError');
           _showErrorDialog(
             'Failed to initialize audio player. Please restart the app.',
           );
@@ -7295,7 +7330,12 @@ class _InnerChatPageState extends State<InnerChatPage>
                 : const Color(0xFF008080),
             width: 4,
           ),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(14),
+            topRight: const Radius.circular(14),
+            bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+            bottomRight: Radius.circular(isMyMessage ? 0 : 14),
+          ),
         ),
         child: Stack(
           children: [
@@ -7358,22 +7398,16 @@ class _InnerChatPageState extends State<InnerChatPage>
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.5),
                   borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(10),
-                    topRight: Radius.circular(10),
-                    bottomLeft: message.body.isNotEmpty
-                        ? Radius.zero
-                        : Radius.circular(10),
-                    bottomRight: message.body.isNotEmpty
-                        ? Radius.zero
-                        : Radius.circular(10),
+                    topLeft: const Radius.circular(10),
+                    topRight: const Radius.circular(10),
+                    bottomLeft: Radius.circular(isMyMessage ? 10 : 0),
+                    bottomRight: Radius.circular(isMyMessage ? 0 : 10),
                   ),
                 ),
                 child: Center(
                   child: CircularProgressIndicator(
                     strokeWidth: 3,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      Colors.white,
-                    ),
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                   ),
                 ),
               ),
@@ -7388,7 +7422,6 @@ class _InnerChatPageState extends State<InnerChatPage>
     final attachmentData = message.attachments as Map<String, dynamic>;
     final localPath = attachmentData['local_path'] as String?;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
       child: Container(
         width: 200,
         decoration: BoxDecoration(
@@ -7399,7 +7432,12 @@ class _InnerChatPageState extends State<InnerChatPage>
                 : const Color(0xFF008080),
             width: 4,
           ),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(14),
+            topRight: const Radius.circular(14),
+            bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+            bottomRight: Radius.circular(isMyMessage ? 0 : 14),
+          ),
         ),
         child: Stack(
           children: [
@@ -7546,7 +7584,12 @@ class _InnerChatPageState extends State<InnerChatPage>
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: isMyMessage ? Colors.teal : Colors.white,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(14),
+              topRight: const Radius.circular(14),
+              bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+              bottomRight: Radius.circular(isMyMessage ? 0 : 14),
+            ),
             border: Border.all(
               color: isMyMessage ? Colors.teal : Colors.grey[300]!,
               width: 1,
@@ -7631,7 +7674,12 @@ class _InnerChatPageState extends State<InnerChatPage>
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: isMyMessage ? Colors.teal : Colors.grey[100],
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(14),
+              topRight: const Radius.circular(14),
+              bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
+              bottomRight: Radius.circular(isMyMessage ? 0 : 14),
+            ),
           ),
           child: Row(
             children: [
@@ -8023,9 +8071,10 @@ class _VoiceRecordingModalState extends State<_VoiceRecordingModal> {
                                     snapshot.data ?? Duration.zero;
                                 return Text(
                                   widget.isRecording
-                                      ? 'Recording ${_formatDuration(currentDuration)}'
+                                      ? 'Still Recording ${_formatDuration(currentDuration)}'
                                       : _formatDuration(currentDuration),
                                   style: TextStyle(
+                                    backgroundColor: Colors.red,
                                     fontSize: 20,
                                     fontWeight: FontWeight.w600,
                                     color: widget.isRecording
