@@ -312,7 +312,6 @@ class ApiService {
   }
 
   Future send_login_otp(String phone_number) async {
-    print('this is the phone number: $phone_number');
     try {
       Response response = await _dio.post(
         "${Environment.baseUrl}/auth/generate-login-otp/$phone_number",

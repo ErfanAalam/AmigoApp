@@ -9,6 +9,7 @@ import 'chat_preferences_service.dart';
 import 'notification_service.dart';
 import 'contact_service.dart';
 import 'user_status_service.dart';
+import 'last_message_storage_service.dart';
 import 'package:amigo/api/user.service.dart' as userService;
 import 'package:amigo/utils/navigation_helper.dart';
 import 'package:flutter/material.dart';
@@ -140,23 +141,28 @@ class AuthService {
       final contactService = ContactService();
       contactService.clearCache();
 
-      // 12. Clear local database
+      // 12. Clear last message storage
+      print('💬 Clearing last message storage...');
+      final lastMessageStorage = LastMessageStorageService.instance;
+      await lastMessageStorage.clearAllLastMessages();
+
+      // 13. Clear local database
       print('🗄️ Clearing local database...');
       final databaseHelper = DatabaseHelper.instance;
       await databaseHelper.clearAllData();
       await databaseHelper.resetInstance();
 
-      // 13. Clear app cache directories
+      // 14. Clear app cache directories
       print('🗂️ Clearing app cache directories...');
       await _clearAppCacheDirectories();
 
-      // 14. Clear temporary files
+      // 15. Clear temporary files
       print('🗑️ Clearing temporary files...');
       await _clearTemporaryFiles();
 
       print('✅ Comprehensive logout completed successfully');
 
-      // 15. Restart the app
+      // 16. Restart the app
       print('🔄 Restarting app...');
       if (NavigationHelper.navigatorKey.currentContext != null) {
         Navigator.pushAndRemoveUntil(

@@ -5,6 +5,7 @@ import '../../api/user.service.dart';
 import '../../services/websocket_service.dart';
 import '../../services/user_status_service.dart';
 import '../../services/chat_preferences_service.dart';
+import '../../services/last_message_storage_service.dart';
 import '../../widgets/chat_action_menu.dart';
 import '../../repositories/conversations_repository.dart';
 import '../../api/chats.services.dart';
@@ -25,6 +26,8 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   final ChatPreferencesService _chatPreferencesService =
       ChatPreferencesService();
   final ConversationsRepository _conversationsRepo = ConversationsRepository();
+  final LastMessageStorageService _lastMessageStorage =
+      LastMessageStorageService.instance;
   late Future<List<ConversationModel>> _conversationsFuture;
   final ChatsServices _chatsServices = ChatsServices();
   // Search functionality
@@ -70,8 +73,14 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
     try {
       final localConversations = await _conversationsRepo.getAllConversations();
       if (localConversations.isNotEmpty && mounted) {
+        // Load last messages from storage and update conversations
+        final updatedConversations =
+            await _updateConversationsWithStoredLastMessages(
+              localConversations,
+            );
+
         setState(() {
-          _conversations = localConversations;
+          _conversations = updatedConversations;
           _isLoaded = true;
           _filterConversations();
         });
@@ -111,6 +120,57 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   /// Clear search query
   void _clearSearch() {
     _searchController.clear();
+  }
+
+  /// Update conversations with stored last messages
+  Future<List<ConversationModel>> _updateConversationsWithStoredLastMessages(
+    List<ConversationModel> conversations,
+  ) async {
+    try {
+      final storedLastMessages = await _lastMessageStorage.getAllLastMessages();
+      final updatedConversations = <ConversationModel>[];
+
+      for (final conversation in conversations) {
+        final storedMessage = storedLastMessages[conversation.conversationId];
+
+        if (storedMessage != null) {
+          // Create LastMessage from stored data
+          final lastMessage = LastMessage(
+            id: storedMessage['id'] ?? 0,
+            body: storedMessage['body'] ?? '',
+            type: storedMessage['type'] ?? 'text',
+            senderId: storedMessage['sender_id'] ?? 0,
+            createdAt:
+                storedMessage['created_at'] ?? DateTime.now().toIso8601String(),
+            conversationId: conversation.conversationId,
+          );
+
+          // Create updated metadata with stored last message
+          final updatedMetadata = ConversationMetadata(
+            lastMessage: lastMessage,
+            pinnedMessage: conversation.metadata?.pinnedMessage,
+          );
+
+          // Create updated conversation
+          final updatedConversation = conversation.copyWith(
+            metadata: updatedMetadata,
+            lastMessageAt: lastMessage.createdAt,
+          );
+
+          updatedConversations.add(updatedConversation);
+        } else {
+          // No stored last message, use original conversation
+          updatedConversations.add(conversation);
+        }
+      }
+
+      return updatedConversations;
+    } catch (e) {
+      debugPrint(
+        '❌ Error updating conversations with stored last messages: $e',
+      );
+      return conversations; // Return original conversations on error
+    }
   }
 
   /// Load chat preferences from local storage
@@ -329,20 +389,26 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
             conversations,
           );
 
+          // Update with stored last messages
+          final updatedConversations =
+              await _updateConversationsWithStoredLastMessages(
+                filteredConversations,
+              );
+
           // Persist to local DB
           await _conversationsRepo.insertOrUpdateConversations(
-            filteredConversations,
+            updatedConversations,
           );
 
           // Update the state for real-time updates
           if (mounted) {
             setState(() {
-              _conversations = filteredConversations;
+              _conversations = updatedConversations;
               _isLoaded = true;
               _filterConversations(); // Update filtered conversations
             });
           }
-          return filteredConversations;
+          return updatedConversations;
         } else {
           // No conversations found - return empty list instead of throwing exception
           debugPrint('ℹ️ No conversations found, returning empty list');
@@ -580,7 +646,9 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   }
 
   /// Handle incoming WebSocket messages for typing events
-  void _handleIncomingWebSocketMessage(Map<String, dynamic> message) {
+  Future<void> _handleIncomingWebSocketMessage(
+    Map<String, dynamic> message,
+  ) async {
     try {
       debugPrint('📨 ChatsPage received WebSocket message: $message');
 
@@ -593,9 +661,9 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
       } else if (messageType == 'user_offline') {
         _handleUserOfflineMessage(message);
       } else if (messageType == 'message_delivery_receipt') {
-        _handleMessageDeliveryReceipt(message);
+        await _handleMessageDeliveryReceipt(message);
       } else if (messageType == 'message' || messageType == 'media') {
-        _handleNewMessage(message);
+        await _handleNewMessage(message);
       }
     } catch (e) {
       debugPrint('❌ Error handling WebSocket message in ChatsPage: $e');
@@ -613,7 +681,9 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   }
 
   /// Handle message delivery receipt to update last message and unread count
-  void _handleMessageDeliveryReceipt(Map<String, dynamic> message) {
+  Future<void> _handleMessageDeliveryReceipt(
+    Map<String, dynamic> message,
+  ) async {
     try {
       debugPrint('📨 ChatsPage handling message_delivery_receipt: $message');
 
@@ -639,45 +709,56 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
       }
 
       if (mounted && _isLoaded) {
-        setState(() {
-          final conversation = _conversations[conversationIndex];
-          // Update the last message if provided
-          ConversationMetadata? updatedMetadata = conversation.metadata;
-          if (messageData.isNotEmpty) {
-            // Extract message details with proper handling for media messages
-            String messageBody = messageData['body'] ?? '';
-            String messageTypeValue = messageData['type'] ?? 'text';
-            int senderId = messageData['sender_id'] ?? 0;
-            int messageId = messageData['id'] ?? 0;
-            String createdAt =
-                messageData['created_at'] ?? DateTime.now().toIso8601String();
+        final conversation = _conversations[conversationIndex];
+        // Update the last message if provided
+        ConversationMetadata? updatedMetadata = conversation.metadata;
+        if (messageData.isNotEmpty) {
+          // Extract message details with proper handling for media messages
+          String messageBody = messageData['body'] ?? '';
+          String messageTypeValue = messageData['type'] ?? 'text';
+          int senderId = messageData['sender_id'] ?? 0;
+          int messageId = messageData['id'] ?? 0;
+          String createdAt =
+              messageData['created_at'] ?? DateTime.now().toIso8601String();
 
-            // If body is empty and it's a media message, extract from nested data
-            if (messageBody.isEmpty && messageData['data'] != null) {
-              final nestedData = messageData['data'] as Map<String, dynamic>;
-              messageBody =
-                  nestedData['message_type'] ?? nestedData['file_name'] ?? '';
-              messageTypeValue = nestedData['message_type'] ?? messageTypeValue;
-              senderId = nestedData['user_id'] ?? senderId;
-              messageId = nestedData['media_message_id'] ?? messageId;
-              createdAt = nestedData['created_at'] ?? createdAt;
-            }
-
-            final lastMessage = LastMessage(
-              id: messageId,
-              body: messageBody,
-              type: messageTypeValue,
-              senderId: senderId,
-              createdAt: createdAt,
-              conversationId: conversationId,
-            );
-            // Preserve pinnedMessage from existing metadata
-            updatedMetadata = ConversationMetadata(
-              lastMessage: lastMessage,
-              pinnedMessage: conversation.metadata?.pinnedMessage,
-            );
+          // If body is empty and it's a media message, extract from nested data
+          if (messageBody.isEmpty && messageData['data'] != null) {
+            final nestedData = messageData['data'] as Map<String, dynamic>;
+            messageBody =
+                nestedData['message_type'] ?? nestedData['file_name'] ?? '';
+            messageTypeValue = nestedData['message_type'] ?? messageTypeValue;
+            senderId = nestedData['user_id'] ?? senderId;
+            messageId = nestedData['media_message_id'] ?? messageId;
+            createdAt = nestedData['created_at'] ?? createdAt;
           }
 
+          final lastMessage = LastMessage(
+            id: messageId,
+            body: messageBody,
+            type: messageTypeValue,
+            senderId: senderId,
+            createdAt: createdAt,
+            conversationId: conversationId,
+          );
+
+          // Store the last message in local storage
+          await _lastMessageStorage.storeLastMessage(conversationId, {
+            'id': messageId,
+            'body': messageBody,
+            'type': messageTypeValue,
+            'sender_id': senderId,
+            'created_at': createdAt,
+            'conversation_id': conversationId,
+          });
+
+          // Preserve pinnedMessage from existing metadata
+          updatedMetadata = ConversationMetadata(
+            lastMessage: lastMessage,
+            pinnedMessage: conversation.metadata?.pinnedMessage,
+          );
+        }
+
+        setState(() {
           // Update unread count (only increment if not the active conversation)
           final providedUnreadCount = data['unread_count'] as int?;
           final newUnreadCount =
@@ -735,7 +816,7 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   }
 
   /// Handle new message to update last message and unread count
-  void _handleNewMessage(Map<String, dynamic> message) {
+  Future<void> _handleNewMessage(Map<String, dynamic> message) async {
     try {
       debugPrint('📨 ChatsPage handling new message: $message');
 
@@ -774,50 +855,60 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
       // {id: 532, optimistic_id: -2, conversation_id: 3904105585, sender_id: 7300437892, type: text, body: hrhfh, created_at: 2025-09-23T11:35:26.561Z}
 
       if (mounted && _isLoaded) {
+        final conversation = _conversations[conversationIndex];
+
+        // Extract message details with proper handling for media messages
+        String messageBody = data['body'] ?? '';
+        String messageTypeValue = data['type'] ?? messageType ?? 'text';
+        int senderId = data['sender_id'] ?? 0;
+        int messageId = data['id'] ?? 0;
+        String createdAt =
+            data['created_at'] ??
+            message['timestamp'] ??
+            DateTime.now().toIso8601String();
+
+        // If body is empty and it's a media message, extract from nested data
+        if (messageBody.isEmpty && data['data'] != null) {
+          final nestedData = data['data'] as Map<String, dynamic>;
+          messageBody =
+              nestedData['message_type'] ?? nestedData['file_name'] ?? '';
+          messageTypeValue =
+              nestedData['message_type'] ?? messageType ?? 'media';
+          senderId = nestedData['user_id'] ?? senderId;
+          messageId =
+              nestedData['media_message_id'] ??
+              data['media_message_id'] ??
+              messageId;
+          createdAt = nestedData['created_at'] ?? createdAt;
+        }
+
+        // Create new last message from the message data
+        final lastMessage = LastMessage(
+          id: messageId,
+          body: messageBody,
+          type: messageTypeValue,
+          senderId: senderId,
+          createdAt: createdAt,
+          conversationId: conversationId,
+        );
+
+        // Store the last message in local storage
+        await _lastMessageStorage.storeLastMessage(conversationId, {
+          'id': messageId,
+          'body': messageBody,
+          'type': messageTypeValue,
+          'sender_id': senderId,
+          'created_at': createdAt,
+          'conversation_id': conversationId,
+        });
+
+        // Preserve pinnedMessage from existing metadata
+        final updatedMetadata = ConversationMetadata(
+          lastMessage: lastMessage,
+          pinnedMessage: conversation.metadata?.pinnedMessage,
+        );
+
         setState(() {
-          final conversation = _conversations[conversationIndex];
-
-          // Extract message details with proper handling for media messages
-          String messageBody = data['body'] ?? '';
-          String messageTypeValue = data['type'] ?? messageType ?? 'text';
-          int senderId = data['sender_id'] ?? 0;
-          int messageId = data['id'] ?? 0;
-          String createdAt =
-              data['created_at'] ??
-              message['timestamp'] ??
-              DateTime.now().toIso8601String();
-
-          // If body is empty and it's a media message, extract from nested data
-          if (messageBody.isEmpty && data['data'] != null) {
-            final nestedData = data['data'] as Map<String, dynamic>;
-            messageBody =
-                nestedData['message_type'] ?? nestedData['file_name'] ?? '';
-            messageTypeValue =
-                nestedData['message_type'] ?? messageType ?? 'media';
-            senderId = nestedData['user_id'] ?? senderId;
-            messageId =
-                nestedData['media_message_id'] ??
-                data['media_message_id'] ??
-                messageId;
-            createdAt = nestedData['created_at'] ?? createdAt;
-          }
-
-          // Create new last message from the message data
-          final lastMessage = LastMessage(
-            id: messageId,
-            body: messageBody,
-            type: messageTypeValue,
-            senderId: senderId,
-            createdAt: createdAt,
-            conversationId: conversationId,
-          );
-
-          // Preserve pinnedMessage from existing metadata
-          final updatedMetadata = ConversationMetadata(
-            lastMessage: lastMessage,
-            pinnedMessage: conversation.metadata?.pinnedMessage,
-          );
-
           // Only increment unread count if this is not the currently active conversation
           final newUnreadCount = _activeConversationId == conversationId
               ? conversation
@@ -1008,19 +1099,25 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
             conversations,
           );
 
+          // Update with stored last messages
+          final updatedConversations =
+              await _updateConversationsWithStoredLastMessages(
+                filteredConversations,
+              );
+
           // Persist to local DB
           await _conversationsRepo.insertOrUpdateConversations(
-            filteredConversations,
+            updatedConversations,
           );
 
           // Update the state silently (only if mounted and not already showing loading)
           if (mounted && _isLoaded) {
             setState(() {
-              _conversations = filteredConversations;
+              _conversations = updatedConversations;
               _filterConversations(); // Update filtered conversations
             });
             debugPrint(
-              '✅ Silently updated ${filteredConversations.length} conversations',
+              '✅ Silently updated ${updatedConversations.length} conversations',
             );
           }
         }

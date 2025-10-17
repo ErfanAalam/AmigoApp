@@ -177,7 +177,7 @@ class _InnerChatPageState extends State<InnerChatPage>
     // Initialize typing animation
     _initializeTypingAnimation();
 
-    // _websocketService.connect();
+    _websocketService.connect();
 
     // Initialize voice recording animations
     _initializeVoiceAnimations();
@@ -6226,8 +6226,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                     ),
                   ),
                   maxLines: null,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => _sendMessage(),
+                  textInputAction: TextInputAction.newline,
                   onChanged: (value) {
                     _handleTyping(value);
                   },

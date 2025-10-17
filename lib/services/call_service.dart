@@ -112,16 +112,6 @@ class CallService extends ChangeNotifier {
           case Event.actionCallAccept:
             acceptCall();
 
-            print(
-              "--------------------------------------------------------------------------------",
-            );
-            final jfkdjfd = event?.body;
-            print("event -> $jfkdjfd");
-            print(
-              "--------------------------------------------------------------------------------",
-            );
-            print("call accepted api request sent");
-
             // final res = await ApiService().authenticatedPut(
             //   '/call/accept',
             //   data: {'callId': , 'title': title},
@@ -136,14 +126,6 @@ class CallService extends ChangeNotifier {
             break;
           case Event.actionCallDecline:
             declineCall();
-            print(
-              "--------------------------------------------------------------------------------",
-            );
-            print("event -> ${event}");
-            print(
-              "--------------------------------------------------------------------------------",
-            );
-            print("call declined api request sent");
             break;
           case Event.actionCallEnded:
             endCall();
@@ -296,14 +278,6 @@ class CallService extends ChangeNotifier {
     String? callerProfilePic,
   }) async {
     try {
-      print(
-        "--------------------------------------------------------------------------------",
-      );
-      print("recieved callId -> ${callId}");
-      print(
-        "--------------------------------------------------------------------------------",
-      );
-
       // If _activeCall is null but we have callId, try to restore call state
       if (_activeCall == null && callId != null) {
         if (callerId != null && callerName != null) {
@@ -325,25 +299,7 @@ class CallService extends ChangeNotifier {
       }
 
       if (callId != null && _activeCall != null) {
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print("setting callId -> ${callId}");
-        print(
-          "--------------------------------------------------------------------------------",
-        );
         _activeCall = _activeCall?.copyWith(callId: callId);
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print("_activeCall -> ${_activeCall}");
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-
-        // hasActiveCall is now updated and reflects the new _activeCall state
-        print("hasActiveCall after update: $hasActiveCall");
-
         notifyListeners();
       }
 

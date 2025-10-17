@@ -6,6 +6,7 @@ import '../../api/user.service.dart';
 import '../../repositories/groups_repository.dart';
 import '../../repositories/communities_repository.dart';
 import '../../services/websocket_service.dart';
+import '../../services/last_message_storage_service.dart';
 import 'inner_group_chat_page.dart';
 import 'create_group_page.dart';
 import 'community_inner_groups_page.dart';
@@ -22,6 +23,8 @@ class _GroupsPageState extends State<GroupsPage> {
   final GroupsRepository _groupsRepo = GroupsRepository();
   final CommunitiesRepository _communitiesRepo = CommunitiesRepository();
   final WebSocketService _websocketService = WebSocketService();
+  final LastMessageStorageService _lastMessageStorage =
+      LastMessageStorageService.instance;
 
   late Future<Map<String, dynamic>> _dataFuture;
   final TextEditingController _searchController = TextEditingController();
@@ -64,8 +67,13 @@ class _GroupsPageState extends State<GroupsPage> {
       final localCommunities = await _communitiesRepo.getAllCommunities();
 
       if (mounted) {
+        // Update groups with stored last messages
+        final updatedGroups = await _updateGroupsWithStoredLastMessages(
+          localGroups,
+        );
+
         setState(() {
-          _allGroups = localGroups;
+          _allGroups = updatedGroups;
           _allCommunities = localCommunities;
 
           // Sort groups by last message time (most recent first)
@@ -79,9 +87,9 @@ class _GroupsPageState extends State<GroupsPage> {
           _onSearchChanged();
         });
 
-        if (localGroups.isNotEmpty || localCommunities.isNotEmpty) {
+        if (updatedGroups.isNotEmpty || localCommunities.isNotEmpty) {
           debugPrint(
-            '✅ Loaded ${localGroups.length} groups and ${localCommunities.length} communities from local DB',
+            '✅ Loaded ${updatedGroups.length} groups and ${localCommunities.length} communities from local DB',
           );
         } else {
           debugPrint('ℹ️ No cached groups or communities found in local DB');
@@ -101,6 +109,66 @@ class _GroupsPageState extends State<GroupsPage> {
     }
   }
 
+  /// Update groups with stored last messages
+  Future<List<GroupModel>> _updateGroupsWithStoredLastMessages(
+    List<GroupModel> groups,
+  ) async {
+    try {
+      final storedLastMessages = await _lastMessageStorage
+          .getAllGroupLastMessages();
+      final updatedGroups = <GroupModel>[];
+
+      for (final group in groups) {
+        final storedMessage = storedLastMessages[group.conversationId];
+
+        if (storedMessage != null) {
+          // Create GroupLastMessage from stored data
+          final lastMessage = GroupLastMessage(
+            id: storedMessage['id'] ?? 0,
+            body: storedMessage['body'] ?? '',
+            type: storedMessage['type'] ?? 'text',
+            senderId: storedMessage['sender_id'] ?? 0,
+            senderName: storedMessage['sender_name'] ?? '',
+            createdAt:
+                storedMessage['created_at'] ?? DateTime.now().toIso8601String(),
+            conversationId: group.conversationId,
+          );
+
+          // Create updated metadata with stored last message
+          final updatedMetadata = GroupMetadata(
+            lastMessage: lastMessage,
+            totalMessages: group.metadata?.totalMessages ?? 0,
+            createdAt: group.metadata?.createdAt,
+            createdBy: group.metadata?.createdBy ?? 0,
+          );
+
+          // Create updated group
+          final updatedGroup = GroupModel(
+            conversationId: group.conversationId,
+            title: group.title,
+            type: group.type,
+            members: group.members,
+            metadata: updatedMetadata,
+            lastMessageAt: lastMessage.createdAt,
+            role: group.role,
+            unreadCount: group.unreadCount,
+            joinedAt: group.joinedAt,
+          );
+
+          updatedGroups.add(updatedGroup);
+        } else {
+          // No stored last message, use original group
+          updatedGroups.add(group);
+        }
+      }
+
+      return updatedGroups;
+    } catch (e) {
+      debugPrint('❌ Error updating groups with stored last messages: $e');
+      return groups; // Return original groups on error
+    }
+  }
+
   /// Set up WebSocket listener for real-time updates
   void _setupWebSocketListener() {
     _websocketSubscription = _websocketService.messageStream.listen(
@@ -114,7 +182,9 @@ class _GroupsPageState extends State<GroupsPage> {
   }
 
   /// Handle incoming WebSocket messages
-  void _handleIncomingWebSocketMessage(Map<String, dynamic> message) {
+  Future<void> _handleIncomingWebSocketMessage(
+    Map<String, dynamic> message,
+  ) async {
     try {
       debugPrint('📨 GroupsPage received WebSocket message: $message');
 
@@ -122,7 +192,7 @@ class _GroupsPageState extends State<GroupsPage> {
 
       if (messageType == 'message' || messageType == 'media') {
         // Update last message for groups
-        _handleNewGroupMessage(message);
+        await _handleNewGroupMessage(message);
       }
     } catch (e) {
       debugPrint('❌ Error handling WebSocket message in GroupsPage: $e');
@@ -183,7 +253,7 @@ class _GroupsPageState extends State<GroupsPage> {
   }
 
   /// Handle new message for groups
-  void _handleNewGroupMessage(Map<String, dynamic> message) {
+  Future<void> _handleNewGroupMessage(Map<String, dynamic> message) async {
     try {
       final conversationId = message['conversation_id'] as int?;
       if (conversationId == null) return;
@@ -197,36 +267,47 @@ class _GroupsPageState extends State<GroupsPage> {
       final data = message['data'] as Map<String, dynamic>? ?? {};
 
       if (mounted && _isLoaded) {
+        final group = _allGroups[groupIndex];
+
+        // Create new last message with better media handling
+        String messageBody = data['body'] ?? '';
+
+        // If body is empty and it's a media message, extract from nested data
+        if (messageBody.isEmpty && data['data'] != null) {
+          final nestedData = data['data'] as Map<String, dynamic>;
+          messageBody =
+              nestedData['message_type'] ?? nestedData['file_name'] ?? '';
+        }
+
+        final lastMessage = GroupLastMessage(
+          id: data['id'] ?? data['media_message_id'] ?? 0,
+          body: messageBody,
+          type: data['type'] ?? message['type'] ?? 'text',
+          senderId: data['sender_id'] ?? data['user_id'] ?? 0,
+          senderName: data['sender_name'] ?? '',
+          createdAt: data['created_at'] ?? DateTime.now().toIso8601String(),
+          conversationId: conversationId,
+        );
+
+        // Store the last message in local storage
+        await _lastMessageStorage.storeGroupLastMessage(conversationId, {
+          'id': data['id'] ?? data['media_message_id'] ?? 0,
+          'body': messageBody,
+          'type': data['type'] ?? message['type'] ?? 'text',
+          'sender_id': data['sender_id'] ?? data['user_id'] ?? 0,
+          'sender_name': data['sender_name'] ?? '',
+          'created_at': data['created_at'] ?? DateTime.now().toIso8601String(),
+          'conversation_id': conversationId,
+        });
+
+        final updatedMetadata = GroupMetadata(
+          lastMessage: lastMessage,
+          totalMessages: (group.metadata?.totalMessages ?? 0) + 1,
+          createdAt: group.metadata?.createdAt,
+          createdBy: group.metadata?.createdBy ?? 0,
+        );
+
         setState(() {
-          final group = _allGroups[groupIndex];
-
-          // Create new last message with better media handling
-          String messageBody = data['body'] ?? '';
-
-          // If body is empty and it's a media message, extract from nested data
-          if (messageBody.isEmpty && data['data'] != null) {
-            final nestedData = data['data'] as Map<String, dynamic>;
-            messageBody =
-                nestedData['message_type'] ?? nestedData['file_name'] ?? '';
-          }
-
-          final lastMessage = GroupLastMessage(
-            id: data['id'] ?? data['media_message_id'] ?? 0,
-            body: messageBody,
-            type: data['type'] ?? message['type'] ?? 'text',
-            senderId: data['sender_id'] ?? data['user_id'] ?? 0,
-            senderName: data['sender_name'] ?? '',
-            createdAt: data['created_at'] ?? DateTime.now().toIso8601String(),
-            conversationId: conversationId,
-          );
-
-          final updatedMetadata = GroupMetadata(
-            lastMessage: lastMessage,
-            totalMessages: (group.metadata?.totalMessages ?? 0) + 1,
-            createdAt: group.metadata?.createdAt,
-            createdBy: group.metadata?.createdBy ?? 0,
-          );
-
           // Only increment unread count if this is not the currently active group
           final newUnreadCount = _activeConversationId == conversationId
               ? group
@@ -361,9 +442,13 @@ class _GroupsPageState extends State<GroupsPage> {
 
         if (groups.isNotEmpty) {
           hasServerData = true;
+          // Update with stored last messages before persisting
+          final updatedGroups = await _updateGroupsWithStoredLastMessages(
+            groups,
+          );
           // Only persist if we got data from server
-          await _groupsRepo.insertOrUpdateGroups(groups);
-          debugPrint('✅ Persisted ${groups.length} groups to local DB');
+          await _groupsRepo.insertOrUpdateGroups(updatedGroups);
+          debugPrint('✅ Persisted ${updatedGroups.length} groups to local DB');
         } else {
           debugPrint('⚠️ Server returned 0 groups - keeping local cache');
         }
@@ -400,8 +485,14 @@ class _GroupsPageState extends State<GroupsPage> {
       }
 
       if (mounted) {
+        // Update groups with stored last messages
+        final finalGroups = groups.isNotEmpty ? groups : localGroups;
+        final updatedGroups = await _updateGroupsWithStoredLastMessages(
+          finalGroups,
+        );
+
         setState(() {
-          _allGroups = groups.isNotEmpty ? groups : localGroups;
+          _allGroups = updatedGroups;
           _allCommunities = communities.isNotEmpty
               ? communities
               : localCommunities;
@@ -428,8 +519,13 @@ class _GroupsPageState extends State<GroupsPage> {
 
       // Use local data on error
       if (mounted) {
+        // Update groups with stored last messages
+        final updatedGroups = await _updateGroupsWithStoredLastMessages(
+          localGroups,
+        );
+
         setState(() {
-          _allGroups = localGroups;
+          _allGroups = updatedGroups;
           _allCommunities = localCommunities;
 
           // Sort groups by last message time (most recent first)
@@ -439,7 +535,7 @@ class _GroupsPageState extends State<GroupsPage> {
             return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
           });
 
-          _filteredItems = [...localGroups, ...localCommunities];
+          _filteredItems = [...updatedGroups, ...localCommunities];
           _isLoaded = true;
         });
       }

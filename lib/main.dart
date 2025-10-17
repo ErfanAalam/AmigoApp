@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
@@ -27,6 +28,7 @@ import 'models/conversation_model.dart';
 import 'models/group_model.dart';
 import 'repositories/conversations_repository.dart';
 import 'repositories/groups_repository.dart';
+import 'api/user.service.dart';
 
 void main() async {
   material.WidgetsFlutterBinding.ensureInitialized();
@@ -77,10 +79,12 @@ class _MyAppState extends material.State<MyApp> {
   final UserStatusService _userStatusService = UserStatusService();
   final NotificationService _notificationService = NotificationService();
   final ApiService _apiService = ApiService();
+  final UserService _userService = UserService();
   bool _isLoading = true;
   bool _isAuthenticated = false;
   StreamSubscription? _intentDataStreamSubscription;
   int _notificationRetryCount = 0;
+  String appVersion = '';
 
   @override
   void initState() {
@@ -89,7 +93,7 @@ class _MyAppState extends material.State<MyApp> {
     _checkAuthentication();
     _setupWebSocketListeners();
     _initializeSharing();
-
+    _loadAppVersion();
     // Process initial notification after the first frame is rendered
     // This ensures navigator is ready
     material.WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -97,23 +101,27 @@ class _MyAppState extends material.State<MyApp> {
     });
   }
 
+  Future<void> _loadAppVersion() async {
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() {
+          appVersion = packageInfo.version;
+        });
+      }
+    } catch (e) {
+      print('❌ Error loading app version: $e');
+    }
+  }
+
   /// Process initial notification from terminated state
   Future<void> _processInitialNotification() async {
     // Wait for authentication to complete and UI to be ready
     await Future.delayed(const Duration(milliseconds: 500));
 
-    print(
-      '🔔 Checking for initial notification (attempt ${_notificationRetryCount + 1}/5)...',
-    );
-    print('   Is authenticated: $_isAuthenticated');
-    print(
-      '   Navigator ready: ${NavigationHelper.navigatorKey.currentContext != null}',
-    );
-
     // Only process if authenticated and navigator is ready
     if (_isAuthenticated &&
         NavigationHelper.navigatorKey.currentContext != null) {
-      print('✅ Processing initial notification...');
       await _notificationService.processInitialMessage();
       _notificationRetryCount = 0; // Reset counter
     } else {
@@ -151,71 +159,22 @@ class _MyAppState extends material.State<MyApp> {
           await _notificationService.sendTokenToBackend(userId.toString());
         }
 
+        await _userService.updateUser({'app_version': appVersion});
+
         // await _apiService.updateUserLocationAndIp();
         // Wait a bit for WebSocket to establish connection
         await Future.delayed(const Duration(milliseconds: 500));
         FlutterCallkitIncoming.requestFullIntentPermission();
 
-        print('✅ WebSocket connection established in main.dart');
-
         final prefs = await SharedPreferences.getInstance();
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print("prefs current call id -> ${prefs.getString('current_call_id')}");
-        print(
-          "prefs current caller id -> ${prefs.getString('current_caller_id')}",
-        );
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print(
-          "--------------------------------------------------------------------------------",
-        );
 
         final callStatus = prefs.getString('call_status');
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print("callStatus -> ${callStatus}");
-        print(
-          "--------------------------------------------------------------------------------",
-        );
+
         final callId = prefs.getString('current_call_id');
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print("callId -> ${callId}");
-        print(
-          "--------------------------------------------------------------------------------",
-        );
+
         final callerId = prefs.getString('current_caller_id');
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print("callerId -> ${callerId}");
-        print(
-          "--------------------------------------------------------------------------------",
-        );
 
         if (callId != null) {
-          print(
-            "--------------------------------------------------------------------------------",
-          );
-          print("inside if callId -> ${callId}");
-          print(
-            "--------------------------------------------------------------------------------",
-          );
-
           // Get caller information from storage
           final callerId = prefs.getString('current_caller_id');
           final callerName =
@@ -224,19 +183,8 @@ class _MyAppState extends material.State<MyApp> {
             'current_caller_profile_pic',
           );
 
-          print("callerId from storage -> $callerId");
-          print("callerName from storage -> $callerName");
-          print("callerProfilePic from storage -> $callerProfilePic");
-
           switch (callStatus) {
             case 'answered':
-              print(
-                "--------------------------------------------------------------------------------",
-              );
-              print("answered callId -> ${callId}");
-              print(
-                "--------------------------------------------------------------------------------",
-              );
               // Call was answered, proceed to accept
               await CallService().initialize();
               await CallService().acceptCall(
@@ -269,13 +217,7 @@ class _MyAppState extends material.State<MyApp> {
               );
               break;
             default:
-              print(
-                "--------------------------------------------------------------------------------",
-              );
-              print("default case");
-              print(
-                "--------------------------------------------------------------------------------",
-              );
+
               // No action needed
               break;
           }

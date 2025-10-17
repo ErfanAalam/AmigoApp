@@ -214,6 +214,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   late List<Animation<double>> _typingDotAnimations;
   Timer? _typingTimeout;
 
+  // Scroll debounce timer
+  Timer? _scrollDebounceTimer;
+
   // Message animation controllers
   final Map<int, AnimationController> _messageAnimationControllers = {};
   final Map<int, Animation<double>> _messageSlideAnimations = {};
@@ -223,6 +226,21 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   // Swipe animation controllers for reply gesture
   final Map<int, AnimationController> _swipeAnimationControllers = {};
   final Map<int, Animation<double>> _swipeAnimations = {};
+
+  // Swipe gesture tracking variables
+  Offset? _swipeStartPosition;
+  double _swipeTotalDistance = 0.0;
+  bool _isSwipeGesture = false;
+  bool _isScrolling = false;
+  double _lastScrollPosition = 0.0;
+  static const double _minSwipeDistance =
+      50.0; // Minimum distance to consider as swipe
+  static const double _maxVerticalDeviation =
+      30.0; // Max vertical movement allowed for horizontal swipe
+  static const double _minSwipeVelocity =
+      1000.0; // Minimum velocity for swipe completion
+  static const double _swipeThreshold =
+      0.5; // Threshold for swipe completion (0.0 to 1.0)
 
   // Voice recording related variables
   late FlutterSoundRecorder _recorder;
@@ -1020,6 +1038,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     _websocketSubscription?.cancel();
     _typingAnimationController.dispose();
     _typingTimeout?.cancel();
+    _scrollDebounceTimer?.cancel();
     _highlightTimer?.cancel();
 
     // Dispose message animation controllers
@@ -1080,8 +1099,29 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     // Ensure we have a valid scroll position and the widget is still mounted
     if (!mounted || !_scrollController.hasClients) return;
 
-    // Update sticky date separator
-    _updateStickyDateSeparator();
+    final currentScrollPosition = _scrollController.position.pixels;
+    final scrollDelta = (currentScrollPosition - _lastScrollPosition).abs();
+
+    // Only set scrolling flag if there's significant movement (more than 5 pixels)
+    if (scrollDelta > 5.0) {
+      _isScrolling = true;
+      _lastScrollPosition = currentScrollPosition;
+
+      // Reset scrolling flag after a short delay
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) {
+          _isScrolling = false;
+        }
+      });
+    }
+
+    // Debounce sticky date separator updates to reduce frequency
+    _scrollDebounceTimer?.cancel();
+    _scrollDebounceTimer = Timer(const Duration(milliseconds: 50), () {
+      if (mounted && _scrollController.hasClients) {
+        _updateStickyDateSeparator();
+      }
+    });
 
     // With reverse: true, when scrolling to see older messages (scrolling "up" in the UI),
     // we're actually scrolling towards maxScrollExtent
@@ -3150,6 +3190,11 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         end: 1.0,
       ).animate(CurvedAnimation(parent: controller, curve: Curves.easeOut));
     }
+
+    // Reset swipe tracking variables
+    _swipeStartPosition = details.globalPosition;
+    _swipeTotalDistance = 0.0;
+    _isSwipeGesture = false;
   }
 
   void _onSwipeUpdate(
@@ -3157,12 +3202,37 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     DragUpdateDetails details,
     bool isMyMessage,
   ) {
-    // Only allow right swipe (positive delta x) for reply gesture
-    if (details.delta.dx > 0) {
+    if (_isSelectionMode || _swipeStartPosition == null || _isScrolling) return;
+
+    // Calculate total distance moved from start position
+    final currentPosition = details.globalPosition;
+    final horizontalDistance = currentPosition.dx - _swipeStartPosition!.dx;
+    final verticalDistance = (currentPosition.dy - _swipeStartPosition!.dy)
+        .abs();
+
+    _swipeTotalDistance = horizontalDistance.abs();
+
+    // Determine if this is a horizontal swipe gesture
+    if (!_isSwipeGesture) {
+      // Check if we have enough horizontal movement and not too much vertical movement
+      if (_swipeTotalDistance > _minSwipeDistance &&
+          verticalDistance < _maxVerticalDeviation &&
+          horizontalDistance > 0) {
+        _isSwipeGesture = true;
+      } else if (verticalDistance > _maxVerticalDeviation ||
+          horizontalDistance < 0) {
+        // Too much vertical movement or left swipe, this is likely a scroll, not a swipe
+        _isScrolling = true;
+        return;
+      }
+    }
+
+    // Only proceed if this is confirmed as a horizontal swipe
+    if (_isSwipeGesture && horizontalDistance > 0) {
       final controller = _swipeAnimationControllers[message.id];
       if (controller != null) {
-        // Calculate swipe progress (0 to 1)
-        final progress = (details.delta.dx / 100).clamp(0.0, 1.0);
+        // Calculate swipe progress (0 to 1) based on total distance
+        final progress = (_swipeTotalDistance / 100).clamp(0.0, 1.0);
         controller.value = progress;
       }
     }
@@ -3175,8 +3245,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   ) {
     final controller = _swipeAnimationControllers[message.id];
     if (controller != null) {
-      // If swipe velocity is sufficient or swipe distance is enough, trigger reply
-      if (details.velocity.pixelsPerSecond.dx > 300 || controller.value > 0.3) {
+      // Only trigger reply if this was confirmed as a horizontal swipe gesture
+      if (_isSwipeGesture &&
+          (details.velocity.pixelsPerSecond.dx > _minSwipeVelocity ||
+              controller.value > _swipeThreshold)) {
         // Animate to complete position then trigger reply
         controller.forward().then((_) {
           _replyToMessage(message);
@@ -3188,6 +3260,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         controller.reverse();
       }
     }
+
+    // Reset swipe tracking variables
+    _swipeStartPosition = null;
+    _swipeTotalDistance = 0.0;
+    _isSwipeGesture = false;
+    _isScrolling = false;
   }
 
   Widget _buildSwipeableMessageBubble(
@@ -4002,10 +4080,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                     ),
                   ),
                   maxLines: null,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: shouldDisableSending
-                      ? null
-                      : (_) => _sendMessage(),
+                  textInputAction: TextInputAction.newline,
                   onChanged: shouldDisableSending
                       ? null
                       : (value) {
@@ -8655,10 +8730,8 @@ class _ReadByModalState extends State<ReadByModal>
                             'Read by ${readMembers.length}',
                             true,
                           ),
-                          Flexible(
+                          Expanded(
                             child: ListView.builder(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
                               itemCount: readMembers.length,
                               itemBuilder: (context, index) {
                                 return _buildMemberTile(
@@ -8677,10 +8750,8 @@ class _ReadByModalState extends State<ReadByModal>
                             'Not read by ${unreadMembers.length}',
                             false,
                           ),
-                          Flexible(
+                          Expanded(
                             child: ListView.builder(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
                               itemCount: unreadMembers.length,
                               itemBuilder: (context, index) {
                                 return _buildMemberTile(
