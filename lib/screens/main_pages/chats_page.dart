@@ -975,7 +975,7 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   /// Silently load conversations without affecting the UI state
   Future<void> _loadConversationsSilently() async {
     try {
-      debugPrint('🔄 Silently loading conversations...');
+      // debugPrint('🔄 Silently loading conversations...');
       final response = await _userService.GetChatList('dm');
 
       if (response['success']) {
