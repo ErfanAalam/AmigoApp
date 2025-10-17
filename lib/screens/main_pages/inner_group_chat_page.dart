@@ -3354,9 +3354,11 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                             ],
                           )
                         : Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 10,
+                            padding: const EdgeInsets.only(
+                              top: 5,
+                              bottom: 2,
+                              left: 10,
+                              right: 10,
                             ),
                             decoration: BoxDecoration(
                               color: isMyMessage
@@ -3392,7 +3394,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
                                 // Message content (text, image, or video)
                                 _buildMessageContent(message, isMyMessage),
-                                const SizedBox(height: 6),
+                                const SizedBox(height: 1),
                                 // Time and status row
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
@@ -3414,7 +3416,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                                         color: isMyMessage
                                             ? Colors.white70
                                             : Colors.grey[600],
-                                        fontSize: 12,
+                                        fontSize: 11,
                                         fontWeight: FontWeight.w400,
                                       ),
                                     ),
