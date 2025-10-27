@@ -3,12 +3,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../models/conversation_model.dart';
-import '../api/user.service.dart';
-import '../api/chats.services.dart';
-import '../services/websocket_service.dart';
-import '../repositories/conversations_repository.dart';
-import '../repositories/groups_repository.dart';
+import '../../models/conversation_model.dart';
+import '../../api/user.service.dart';
+import '../../api/chats.services.dart';
+import '../../services/websocket_service.dart';
+import '../../repositories/conversations_repository.dart';
+import '../../repositories/groups_repository.dart';
 
 /// A screen that handles incoming shared media (images and videos)
 /// from the Android share sheet and allows selecting conversations to share to.

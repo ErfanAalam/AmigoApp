@@ -2,14 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../models/group_model.dart';
-import '../../models/user_model.dart';
-import '../../api/groups.services.dart';
-import '../../api/user.service.dart';
-import '../../services/contact_service.dart';
-import '../../repositories/groups_repository.dart';
-import '../../repositories/user_repository.dart';
-import '../../repositories/group_members_repository.dart';
+import '../../../models/group_model.dart';
+import '../../../models/user_model.dart';
+import '../../../api/groups.services.dart';
+import '../../../api/user.service.dart';
+import '../../../services/contact_service.dart';
+import '../../../repositories/groups_repository.dart';
+import '../../../repositories/user_repository.dart';
+import '../../../repositories/group_members_repository.dart';
 
 class GroupInfoPage extends StatefulWidget {
   final GroupModel group;
@@ -1998,7 +1998,6 @@ class _GroupInfoPageState extends State<GroupInfoPage>
       if (response['success'] == true) {
         // Delete from local database
         await _groupsRepo.deleteGroup(widget.group.conversationId);
-        
 
         _showSnackBar('Group deleted successfully');
 

@@ -1,19 +1,20 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../../models/conversation_model.dart';
-import '../../api/user.service.dart';
-import '../../services/websocket_service.dart';
-import '../../services/user_status_service.dart';
-import '../../services/chat_preferences_service.dart';
-import '../../services/last_message_storage_service.dart';
-import '../../widgets/chat_action_menu.dart';
-import '../../repositories/conversations_repository.dart';
-import '../../api/chats.services.dart';
+import '../../../models/conversation_model.dart';
+import '../../../api/user.service.dart';
+import '../../../services/websocket_service.dart';
+import '../../../services/user_status_service.dart';
+import '../../../services/chat_preferences_service.dart';
+import '../../../services/last_message_storage_service.dart';
+import '../../../widgets/chat_action_menu.dart';
+import '../../../repositories/conversations_repository.dart';
+import '../../../api/chats.services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'inner_chat_page.dart';
+import '../../../widgets/chat/searchable_list_widget.dart';
+import 'messaging.dart';
 
 class ChatsPage extends StatefulWidget {
-  const ChatsPage({Key? key}) : super(key: key);
+  const ChatsPage({super.key});
 
   @override
   State<ChatsPage> createState() => ChatsPageState();
@@ -353,12 +354,8 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   }
 
   Future<List<ConversationModel>> _loadConversations() async {
-    print('Loading conversations');
     try {
       final response = await _userService.GetChatList('dm');
-      print(
-        "------------------------------------------------------------\n response -> $response \n----------------------------------------------------------------",
-      );
       if (response['success']) {
         final dynamic responseData = response['data'];
         List<dynamic> conversationsList = [];
@@ -436,9 +433,9 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         return localConversations;
       }
     } catch (e) {
-      // Network error or other exception, load from local DB
-      debugPrint('❌ Error loading conversations from server: $e');
-      debugPrint('📦 Loading from local DB as fallback');
+      debugPrint(
+        '❌ Error loading conversations from server \n 📦 Loading from local DB as fallback',
+      );
       try {
         final localConversations = await _conversationsRepo
             .getAllConversations();
@@ -516,7 +513,6 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
                 if (conversationId == null ||
                     userName == null ||
                     userName.toString().isEmpty) {
-                  debugPrint('⚠️ Skipping invalid conversation: $json');
                   return null;
                 }
 
@@ -555,9 +551,6 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
           conversation.userId,
           isOnline: conversation.isOnline!,
         );
-        debugPrint(
-          '📡 Set initial online status for user ${conversation.userId}: ${conversation.isOnline}',
-        );
       }
     }
   }
@@ -590,9 +583,6 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
           // Persist to local DB
           _conversationsRepo.updateUnreadCount(conversationId, 0);
         });
-        debugPrint(
-          '✅ Cleared unread count for conversation $conversationId (was ${conversation.unreadCount})',
-        );
       } else {
         debugPrint(
           'ℹ️ Conversation $conversationId already has 0 unread count',
@@ -607,9 +597,6 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
 
   /// Set the currently active conversation (when user enters inner chat)
   void _setActiveConversation(int? conversationId) {
-    debugPrint(
-      '📍 Setting active conversation from $_activeConversationId to: $conversationId',
-    );
     _activeConversationId = conversationId;
     if (conversationId != null) {
       _clearUnreadCount(conversationId);
@@ -635,7 +622,6 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         if (mounted) {
           setState(() {
             // Trigger a rebuild to update online status indicators
-            debugPrint('📨 User status updated: $statusMap');
           });
         }
       },
@@ -650,8 +636,6 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
     Map<String, dynamic> message,
   ) async {
     try {
-      debugPrint('📨 ChatsPage received WebSocket message: $message');
-
       // Handle different message types
       final messageType = message['type'];
       if (messageType == 'typing') {
@@ -660,9 +644,11 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         _handleUserOnlineMessage(message);
       } else if (messageType == 'user_offline') {
         _handleUserOfflineMessage(message);
-      } else if (messageType == 'message_delivery_receipt') {
-        await _handleMessageDeliveryReceipt(message);
-      } else if (messageType == 'message' || messageType == 'media') {
+      }
+      // else if (messageType == 'message_delivery_receipt') {
+      //   await _handleMessageDeliveryReceipt(message);
+      // }
+      else if (messageType == 'message' || messageType == 'media') {
         await _handleNewMessage(message);
       }
     } catch (e) {
@@ -671,155 +657,145 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   }
 
   void _handleUserOnlineMessage(Map<String, dynamic> message) {
-    debugPrint('📨 ChatsPage handling user_online message: $message');
     _userStatusService.handleUserOnlineMessage(message);
   }
 
   void _handleUserOfflineMessage(Map<String, dynamic> message) {
-    debugPrint('📨 ChatsPage handling user_offline message: $message');
     _userStatusService.handleUserOfflineMessage(message);
   }
 
-  /// Handle message delivery receipt to update last message and unread count
-  Future<void> _handleMessageDeliveryReceipt(
-    Map<String, dynamic> message,
-  ) async {
-    try {
-      debugPrint('📨 ChatsPage handling message_delivery_receipt: $message');
-
-      final data = message['data'] as Map<String, dynamic>? ?? {};
-      final conversationId = message['conversation_id'] as int?;
-      final messageData = data['message'] as Map<String, dynamic>? ?? {};
-
-      if (conversationId == null) {
-        debugPrint('⚠️ Invalid delivery receipt: missing conversation_id');
-        return;
-      }
-
-      // Find the conversation to update
-      final conversationIndex = _conversations.indexWhere(
-        (conv) => conv.conversationId == conversationId,
-      );
-
-      if (conversationIndex == -1) {
-        debugPrint(
-          '⚠️ Conversation not found for delivery receipt: $conversationId',
-        );
-        return;
-      }
-
-      if (mounted && _isLoaded) {
-        final conversation = _conversations[conversationIndex];
-        // Update the last message if provided
-        ConversationMetadata? updatedMetadata = conversation.metadata;
-        if (messageData.isNotEmpty) {
-          // Extract message details with proper handling for media messages
-          String messageBody = messageData['body'] ?? '';
-          String messageTypeValue = messageData['type'] ?? 'text';
-          int senderId = messageData['sender_id'] ?? 0;
-          int messageId = messageData['id'] ?? 0;
-          String createdAt =
-              messageData['created_at'] ?? DateTime.now().toIso8601String();
-
-          // If body is empty and it's a media message, extract from nested data
-          if (messageBody.isEmpty && messageData['data'] != null) {
-            final nestedData = messageData['data'] as Map<String, dynamic>;
-            messageBody =
-                nestedData['message_type'] ?? nestedData['file_name'] ?? '';
-            messageTypeValue = nestedData['message_type'] ?? messageTypeValue;
-            senderId = nestedData['user_id'] ?? senderId;
-            messageId = nestedData['media_message_id'] ?? messageId;
-            createdAt = nestedData['created_at'] ?? createdAt;
-          }
-
-          final lastMessage = LastMessage(
-            id: messageId,
-            body: messageBody,
-            type: messageTypeValue,
-            senderId: senderId,
-            createdAt: createdAt,
-            conversationId: conversationId,
-          );
-
-          // Store the last message in local storage
-          await _lastMessageStorage.storeLastMessage(conversationId, {
-            'id': messageId,
-            'body': messageBody,
-            'type': messageTypeValue,
-            'sender_id': senderId,
-            'created_at': createdAt,
-            'conversation_id': conversationId,
-          });
-
-          // Preserve pinnedMessage from existing metadata
-          updatedMetadata = ConversationMetadata(
-            lastMessage: lastMessage,
-            pinnedMessage: conversation.metadata?.pinnedMessage,
-          );
-        }
-
-        setState(() {
-          // Update unread count (only increment if not the active conversation)
-          final providedUnreadCount = data['unread_count'] as int?;
-          final newUnreadCount =
-              providedUnreadCount ??
-              (_activeConversationId == conversationId
-                  ? conversation
-                        .unreadCount // Don't increment if user is viewing this chat
-                  : conversation.unreadCount +
-                        1); // Increment if user is not viewing this chat
-
-          // Create updated conversation
-          final updatedConversation = conversation.copyWith(
-            metadata: updatedMetadata,
-            unreadCount: newUnreadCount,
-            lastMessageAt:
-                messageData['created_at'] ?? DateTime.now().toIso8601String(),
-          );
-
-          // Replace the conversation in the list
-          _conversations[conversationIndex] = updatedConversation;
-
-          // Persist to local DB
-          _conversationsRepo.insertOrUpdateConversation(updatedConversation);
-
-          // Sort conversations: pinned first, then by last message time
-          _conversations.sort((a, b) {
-            final aPinned = _pinnedChats.contains(a.conversationId);
-            final bPinned = _pinnedChats.contains(b.conversationId);
-
-            // If one is pinned and the other is not, pinned comes first
-            if (aPinned && !bPinned) return -1;
-            if (!aPinned && bPinned) return 1;
-
-            // Both pinned or both not pinned, sort by last message time
-            final aTime = a.lastMessageAt ?? a.joinedAt;
-            final bTime = b.lastMessageAt ?? b.joinedAt;
-            return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
-          });
-
-          // Update filtered conversations to immediately show the updated list
-          _filterConversations();
-
-          debugPrint(
-            '✅ Delivery receipt processed for conversation $conversationId - unread: $newUnreadCount',
-          );
-        });
-      } else {
-        debugPrint(
-          '⚠️ Cannot update UI: mounted=$mounted, _isLoaded=$_isLoaded',
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ Error handling message delivery receipt: $e');
-    }
-  }
+  /// /// Handle message delivery receipt to update last message and unread count
+  /// Future<void> _handleMessageDeliveryReceipt(
+  ///   Map<String, dynamic> message,
+  /// ) async {
+  ///   try {
+  ///     final data = message['data'] as Map<String, dynamic>? ?? {};
+  ///     final conversationId = message['conversation_id'] as int?;
+  ///     final messageData = data['message'] as Map<String, dynamic>? ?? {};
+  ///
+  ///     if (conversationId == null) {
+  ///       debugPrint('⚠️ Invalid delivery receipt: missing conversation_id');
+  ///       return;
+  ///     }
+  ///
+  ///     // Find the conversation to update
+  ///     final conversationIndex = _conversations.indexWhere(
+  ///       (conv) => conv.conversationId == conversationId,
+  ///     );
+  ///
+  ///     if (conversationIndex == -1) {
+  ///       debugPrint(
+  ///         '⚠️ Conversation not found for delivery receipt: $conversationId',
+  ///       );
+  ///       return;
+  ///     }
+  ///
+  ///     if (mounted && _isLoaded) {
+  ///       final conversation = _conversations[conversationIndex];
+  ///       // Update the last message if provided
+  ///       ConversationMetadata? updatedMetadata = conversation.metadata;
+  ///       if (messageData.isNotEmpty) {
+  ///         // Extract message details with proper handling for media messages
+  ///         String messageBody = messageData['body'] ?? '';
+  ///         String messageTypeValue = messageData['type'] ?? 'text';
+  ///         int senderId = messageData['sender_id'] ?? 0;
+  ///         int messageId = messageData['id'] ?? 0;
+  ///         String createdAt =
+  ///             messageData['created_at'] ?? DateTime.now().toIso8601String();
+  ///
+  ///         // If body is empty and it's a media message, extract from nested data
+  ///         if (messageBody.isEmpty && messageData['data'] != null) {
+  ///           final nestedData = messageData['data'] as Map<String, dynamic>;
+  ///           messageBody =
+  ///               nestedData['message_type'] ?? nestedData['file_name'] ?? '';
+  ///           messageTypeValue = nestedData['message_type'] ?? messageTypeValue;
+  ///           senderId = nestedData['user_id'] ?? senderId;
+  ///           messageId = nestedData['media_message_id'] ?? messageId;
+  ///           createdAt = nestedData['created_at'] ?? createdAt;
+  ///         }
+  ///
+  ///         final lastMessage = LastMessage(
+  ///           id: messageId,
+  ///           body: messageBody,
+  ///           type: messageTypeValue,
+  ///           senderId: senderId,
+  ///           createdAt: createdAt,
+  ///           conversationId: conversationId,
+  ///         );
+  ///
+  ///         // Store the last message in local storage
+  ///         await _lastMessageStorage.storeLastMessage(conversationId, {
+  ///           'id': messageId,
+  ///           'body': messageBody,
+  ///           'type': messageTypeValue,
+  ///           'sender_id': senderId,
+  ///           'created_at': createdAt,
+  ///           'conversation_id': conversationId,
+  ///         });
+  ///
+  ///         // Preserve pinnedMessage from existing metadata
+  ///         updatedMetadata = ConversationMetadata(
+  ///           lastMessage: lastMessage,
+  ///           pinnedMessage: conversation.metadata?.pinnedMessage,
+  ///         );
+  ///       }
+  ///
+  ///       setState(() {
+  ///         // Update unread count (only increment if not the active conversation)
+  ///         final providedUnreadCount = data['unread_count'] as int?;
+  ///         final newUnreadCount =
+  ///             providedUnreadCount ??
+  ///             (_activeConversationId == conversationId
+  ///                 ? conversation
+  ///                       .unreadCount // Don't increment if user is viewing this chat
+  ///                 : conversation.unreadCount +
+  ///                       1); // Increment if user is not viewing this chat
+  ///
+  ///         // Create updated conversation
+  ///         final updatedConversation = conversation.copyWith(
+  ///           metadata: updatedMetadata,
+  ///           unreadCount: newUnreadCount,
+  ///           lastMessageAt:
+  ///               messageData['created_at'] ?? DateTime.now().toIso8601String(),
+  ///         );
+  ///
+  ///         // Replace the conversation in the list
+  ///         _conversations[conversationIndex] = updatedConversation;
+  ///
+  ///         // Persist to local DB
+  ///         _conversationsRepo.insertOrUpdateConversation(updatedConversation);
+  ///
+  ///         // Sort conversations: pinned first, then by last message time
+  ///         _conversations.sort((a, b) {
+  ///           final aPinned = _pinnedChats.contains(a.conversationId);
+  ///           final bPinned = _pinnedChats.contains(b.conversationId);
+  ///
+  ///           // If one is pinned and the other is not, pinned comes first
+  ///           if (aPinned && !bPinned) return -1;
+  ///           if (!aPinned && bPinned) return 1;
+  ///
+  ///           // Both pinned or both not pinned, sort by last message time
+  ///           final aTime = a.lastMessageAt ?? a.joinedAt;
+  ///           final bTime = b.lastMessageAt ?? b.joinedAt;
+  ///           return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
+  ///         });
+  ///
+  ///         // Update filtered conversations to immediately show the updated list
+  ///         _filterConversations();
+  ///       });
+  ///     } else {
+  ///       debugPrint(
+  ///         '⚠️ Cannot update UI: mounted=$mounted, _isLoaded=$_isLoaded',
+  ///       );
+  ///     }
+  ///   } catch (e) {
+  ///     debugPrint('❌ Error handling message delivery receipt: $e');
+  ///   }
+  /// }
 
   /// Handle new message to update last message and unread count
   Future<void> _handleNewMessage(Map<String, dynamic> message) async {
     try {
-      debugPrint('📨 ChatsPage handling new message: $message');
-
       final conversationId = message['conversation_id'] as int?;
       final messageType = message['type'] as String?;
       final data = message['data'] as Map<String, dynamic>? ?? {};
@@ -834,25 +810,12 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         (conv) => conv.conversationId == conversationId,
       );
 
-      print(
-        '------------------------------------------------------------------',
-      );
-      print('messageData: $data');
-      print('messageType: $messageType');
-      print(
-        '------------------------------------------------------------------',
-      );
-
       if (conversationIndex == -1) {
         debugPrint(
           '⚠️ Conversation not found for new message: $conversationId',
         );
         return;
       }
-
-      // {type: media, data: {user_id: 7300437892, url: https://amigo-chat-app.s3.ap-south-1.amazonaws.com/audios/7300437892/1758627144111_voice_note_1758627136762.m4a, key: audios/7300437892/1758627144111_voice_note_1758627136762.m4a, category: audios, file_name: voice_note_1758627136762.m4a, file_size: 96156, mime_type: audio/x-m4a, conversation_id: 3904105585, message_type: audio, reply_to_message_id: null, optimistic_id: -1, media_message_id: 531}, conversation_id: 3904105585, timestamp: 2025-09-23T11:32:25.419Z}
-
-      // {id: 532, optimistic_id: -2, conversation_id: 3904105585, sender_id: 7300437892, type: text, body: hrhfh, created_at: 2025-09-23T11:35:26.561Z}
 
       if (mounted && _isLoaded) {
         final conversation = _conversations[conversationIndex];
@@ -946,10 +909,6 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
 
           // Update filtered conversations to immediately show the updated list
           _filterConversations();
-
-          debugPrint(
-            '✅ Updated conversation $conversationId - new unread: $newUnreadCount, last message: ${lastMessage.body}',
-          );
         });
       } else {
         debugPrint(
@@ -983,7 +942,6 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
               (conv) => conv.conversationId == conversationId,
               orElse: () => throw StateError('Conversation not found'),
             );
-
             if (mounted) {
               setState(() {
                 if (isTyping) {
@@ -1049,16 +1007,12 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
     // When app comes back to foreground, clear active conversation
     // This handles cases where user might have been in a chat and app was backgrounded
     if (state == AppLifecycleState.resumed) {
-      debugPrint('📱 App resumed, clearing active conversation state');
       _activeConversationId = null;
     }
   }
 
   /// Called when the page becomes visible (when user navigates to Chats tab)
   void onPageVisible() {
-    debugPrint(
-      '📱 ChatsPage became visible - silently refreshing conversations',
-    );
     // Silently refresh conversations without showing loading state
     _loadConversationsSilently();
   }
@@ -1116,9 +1070,6 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
               _conversations = updatedConversations;
               _filterConversations(); // Update filtered conversations
             });
-            debugPrint(
-              '✅ Silently updated ${updatedConversations.length} conversations',
-            );
           }
         }
       }
@@ -1187,43 +1138,14 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         ),
       ),
 
-      body: Container(
-        color: Colors.grey[50],
-        child: Column(
-          children: [
-            // Search Bar
-            Container(
-              padding: EdgeInsets.all(16),
-              color: Colors.white,
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Search chats...',
-                  prefixIcon: Icon(Icons.search, color: Colors.grey[600]),
-                  suffixIcon: _searchQuery.isNotEmpty
-                      ? IconButton(
-                          icon: Icon(Icons.clear, color: Colors.grey[600]),
-                          onPressed: _clearSearch,
-                        )
-                      : null,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(25),
-                    borderSide: BorderSide.none,
-                  ),
-                  filled: true,
-                  fillColor: Colors.grey[100],
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                ),
-              ),
-            ),
-
-            // Chats List
-            Expanded(child: _buildChatsContent()),
-          ],
+      body: SearchableListLayout(
+        searchBar: SearchableListBar(
+          controller: _searchController,
+          hintText: 'Search chats...',
+          onChanged: (value) => _onSearchChanged(),
+          onClear: _clearSearch,
         ),
+        content: _buildChatsContent(),
       ),
       // floatingActionButton: FloatingActionButton(
       //   onPressed: () {
@@ -1367,18 +1289,11 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   }
 
   Widget _buildChatsContent() {
-    debugPrint(
-      '🏗️ Building chats content: _isLoaded=$_isLoaded, conversations count=${_conversations.length}, search query: "$_searchQuery"',
-    );
-
     // If we have loaded conversations and they're available, show them directly
     if (_isLoaded && _conversations.isNotEmpty) {
       final conversationsToShow = _searchQuery.isNotEmpty
           ? _filteredConversations
           : _conversations;
-      debugPrint(
-        '🏗️ Using real-time conversations (${conversationsToShow.length} items, filtered: ${_searchQuery.isNotEmpty})',
-      );
       return _buildChatsList(conversationsToShow);
     }
 
@@ -1386,10 +1301,6 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
     return FutureBuilder<List<ConversationModel>>(
       future: _conversationsFuture,
       builder: (context, snapshot) {
-        debugPrint(
-          '🏗️ FutureBuilder state: ${snapshot.connectionState}, hasData: ${snapshot.hasData}, _isLoaded: $_isLoaded',
-        );
-
         if (snapshot.connectionState == ConnectionState.waiting && !_isLoaded) {
           return _buildSkeletonLoader();
         } else if (snapshot.hasError && !_isLoaded) {
@@ -1400,9 +1311,6 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
           final conversationsToShow = _searchQuery.isNotEmpty
               ? _filteredConversations
               : conversations;
-          debugPrint(
-            '🏗️ Using conversations: ${conversationsToShow.length} items (filtered: ${_searchQuery.isNotEmpty})',
-          );
           if (conversationsToShow.isEmpty) {
             return _searchQuery.isNotEmpty
                 ? _buildSearchEmptyState()
@@ -1671,7 +1579,7 @@ class ChatListItem extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-        trailing: _buildTrailing(timeText, hasUnreadMessages),
+        trailing: _buildUnreadCounts(timeText, hasUnreadMessages),
         onTap: onTap,
         onLongPress: onLongPress,
         dense: true,
@@ -1723,11 +1631,10 @@ class ChatListItem extends StatelessWidget {
     return Row(
       children: [
         Text(
-          'typing',
+          'Typing',
           style: TextStyle(
             color: Colors.teal[600],
             fontSize: 14,
-            fontStyle: FontStyle.italic,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -1752,14 +1659,14 @@ class ChatListItem extends StatelessWidget {
     );
   }
 
-  Widget _buildTrailing(String timeText, bool hasUnreadMessages) {
+  Widget _buildUnreadCounts(String timeText, bool hasUnreadMessages) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.end,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(timeText, style: TextStyle(color: Colors.grey[500], fontSize: 12)),
-        if (hasUnreadMessages && !isTyping) ...[
+        if (hasUnreadMessages) ...[
           const SizedBox(height: 4),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),

@@ -16,12 +16,12 @@ class ImagePreviewScreen extends StatefulWidget {
   final List<String>? localPaths;
 
   const ImagePreviewScreen({
-    Key? key,
+    super.key,
     required this.imageUrls,
     this.initialIndex = 0,
     this.captions,
     this.localPaths,
-  }) : super(key: key);
+  });
 
   @override
   State<ImagePreviewScreen> createState() => _ImagePreviewScreenState();
@@ -362,12 +362,12 @@ class VideoPreviewScreen extends StatefulWidget {
   final String? localPath;
 
   const VideoPreviewScreen({
-    Key? key,
+    super.key,
     required this.videoUrl,
     this.caption,
     this.fileName,
     this.localPath,
-  }) : super(key: key);
+  });
 
   @override
   State<VideoPreviewScreen> createState() => _VideoPreviewScreenState();
@@ -805,12 +805,12 @@ class DocumentPreviewScreen extends StatefulWidget {
   final int? fileSize;
 
   const DocumentPreviewScreen({
-    Key? key,
+    super.key,
     required this.documentUrl,
     this.fileName,
     this.caption,
     this.fileSize,
-  }) : super(key: key);
+  });
 
   @override
   State<DocumentPreviewScreen> createState() => _DocumentPreviewScreenState();
@@ -1332,8 +1332,7 @@ class _DocumentPreviewScreenState extends State<DocumentPreviewScreen> {
 class DownloadProgressDialog extends StatefulWidget {
   final String fileName;
 
-  const DownloadProgressDialog({Key? key, required this.fileName})
-    : super(key: key);
+  const DownloadProgressDialog({super.key, required this.fileName});
 
   @override
   State<DownloadProgressDialog> createState() => _DownloadProgressDialogState();

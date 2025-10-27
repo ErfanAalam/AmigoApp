@@ -1,18 +1,19 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import '../../models/group_model.dart';
-import '../../models/community_model.dart';
-import '../../api/user.service.dart';
-import '../../repositories/groups_repository.dart';
-import '../../repositories/communities_repository.dart';
-import '../../services/websocket_service.dart';
-import '../../services/last_message_storage_service.dart';
-import 'inner_group_chat_page.dart';
-import 'create_group_page.dart';
-import 'community_inner_groups_page.dart';
+import '../../../models/group_model.dart';
+import '../../../models/community_model.dart';
+import '../../../api/user.service.dart';
+import '../../../repositories/groups_repository.dart';
+import '../../../repositories/communities_repository.dart';
+import '../../../services/websocket_service.dart';
+import '../../../services/last_message_storage_service.dart';
+import '../../../widgets/chat/searchable_list_widget.dart';
+import 'messaging.dart';
+import 'create_group.dart';
+import 'community_group_list.dart';
 
 class GroupsPage extends StatefulWidget {
-  const GroupsPage({Key? key}) : super(key: key);
+  const GroupsPage({super.key});
 
   @override
   State<GroupsPage> createState() => _GroupsPageState();
@@ -38,6 +39,11 @@ class _GroupsPageState extends State<GroupsPage> {
   // Track which group user is currently viewing
   int? _activeConversationId;
 
+  // Typing state management
+  final Map<int, bool> _typingUsers = {}; // conversationId -> isTyping
+  final Map<int, Timer?> _typingTimers = {}; // conversationId -> timer
+  final Map<int, String> _typingUserNames = {}; // conversationId -> userName
+
   StreamSubscription<Map<String, dynamic>>? _websocketSubscription;
 
   @override
@@ -54,6 +60,11 @@ class _GroupsPageState extends State<GroupsPage> {
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     _websocketSubscription?.cancel();
+    // Cancel all typing timers
+    for (final timer in _typingTimers.values) {
+      timer?.cancel();
+    }
+    _typingTimers.clear();
     // Clear active conversation
     _activeConversationId = null;
     super.dispose();
@@ -62,7 +73,6 @@ class _GroupsPageState extends State<GroupsPage> {
   /// Load groups and communities from local DB first
   Future<void> _loadFromLocal() async {
     try {
-      debugPrint('📦 Loading from local DB...');
       final localGroups = await _groupsRepo.getAllGroups();
       final localCommunities = await _communitiesRepo.getAllCommunities();
 
@@ -88,9 +98,6 @@ class _GroupsPageState extends State<GroupsPage> {
         });
 
         if (updatedGroups.isNotEmpty || localCommunities.isNotEmpty) {
-          debugPrint(
-            '✅ Loaded ${updatedGroups.length} groups and ${localCommunities.length} communities from local DB',
-          );
         } else {
           debugPrint('ℹ️ No cached groups or communities found in local DB');
         }
@@ -186,16 +193,93 @@ class _GroupsPageState extends State<GroupsPage> {
     Map<String, dynamic> message,
   ) async {
     try {
-      debugPrint('📨 GroupsPage received WebSocket message: $message');
-
       final messageType = message['type'];
 
       if (messageType == 'message' || messageType == 'media') {
         // Update last message for groups
         await _handleNewGroupMessage(message);
+      } else if (messageType == 'typing') {
+        _handleTypingMessage(message);
       }
     } catch (e) {
       debugPrint('❌ Error handling WebSocket message in GroupsPage: $e');
+    }
+  }
+
+  /// Handle typing message from WebSocket
+  void _handleTypingMessage(Map<String, dynamic> message) {
+    try {
+      final data = message['data'] as Map<String, dynamic>? ?? {};
+      final conversationId = message['conversation_id'] as int?;
+      final isTyping = data['is_typing'] as bool? ?? false;
+      final userId = data['user_id'] as int?;
+      final userName = data['user_name'] as String? ?? '';
+
+      if (conversationId == null || userId == null) {
+        debugPrint(
+          '⚠️ Invalid typing message: missing conversationId or userId',
+        );
+        return;
+      }
+
+      // Find the group to get user name
+      final groupIndex = _allGroups.indexWhere(
+        (group) => group.conversationId == conversationId,
+      );
+
+      if (groupIndex == -1) {
+        debugPrint('⚠️ Group not found for typing indicator: $conversationId');
+        return;
+      }
+
+      final group = _allGroups[groupIndex];
+      // Get user name from group members or use provided name
+      final typingUserName = userName.isNotEmpty
+          ? userName
+          : group.members
+                .firstWhere(
+                  (member) => member.userId == userId,
+                  orElse: () => GroupMember(
+                    userId: userId,
+                    name: 'Someone',
+                    role: 'member',
+                  ),
+                )
+                .name;
+
+      if (mounted) {
+        setState(() {
+          if (isTyping) {
+            _typingUsers[conversationId] = true;
+            _typingUserNames[conversationId] = typingUserName;
+
+            // Cancel existing timer
+            _typingTimers[conversationId]?.cancel();
+
+            // Set timer to hide typing indicator after 2 seconds
+            _typingTimers[conversationId] = Timer(
+              const Duration(seconds: 2),
+              () {
+                if (mounted) {
+                  setState(() {
+                    _typingUsers[conversationId] = false;
+                    _typingUserNames.remove(conversationId);
+                  });
+                }
+                _typingTimers[conversationId] = null;
+              },
+            );
+          } else {
+            // Stop typing immediately
+            _typingUsers[conversationId] = false;
+            _typingUserNames.remove(conversationId);
+            _typingTimers[conversationId]?.cancel();
+            _typingTimers[conversationId] = null;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error handling typing message: $e');
     }
   }
 
@@ -228,9 +312,6 @@ class _GroupsPageState extends State<GroupsPage> {
           // Update filtered items
           _onSearchChanged();
         });
-        debugPrint(
-          '✅ Cleared unread count for group $conversationId (was ${group.unreadCount})',
-        );
       } else {
         debugPrint('ℹ️ Group $conversationId already has 0 unread count');
       }
@@ -243,9 +324,6 @@ class _GroupsPageState extends State<GroupsPage> {
 
   /// Set the currently active group (when user enters inner group chat)
   void _setActiveConversation(int? conversationId) {
-    debugPrint(
-      '📍 Setting active group from $_activeConversationId to: $conversationId',
-    );
     _activeConversationId = conversationId;
     if (conversationId != null) {
       _clearUnreadCount(conversationId);
@@ -379,35 +457,16 @@ class _GroupsPageState extends State<GroupsPage> {
     try {
       localGroups = await _groupsRepo.getAllGroups();
       localCommunities = await _communitiesRepo.getAllCommunities();
-      debugPrint(
-        '📦 Current local DB has ${localGroups.length} groups and ${localCommunities.length} communities',
-      );
     } catch (e) {
       debugPrint('⚠️ Error reading local DB: $e');
     }
 
     try {
-      debugPrint('📥 Loading groups and communities from server...');
-
       // Load groups
       final groupResponse = await _userService.GetChatList('group');
-      print(
-        "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
-      );
-      print('group response: $groupResponse');
-      print(
-        "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
-      );
 
       // Load communities
       final communityResponse = await _userService.GetCommunityChatList();
-      print(
-        "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
-      );
-      print('Community response: $communityResponse');
-      print(
-        "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",
-      );
 
       List<GroupModel> groups = [];
       List<CommunityModel> communities = [];
@@ -448,7 +507,6 @@ class _GroupsPageState extends State<GroupsPage> {
           );
           // Only persist if we got data from server
           await _groupsRepo.insertOrUpdateGroups(updatedGroups);
-          debugPrint('✅ Persisted ${updatedGroups.length} groups to local DB');
         } else {
           debugPrint('⚠️ Server returned 0 groups - keeping local cache');
         }
@@ -468,9 +526,6 @@ class _GroupsPageState extends State<GroupsPage> {
           hasServerData = true;
           // Only persist if we got data from server
           await _communitiesRepo.insertOrUpdateCommunities(communities);
-          debugPrint(
-            '✅ Persisted ${communities.length} communities to local DB',
-          );
         } else {
           debugPrint('⚠️ Server returned 0 communities - keeping local cache');
         }
@@ -479,7 +534,6 @@ class _GroupsPageState extends State<GroupsPage> {
       // If server returned empty but we have local data, use local data
       if (!hasServerData &&
           (localGroups.isNotEmpty || localCommunities.isNotEmpty)) {
-        debugPrint('📦 Server returned no data - using cached data instead');
         groups = localGroups;
         communities = localCommunities;
       }
@@ -509,13 +563,11 @@ class _GroupsPageState extends State<GroupsPage> {
         });
       }
 
-      debugPrint(
-        '✅ Displaying ${_allGroups.length} groups and ${_allCommunities.length} communities',
-      );
       return {'groups': _allGroups, 'communities': _allCommunities};
     } catch (e) {
-      debugPrint('❌ Error loading from server: $e');
-      debugPrint('📦 Using local DB data as fallback...');
+      debugPrint(
+        '❌ Error loading from server \n 📦 Using local DB data as fallback...',
+      );
 
       // Use local data on error
       if (mounted) {
@@ -540,9 +592,6 @@ class _GroupsPageState extends State<GroupsPage> {
         });
       }
 
-      debugPrint(
-        '📦 Displaying ${localGroups.length} groups and ${localCommunities.length} communities from local DB',
-      );
       return {'groups': localGroups, 'communities': localCommunities};
     }
   }
@@ -637,33 +686,13 @@ class _GroupsPageState extends State<GroupsPage> {
           ],
         ),
       ),
-      body: Container(
-        color: Colors.grey[50],
-        child: Column(
-          children: [
-            // Search Bar
-            Container(
-              padding: EdgeInsets.all(16),
-              color: Colors.white,
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Search groups...',
-                  prefixIcon: Icon(Icons.search),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(25),
-                    borderSide: BorderSide.none,
-                  ),
-                  filled: true,
-                  fillColor: Colors.grey[100],
-                ),
-              ),
-            ),
-
-            // Groups and Communities List
-            Expanded(child: _buildContent()),
-          ],
+      body: SearchableListLayout(
+        searchBar: SearchableListBar(
+          controller: _searchController,
+          hintText: 'Search groups...',
+          onChanged: (value) => _onSearchChanged(),
         ),
+        content: _buildContent(),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
@@ -685,10 +714,6 @@ class _GroupsPageState extends State<GroupsPage> {
   }
 
   Widget _buildContent() {
-    debugPrint(
-      '🏗️ Building content: _isLoaded=$_isLoaded, filteredItems=${_filteredItems.length}',
-    );
-
     // If we have loaded data, show it directly
     if (_isLoaded && _filteredItems.isNotEmpty) {
       return _buildItemsList();
@@ -846,8 +871,13 @@ class _GroupsPageState extends State<GroupsPage> {
           final item = _filteredItems[index];
 
           if (item is GroupModel) {
+            final isTyping = _typingUsers[item.conversationId] ?? false;
+            final typingUserName = _typingUserNames[item.conversationId];
+
             return GroupListItem(
               group: item,
+              isTyping: isTyping,
+              typingUserName: typingUserName,
               onTap: () async {
                 // Set this group as active and clear unread count
                 _setActiveConversation(item.conversationId);
@@ -862,7 +892,6 @@ class _GroupsPageState extends State<GroupsPage> {
 
                 // Check if group was deleted
                 if (result is Map && result['action'] == 'deleted') {
-                  debugPrint('🗑️ Group was deleted, refreshing list...');
                   // Refresh the groups list
                   _refreshData();
                   return;
@@ -911,9 +940,16 @@ class _GroupsPageState extends State<GroupsPage> {
 class GroupListItem extends StatelessWidget {
   final GroupModel group;
   final VoidCallback onTap;
+  final bool isTyping;
+  final String? typingUserName;
 
-  const GroupListItem({Key? key, required this.group, required this.onTap})
-    : super(key: key);
+  const GroupListItem({
+    super.key,
+    required this.group,
+    required this.onTap,
+    this.isTyping = false,
+    this.typingUserName,
+  });
 
   String _formatTime(String? dateTimeString) {
     if (dateTimeString == null) return '';
@@ -976,6 +1012,7 @@ class GroupListItem extends StatelessWidget {
     final hasUnreadMessages = group.unreadCount > 0;
     final lastMessageText = _formatLastMessageText(group.metadata?.lastMessage);
     final timeText = _formatTime(group.lastMessageAt ?? group.joinedAt);
+    final displayText = isTyping ? 'Typing...' : lastMessageText;
 
     return Container(
       height: 80,
@@ -1020,12 +1057,30 @@ class GroupListItem extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      lastMessageText,
-                      style: TextStyle(color: Colors.grey[600], fontSize: 14),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    isTyping
+                        ? Row(
+                            children: [
+                              Text(
+                                'Typing',
+                                style: TextStyle(
+                                  color: Colors.teal[600],
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              _buildTypingAnimation(),
+                            ],
+                          )
+                        : Text(
+                            displayText,
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 14,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                   ],
                 ),
               ),
@@ -1068,6 +1123,80 @@ class GroupListItem extends StatelessWidget {
       ),
     );
   }
+
+  Widget _buildTypingAnimation() {
+    return SizedBox(
+      width: 20,
+      height: 14,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _TypingDot(delay: 0),
+          _TypingDot(delay: 200),
+          _TypingDot(delay: 400),
+        ],
+      ),
+    );
+  }
+}
+
+class _TypingDot extends StatefulWidget {
+  final int delay;
+
+  const _TypingDot({required this.delay});
+
+  @override
+  State<_TypingDot> createState() => _TypingDotState();
+}
+
+class _TypingDotState extends State<_TypingDot>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 1200),
+      vsync: this,
+    );
+
+    _animation = Tween<double>(
+      begin: 0.3,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+
+    // Start animation with delay
+    Future.delayed(Duration(milliseconds: widget.delay), () {
+      if (mounted) {
+        _controller.repeat(reverse: true);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        return Container(
+          width: 3,
+          height: 3,
+          decoration: BoxDecoration(
+            color: Colors.teal[600]!.withOpacity(_animation.value),
+            shape: BoxShape.circle,
+          ),
+        );
+      },
+    );
+  }
 }
 
 class CommunityListItem extends StatelessWidget {
@@ -1075,10 +1204,10 @@ class CommunityListItem extends StatelessWidget {
   final VoidCallback onTap;
 
   const CommunityListItem({
-    Key? key,
+    super.key,
     required this.community,
     required this.onTap,
-  }) : super(key: key);
+  });
 
   String _formatTime(String? dateTimeString) {
     if (dateTimeString == null) return '';

@@ -1,5 +1,5 @@
 // import 'dart:convert';
-import 'package:amigo/screens/main_pages/inner_chat_page.dart';
+import 'package:amigo/screens/chat/dm/messaging.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';

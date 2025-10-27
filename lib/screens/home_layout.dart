@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'main_pages/chats_page.dart';
-import 'main_pages/groups_page.dart';
-import 'main_pages/contacts_page.dart';
-import 'main_pages/profile_page.dart';
-import 'main_pages/calls_page.dart';
+import 'chat/dm/dm_list.dart';
+import 'chat/group/group_list.dart';
+import 'contact/contact_list.dart';
+import 'profile/profile_info.dart';
+import 'call/call_logs.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({Key? key}) : super(key: key);
@@ -91,32 +91,51 @@ class _MainScreenState extends State<MainScreen> {
         selectedIndex: _currentPageIndex,
         backgroundColor: Colors.grey[100],
         labelTextStyle: WidgetStateProperty.all(
-          const TextStyle(fontSize: 14, color: Colors.black, fontWeight: FontWeight.bold),
+          const TextStyle(
+            fontSize: 14,
+            color: Colors.black,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         destinations: const <Widget>[
           NavigationDestination(
             selectedIcon: Icon(Icons.message, color: Colors.teal),
-            icon: Icon(Icons.message_outlined, color: Color.fromARGB(255, 65, 64, 64)),
+            icon: Icon(
+              Icons.message_outlined,
+              color: Color.fromARGB(255, 65, 64, 64),
+            ),
             label: 'Chats',
           ),
           NavigationDestination(
             selectedIcon: Icon(Icons.group, color: Colors.teal),
-            icon: Icon(Icons.group_outlined, color: Color.fromARGB(255, 65, 64, 64)),
+            icon: Icon(
+              Icons.group_outlined,
+              color: Color.fromARGB(255, 65, 64, 64),
+            ),
             label: 'Groups',
           ),
           NavigationDestination(
             selectedIcon: Icon(Icons.contacts_rounded, color: Colors.teal),
-            icon: Icon(Icons.contacts_outlined, color: Color.fromARGB(255, 65, 64, 64)),
+            icon: Icon(
+              Icons.contacts_outlined,
+              color: Color.fromARGB(255, 65, 64, 64),
+            ),
             label: 'Contacts',
           ),
           NavigationDestination(
             selectedIcon: Icon(Icons.call, color: Colors.teal),
-            icon: Icon(Icons.call_outlined, color: Color.fromARGB(255, 65, 64, 64)),
+            icon: Icon(
+              Icons.call_outlined,
+              color: Color.fromARGB(255, 65, 64, 64),
+            ),
             label: 'Calls',
           ),
           NavigationDestination(
             selectedIcon: Icon(Icons.person_rounded, color: Colors.teal),
-            icon: Icon(Icons.person_outline, color: Color.fromARGB(255, 65, 64, 64)),
+            icon: Icon(
+              Icons.person_outline,
+              color: Color.fromARGB(255, 65, 64, 64),
+            ),
             label: 'Profile',
           ),
         ],

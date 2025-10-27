@@ -6,12 +6,12 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'screens/auth/login_screen.dart';
-import 'screens/main_screen.dart';
+import 'screens/home_layout.dart';
 import 'screens/call/in_call_screen.dart';
 import 'screens/call/incoming_call_screen.dart';
-import 'screens/main_pages/inner_chat_page.dart';
-import 'screens/main_pages/inner_group_chat_page.dart';
-import 'screens/share_handler_screen.dart';
+import 'screens/chat/dm/messaging.dart';
+import 'screens/chat/group/messaging.dart';
+import 'screens/share/external_share.dart';
 import 'services/auth_service.dart';
 import 'services/cookie_service.dart';
 import 'services/websocket_service.dart';
@@ -276,7 +276,6 @@ class _MyAppState extends material.State<MyApp> {
 
     // Listen to notification streams
     _notificationService.messageNotificationStream.listen((data) {
-      print('📨 Message notification received: $data');
       // Handle message notification - could navigate to specific chat
       _handleNotificationNavigation(data);
     });
@@ -299,8 +298,6 @@ class _MyAppState extends material.State<MyApp> {
 
   /// Handle navigation from notification tap
   void _handleNotificationNavigation(Map<String, dynamic> data) {
-    print('🔔 _handleNotificationNavigation called with data: $data');
-
     // Add a small delay to ensure navigator is ready
     Future.delayed(const Duration(milliseconds: 300), () async {
       try {
@@ -320,15 +317,10 @@ class _MyAppState extends material.State<MyApp> {
           return;
         }
 
-        print(
-          '🚀 Navigating to conversation from notification: conversationId=$conversationId',
-        );
-
         // Try to fetch the conversation from local DB
         await _fetchAndNavigateToConversation(conversationId, data);
       } catch (e) {
         print('❌ Error navigating to conversation from notification: $e');
-        print('   Stack trace: ${StackTrace.current}');
       }
     });
   }
@@ -339,58 +331,38 @@ class _MyAppState extends material.State<MyApp> {
     Map<String, dynamic> notificationData,
   ) async {
     try {
-      print('🔍 Fetching conversation with ID: $conversationId');
-
       // First, try to get it as a DM conversation
       final conversationsRepo = ConversationsRepository();
-      print('   Checking DM conversations...');
       final conversation = await conversationsRepo.getConversationById(
         conversationId,
       );
 
       if (conversation != null) {
-        print('✅ Found DM conversation: ${conversation.userName}');
         _navigateToDM(conversation);
         return;
       }
-
-      print('   Not found in DM conversations, checking groups...');
 
       // If not found as DM, try to get it as a group
       final groupsRepo = GroupsRepository();
       final group = await groupsRepo.getGroupById(conversationId);
 
       if (group != null) {
-        print('✅ Found group conversation: ${group.title}');
         _navigateToGroup(group);
         return;
       }
-
-      // If not found in local DB
-      print(
-        '⚠️ Conversation $conversationId not found in local DB (neither DM nor Group)',
-      );
-      print(
-        '   This might be a new conversation. The app will sync it on next refresh.',
-      );
     } catch (e) {
       print('❌ Error fetching conversation: $e');
-      print('   Stack trace: ${StackTrace.current}');
     }
   }
 
   /// Navigate to DM conversation
   void _navigateToDM(ConversationModel conversation) {
-    print('🎯 Navigating to DM conversation: ${conversation.userName}');
-
     if (NavigationHelper.navigatorKey.currentContext != null) {
-      print('   Navigator context is available');
       material.Navigator.of(NavigationHelper.navigatorKey.currentContext!).push(
         material.MaterialPageRoute(
           builder: (_) => InnerChatPage(conversation: conversation),
         ),
       );
-      print('✅ Navigation to DM completed');
     } else {
       print('❌ Navigator context is null, cannot navigate');
     }
@@ -398,16 +370,12 @@ class _MyAppState extends material.State<MyApp> {
 
   /// Navigate to group conversation
   void _navigateToGroup(GroupModel group) {
-    print('🎯 Navigating to group conversation: ${group.title}');
-
     if (NavigationHelper.navigatorKey.currentContext != null) {
-      print('   Navigator context is available');
       material.Navigator.of(NavigationHelper.navigatorKey.currentContext!).push(
         material.MaterialPageRoute(
           builder: (_) => InnerGroupChatPage(group: group),
         ),
       );
-      print('✅ Navigation to group completed');
     } else {
       print('❌ Navigator context is null, cannot navigate');
     }
@@ -450,9 +418,6 @@ class _MyAppState extends material.State<MyApp> {
       print("⚠️ User not authenticated, ignoring shared media");
       return;
     }
-
-    print("📤 Received ${files.length} shared file(s)");
-    print("📤 Files: ${files.map((f) => f.path).join(", ")}");
 
     // Navigate to ShareHandlerScreen with files
     if (NavigationHelper.navigatorKey.currentContext != null) {

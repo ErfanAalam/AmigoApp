@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import '../../models/community_model.dart';
-import '../../models/group_model.dart';
-import '../../api/user.service.dart';
-import '../../repositories/groups_repository.dart';
-import 'inner_group_chat_page.dart';
+import '../../../models/community_model.dart';
+import '../../../models/group_model.dart';
+import '../../../api/user.service.dart';
+import '../../../repositories/groups_repository.dart';
+import 'messaging.dart';
 
 class CommunityInnerGroupsPage extends StatefulWidget {
   final CommunityModel community;
@@ -63,16 +63,14 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
       final localGroups = await _groupsRepo.getAllCommunityInnerGroups();
 
       // Filter groups that belong to this community
-      final communityGroups = localGroups
-          .where((group) {
-            // Check if the group belongs to this community by checking metadata
-            if (group.metadata?.createdBy == widget.community.id) {
-              return true;
-            }
-            // Fallback: Check if group is in the community's group IDs list
-            return widget.community.groupIds.contains(group.conversationId);
-          })
-          .toList();
+      final communityGroups = localGroups.where((group) {
+        // Check if the group belongs to this community by checking metadata
+        if (group.metadata?.createdBy == widget.community.id) {
+          return true;
+        }
+        // Fallback: Check if group is in the community's group IDs list
+        return widget.community.groupIds.contains(group.conversationId);
+      }).toList();
 
       if (mounted) {
         setState(() {
@@ -105,12 +103,22 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
   }
 
   /// Convert GroupModel to CommunityGroupModel
-  CommunityGroupModel _convertGroupModelToCommunityGroupModel(GroupModel group) {
+  CommunityGroupModel _convertGroupModelToCommunityGroupModel(
+    GroupModel group,
+  ) {
     CommunityGroupMetadata? metadata;
     if (group.metadata != null) {
       metadata = CommunityGroupMetadata(
         timezone: 'UTC', // Default timezone, will be updated from server
-        activeDays: [0, 1, 2, 3, 4, 5, 6], // Default all days, will be updated from server
+        activeDays: [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+        ], // Default all days, will be updated from server
         communityId: widget.community.id,
         activeTimeSlots: [], // Will be updated from server
         lastMessage: group.metadata!.lastMessage,
@@ -139,9 +147,11 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
     try {
       final localGroups = await _groupsRepo.getAllCommunityInnerGroups();
       localInnerGroups = localGroups
-          .where((group) =>
-              widget.community.groupIds.contains(group.conversationId) ||
-              group.metadata?.createdBy == widget.community.id)
+          .where(
+            (group) =>
+                widget.community.groupIds.contains(group.conversationId) ||
+                group.metadata?.createdBy == widget.community.id,
+          )
           .map((g) => _convertGroupModelToCommunityGroupModel(g))
           .toList();
       debugPrint(
@@ -222,8 +232,9 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
 
         if (mounted) {
           setState(() {
-            _allInnerGroups =
-                innerGroups.isNotEmpty ? innerGroups : localInnerGroups;
+            _allInnerGroups = innerGroups.isNotEmpty
+                ? innerGroups
+                : localInnerGroups;
             _filteredInnerGroups = List.from(_allInnerGroups);
             _isLoaded = true;
           });

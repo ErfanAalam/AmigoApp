@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import '../../models/user_model.dart';
-import '../../api/groups.services.dart';
-import '../../api/user.service.dart';
-import '../../services/contact_service.dart';
-import '../../services/websocket_service.dart';
+import '../../../models/user_model.dart';
+import '../../../api/groups.services.dart';
+import '../../../api/user.service.dart';
+import '../../../services/contact_service.dart';
+import '../../../services/websocket_service.dart';
 
 class CreateGroupPage extends StatefulWidget {
   const CreateGroupPage({Key? key}) : super(key: key);
@@ -91,7 +91,9 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('NO Contact found please add some contacts to your phone: ${e.toString()}'),
+            content: Text(
+              'NO Contact found please add some contacts to your phone: ${e.toString()}',
+            ),
             backgroundColor: Colors.teal,
           ),
         );
@@ -172,7 +174,9 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error creating group please try again: ${e.toString()}'),
+            content: Text(
+              'Error creating group please try again: ${e.toString()}',
+            ),
             backgroundColor: Colors.teal,
           ),
         );

@@ -8,25 +8,25 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
-import '../../models/group_model.dart';
-import '../../models/message_model.dart';
-import '../../models/conversation_model.dart';
-import '../../models/community_model.dart';
-import '../../models/user_model.dart';
-import '../../api/groups.services.dart';
-import '../../api/user.service.dart';
-import '../../api/chats.services.dart';
-import '../../services/message_storage_service.dart';
-import '../../repositories/messages_repository.dart';
-import '../../repositories/user_repository.dart';
-import '../../repositories/groups_repository.dart';
-import '../../repositories/group_members_repository.dart';
-import '../../services/websocket_service.dart';
-import '../../services/media_cache_service.dart';
-import '../../utils/chat_helpers.dart';
-import '../../utils/message_storage_helpers.dart';
-import '../../widgets/media_preview_widgets.dart';
-import 'group_info_page.dart';
+import '../../../models/group_model.dart';
+import '../../../models/message_model.dart';
+import '../../../models/conversation_model.dart';
+import '../../../models/community_model.dart';
+import '../../../models/user_model.dart';
+import '../../../api/groups.services.dart';
+import '../../../api/user.service.dart';
+import '../../../api/chats.services.dart';
+import '../../../services/message_storage_service.dart';
+import '../../../repositories/messages_repository.dart';
+import '../../../repositories/user_repository.dart';
+import '../../../repositories/groups_repository.dart';
+import '../../../repositories/group_members_repository.dart';
+import '../../../services/websocket_service.dart';
+import '../../../services/media_cache_service.dart';
+import '../../../utils/chat_helpers.dart';
+import '../../../utils/message_storage_helpers.dart';
+import '../../../widgets/media_preview_widgets.dart';
+import 'group_info.dart';
 import 'dart:io' as io;
 
 class InnerGroupChatPage extends StatefulWidget {
@@ -35,11 +35,11 @@ class InnerGroupChatPage extends StatefulWidget {
   final CommunityGroupMetadata? communityGroupMetadata;
 
   const InnerGroupChatPage({
-    Key? key,
+    super.key,
     required this.group,
     this.isCommunityGroup = false,
     this.communityGroupMetadata,
-  }) : super(key: key);
+  });
 
   @override
   State<InnerGroupChatPage> createState() => _InnerGroupChatPageState();
@@ -8493,11 +8493,11 @@ class ReadByModal extends StatefulWidget {
   final int? currentUserId;
 
   const ReadByModal({
-    Key? key,
+    super.key,
     required this.message,
     required this.members,
     this.currentUserId,
-  }) : super(key: key);
+  });
 
   @override
   State<ReadByModal> createState() => _ReadByModalState();
