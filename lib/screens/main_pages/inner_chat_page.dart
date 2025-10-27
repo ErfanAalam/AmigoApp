@@ -3145,7 +3145,18 @@ class _InnerChatPageState extends State<InnerChatPage>
           // Wrap the message with a container that has a key for scrolling
           return Container(
             key: _messageKeys[message.id],
-            child: _buildMessageWithActions(message, isMyMessage),
+            child: Column(
+              children: [
+                // Date separator - show the date for the group of messages that starts here
+                if (ChatHelpers.shouldShowDateSeparator(
+                  _messages,
+                  messageIndex,
+                ))
+                  _buildDateSeparator(message.createdAt),
+                // Message bubble with long press
+                _buildMessageWithActions(message, isMyMessage),
+              ],
+            ),
           );
         },
       ),
@@ -3212,6 +3223,35 @@ class _InnerChatPageState extends State<InnerChatPage>
           },
         );
       },
+    );
+  }
+
+  Widget _buildDateSeparator(String dateTimeString) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 16),
+      child: Row(
+        children: [
+          Expanded(child: Container(height: 1, color: Colors.grey[300])),
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.grey[100],
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey[300]!),
+            ),
+            child: Text(
+              ChatHelpers.formatDateSeparator(dateTimeString),
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(child: Container(height: 1, color: Colors.grey[300])),
+        ],
+      ),
     );
   }
 

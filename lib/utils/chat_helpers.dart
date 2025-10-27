@@ -145,47 +145,42 @@ class ChatHelpers {
       // Get the current message (the one we're checking)
       final currentMessage = messages[messages.length - 1 - index];
 
-      // For the first message (newest at bottom), always show separator
-      if (index == 0) {
-        debugPrint(
-          '📅 Date separator: Showing for first message (index 0) - ${currentMessage.createdAt}',
-        );
-        return true;
-      }
+      // If this is the oldest item in the list (top-most when reversed),
+      // always show the date chip above it.
+      final isOldestItem = (messages.length - 1 - index) == 0;
+      if (isOldestItem) return true;
 
-      // Get the next message in the display order (chronologically newer, displayed below)
-      // Since we're going up in the list (higher index = older message), we need to get the message below
-      final nextMessage = messages[messages.length - 1 - (index - 1)];
+      // Compare with the previous item in display order (the one above = older)
+      // If the date differs, current is the first message of its day group.
+      final previousMessage = messages[messages.length - 1 - (index + 1)];
 
-      // Convert both to local time and get date parts
       final currentDateTime = convertToLocalTime(currentMessage.createdAt);
-      final nextDateTime = convertToLocalTime(nextMessage.createdAt);
+      final previousDateTime = convertToLocalTime(previousMessage.createdAt);
 
       final currentDate = DateTime(
         currentDateTime.year,
         currentDateTime.month,
         currentDateTime.day,
       );
-      final nextDate = DateTime(
-        nextDateTime.year,
-        nextDateTime.month,
-        nextDateTime.day,
+      final previousDate = DateTime(
+        previousDateTime.year,
+        previousDateTime.month,
+        previousDateTime.day,
       );
 
-      // Show separator if the current message is from a different date than the next message
-      // This means we're at the start of a new date group (WhatsApp style)
-      final shouldShow = currentDate != nextDate;
+      // Place chip above the first message of the current date group
+      final shouldShow = currentDate != previousDate;
 
       // Debug logging
       if (shouldShow) {
         debugPrint(
-          '📅 Date separator: Showing at index $index (start of new date group)',
+          '📅 Date separator: Showing at index $index (first message of date group)',
         );
         debugPrint(
           '   Current: ${currentMessage.createdAt} -> ${currentDate.toString().split(' ')[0]}',
         );
         debugPrint(
-          '   Next: ${nextMessage.createdAt} -> ${nextDate.toString().split(' ')[0]}',
+          '   Prev: ${previousMessage.createdAt} -> ${previousDate.toString().split(' ')[0]}',
         );
       }
 

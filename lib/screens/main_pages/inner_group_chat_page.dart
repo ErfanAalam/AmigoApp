@@ -3086,8 +3086,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           return Column(
             children: [
               // Date separator - show the date for the group of messages that starts here
-              // if (ChatHelpers.shouldShowDateSeparator(_messages, messageIndex))
-              // _buildDateSeparator(message.createdAt),
+              if (ChatHelpers.shouldShowDateSeparator(_messages, messageIndex))
+                _buildDateSeparator(message.createdAt),
               // Message bubble with long press
               _buildMessageWithActions(message, isMyMessage),
             ],
@@ -3097,34 +3097,34 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     );
   }
 
-  // Widget _buildDateSeparator(String dateTimeString) {
-  //   return Container(
-  //     margin: const EdgeInsets.symmetric(vertical: 16),
-  //     child: Row(
-  //       children: [
-  //         Expanded(child: Container(height: 1, color: Colors.grey[300])),
-  //         Container(
-  //           margin: const EdgeInsets.symmetric(horizontal: 16),
-  //           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-  //           decoration: BoxDecoration(
-  //             color: Colors.grey[100],
-  //             borderRadius: BorderRadius.circular(12),
-  //             border: Border.all(color: Colors.grey[300]!),
-  //           ),
-  //           child: Text(
-  //             ChatHelpers.formatDateSeparator(dateTimeString),
-  //             style: TextStyle(
-  //               color: Colors.grey[600],
-  //               fontSize: 12,
-  //               fontWeight: FontWeight.w500,
-  //             ),
-  //           ),
-  //         ),
-  //         Expanded(child: Container(height: 1, color: Colors.grey[300])),
-  //       ],
-  //     ),
-  //   );
-  // }
+  Widget _buildDateSeparator(String dateTimeString) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 16),
+      child: Row(
+        children: [
+          Expanded(child: Container(height: 1, color: Colors.grey[300])),
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.grey[100],
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey[300]!),
+            ),
+            child: Text(
+              ChatHelpers.formatDateSeparator(dateTimeString),
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(child: Container(height: 1, color: Colors.grey[300])),
+        ],
+      ),
+    );
+  }
 
   Widget _buildMessageWithActions(MessageModel message, bool isMyMessage) {
     final isSelected = _selectedMessages.contains(message.id);
@@ -3382,28 +3382,31 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                       ? CrossAxisAlignment.end
                       : CrossAxisAlignment.start,
                   children: [
-                    // Sender name (if not my message) - shown above all message types
-                    if (!isMyMessage) ...[
-                      Padding(
-                        padding: const EdgeInsets.only(left: 12, bottom: 4),
-                        child: Text(
-                          _getSenderName(
-                            message.senderId,
-                            storedSenderName: message.senderName,
-                          ),
-                          style: TextStyle(
-                            color: Colors.teal[700],
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
                     // Check if this is a media message (image/video)
                     _isMediaMessage(message)
                         ? Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              if (!isMyMessage) ...[
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    left: 12,
+                                    top: 8,
+                                    bottom: 4,
+                                  ),
+                                  child: Text(
+                                    _getSenderName(
+                                      message.senderId,
+                                      storedSenderName: message.senderName,
+                                    ),
+                                    style: TextStyle(
+                                      color: Colors.teal[700],
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
                               // Reply message preview (if this is a reply)
                               if (message.replyToMessage != null)
                                 Container(
@@ -3463,6 +3466,25 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                                if (!isMyMessage) ...[
+                                  Padding(
+                                    padding: const EdgeInsets.only(
+                                      top: 4,
+                                      bottom: 2,
+                                    ),
+                                    child: Text(
+                                      _getSenderName(
+                                        message.senderId,
+                                        storedSenderName: message.senderName,
+                                      ),
+                                      style: TextStyle(
+                                        color: Colors.teal[700],
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                                 // Reply message preview (if this is a reply)
                                 if (message.replyToMessage != null)
                                   _buildReplyPreview(
