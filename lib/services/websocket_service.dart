@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'cookie_service.dart';
 import '../env.dart';
+import 'package:flutter/material.dart' as material;
+import '../utils/navigation_helper.dart';
 
 enum WebSocketConnectionState {
   disconnected,
@@ -25,8 +27,8 @@ class WebSocketService {
   // Connection management
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
-  static const int maxReconnectAttempts = 5;
-  static const Duration reconnectInterval = Duration(seconds: 5);
+  static const int maxReconnectAttempts = 50;
+  static const Duration reconnectInterval = Duration(seconds: 3);
 
   // Stream controllers for different events
   final StreamController<WebSocketConnectionState> _connectionStateController =
@@ -118,8 +120,8 @@ class WebSocketService {
     // Build WebSocket URL preserving the original scheme, host, port, and path
     String wsUrl;
     if (uri.hasPort && uri.port != 80 && uri.port != 443) {
-      // wsUrl = '${uri.scheme}://${uri.host}:${uri.port}${uri.path}';
-      wsUrl = '${uri.scheme}://${uri.host}${uri.path}';
+      wsUrl = '${uri.scheme}://${uri.host}:${uri.port}${uri.path}';
+      // wsUrl = '${uri.scheme}://${uri.host}${uri.path}';
     } else {
       wsUrl = '${uri.scheme}://${uri.host}${uri.path}';
     }
@@ -181,6 +183,7 @@ class WebSocketService {
   void _scheduleReconnect() {
     if (_reconnectAttempts >= maxReconnectAttempts) {
       print('❌ Max reconnection attempts reached');
+      _showInternetIssueDialog();
       return;
     }
 
@@ -189,6 +192,37 @@ class WebSocketService {
     _reconnectTimer = Timer(reconnectInterval, () {
       connect();
     });
+  }
+
+  void _showInternetIssueDialog() {
+    final context = NavigationHelper.navigatorKey.currentContext;
+    if (context == null) {
+      print('⚠️ Cannot show internet issue dialog: navigator context is null');
+      return;
+    }
+
+    material.showDialog(
+      context: context,
+      builder: (ctx) => material.AlertDialog(
+        title: const material.Text('Connection issue'),
+        content: const material.Text(
+          "We're having trouble connecting to the server. Please check your internet connection.",
+        ),
+        actions: [
+          material.TextButton(
+            onPressed: () {
+              material.Navigator.of(ctx).pop();
+              reconnect();
+            },
+            child: const material.Text('Retry'),
+          ),
+          material.TextButton(
+            onPressed: () => material.Navigator.of(ctx).pop(),
+            child: const material.Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Update connection state and notify listeners
