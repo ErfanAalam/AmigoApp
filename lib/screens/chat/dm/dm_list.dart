@@ -386,26 +386,36 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
             conversations,
           );
 
-          // Update with stored last messages
-          final updatedConversations =
-              await _updateConversationsWithStoredLastMessages(
-                filteredConversations,
-              );
+          // Store the server's last messages to local storage for offline use
+          for (final conversation in filteredConversations) {
+            if (conversation.metadata?.lastMessage != null) {
+              final lastMsg = conversation.metadata!.lastMessage;
+              await _lastMessageStorage
+                  .storeLastMessage(conversation.conversationId, {
+                    'id': lastMsg.id,
+                    'body': lastMsg.body,
+                    'type': lastMsg.type,
+                    'sender_id': lastMsg.senderId,
+                    'created_at': lastMsg.createdAt,
+                    'conversation_id': conversation.conversationId,
+                  });
+            }
+          }
 
           // Persist to local DB
           await _conversationsRepo.insertOrUpdateConversations(
-            updatedConversations,
+            filteredConversations,
           );
 
           // Update the state for real-time updates
           if (mounted) {
             setState(() {
-              _conversations = updatedConversations;
+              _conversations = filteredConversations;
               _isLoaded = true;
               _filterConversations(); // Update filtered conversations
             });
           }
-          return updatedConversations;
+          return filteredConversations;
         } else {
           // No conversations found - return empty list instead of throwing exception
           debugPrint('ℹ️ No conversations found, returning empty list');
@@ -423,14 +433,19 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         debugPrint('⚠️ Server fetch failed, loading from local DB');
         final localConversations = await _conversationsRepo
             .getAllConversations();
+        // Update with stored last messages when using local data
+        final updatedConversations =
+            await _updateConversationsWithStoredLastMessages(
+              localConversations,
+            );
         if (mounted) {
           setState(() {
-            _conversations = localConversations;
+            _conversations = updatedConversations;
             _isLoaded = true;
             _filterConversations();
           });
         }
-        return localConversations;
+        return updatedConversations;
       }
     } catch (e) {
       debugPrint(
@@ -439,14 +454,19 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
       try {
         final localConversations = await _conversationsRepo
             .getAllConversations();
+        // Update with stored last messages when using local data
+        final updatedConversations =
+            await _updateConversationsWithStoredLastMessages(
+              localConversations,
+            );
         if (mounted) {
           setState(() {
-            _conversations = localConversations;
+            _conversations = updatedConversations;
             _isLoaded = true;
             _filterConversations();
           });
         }
-        return localConversations;
+        return updatedConversations;
       } catch (localError) {
         debugPrint('❌ Error loading from local DB: $localError');
         if (mounted) {
@@ -1053,21 +1073,31 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
             conversations,
           );
 
-          // Update with stored last messages
-          final updatedConversations =
-              await _updateConversationsWithStoredLastMessages(
-                filteredConversations,
-              );
+          // Store the server's last messages to local storage for offline use
+          for (final conversation in filteredConversations) {
+            if (conversation.metadata?.lastMessage != null) {
+              final lastMsg = conversation.metadata!.lastMessage;
+              await _lastMessageStorage
+                  .storeLastMessage(conversation.conversationId, {
+                    'id': lastMsg.id,
+                    'body': lastMsg.body,
+                    'type': lastMsg.type,
+                    'sender_id': lastMsg.senderId,
+                    'created_at': lastMsg.createdAt,
+                    'conversation_id': conversation.conversationId,
+                  });
+            }
+          }
 
           // Persist to local DB
           await _conversationsRepo.insertOrUpdateConversations(
-            updatedConversations,
+            filteredConversations,
           );
 
           // Update the state silently (only if mounted and not already showing loading)
           if (mounted && _isLoaded) {
             setState(() {
-              _conversations = updatedConversations;
+              _conversations = filteredConversations;
               _filterConversations(); // Update filtered conversations
             });
           }
