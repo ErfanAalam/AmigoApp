@@ -42,7 +42,8 @@ class _GroupsPageState extends State<GroupsPage> {
   // Typing state management
   final Map<int, bool> _typingUsers = {}; // conversationId -> isTyping
   final Map<int, Timer?> _typingTimers = {}; // conversationId -> timer
-  final Map<int, String> _typingUserNames = {}; // conversationId -> userName
+  final Map<int, Set<String>> _typingUserNames =
+      {}; // conversationId -> Set of userNames
 
   StreamSubscription<Map<String, dynamic>>? _websocketSubscription;
 
@@ -234,6 +235,8 @@ class _GroupsPageState extends State<GroupsPage> {
 
       final group = _allGroups[groupIndex];
       // Get user name from group members or use provided name
+      // delay of 1 second before showing the typing indicator
+
       final typingUserName = userName.isNotEmpty
           ? userName
           : group.members
@@ -241,7 +244,7 @@ class _GroupsPageState extends State<GroupsPage> {
                   (member) => member.userId == userId,
                   orElse: () => GroupMember(
                     userId: userId,
-                    name: 'Someone',
+                    name: userName,
                     role: 'member',
                   ),
                 )
@@ -250,8 +253,11 @@ class _GroupsPageState extends State<GroupsPage> {
       if (mounted) {
         setState(() {
           if (isTyping) {
+            // Add user to typing set
+            _typingUserNames.putIfAbsent(conversationId, () => <String>{});
+            _typingUserNames[conversationId]!.add(typingUserName);
+
             _typingUsers[conversationId] = true;
-            _typingUserNames[conversationId] = typingUserName;
 
             // Cancel existing timer
             _typingTimers[conversationId]?.cancel();
@@ -262,6 +268,7 @@ class _GroupsPageState extends State<GroupsPage> {
               () {
                 if (mounted) {
                   setState(() {
+                    // Clear typing indicator after timeout
                     _typingUsers[conversationId] = false;
                     _typingUserNames.remove(conversationId);
                   });
@@ -270,11 +277,16 @@ class _GroupsPageState extends State<GroupsPage> {
               },
             );
           } else {
-            // Stop typing immediately
-            _typingUsers[conversationId] = false;
-            _typingUserNames.remove(conversationId);
-            _typingTimers[conversationId]?.cancel();
-            _typingTimers[conversationId] = null;
+            // Remove user from typing set
+            _typingUserNames[conversationId]?.remove(typingUserName);
+
+            // If no more users typing, clear the indicator
+            if (_typingUserNames[conversationId]?.isEmpty ?? true) {
+              _typingUsers[conversationId] = false;
+              _typingUserNames.remove(conversationId);
+              _typingTimers[conversationId]?.cancel();
+              _typingTimers[conversationId] = null;
+            }
           }
         });
       }
@@ -475,6 +487,7 @@ class _GroupsPageState extends State<GroupsPage> {
       // Process groups
       if (groupResponse['success']) {
         final dynamic responseData = groupResponse['data'];
+        debugPrint('🔍 Group response data: ${responseData.toString()}');
         List<dynamic> conversationsList = [];
 
         if (responseData is List) {
@@ -501,12 +514,26 @@ class _GroupsPageState extends State<GroupsPage> {
 
         if (groups.isNotEmpty) {
           hasServerData = true;
-          // Update with stored last messages before persisting
-          final updatedGroups = await _updateGroupsWithStoredLastMessages(
-            groups,
-          );
+
+          // Store the server's last messages to local storage for offline use
+          for (final group in groups) {
+            if (group.metadata?.lastMessage != null) {
+              final lastMsg = group.metadata!.lastMessage!;
+              await _lastMessageStorage
+                  .storeGroupLastMessage(group.conversationId, {
+                    'id': lastMsg.id,
+                    'body': lastMsg.body,
+                    'type': lastMsg.type,
+                    'sender_id': lastMsg.senderId,
+                    'sender_name': lastMsg.senderName,
+                    'created_at': lastMsg.createdAt,
+                    'conversation_id': group.conversationId,
+                  });
+            }
+          }
+
           // Only persist if we got data from server
-          await _groupsRepo.insertOrUpdateGroups(updatedGroups);
+          await _groupsRepo.insertOrUpdateGroups(groups);
         } else {
           debugPrint('⚠️ Server returned 0 groups - keeping local cache');
         }
@@ -539,11 +566,14 @@ class _GroupsPageState extends State<GroupsPage> {
       }
 
       if (mounted) {
-        // Update groups with stored last messages
+        // Use server data if available, otherwise use local data
         final finalGroups = groups.isNotEmpty ? groups : localGroups;
-        final updatedGroups = await _updateGroupsWithStoredLastMessages(
-          finalGroups,
-        );
+
+        // If we have server data, use it directly
+        // If we're using local data (because server had no data), update with stored messages
+        final updatedGroups = groups.isNotEmpty
+            ? finalGroups
+            : await _updateGroupsWithStoredLastMessages(finalGroups);
 
         setState(() {
           _allGroups = updatedGroups;
@@ -872,12 +902,15 @@ class _GroupsPageState extends State<GroupsPage> {
 
           if (item is GroupModel) {
             final isTyping = _typingUsers[item.conversationId] ?? false;
-            final typingUserName = _typingUserNames[item.conversationId];
+            final typingUsers =
+                _typingUserNames[item.conversationId] ?? <String>{};
+            final typingUsersCount = typingUsers.length;
 
             return GroupListItem(
               group: item,
               isTyping: isTyping,
-              typingUserName: typingUserName,
+              typingUsers: typingUsers,
+              typingUsersCount: typingUsersCount,
               onTap: () async {
                 // Set this group as active and clear unread count
                 _setActiveConversation(item.conversationId);
@@ -941,14 +974,16 @@ class GroupListItem extends StatelessWidget {
   final GroupModel group;
   final VoidCallback onTap;
   final bool isTyping;
-  final String? typingUserName;
+  final Set<String> typingUsers;
+  final int typingUsersCount;
 
   const GroupListItem({
     super.key,
     required this.group,
     required this.onTap,
     this.isTyping = false,
-    this.typingUserName,
+    this.typingUsers = const {},
+    this.typingUsersCount = 0,
   });
 
   String _formatTime(String? dateTimeString) {
@@ -1061,7 +1096,9 @@ class GroupListItem extends StatelessWidget {
                         ? Row(
                             children: [
                               Text(
-                                'Typing',
+                                typingUsersCount == 1
+                                    ? '${typingUsers.first} is typing'
+                                    : '$typingUsersCount people are typing',
                                 style: TextStyle(
                                   color: Colors.teal[600],
                                   fontSize: 14,

@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import '../../../models/group_model.dart';
 import '../../../models/message_model.dart';
@@ -85,45 +86,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
   // User info cache for sender names and profile pics
   final Map<int, Map<String, String?>> _userInfoCache = {};
-
-  /// Get sender name from conversation metadata or fallback to message senderName
-  String _getSenderName(int senderId, {String? storedSenderName}) {
-    // First try to get from conversation metadata members data
-    if (_conversationMeta != null && _conversationMeta!.members.isNotEmpty) {
-      final senderName = _conversationMeta!.getSenderName(senderId);
-      debugPrint('🔍 Found sender name: $senderName for ID $senderId');
-      if (senderName != 'Unknown User') {
-        return senderName;
-      }
-    } else {
-      debugPrint('⚠️ No conversation metadata or members data available');
-    }
-
-    // Fallback to user info cache
-    final userInfo = _userInfoCache[senderId];
-    if (userInfo != null &&
-        userInfo['name'] != null &&
-        !userInfo['name']!.startsWith('User ')) {
-      debugPrint(
-        '🔍 Using cached user info: ${userInfo['name']} for ID $senderId',
-      );
-      return userInfo['name']!;
-    }
-
-    // Use stored sender name from message (for offline support)
-    if (storedSenderName != null &&
-        storedSenderName.isNotEmpty &&
-        !storedSenderName.startsWith('User ')) {
-      debugPrint(
-        '✅ Using stored sender name: $storedSenderName for ID $senderId (offline fallback)',
-      );
-      return storedSenderName;
-    }
-
-    // Final fallback - return a default name
-    debugPrint('⚠️ Using fallback name for ID $senderId');
-    return 'Unknown User';
-  }
 
   /// Get user info from cache, metadata, or local DB
   Map<String, String?> _getUserInfo(int userId) {
@@ -462,6 +424,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               );
               _hasMoreMessages = historyResponse.hasNextPage;
             });
+            _populateReplyMessageSenderNames();
           }
         } else if (backendCount == cachedCount) {
           // Just update metadata in case pagination info changed
@@ -488,6 +451,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               );
               _hasMoreMessages = historyResponse.hasNextPage;
             });
+            _populateReplyMessageSenderNames();
           }
         }
 
@@ -941,9 +905,28 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           message.replyToMessage!.senderName.isEmpty) {
         // Reply message exists but sender name is empty, populate it
         final senderId = message.replyToMessage!.senderId;
-        final senderInfo = _getUserInfo(senderId);
-        final senderName = senderInfo['name'] ?? 'Unknown User';
-        final senderProfilePic = senderInfo['profile_pic'];
+        String senderName;
+        String? senderProfilePic;
+
+        // First try to find the original message in the messages array
+        try {
+          final originalMessage = _messages.firstWhere(
+            (msg) => msg.id == message.replyToMessage!.id,
+          );
+          senderName = originalMessage.senderName;
+          senderProfilePic = originalMessage.senderProfilePic;
+          debugPrint(
+            '✅ Found original message in array for cached reply: $senderName',
+          );
+        } catch (e) {
+          // If not found, use cache/DB
+          final senderInfo = _getUserInfo(senderId);
+          senderName = senderInfo['name'] ?? 'Unknown User';
+          senderProfilePic = senderInfo['profile_pic'];
+          debugPrint(
+            '⚠️ Original message not in array, using cache for cached reply: $senderName',
+          );
+        }
 
         final updatedReplyMessage = MessageModel(
           id: message.replyToMessage!.id,
@@ -1272,6 +1255,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             _validatePinnedMessage();
             _validateStarredMessages();
             _validateReplyMessages();
+            _populateReplyMessageSenderNames();
           }
         } else {
           debugPrint('ℹ️ No cached group messages found in local DB');
@@ -1425,6 +1409,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           _isLoadingMore = false;
         });
 
+        _populateReplyMessageSenderNames();
+
         debugPrint('📄 Loaded ${newMessages.length} more group messages');
 
         // Cache user info from metadata for offline access
@@ -1494,8 +1480,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       // Extract message data from WebSocket payload
       final data = messageData['data'] as Map<String, dynamic>? ?? {};
       final messageBody = data['body'] as String? ?? '';
-      final senderId = _parseToInt(data['sender_id'] ?? data['senderId']);
-      final messageId = data['id'] ?? data['messageId'];
+      final senderId = _parseToInt(data['sender_id']);
+      final senderName = data['sender_name'];
+      final messageId = data['id'];
 
       final optimisticId = data['optimistic_id'] ?? data['optimisticId'];
 
@@ -1525,40 +1512,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         return;
       }
 
-      // Get sender info from conversation metadata or cache - try DB first for accuracy
-      Map<String, String?> senderInfo;
-      String senderName;
+      // Use sender name directly from socket message
       String? senderProfilePic;
 
-      // First try memory cache and metadata (fast)
-      senderInfo = _getUserInfo(senderId);
-      senderName = senderInfo['name'] ?? 'Unknown User';
+      // Try to get profile pic from cache if available
+      final senderInfo = _getUserInfo(senderId);
       senderProfilePic = senderInfo['profile_pic'];
-
-      // If we got a fallback name (User X), try to load from DB synchronously
-      if (senderName.startsWith('User ') && senderId > 0) {
-        try {
-          // Try group members DB first (synchronous-ish)
-          final groupMember = await _groupMembersRepo.getGroupMember(
-            widget.group.conversationId,
-            senderId,
-          );
-          if (groupMember != null) {
-            senderName = groupMember.userName;
-            senderProfilePic = groupMember.profilePic;
-            // Cache it for future use
-            _userInfoCache[senderId] = {
-              'name': senderName,
-              'profile_pic': senderProfilePic,
-            };
-            debugPrint(
-              '💾 Loaded sender info from DB: $senderName (ID: $senderId)',
-            );
-          }
-        } catch (e) {
-          debugPrint('⚠️ Could not load sender info from DB: $e');
-        }
-      }
 
       // Handle reply message data
       MessageModel? replyToMessage;
@@ -1570,26 +1529,47 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         final replyToData = metadata['reply_to'] as Map<String, dynamic>;
         replyToMessageId = _parseToInt(replyToData['message_id']);
 
-        // Create reply message from metadata
-        replyToMessage = MessageModel(
-          id: replyToMessageId,
-          body: replyToData['body'] ?? '',
-          type: 'text',
-          senderId: _parseToInt(replyToData['sender_id']),
-          conversationId: widget.group.conversationId,
-          createdAt: replyToData['created_at'] ?? '',
-          deleted: false,
-          senderName:
-              _getUserInfo(_parseToInt(replyToData['sender_id']))['name'] ??
-              'Unknown User',
-          senderProfilePic: _getUserInfo(
-            _parseToInt(replyToData['sender_id']),
-          )['profile_pic'],
-        );
+        // Try to find the original message in local messages first
+        try {
+          replyToMessage = _messages.firstWhere(
+            (msg) => msg.id == replyToMessageId,
+          );
+          debugPrint('✅ Found original message in local array for reply');
+        } catch (e) {
+          // Message not in local array, create from metadata
+          final repliedToSenderId = _parseToInt(replyToData['sender_id']);
 
-        debugPrint(
-          '✅ Found reply data in group metadata: replying to message $replyToMessageId',
-        );
+          // Get the sender name for the replied-to message
+          final replySenderName = replyToData['sender_name'] as String?;
+          String finalReplySenderName;
+          String? replySenderProfilePic;
+
+          if (replySenderName != null && replySenderName.isNotEmpty) {
+            // Use sender name from metadata
+            finalReplySenderName = replySenderName;
+          } else {
+            // Fallback to user info cache/DB
+            final senderInfo = _getUserInfo(repliedToSenderId);
+            finalReplySenderName = senderInfo['name'] ?? 'Unknown User';
+          }
+
+          replySenderProfilePic = _getUserInfo(
+            repliedToSenderId,
+          )['profile_pic'];
+
+          // Create reply message from metadata
+          replyToMessage = MessageModel(
+            id: replyToMessageId,
+            body: replyToData['body'] ?? '',
+            type: 'text',
+            senderId: repliedToSenderId,
+            conversationId: widget.group.conversationId,
+            createdAt: replyToData['created_at'] ?? '',
+            deleted: false,
+            senderName: finalReplySenderName,
+            senderProfilePic: replySenderProfilePic,
+          );
+        }
       } else if (data['reply_to_message'] != null) {
         replyToMessage = MessageModel.fromJson(
           data['reply_to_message'] as Map<String, dynamic>,
@@ -1856,6 +1836,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       final messageIds = message['message_ids'] as List<dynamic>? ?? [];
       final timestamp = message['timestamp'] as String?;
       final optimisticId = data['optimistic_id'];
+      final senderName = data['sender_name'] as String? ?? 'Unknown User';
 
       // Skip if this is not for our group conversation
       if (conversationId != widget.group.conversationId) {
@@ -1893,40 +1874,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         return;
       }
 
-      // Get sender info from conversation metadata or cache - try DB first for accuracy
-      Map<String, String?> senderInfo;
-      String senderName;
+      // Try to get profile pic from cache if available
       String? senderProfilePic;
-
-      // First try memory cache and metadata (fast)
-      senderInfo = _getUserInfo(userId);
-      senderName = senderInfo['name'] ?? 'Unknown User';
-      senderProfilePic = senderInfo['profile_pic'];
-
-      // If we got a fallback name (User X), try to load from DB synchronously
-      if (senderName.startsWith('User ') && userId > 0) {
-        try {
-          // Try group members DB first (synchronous-ish)
-          final groupMember = await _groupMembersRepo.getGroupMember(
-            widget.group.conversationId,
-            userId,
-          );
-          if (groupMember != null) {
-            senderName = groupMember.userName;
-            senderProfilePic = groupMember.profilePic;
-            // Cache it for future use
-            _userInfoCache[userId] = {
-              'name': senderName,
-              'profile_pic': senderProfilePic,
-            };
-            debugPrint(
-              '💾 Loaded sender info from DB: $senderName (ID: $userId)',
-            );
-          }
-        } catch (e) {
-          debugPrint('⚠️ Could not load sender info from DB: $e');
-        }
-      }
+      final cachedInfo = _getUserInfo(userId);
+      senderProfilePic = cachedInfo['profile_pic'];
 
       // Find the original message being replied to
       MessageModel? replyToMessage;
@@ -2031,64 +1982,13 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         return;
       }
 
-      // Get sender info from conversation metadata or cache - try DB first for accuracy
-      Map<String, String?> senderInfo;
-      String senderName;
+      // Extract sender_name directly from socket message
+      final senderName = data['sender_name'] ?? 'Unknown User';
+
+      // Try to get profile pic from cache if available
       String? senderProfilePic;
-
-      // First try memory cache and metadata (fast)
-      senderInfo = _getUserInfo(senderId);
-      senderName = senderInfo['name'] ?? 'Unknown User';
+      final senderInfo = _getUserInfo(senderId);
       senderProfilePic = senderInfo['profile_pic'];
-
-      // If we got a fallback name (User X), try to load from DB synchronously
-      if (senderName.startsWith('User ') && senderId > 0) {
-        try {
-          // Try group members DB first (synchronous-ish)
-          final groupMember = await _groupMembersRepo.getGroupMember(
-            widget.group.conversationId,
-            senderId,
-          );
-          if (groupMember != null) {
-            senderName = groupMember.userName;
-            senderProfilePic = groupMember.profilePic;
-            // Cache it for future use
-            _userInfoCache[senderId] = {
-              'name': senderName,
-              'profile_pic': senderProfilePic,
-            };
-            debugPrint(
-              '💾 Loaded sender info from DB: $senderName (ID: $senderId)',
-            );
-          }
-        } catch (e) {
-          debugPrint('⚠️ Could not load sender info from DB: $e');
-        }
-      }
-
-      // Cache sender info to group_members table for offline support
-      if (senderId > 0 &&
-          senderName != 'Unknown User' &&
-          !senderName.startsWith('User ')) {
-        try {
-          final memberInfo = GroupMemberInfo(
-            userId: senderId,
-            userName: senderName,
-            profilePic: senderProfilePic,
-            role: 'member', // Default role
-            joinedAt: null,
-          );
-          await _groupMembersRepo.insertOrUpdateGroupMember(
-            widget.group.conversationId,
-            memberInfo,
-          );
-          debugPrint(
-            '💾 Cached sender info to group_members DB: $senderName (ID: $senderId)',
-          );
-        } catch (e) {
-          debugPrint('⚠️ Could not cache sender info to DB: $e');
-        }
-      }
 
       // Handle reply message data for media messages
       MessageModel? replyToMessage;
@@ -2100,22 +2000,47 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         final replyToData = metadata['reply_to'] as Map<String, dynamic>;
         replyToMessageId = _parseToInt(replyToData['message_id']);
 
-        // Create reply message from metadata
-        replyToMessage = MessageModel(
-          id: replyToMessageId,
-          body: replyToData['body'] ?? '',
-          type: 'text',
-          senderId: _parseToInt(replyToData['sender_id']),
-          conversationId: widget.group.conversationId,
-          createdAt: replyToData['created_at'] ?? '',
-          deleted: false,
-          senderName:
-              _getUserInfo(_parseToInt(replyToData['sender_id']))['name'] ??
-              'Unknown User',
-          senderProfilePic: _getUserInfo(
-            _parseToInt(replyToData['sender_id']),
-          )['profile_pic'],
-        );
+        // Try to find the original message in local messages first
+        try {
+          replyToMessage = _messages.firstWhere(
+            (msg) => msg.id == replyToMessageId,
+          );
+          debugPrint('✅ Found original message in local array for media reply');
+        } catch (e) {
+          // Message not in local array, create from metadata
+          final repliedToSenderId = _parseToInt(replyToData['sender_id']);
+
+          // Get the sender name for the replied-to message
+          final replySenderName = replyToData['sender_name'] as String?;
+          String finalReplySenderName;
+          String? replySenderProfilePic;
+
+          if (replySenderName != null && replySenderName.isNotEmpty) {
+            // Use sender name from metadata
+            finalReplySenderName = replySenderName;
+          } else {
+            // Fallback to user info cache/DB
+            final senderInfo = _getUserInfo(repliedToSenderId);
+            finalReplySenderName = senderInfo['name'] ?? 'Unknown User';
+          }
+
+          replySenderProfilePic = _getUserInfo(
+            repliedToSenderId,
+          )['profile_pic'];
+
+          // Create reply message from metadata
+          replyToMessage = MessageModel(
+            id: replyToMessageId,
+            body: replyToData['body'] ?? '',
+            type: 'text',
+            senderId: repliedToSenderId,
+            conversationId: widget.group.conversationId,
+            createdAt: replyToData['created_at'] ?? '',
+            deleted: false,
+            senderName: finalReplySenderName,
+            senderProfilePic: replySenderProfilePic,
+          );
+        }
 
         debugPrint(
           '✅ Found reply data in group media metadata: replying to message $replyToMessageId',
@@ -2384,6 +2309,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     // Store message immediately in cache (optimistic storage)
     _storeMessageAsync(optimisticMessage);
 
+    final prefs = await SharedPreferences.getInstance();
+    final currentUserName = prefs.getString('current_user_name');
     try {
       // Check if this is a reply message
       if (replyMessageId != null) {
@@ -2412,6 +2339,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           'type': 'message',
           'data': messageData,
           'conversation_id': widget.group.conversationId,
+          'sender_name': currentUserName,
         });
       }
 
@@ -2706,7 +2634,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
   void _reciveTyping(Map<String, dynamic> message) {
     final isTyping = message['data']['is_typing'] as bool;
-
+    // final senderName = message['data']['sender_name'];
     // Cancel any existing timeout
     _typingTimeout?.cancel();
 
@@ -3395,10 +3323,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                                     bottom: 4,
                                   ),
                                   child: Text(
-                                    _getSenderName(
-                                      message.senderId,
-                                      storedSenderName: message.senderName,
-                                    ),
+                                    message.senderName.isNotEmpty
+                                        ? message.senderName
+                                        : 'Unknown User',
                                     style: TextStyle(
                                       color: Colors.teal[700],
                                       fontSize: 12,
@@ -3473,10 +3400,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                                       bottom: 2,
                                     ),
                                     child: Text(
-                                      _getSenderName(
-                                        message.senderId,
-                                        storedSenderName: message.senderName,
-                                      ),
+                                      message.senderName.isNotEmpty
+                                          ? message.senderName
+                                          : 'Unknown User',
                                       style: TextStyle(
                                         color: Colors.teal[700],
                                         fontSize: 12,

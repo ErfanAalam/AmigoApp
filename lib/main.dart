@@ -29,6 +29,7 @@ import 'models/group_model.dart';
 import 'repositories/conversations_repository.dart';
 import 'repositories/groups_repository.dart';
 import 'api/user.service.dart';
+import 'repositories/user_repository.dart';
 
 void main() async {
   material.WidgetsFlutterBinding.ensureInitialized();
@@ -80,6 +81,7 @@ class _MyAppState extends material.State<MyApp> {
   final NotificationService _notificationService = NotificationService();
   final ApiService _apiService = ApiService();
   final UserService _userService = UserService();
+  final UserRepository _userRepo = UserRepository();
   bool _isLoading = true;
   bool _isAuthenticated = false;
   StreamSubscription? _intentDataStreamSubscription;
@@ -94,11 +96,18 @@ class _MyAppState extends material.State<MyApp> {
     _setupWebSocketListeners();
     _initializeSharing();
     _loadAppVersion();
+    _getCurrentUser();
     // Process initial notification after the first frame is rendered
     // This ensures navigator is ready
     material.WidgetsBinding.instance.addPostFrameCallback((_) {
       _processInitialNotification();
     });
+  }
+
+  Future<void> _getCurrentUser() async {
+    final userInfo =  await _userRepo.getFirstUser();
+    final prefs = await SharedPreferences.getInstance();
+    prefs.setString('current_user_name', userInfo?.name ?? '');
   }
 
   Future<void> _loadAppVersion() async {
