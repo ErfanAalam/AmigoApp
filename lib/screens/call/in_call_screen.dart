@@ -106,11 +106,11 @@ class _InCallScreenState extends State<InCallScreen> {
                             ),
                             const SizedBox(width: 6),
                             Text(
-                              'Live Call',
-                              style: TextStyle(
-                                color: Colors.green,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
+                              _getCallStatusText(activeCall.status),
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w300,
                               ),
                             ),
                           ],
@@ -124,20 +124,11 @@ class _InCallScreenState extends State<InCallScreen> {
 
                 // Top section - call info
                 Expanded(
-                  flex: 2,
+                  flex: 3,
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // Call status
-                      Text(
-                        _getCallStatusText(activeCall.status),
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w300,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 0),
 
                       // User avatar
                       Container(

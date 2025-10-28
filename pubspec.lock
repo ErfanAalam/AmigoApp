@@ -1200,6 +1200,46 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "6.1.5+1"
+  proximity_screen_lock:
+    dependency: "direct main"
+    description:
+      name: proximity_screen_lock
+      sha256: ccec6086c60dd6a4fa8f01a7187cc18d5be07dea262d6b833cb0d8233adcfd0d
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.0"
+  proximity_screen_lock_android:
+    dependency: transitive
+    description:
+      name: proximity_screen_lock_android
+      sha256: "43fb57f75cc75332343d527ec8039d226c7da273b5e032ef79d84de5e8e7e680"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.0"
+  proximity_screen_lock_ios:
+    dependency: transitive
+    description:
+      name: proximity_screen_lock_ios
+      sha256: "7ab3860287c70e19880244a6dedeaa18dc1832501425374d080bdbce7ca961d2"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.0"
+  proximity_screen_lock_platform_interface:
+    dependency: transitive
+    description:
+      name: proximity_screen_lock_platform_interface
+      sha256: d71383fc6bd22e3b7efca2dd5501b415ec3c725be9d578bf60036a6da4bb25f5
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.0"
+  proximity_sensor:
+    dependency: "direct main"
+    description:
+      name: proximity_sensor
+      sha256: aea20f05a697b7e709434073f624a7682e3a7a64a20e7785cfbab87b94b9a100
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.3.9"
   pub_semver:
     dependency: transitive
     description:
@@ -1248,6 +1288,62 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.28.0"
+  screen_brightness:
+    dependency: "direct main"
+    description:
+      name: screen_brightness
+      sha256: "5f70754028f169f059fdc61112a19dcbee152f8b293c42c848317854d650cba3"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.7"
+  screen_brightness_android:
+    dependency: transitive
+    description:
+      name: screen_brightness_android
+      sha256: d34f5321abd03bc3474f4c381f53d189117eba0b039eac1916aa92cca5fd0a96
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.3"
+  screen_brightness_ios:
+    dependency: transitive
+    description:
+      name: screen_brightness_ios
+      sha256: "2493953340ecfe8f4f13f61db50ce72533a55b0bbd58ba1402893feecf3727f5"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.2"
+  screen_brightness_macos:
+    dependency: transitive
+    description:
+      name: screen_brightness_macos
+      sha256: "4edf330ad21078686d8bfaf89413325fbaf571dcebe1e89254d675a3f288b5b9"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.1"
+  screen_brightness_ohos:
+    dependency: transitive
+    description:
+      name: screen_brightness_ohos
+      sha256: a93a263dcd39b5c56e589eb495bcd001ce65cdd96ff12ab1350683559d5c5bb7
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.2"
+  screen_brightness_platform_interface:
+    dependency: transitive
+    description:
+      name: screen_brightness_platform_interface
+      sha256: "737bd47b57746bc4291cab1b8a5843ee881af499514881b0247ec77447ee769c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
+  screen_brightness_windows:
+    dependency: transitive
+    description:
+      name: screen_brightness_windows
+      sha256: d3518bf0f5d7a884cee2c14449ae0b36803802866de09f7ef74077874b6b2448
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
   shadcn_flutter:
     dependency: "direct main"
     description:
