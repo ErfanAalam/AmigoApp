@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
+
 /// Service to manage user online/offline status tracking
 class UserStatusService {
   static final UserStatusService _instance = UserStatusService._internal();
@@ -23,47 +25,10 @@ class UserStatusService {
   }
 
   /// Set user online status
-  void setUserOnline(int userId, {bool isOnline = true}) {
+  // void setUserOnline(int userId, {bool isOnline = true}) {
+  void setUserOnlineStatus(int userId, {bool isOnline = true}) {
     _onlineStatus[userId] = isOnline;
     _notifyStatusChange();
-
-    if (isOnline) {
-      print('🟢 User $userId is now online');
-    } else {
-      print('🔴 User $userId is now offline');
-    }
-  }
-
-  /// Set multiple users online
-  void setUsersOnline(List<int> userIds) {
-    bool hasChanges = false;
-    for (final userId in userIds) {
-      if (_onlineStatus[userId] != true) {
-        _onlineStatus[userId] = true;
-        hasChanges = true;
-        print('🟢 User $userId is now online');
-      }
-    }
-
-    if (hasChanges) {
-      _notifyStatusChange();
-    }
-  }
-
-  /// Set multiple users offline
-  void setUsersOffline(List<int> userIds) {
-    bool hasChanges = false;
-    for (final userId in userIds) {
-      if (_onlineStatus[userId] != false) {
-        _onlineStatus[userId] = false;
-        hasChanges = true;
-        print('🔴 User $userId is now offline');
-      }
-    }
-
-    if (hasChanges) {
-      _notifyStatusChange();
-    }
   }
 
   /// Handle user_online WebSocket message
@@ -73,12 +38,12 @@ class UserStatusService {
       final userId = data['user_id'] as int?;
 
       if (userId != null) {
-        setUserOnline(userId, isOnline: true);
+        setUserOnlineStatus(userId, isOnline: true);
       } else {
-        print('⚠️ Invalid user_online message: missing user_id');
+        debugPrint('⚠️ Invalid user_online message: missing user_id');
       }
     } catch (e) {
-      print('❌ Error handling user_online message: $e');
+      debugPrint('❌ Error handling user_online message');
     }
   }
 
@@ -89,25 +54,19 @@ class UserStatusService {
       final userId = data['user_id'] as int?;
 
       if (userId != null) {
-        setUserOnline(userId, isOnline: false);
+        setUserOnlineStatus(userId, isOnline: false);
       } else {
-        print('⚠️ Invalid user_offline message: missing user_id');
+        debugPrint('⚠️ Invalid user_offline message: missing user_id');
       }
     } catch (e) {
-      print('❌ Error handling user_offline message: $e');
+      debugPrint('❌ Error handling user_offline message');
     }
-  }
-
-  /// Handle bulk online users message (if server sends initial online users)
-  void handleBulkOnlineUsersMessage(List<int> userIds) {
-    setUsersOnline(userIds);
   }
 
   /// Clear all online status (useful when disconnecting)
   void clearAllStatus() {
     _onlineStatus.clear();
     _notifyStatusChange();
-    print('🧹 Cleared all user online status');
   }
 
   /// Remove specific user status
@@ -115,7 +74,6 @@ class UserStatusService {
     if (_onlineStatus.containsKey(userId)) {
       _onlineStatus.remove(userId);
       _notifyStatusChange();
-      print('🗑️ Removed status for user $userId');
     }
   }
 

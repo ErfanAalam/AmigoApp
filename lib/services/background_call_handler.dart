@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'package:amigo/api/api_service.dart';
-import 'package:amigo/services/call_service.dart';
 import 'package:amigo/env.dart';
 import 'package:amigo/services/notification_service.dart';
+import 'package:amigo/db/database_helper.dart';
+import 'package:amigo/models/message_model.dart';
+import 'package:amigo/repositories/messages_repository.dart';
 import 'package:dio/dio.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -12,6 +13,7 @@ import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // Global variables for background polling
@@ -22,24 +24,11 @@ int? _backgroundPollingCallId;
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  final CallService _callService = CallService();
-  final NotificationService _notifcations = NotificationService();
-  await _notifcations.initialize();
+  // final CallService _callService = CallService();
+  final NotificationService notifcations = NotificationService();
+  await notifcations.initialize();
 
   FlutterCallkitIncoming.onEvent.listen((CallEvent? event) async {
-    print('🔔 CallKit event received: ${event?.event}');
-    print('🔔 Full event data: $event');
-    print('🔔 Event type: ${event?.event.runtimeType}');
-
-    print(
-      "--------------------------------------------------------------------------------",
-    );
-    print(
-      "event -> ${event?.body['id']} :: ${event?.body['extra']['callerId']}",
-    );
-    print(
-      "--------------------------------------------------------------------------------",
-    );
     final prefs = await SharedPreferences.getInstance();
     switch (event?.event) {
       case Event.actionCallAccept:
@@ -60,26 +49,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         // Stop background polling since call is accepted
         _stopBackgroundStatusPolling();
 
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print("prefs updated for accepted call");
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-
-        // Navigator.popUntil(
-        //   NavigationHelper.navigator!.context,
-        //   (route) => route.isFirst,
-        // );
-
         break;
+
       case Event.actionCallDecline:
         // _callService.initialize();
         // _callService..declineCall();
@@ -97,38 +68,16 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         // Initialize Dio and make API request
         final dio = Dio();
         try {
-          final response = await dio.post(
+          await dio.post(
             '${Environment.baseUrl}/call/decline/${event?.body['id'] ?? ''}',
           );
-          print('API request successful: ${response.statusCode}');
         } catch (e) {
-          print('API request failed: $e');
+          debugPrint('Error declining call via API');
         }
 
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print("prefs updated for declined call");
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-
         break;
-      case Event.actionCallEnded:
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print("call ended from callkit");
-        print(
-          "--------------------------------------------------------------------------------",
-        );
 
+      case Event.actionCallEnded:
         // Stop background polling since call is ended
         _stopBackgroundStatusPolling();
 
@@ -147,51 +96,19 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
         break;
       default:
-        print('🔔 Unhandled CallKit event: ${event?.event}');
-        print('🔔 Event data: $event');
+        debugPrint('🔔 Unhandled CallKit event: ${event?.event}');
         break;
     }
   });
-  print('📨 Background message received: ${message.messageId}');
-  print('📨 Message data: ${message.data}');
-
-  print(
-    '--------------------------------------------------------------------------------',
-  );
-  print(
-    '--------------------------------------------------------------------------------',
-  );
-  print('🔔 Background message received with data: ${message.data}');
-  print(
-    '--------------------------------------------------------------------------------',
-  );
-  print(
-    '--------------------------------------------------------------------------------',
-  );
 
   // Handle call notifications in background
   final data = message.data;
-  if (data['type'] == 'call') {
-    print('📞 Background call notification received - showing CallKit');
 
+  if (data['type'] == 'call') {
     // Use CallKit for background call notifications
     await _handleBackgroundCallNotification(data);
   } else if (message.data['type'] == 'call_end') {
     final callId = message.data['callId'];
-
-    print(
-      '--------------------------------------------------------------------------------',
-    );
-    print(
-      '--------------------------------------------------------------------------------',
-    );
-    print('📞 Call ended notification received for callId: $callId');
-    print(
-      '--------------------------------------------------------------------------------',
-    );
-    print(
-      '--------------------------------------------------------------------------------',
-    );
 
     // Stop background polling since call is ended via FCM
     _stopBackgroundStatusPolling();
@@ -201,13 +118,16 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     await FlutterCallkitIncoming.endAllCalls();
 
     // 2. Optionally show missed call notification
-    await _notifcations.showMessageNotification(
+    await notifcations.showMessageNotification(
       title: 'Missed Call',
       body: 'You missed a call from ${message.data['callerName']}',
       data: {'type': 'missed_call', 'callId': callId},
     );
+  } else if (data['type'] == 'message') {
+    // Handle regular message notifications in background
+    // await _handleBackgroundMessage(data);
   } else {
-    print('📨 Non-call message received in background: ${data['type']}');
+    debugPrint('📨 Non-call message received in background: ${data['type']}');
   }
 }
 
@@ -216,24 +136,16 @@ Future<void> _handleBackgroundCallNotification(
   Map<String, dynamic> data,
 ) async {
   try {
-    print('🔧 Creating CallKit notification with data: $data');
-
     final callId =
         data['callId']?.toString() ??
         DateTime.now().millisecondsSinceEpoch.toString();
-    final from = data['callerId'] ?? data['from'];
-    final payload = data;
-
-    print(
-      '🔧 CallKit params - callId: $callId, from: $from, callerName: ${payload['callerName']}',
-    );
 
     final CallKitParams params = CallKitParams(
       id: callId,
-      nameCaller: payload['callerName'] ?? 'Unknown',
+      nameCaller: data['callerName'] ?? 'Unknown',
       appName: 'amigo',
-      avatar: payload['callerProfilePic'] ?? '',
-      handle: payload['callerPhone'] ?? 'Unknown',
+      avatar: data['callerProfilePic'] ?? '',
+      handle: data['callerPhone'] ?? 'Unknown',
       type: 0,
       duration: 30000,
       textAccept: 'Accept',
@@ -244,7 +156,7 @@ Future<void> _handleBackgroundCallNotification(
         subtitle: 'Missed call',
         callbackText: 'Call back',
       ),
-      extra: payload,
+      extra: data,
       android: const AndroidParams(
         isCustomNotification: true,
         isShowLogo: false,
@@ -274,13 +186,11 @@ Future<void> _handleBackgroundCallNotification(
     );
 
     await FlutterCallkitIncoming.showCallkitIncoming(params);
-    // await FlutterCallkitIncoming.showMissCallNotification(params);
-    print('📞 CallKit notification shown in background for call: $callId');
 
     // Start polling for call status after showing CallKit notification
     _startBackgroundStatusPolling(int.parse(callId));
   } catch (e) {
-    print('❌ Error showing CallKit notification in background: $e');
+    debugPrint('❌ Error showing CallKit notification in background: $e');
   }
 }
 
@@ -295,11 +205,13 @@ Future<Map<String, dynamic>?> _fetchBackgroundCallStatus(int callId) async {
     if (response.statusCode == 200) {
       return response.data;
     } else {
-      print('[BACKGROUND] Failed to fetch call status: ${response.statusCode}');
+      debugPrint(
+        '[BACKGROUND] Failed to fetch call status: ${response.statusCode}',
+      );
       return null;
     }
   } catch (e) {
-    print('[BACKGROUND] Error fetching call status: $e');
+    debugPrint('[BACKGROUND] Error fetching call status: $e');
     return null;
   }
 }
@@ -311,7 +223,6 @@ void _startBackgroundStatusPolling(int callId) {
   }
 
   _backgroundPollingCallId = callId;
-  print('[BACKGROUND] Starting status polling for call: $callId');
 
   int pollCount = 0;
   const maxPolls = 15; // 30 seconds / 2 seconds = 15 polls
@@ -328,9 +239,6 @@ void _startBackgroundStatusPolling(int callId) {
 
     // Stop polling after 30 seconds (15 polls)
     if (pollCount > maxPolls) {
-      print(
-        '[BACKGROUND] Status polling timeout after 30 seconds, stopping...',
-      );
       timer.cancel();
       _backgroundPollingTimer = null;
       _backgroundPollingCallId = null;
@@ -342,14 +250,7 @@ void _startBackgroundStatusPolling(int callId) {
       final callData = statusResponse['data'];
       final status = callData['status'];
 
-      print(
-        '[BACKGROUND] Polling - Call status: $status (poll $pollCount/$maxPolls)',
-      );
-
       if (status == 'declined' || status == 'ended') {
-        print(
-          '[BACKGROUND] Call $status detected via polling, ending CallKit...',
-        );
         timer.cancel();
         _backgroundPollingTimer = null;
         _backgroundPollingCallId = null;
@@ -366,8 +267,6 @@ void _startBackgroundStatusPolling(int callId) {
           prefs.setString('call_status', 'ended');
         }
         prefs.setString('current_call_id', callId.toString());
-
-        print('[BACKGROUND] CallKit notification ended due to $status status');
       }
     }
   });
@@ -376,9 +275,110 @@ void _startBackgroundStatusPolling(int callId) {
 /// Stop background status polling
 void _stopBackgroundStatusPolling() {
   if (_backgroundPollingTimer != null) {
-    print('[BACKGROUND] Stopping status polling');
     _backgroundPollingTimer?.cancel();
     _backgroundPollingTimer = null;
     _backgroundPollingCallId = null;
+  }
+}
+
+/// Handle background message notifications and store in local database
+Future<void> _handleBackgroundMessage(Map<String, dynamic> data) async {
+  try {
+    debugPrint('📨 Processing background message: $data');
+
+    // Parse the message data from FCM payload
+    final messageData = _parseMessageFromFCM(data);
+    if (messageData == null) {
+      debugPrint('❌ Failed to parse message data from FCM payload');
+      return;
+    }
+
+    // Initialize database helper and messages repository
+    final dbHelper = DatabaseHelper.instance;
+    final messagesRepo = MessagesRepository();
+
+    // Ensure database is initialized
+    await dbHelper.database;
+
+    // Store the message in local SQLite database
+    await messagesRepo.insertOrUpdateMessage(messageData);
+
+    debugPrint('✅ Successfully stored background message in local database');
+    debugPrint('   Message ID: ${messageData.id}');
+    debugPrint('   Conversation ID: ${messageData.conversationId}');
+    debugPrint('   Sender: ${messageData.senderName}');
+    debugPrint('   Body: ${messageData.body}');
+  } catch (e) {
+    debugPrint('❌ Error handling background message: $e');
+    debugPrint('   Stack trace: ${StackTrace.current}');
+  }
+}
+
+/// Parse message data from FCM payload
+MessageModel? _parseMessageFromFCM(Map<String, dynamic> data) {
+  try {
+    // Extract message data from FCM payload
+    final messageId = int.tryParse(data['messageId']?.toString() ?? '0') ?? 0;
+    final conversationId =
+        int.tryParse(data['conversationId']?.toString() ?? '0') ?? 0;
+    final senderId = int.tryParse(data['senderId']?.toString() ?? '0') ?? 0;
+    final senderName = data['senderName']?.toString() ?? '';
+    final senderProfilePic = data['senderProfilePic']?.toString();
+    final body = data['body']?.toString() ?? '';
+    final type = data['messageType']?.toString() ?? 'text';
+    final createdAt =
+        data['createdAt']?.toString() ?? DateTime.now().toIso8601String();
+    final editedAt = data['editedAt']?.toString();
+
+    // Parse attachments if present
+    Map<String, dynamic>? attachments;
+    if (data['attachments'] != null) {
+      try {
+        attachments = Map<String, dynamic>.from(data['attachments'] as Map);
+      } catch (e) {
+        debugPrint('⚠️ Failed to parse attachments: $e');
+      }
+    }
+
+    // Parse metadata if present
+    Map<String, dynamic>? metadata;
+    if (data['metadata'] != null) {
+      try {
+        metadata = Map<String, dynamic>.from(data['metadata'] as Map);
+      } catch (e) {
+        debugPrint('⚠️ Failed to parse metadata: $e');
+      }
+    }
+
+    // Parse reply data if present
+    MessageModel? replyToMessage;
+    int? replyToMessageId;
+    if (data['replyToMessageId'] != null) {
+      replyToMessageId = int.tryParse(
+        data['replyToMessageId']?.toString() ?? '0',
+      );
+    }
+
+    // Create MessageModel
+    return MessageModel(
+      id: messageId,
+      body: body,
+      type: type,
+      senderId: senderId,
+      conversationId: conversationId,
+      createdAt: createdAt,
+      editedAt: editedAt,
+      metadata: metadata,
+      attachments: attachments,
+      deleted: false,
+      senderName: senderName,
+      senderProfilePic: senderProfilePic,
+      replyToMessage: replyToMessage,
+      replyToMessageId: replyToMessageId,
+      isDelivered: true, // Messages received via FCM are considered delivered
+    );
+  } catch (e) {
+    debugPrint('❌ Error parsing message from FCM: $e');
+    return null;
   }
 }

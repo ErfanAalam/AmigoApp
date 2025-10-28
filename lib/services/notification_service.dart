@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -54,10 +55,8 @@ class NotificationService {
 
       // Set up message handlers
       _setupMessageHandlers();
-
-      print('🔔 NotificationService initialized successfully');
     } catch (e) {
-      print('❌ Error initializing NotificationService: $e');
+      debugPrint('❌ Error initializing NotificationService');
     }
   }
 
@@ -65,23 +64,16 @@ class NotificationService {
   Future<void> _requestPermissions() async {
     if (Platform.isAndroid) {
       // Request notification permission
-      final status = await Permission.notification.request();
-      if (status != PermissionStatus.granted) {
-        print('⚠️ Notification permission denied');
-      }
+      await Permission.notification.request();
     }
   }
 
   /// Initialize local notifications
   Future<void> _initializeLocalNotifications() async {
-    const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/launcher_icon');
-
-    const InitializationSettings initializationSettings =
-        InitializationSettings(android: initializationSettingsAndroid);
-
     await _localNotifications.initialize(
-      initializationSettings,
+      InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/launcher_icon'),
+      ),
       onDidReceiveNotificationResponse: _onNotificationTapped,
     );
 
@@ -130,25 +122,21 @@ class NotificationService {
     try {
       if (_firebaseMessaging != null) {
         _fcmToken = await _firebaseMessaging!.getToken();
-        print('🔑 FCM Token: $_fcmToken');
 
         // Store token in shared preferences
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('fcm_token', _fcmToken ?? '');
       } else {
-        print('❌ FirebaseMessaging not initialized');
+        debugPrint('❌ FirebaseMessaging not initialized');
       }
     } catch (e) {
-      print('❌ Error getting FCM token: $e');
+      debugPrint('❌ Error getting FCM token');
     }
   }
 
   /// Set up message handlers
   void _setupMessageHandlers() {
-    if (_firebaseMessaging == null) {
-      print('❌ FirebaseMessaging not initialized, cannot set up handlers');
-      return;
-    }
+    if (_firebaseMessaging == null) return;
 
     // Handle background messages
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
@@ -163,8 +151,6 @@ class NotificationService {
     // Don't process it immediately - let the app initialize first
     _firebaseMessaging!.getInitialMessage().then((message) {
       if (message != null) {
-        print('📱 App launched from terminated state via notification');
-        print('   Storing initial message for later processing');
         _initialMessage = message;
       }
     });
@@ -173,41 +159,29 @@ class NotificationService {
   /// Check and process initial message (call this after app is fully initialized)
   Future<void> processInitialMessage() async {
     if (_initialMessage != null && !_hasProcessedInitialMessage) {
-      print('📬 Processing stored initial message...');
       _hasProcessedInitialMessage = true;
       _handleNotificationTap(_initialMessage!);
       _initialMessage = null; // Clear it after processing
     } else if (_hasProcessedInitialMessage) {
-      print('ℹ️ Initial message already processed');
+      debugPrint('ℹ️ Initial message already processed');
     } else {
-      print('ℹ️ No initial message to process');
+      debugPrint('ℹ️ No initial message to process');
     }
   }
 
   /// Handle foreground messages
   void _handleForegroundMessage(RemoteMessage message) {
-    print('📨 Received foreground message: ${message.messageId}');
-
     final data = message.data;
     final notification = message.notification;
 
-    if (data['type'] == 'call') {
-      // CallKit is handled by the call service, no need for additional notification here
-      print('📞 Call notification received in foreground - handled by CallKit');
-    } else if (data['type'] == 'message') {
+    if (data['type'] == 'message') {
       _handleMessageNotification(data, notification);
     }
   }
 
   /// Handle notification taps (from Firebase when app is in background)
   void _handleNotificationTap(RemoteMessage message) {
-    print('👆 Firebase notification tapped: ${message.messageId}');
-
     final data = message.data;
-
-    print('-------------------------------------------------------');
-    print('Firebase notification data: $data');
-    print('-------------------------------------------------------');
 
     if (data['type'] == 'message') {
       // Ensure conversationId is included in the data
@@ -220,7 +194,6 @@ class NotificationService {
         'messageType': data['messageType'],
       };
 
-      print('✅ Emitting notification data to stream: $notificationData');
       _messageNotificationController.add(notificationData);
     }
   }
@@ -281,10 +254,6 @@ class NotificationService {
 
   /// Handle notification tap (from local notifications)
   void _onNotificationTapped(NotificationResponse response) {
-    print('👆 Local notification tapped!');
-    print('   Action ID: ${response.actionId}');
-    print('   Payload: ${response.payload}');
-
     try {
       final payload = response.payload;
       final actionId = response.actionId;
@@ -292,24 +261,17 @@ class NotificationService {
       if (payload != null) {
         // Parse the payload data
         final data = _parseNotificationPayload(payload);
-        print('   Parsed data: $data');
 
-        if (data != null) {
-          if (data['type'] == 'message') {
-            print('✅ Processing message notification tap');
-            _handleMessageNotificationAction(actionId, data);
-          } else {
-            print('⚠️ Unknown notification type: ${data['type']}');
-          }
+        if (data != null && data['type'] == 'message') {
+          _handleMessageNotificationAction(actionId, data);
         } else {
-          print('❌ Failed to parse notification payload');
+          debugPrint('❌ Failed to parse notification payload');
         }
       } else {
-        print('❌ Notification payload is null');
+        debugPrint('❌ Notification payload is null');
       }
     } catch (e) {
-      print('❌ Error handling notification tap: $e');
-      print('   Stack trace: ${StackTrace.current}');
+      debugPrint('❌ Error handling notification tap');
     }
   }
 
@@ -326,7 +288,7 @@ class NotificationService {
       // This is a fallback for simple string payloads
       return {'type': 'call', 'callId': payload};
     } catch (e) {
-      print('❌ Error parsing notification payload: $e');
+      debugPrint('❌ Error parsing notification payload');
       return null;
     }
   }
@@ -336,9 +298,6 @@ class NotificationService {
     String? actionId,
     Map<String, dynamic> data,
   ) {
-    print('📨 Local message notification action: $actionId');
-    print('📨 Local notification data: $data');
-
     // Ensure all required fields are present
     final notificationData = {
       'type': data['type'] ?? 'message',
@@ -350,23 +309,18 @@ class NotificationService {
       'action': actionId ?? 'tap',
     };
 
-    print('✅ Emitting local notification data to stream: $notificationData');
     // Only emit to stream - navigation will be handled by the listener in main.dart
     _messageNotificationController.add(notificationData);
   }
 
   /// Send FCM token to backend
   Future<void> sendTokenToBackend(String userId) async {
-    if (_fcmToken == null) {
-      print('⚠️ FCM token not available');
-      return;
-    }
+    if (_fcmToken == null) return;
 
     try {
-      print('📤 Sending FCM token to backend for user: $userId');
       await ApiService().updateFCMToken(_fcmToken!);
     } catch (e) {
-      print('❌ Error sending FCM token to backend: $e');
+      debugPrint('❌ Error sending FCM token to backend');
     }
   }
 
@@ -429,10 +383,8 @@ class NotificationService {
       await prefs.remove('fcm_token');
       await prefs.remove('notification_permissions_granted');
       await prefs.remove('last_notification_check');
-
-      print('✅ Notification data cleared');
     } catch (e) {
-      print('❌ Error clearing notification data: $e');
+      debugPrint('❌ Error clearing notification data');
     }
   }
 

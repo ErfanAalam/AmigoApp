@@ -35,8 +35,7 @@ void main() async {
   material.WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize services
-  final cookieService = CookieService();
-  await cookieService.init();
+  await CookieService().init();
 
   // Initialize WebSocket service (will be used in MyApp widget)
   WebSocketService();
@@ -45,8 +44,7 @@ void main() async {
   UserStatusService();
 
   // Initialize NotificationService
-  final notificationService = NotificationService();
-  await notificationService.initialize();
+  await NotificationService().initialize();
 
   // Initialize Foreground Service for keeping microphone active during calls
   await CallForegroundService.initialize();
@@ -54,13 +52,7 @@ void main() async {
   // Initialize RingtoneManager for call audio
   await RingtoneManager.init();
 
-  // Initialize CallNotificationHandler
-  // final callNotificationHandler = CallNotificationHandler();
-  // callNotificationHandler.initialize();
-
-  // Initialize API service (which uses the cookie service)
-  // final apiService = ApiService();
-
+  // Run the app (with CallService provider)
   material.runApp(
     ChangeNotifierProvider<CallService>(
       create: (_) => CallService()..initialize(),
@@ -70,6 +62,8 @@ void main() async {
 }
 
 class MyApp extends material.StatefulWidget {
+  const MyApp({super.key});
+
   @override
   material.State<MyApp> createState() => _MyAppState();
 }
@@ -105,7 +99,7 @@ class _MyAppState extends material.State<MyApp> {
   }
 
   Future<void> _getCurrentUser() async {
-    final userInfo =  await _userRepo.getFirstUser();
+    final userInfo = await _userRepo.getFirstUser();
     final prefs = await SharedPreferences.getInstance();
     prefs.setString('current_user_name', userInfo?.name ?? '');
   }
@@ -310,19 +304,11 @@ class _MyAppState extends material.State<MyApp> {
     // Add a small delay to ensure navigator is ready
     Future.delayed(const Duration(milliseconds: 300), () async {
       try {
-        // Parse conversationId - it can be either String or int
-        final conversationIdStr = data['conversationId']?.toString();
-
-        if (conversationIdStr == null) {
-          print('❌ Missing conversationId in notification data');
-          return;
-        }
-
         // Convert to integer
-        final conversationId = int.tryParse(conversationIdStr);
+        final conversationId = int.tryParse(data['conversationId']);
 
         if (conversationId == null) {
-          print('❌ Invalid conversationId format: $conversationIdStr');
+          print('❌ Invalid conversation ID in notification data ');
           return;
         }
 

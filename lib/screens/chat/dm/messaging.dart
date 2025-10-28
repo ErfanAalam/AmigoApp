@@ -29,7 +29,7 @@ import 'dart:io' as io;
 class InnerChatPage extends StatefulWidget {
   final ConversationModel conversation;
 
-  const InnerChatPage({Key? key, required this.conversation}) : super(key: key);
+  const InnerChatPage({super.key, required this.conversation});
 
   @override
   State<InnerChatPage> createState() => _InnerChatPageState();
@@ -177,7 +177,7 @@ class _InnerChatPageState extends State<InnerChatPage>
     // Initialize typing animation
     _initializeTypingAnimation();
 
-    _websocketService.connect();
+    _websocketService.connect(widget.conversation.conversationId);
 
     // Initialize voice recording animations
     _initializeVoiceAnimations();
@@ -245,6 +245,12 @@ class _InnerChatPageState extends State<InnerChatPage>
   }
 
   /// Smart sync: Compare cached message count with backend and add only new messages
+  /// NOTE: This should ONLY be called when:
+  /// 1. User opens the conversation (to check for missed messages)
+  /// 2. User pulls to refresh
+  /// 3. App resumes from background (to sync missed messages)
+  ///
+  /// DO NOT call this after sending messages - the WebSocket echo is sufficient!
   Future<void> _performSmartSync(int conversationId) async {
     try {
       // Get current cached message count
@@ -1933,83 +1939,72 @@ class _InnerChatPageState extends State<InnerChatPage>
     }
   }
 
-  /// Update optimistic message in local storage with server ID (for sender's own messages)
+  /// Update optimistic message ID when server confirms it
+  ///
+  /// OPTIMIZED APPROACH (Like Telegram/WhatsApp):
+  /// 1. User sends message → creates with temp ID (e.g., -1)
+  /// 2. Server processes and echoes back with real ID + optimistic_id
+  /// 3. We simply update the ID field (no need to rebuild entire message)
+  /// 4. This eliminates unnecessary DB calls (delete + re-insert → simple update)
+  ///
+  /// Previously: Delete message → Insert new message (2 DB operations)
+  /// Now: Just update ID field (1 DB operation, much faster)
   Future<void> _updateOptimisticMessageInStorage(
     int? optimisticId,
     int? serverId,
     Map<String, dynamic> messageData,
   ) async {
-    final updatedMessage =
-        await MessageStorageHelpers.updateOptimisticMessageInStorage(
-          widget.conversation.conversationId,
-          optimisticId,
-          serverId,
-          messageData,
-        );
+    if (optimisticId == null || serverId == null) return;
 
-    if (updatedMessage != null && optimisticId != null && mounted) {
-      // Update the in-memory _messages list
+    try {
+      // Find the optimistic message in UI
       final uiMessageIndex = _messages.indexWhere(
         (msg) => msg.id == optimisticId,
       );
-      if (uiMessageIndex != -1) {
-        // For media messages, preserve the local path to avoid re-downloading
-        final currentMessage = _messages[uiMessageIndex];
-        MessageModel finalMessage = updatedMessage;
 
-        // If this is a media message and we have a local path, preserve it
-        if (_isMediaMessage(currentMessage)) {
-          final currentAttachments = currentMessage.attachments;
-          final localPath = currentAttachments?['local_path'] as String?;
-          final currentLocalMediaPath = currentMessage.localMediaPath;
+      if (uiMessageIndex == -1) {
+        debugPrint('⚠️ Optimistic message $optimisticId not found in UI');
+        return;
+      }
 
-          if (localPath != null && updatedMessage.attachments != null) {
-            final updatedAttachments = Map<String, dynamic>.from(
-              updatedMessage.attachments!,
-            );
-            updatedAttachments['local_path'] = localPath;
+      final currentMessage = _messages[uiMessageIndex];
 
-            // Create new MessageModel with preserved local path
-            finalMessage = MessageModel(
-              id: updatedMessage.id,
-              body: updatedMessage.body,
-              type: updatedMessage.type,
-              senderId: updatedMessage.senderId,
-              conversationId: updatedMessage.conversationId,
-              createdAt: updatedMessage.createdAt,
-              editedAt: updatedMessage.editedAt,
-              metadata: updatedMessage.metadata,
-              attachments: updatedAttachments,
-              deleted: updatedMessage.deleted,
-              senderName: updatedMessage.senderName,
-              senderProfilePic: updatedMessage.senderProfilePic,
-              replyToMessage: updatedMessage.replyToMessage,
-              replyToMessageId: updatedMessage.replyToMessageId,
-              isDelivered: updatedMessage.isDelivered,
-              localMediaPath: currentLocalMediaPath ?? localPath,
-            );
+      // Simply update the ID - create new message with same data but new ID
+      final updatedMessage = MessageModel(
+        id: serverId, // New server ID
+        body: currentMessage.body,
+        type: currentMessage.type,
+        senderId: currentMessage.senderId,
+        conversationId: currentMessage.conversationId,
+        createdAt: currentMessage.createdAt,
+        editedAt: currentMessage.editedAt,
+        metadata: currentMessage.metadata,
+        attachments: currentMessage.attachments,
+        deleted: currentMessage.deleted,
+        senderName: currentMessage.senderName,
+        senderProfilePic: currentMessage.senderProfilePic,
+        replyToMessage: currentMessage.replyToMessage,
+        replyToMessageId: currentMessage.replyToMessageId,
+        isDelivered: currentMessage.isDelivered,
+        localMediaPath: currentMessage.localMediaPath,
+      );
 
-            debugPrint('🔄 Preserved local path for media message: $localPath');
-          } else if (currentLocalMediaPath != null) {
-            // If we don't have local_path in attachments but have localMediaPath, preserve it
-            finalMessage = updatedMessage.copyWith(
-              localMediaPath: currentLocalMediaPath,
-            );
-
-            debugPrint(
-              '🔄 Preserved localMediaPath for media message: $currentLocalMediaPath',
-            );
-          }
-        }
-
+      if (mounted) {
         setState(() {
-          _messages[uiMessageIndex] = finalMessage;
+          _messages[uiMessageIndex] = updatedMessage;
         });
 
         debugPrint(
-          '✅ Updated message ID from $optimisticId to ${finalMessage.id} in UI',
+          '✅ Updated message ID from $optimisticId to $serverId in UI',
         );
       }
+
+      // Update in local storage asynchronously (non-blocking)
+      _messagesRepo.updateMessageId(optimisticId, serverId).catchError((e) {
+        debugPrint('❌ Error updating message ID in storage: $e');
+      });
+    } catch (e) {
+      debugPrint('❌ Error updating optimistic message: $e');
     }
   }
 

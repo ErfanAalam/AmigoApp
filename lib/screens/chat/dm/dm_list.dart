@@ -547,7 +547,7 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
     for (final conversation in conversations) {
       // Only set status for DM conversations and if onlineStatus is not null
       if (conversation.isDM && conversation.isOnline != null) {
-        _userStatusService.setUserOnline(
+        _userStatusService.setUserOnlineStatus(
           conversation.userId,
           isOnline: conversation.isOnline!,
         );

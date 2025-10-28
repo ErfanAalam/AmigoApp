@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:amigo/api/api_service.dart';
 import 'package:amigo/utils/navigation_helper.dart';
 import 'package:amigo/env.dart';
 import 'package:dio/dio.dart';
@@ -15,7 +14,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../models/call_model.dart';
 import '../services/websocket_service.dart';
-import '../services/notification_service.dart';
 import '../services/call_foreground_service.dart';
 import '../api/user.service.dart';
 import '../utils/ringing_tone.dart';
@@ -31,7 +29,7 @@ class CallService extends ChangeNotifier {
   MediaStream? _remoteStream;
 
   // Services
-  final NotificationService _notificationService = NotificationService();
+  // final NotificationService _notificationService = NotificationService();
 
   // Call state
   ActiveCallState? _activeCall;
@@ -105,18 +103,9 @@ class CallService extends ChangeNotifier {
       _isInitialized = true;
 
       FlutterCallkitIncoming.onEvent.listen((CallEvent? event) async {
-        print('🔔 CallKit event received: ${event?.event}');
-        print('🔔 Full event data: $event');
-        print('🔔 Event type: ${event?.event.runtimeType}');
         switch (event?.event) {
           case Event.actionCallAccept:
             acceptCall();
-
-            // final res = await ApiService().authenticatedPut(
-            //   '/call/accept',
-            //   data: {'callId': , 'title': title},
-            // );
-            // print("res -> $res");
 
             Navigator.popUntil(
               NavigationHelper.navigator!.context,
@@ -124,47 +113,22 @@ class CallService extends ChangeNotifier {
             );
 
             break;
+
           case Event.actionCallDecline:
             declineCall();
             break;
+
           case Event.actionCallEnded:
             endCall();
             break;
-          case Event.actionCallIncoming:
-            print('🔔 Incoming call event received');
-            break;
-          case Event.actionCallStart:
-            print('🔔 Call started event received');
-            break;
-          case Event.actionCallToggleHold:
-            print('🔔 Call toggle hold event received');
-            break;
-          case Event.actionCallToggleMute:
-            print('🔔 Call toggle mute event received');
-            break;
-          case Event.actionCallToggleDmtf:
-            print('🔔 Call toggle DTMF event received');
-            break;
-          case Event.actionCallToggleGroup:
-            print('🔔 Call toggle group event received');
-            break;
-          case Event.actionCallToggleAudioSession:
-            print('🔔 Call toggle audio session event received');
-            break;
-          case Event.actionDidUpdateDevicePushTokenVoip:
-            print('🔔 Device push token updated event received');
-            break;
+
           default:
-            print('🔔 Unhandled CallKit event: ${event?.event}');
-            print('🔔 Event data: $event');
+            debugPrint('🔔 Unhandled CallKit event: ${event?.event}');
             break;
         }
       });
-      print('[CALL] CallService initialized');
-      print('[CALL] WebSocket connected: ${WebSocketService().isConnected}');
     } catch (e) {
-      print('[CALL] Error initializing CallService: $e');
-      throw Exception('Failed to initialize CallService: $e');
+      debugPrint('[CALL] Error initializing CallService');
     }
   }
 
@@ -177,15 +141,11 @@ class CallService extends ChangeNotifier {
     try {
       if (!_isInitialized) await initialize();
 
-      if (hasActiveCall) {
-        throw Exception('Already in a call');
-      }
+      if (hasActiveCall) return;
 
       // Check if WebSocket is connected
       if (!WebSocketService().isConnected) {
-        throw Exception(
-          'WebSocket is not connected. Please check your connection.',
-        );
+        await WebSocketService().connect();
       }
 
       // Enable wakelock
@@ -340,12 +300,10 @@ class CallService extends ChangeNotifier {
       await prefs.remove('current_caller_name');
       await prefs.remove('current_caller_profile_pic');
       await prefs.remove('call_status');
-      print('[CALL] Call data cleared from storage');
 
       notifyListeners();
     } catch (e) {
-      print('[CALL] Error accepting call: $e');
-      throw Exception('Failed to accept call: $e');
+      debugPrint('[CALL] Error accepting call');
     }
   }
 
@@ -381,11 +339,10 @@ class CallService extends ChangeNotifier {
       await prefs.remove('current_caller_name');
       await prefs.remove('current_caller_profile_pic');
       await prefs.remove('call_status');
-      print('[CALL] Call data cleared from storage');
 
       // notifyListeners();
     } catch (e) {
-      print('[CALL] Error declining call: $e');
+      debugPrint('[CALL] Error declining call');
       await _cleanup();
     }
   }
@@ -393,10 +350,7 @@ class CallService extends ChangeNotifier {
   /// End the current call
   Future<void> endCall({String? reason}) async {
     try {
-      if (_activeCall == null) {
-        print('[CALL] No active call to end');
-        return;
-      }
+      if (_activeCall == null) return;
 
       final message = {
         'type': 'call:end',
@@ -663,10 +617,10 @@ class CallService extends ChangeNotifier {
       return;
     }
 
-    if (!type.startsWith('call:')) {
-      // Not a call-related message - ignore silently
-      return;
-    }
+    // if (!type.startsWith('call:')) {
+    //   // Not a call-related message - ignore silently
+    //   return;
+    // }
 
     switch (type) {
       case 'call:init':
@@ -686,13 +640,6 @@ class CallService extends ChangeNotifier {
 
       case 'call:ringing':
         // Incoming call notification
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print("message -> ${message}");
-        print(
-          "--------------------------------------------------------------------------------",
-        );
         _handleIncomingCall(message);
         break;
 
@@ -766,6 +713,9 @@ class CallService extends ChangeNotifier {
         _handleCallMissed(message);
         await FlutterCallkitIncoming.endAllCalls();
         break;
+
+      default:
+        return;
     }
   }
 
@@ -774,14 +724,6 @@ class CallService extends ChangeNotifier {
     final callId = message['callId'];
     final from = message['from'];
     final payload = message['payload'];
-    print(
-      "--------------------------------------------------------------------------------",
-    );
-    print("📞 INCOMING CALL - callId: $callId, from: $from");
-    print("payload -> ${payload}");
-    print(
-      "--------------------------------------------------------------------------------",
-    );
 
     CallKitParams params = CallKitParams(
       id: callId.toString(),
@@ -827,34 +769,13 @@ class CallService extends ChangeNotifier {
       ),
     );
 
-    print('🔧 Showing CallKit notification for call: $callId');
     final prefs = await SharedPreferences.getInstance();
     final storageCallStatus = prefs.getString('call_status');
-    print(
-      "--------------------------------------------------------------------------------",
-    );
-    print("storageCallStatus -> ${storageCallStatus}");
-    print(
-      "--------------------------------------------------------------------------------",
-    );
     final storageCallId = prefs.getString('current_call_id');
-    print(
-      "--------------------------------------------------------------------------------",
-    );
-    print("storageCallId -> ${storageCallId}");
-    print(
-      "--------------------------------------------------------------------------------",
-    );
-    if (storageCallStatus == 'answered' && storageCallId == callId.toString()) {
-      print('✅ CallKit notification already shown for call: $callId');
-    } else {
+
+    if (storageCallStatus != 'answered' && storageCallId != callId.toString()) {
       await FlutterCallkitIncoming.showCallkitIncoming(params);
     }
-    print('✅ CallKit notification shown successfully');
-
-    print(
-      '[CALL] Handling incoming call - callId: $callId, from: $from, payload: $payload',
-    );
 
     // Check if we already have an active call
     if (_activeCall != null) {
@@ -1056,26 +977,9 @@ class CallService extends ChangeNotifier {
   /// Stop status polling
   void _stopStatusPolling() {
     if (_statusPollingTimer != null) {
-      print('[CALL] Stopping status polling');
       _statusPollingTimer?.cancel();
       _statusPollingTimer = null;
       _pollingCallId = null;
-    }
-  }
-
-  /// Test method to debug ringtone issues
-  Future<void> testRingtone() async {
-    try {
-      print('[CALL] Testing ringtone...');
-      await RingtoneManager.testAudio();
-      await RingtoneManager.playRingtone();
-      await Future.delayed(const Duration(seconds: 3));
-      await RingtoneManager.stopRingtone();
-      print('[CALL] Ringtone test completed');
-    } catch (e) {
-      print('[CALL] Ringtone test failed: $e');
-      // Try fallback
-      await RingtoneManager.playSystemRingtone();
     }
   }
 

@@ -237,7 +237,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     super.initState();
     _scrollController.addListener(_onScroll);
 
-    // _websocketService.connect();
+    _websocketService.connect(widget.group.conversationId);
 
     // Initialize typing animation
     _initializeTypingAnimation();

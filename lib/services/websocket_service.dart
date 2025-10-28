@@ -22,6 +22,7 @@ class WebSocketService {
   WebSocket? _socket;
   WebSocketConnectionState _connectionState =
       WebSocketConnectionState.disconnected;
+
   final CookieService _cookieService = CookieService();
 
   // Connection management
@@ -33,22 +34,28 @@ class WebSocketService {
   // Stream controllers for different events
   final StreamController<WebSocketConnectionState> _connectionStateController =
       StreamController<WebSocketConnectionState>.broadcast();
+
   final StreamController<Map<String, dynamic>> _messageController =
       StreamController<Map<String, dynamic>>.broadcast();
+
   final StreamController<String> _errorController =
       StreamController<String>.broadcast();
 
   // Getters
   WebSocketConnectionState get connectionState => _connectionState;
+
   Stream<WebSocketConnectionState> get connectionStateStream =>
       _connectionStateController.stream;
+
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
+
   Stream<String> get errorStream => _errorController.stream;
+
   bool get isConnected =>
       _connectionState == WebSocketConnectionState.connected;
 
-  /// Initialize WebSocket connection with access token from cookies
-  Future<void> connect() async {
+  // Initialize WebSocket connection with access token from cookies
+  Future<void> connect([int? conversationId]) async {
     if (_connectionState == WebSocketConnectionState.connecting ||
         _connectionState == WebSocketConnectionState.connected) {
       return;
@@ -66,25 +73,12 @@ class WebSocketService {
       // Build WebSocket URL with access token as query parameter
       final wsUrl = _buildWebSocketUrl(accessToken);
 
-      print(
-        '🔌 Connecting to WebSocket: ${wsUrl.replaceAll(accessToken, '[TOKEN_HIDDEN]')}',
-      );
-      print('🔑 Token length: ${accessToken.length} characters');
-
       // Parse the URI and verify it's correct
       final uri = Uri.parse(wsUrl);
-      print('🔍 Parsed WebSocket URI: ${uri.toString()}');
-      print('🔍 URI Scheme: ${uri.scheme}');
-      print('🔍 URI Host: ${uri.host}');
-      print('🔍 URI Port: ${uri.port}');
-      print('🔍 URI Path: ${uri.path}');
-      print('🔍 URI Query: ${uri.query}');
 
       // Create WebSocket connection using native WebSocket
       print('🔍 About to connect to: $wsUrl');
-      print('🔍 WebSocket.connect() will be called with this exact URL');
       _socket = await WebSocket.connect(wsUrl);
-      print('🔍 WebSocket.connect() completed successfully');
 
       // Listen to messages
       _socket!.listen(
@@ -96,7 +90,16 @@ class WebSocketService {
       _reconnectAttempts = 0;
       _updateConnectionState(WebSocketConnectionState.connected);
       print('✅ WebSocket connected successfully');
+
+      // If a conversation ID is provided, send active_in_conversation message
+      if (conversationId != null) {
+        await sendMessage({
+          'type': 'active_in_conversation',
+          'conversation_id': conversationId,
+        });
+      }
     } catch (e) {
+      print('❌ WebSocket connection failed');
       _handleConnectionError(e.toString());
     }
   }
@@ -112,11 +115,6 @@ class WebSocketService {
     final websocketUrl = Environment.websocketUrl;
     final uri = Uri.parse(websocketUrl);
 
-    print('🔍 Base URL: $websocketUrl');
-    print(
-      '🔍 Parsed URI - Scheme: ${uri.scheme}, Host: ${uri.host}, Port: ${uri.port}, Path: ${uri.path}',
-    );
-
     // Build WebSocket URL preserving the original scheme, host, port, and path
     String wsUrl;
     if (uri.hasPort && uri.port != 80 && uri.port != 443) {
@@ -126,13 +124,8 @@ class WebSocketService {
       wsUrl = '${uri.scheme}://${uri.host}${uri.path}';
     }
 
-    print('🔍 Built WebSocket URL: $wsUrl');
-
     // Add access token as query parameter
     final finalUrl = '$wsUrl?token=${Uri.encodeComponent(accessToken)}';
-    print(
-      '🔍 Final WebSocket URL: ${finalUrl.replaceAll(accessToken, '[TOKEN_HIDDEN]')}',
-    );
 
     return finalUrl;
   }
@@ -153,7 +146,7 @@ class WebSocketService {
 
       _messageController.add(data);
     } catch (e) {
-      print('❌ Error parsing WebSocket message: $e');
+      print('❌ Error parsing WebSocket message');
       _errorController.add('Error parsing message: $e');
     }
   }
@@ -173,7 +166,7 @@ class WebSocketService {
 
   /// Handle connection errors
   void _handleConnectionError(String error) {
-    print('❌ WebSocket connection error: $error');
+    print('❌ WebSocket connection error');
     _updateConnectionState(WebSocketConnectionState.error);
     _errorController.add(error);
     _scheduleReconnect();
@@ -233,7 +226,6 @@ class WebSocketService {
 
   /// Send a message through WebSocket
   Future<void> sendMessage(Map<String, dynamic> message) async {
-    print('🔍 Sending WebSocket message: $message');
     if (_socket == null ||
         _connectionState != WebSocketConnectionState.connected) {
       throw Exception('WebSocket is not connected');
@@ -262,7 +254,6 @@ class WebSocketService {
     }
 
     _updateConnectionState(WebSocketConnectionState.disconnected);
-    print('🔌 WebSocket disconnected manually');
   }
 
   /// Reconnect WebSocket (useful for token refresh scenarios)
