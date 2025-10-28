@@ -105,7 +105,7 @@ class _MyAppState extends material.State<MyApp> {
   }
 
   Future<void> _getCurrentUser() async {
-    final userInfo =  await _userRepo.getFirstUser();
+    final userInfo = await _userRepo.getFirstUser();
     final prefs = await SharedPreferences.getInstance();
     prefs.setString('current_user_name', userInfo?.name ?? '');
   }

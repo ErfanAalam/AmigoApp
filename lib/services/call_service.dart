@@ -13,6 +13,9 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:proximity_sensor/proximity_sensor.dart';
+import 'package:proximity_screen_lock/proximity_screen_lock.dart';
+import 'package:screen_brightness/screen_brightness.dart';
 import '../models/call_model.dart';
 import '../services/websocket_service.dart';
 import '../services/notification_service.dart';
@@ -42,6 +45,10 @@ class CallService extends ChangeNotifier {
   Timer? _callStartedTimer;
   Timer? _statusPollingTimer;
   int? _pollingCallId;
+
+  // Proximity control for global screen lock
+  StreamSubscription<dynamic>? _proximitySubscription;
+  bool _isProximityScreenLocked = false;
 
   // WebRTC configuration - using Plan B for compatibility
   final Map<String, dynamic> _configuration = {
@@ -305,6 +312,9 @@ class CallService extends ChangeNotifier {
 
       // Enable wakelock
       WakelockPlus.enable();
+
+      // Enable global proximity control for screen lock
+      _initializeProximityControl();
 
       // Setup local media if not already done
       if (_localStream == null) {
@@ -707,6 +717,10 @@ class CallService extends ChangeNotifier {
           _stopStatusPolling();
 
           _activeCall = _activeCall?.copyWith(status: CallStatus.answered);
+
+          // Enable global proximity control for outgoing calls
+          _initializeProximityControl();
+
           _createOffer();
           try {
             await RingtoneManager.stopRingtone();
@@ -912,6 +926,9 @@ class CallService extends ChangeNotifier {
       // Stop foreground service first to remove notification
       await CallForegroundService.stopService();
 
+      // Stop proximity control
+      await _disableProximityControl();
+
       // Stop timers
       _callDurationTimer?.cancel();
       _callDurationTimer = null;
@@ -1078,6 +1095,127 @@ class CallService extends ChangeNotifier {
       await RingtoneManager.playSystemRingtone();
     }
   }
+
+  /// Initialize proximity control for global screen lock
+  Future<void> _initializeProximityControl() async {
+    try {
+      print('[CALL] Initializing global proximity control...');
+
+      // Cancel existing subscription if any
+      await _proximitySubscription?.cancel();
+
+      // Start listening to proximity sensor events
+      _proximitySubscription = ProximitySensor.events.listen((dynamic event) {
+        print(
+          '[CALL] Raw proximity event: $event (type: ${event.runtimeType})',
+        );
+
+        bool isNear = false;
+        if (event is int) {
+          isNear = event > 0;
+        } else if (event is double) {
+          isNear = event > 0;
+        } else if (event is Map) {
+          isNear = event['isNear'] == true || event['near'] == true;
+        } else if (event is bool) {
+          isNear = event;
+        }
+
+        print('[CALL] Proximity event processed: isNear = $isNear');
+
+        if (isNear) {
+          _enableProximityLock();
+        } else {
+          _disableProximityLock();
+        }
+      });
+
+      print('[CALL] Global proximity control initialized successfully');
+    } catch (e) {
+      print('[CALL] Error initializing proximity control: $e');
+      print('[CALL] Stack trace: ${e.toString()}');
+    }
+  }
+
+  /// Enable proximity screen lock
+  Future<void> _enableProximityLock() async {
+    if (_isProximityScreenLocked) return;
+
+    try {
+      await ProximityScreenLock.setActive(true);
+      _isProximityScreenLocked = true;
+      print('[CALL] Global screen locked due to proximity');
+    } catch (e) {
+      print('[CALL] Error enabling proximity lock: $e');
+      // Fallback to brightness control
+      try {
+        await ScreenBrightness().setScreenBrightness(0.0);
+        _isProximityScreenLocked = true;
+        print('[CALL] Screen dimmed (fallback)');
+      } catch (e2) {
+        print('[CALL] Error dimming screen: $e2');
+      }
+    }
+  }
+
+  /// Disable proximity screen lock
+  Future<void> _disableProximityLock() async {
+    if (!_isProximityScreenLocked) return;
+
+    try {
+      await ProximityScreenLock.setActive(false);
+      _isProximityScreenLocked = false;
+      print('[CALL] Global screen unlocked - proximity removed');
+    } catch (e) {
+      print('[CALL] Error disabling proximity lock: $e');
+      // Fallback to brightness control
+      try {
+        await ScreenBrightness().resetScreenBrightness();
+        _isProximityScreenLocked = false;
+        print('[CALL] Screen brightness restored (fallback)');
+      } catch (e2) {
+        print('[CALL] Error restoring screen brightness: $e2');
+      }
+    }
+  }
+
+  /// Disable proximity control completely
+  Future<void> _disableProximityControl() async {
+    try {
+      // Disable screen lock if active
+      await _disableProximityLock();
+
+      // Cancel proximity subscription
+      await _proximitySubscription?.cancel();
+      _proximitySubscription = null;
+
+      print('[CALL] Global proximity control disabled');
+    } catch (e) {
+      print('[CALL] Error disabling proximity control: $e');
+    }
+  }
+
+  /// Manually test proximity control (for debugging)
+  Future<void> testProximityControl() async {
+    try {
+      print('[CALL] Testing proximity control manually...');
+
+      await _initializeProximityControl();
+
+      // Test enable/disable
+      print('[CALL] Testing screen lock...');
+      await _enableProximityLock();
+      await Future.delayed(const Duration(seconds: 2));
+      await _disableProximityLock();
+
+      print('[CALL] Manual proximity control test completed');
+    } catch (e) {
+      print('[CALL] Manual proximity control test failed: $e');
+    }
+  }
+
+  /// Check if proximity control is active
+  bool get isProximityControlActive => _proximitySubscription != null;
 
   /// Dispose service
   @override
