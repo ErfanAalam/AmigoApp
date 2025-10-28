@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart' as material;
+import 'package:flutter/widgets.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
@@ -274,7 +275,7 @@ class _MyAppState extends material.State<MyApp> {
 
     // Listen to WebSocket errors
     _websocketService.errorStream.listen((error) {
-      print('❌ WebSocket error in main app: $error');
+      debugPrint('❌ WebSocket error in main app');
     });
 
     // Listen to notification streams
@@ -307,15 +308,12 @@ class _MyAppState extends material.State<MyApp> {
         // Convert to integer
         final conversationId = int.tryParse(data['conversationId']);
 
-        if (conversationId == null) {
-          print('❌ Invalid conversation ID in notification data ');
-          return;
-        }
+        if (conversationId == null) return;
 
         // Try to fetch the conversation from local DB
         await _fetchAndNavigateToConversation(conversationId, data);
       } catch (e) {
-        print('❌ Error navigating to conversation from notification: $e');
+        debugPrint('❌ Error navigating to conversation from notification');
       }
     });
   }

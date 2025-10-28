@@ -77,7 +77,6 @@ class UserService {
   }
 
   Future<Map<String, dynamic>> updateUser(Map<String, dynamic> data) async {
-    print('this is the data in updateUser: $data');
     try {
       final response = await _apiService.authenticatedPost(
         '/user/update-user',

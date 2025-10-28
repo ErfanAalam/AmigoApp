@@ -1,4 +1,5 @@
 import 'package:cookie_jar/cookie_jar.dart';
+import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import '../env.dart';
 
@@ -26,16 +27,12 @@ class CookieService {
       );
 
       _initialized = true;
-      print('✅ Cookie service initialized');
     } catch (e) {
-      print('❌ Error initializing cookie service: $e');
+      debugPrint('❌ Error initializing cookie service');
     }
   }
 
   PersistCookieJar get cookieJar {
-    if (!_initialized) {
-      print('⚠️ Cookie jar accessed before initialization');
-    }
     return _cookieJar;
   }
 

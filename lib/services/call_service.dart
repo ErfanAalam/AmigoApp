@@ -191,13 +191,11 @@ class CallService extends ChangeNotifier {
       try {
         await RingtoneManager.playRingtone();
       } catch (e) {
-        print('[CALL] Failed to play ringtone, using system sound: $e');
         await RingtoneManager.playSystemRingtone();
       }
     } catch (e) {
-      print('[CALL] Error initiating call: $e');
       await _cleanup();
-      throw Exception('Failed to initiate call: $e');
+      debugPrint('Failed to initiate call');
     }
   }
 
@@ -209,10 +207,6 @@ class CallService extends ChangeNotifier {
     String? callerProfilePic,
   ) async {
     try {
-      print(
-        '[CALL] Restoring call state for callId: $callId, callerId: $callerId',
-      );
-
       _activeCall = ActiveCallState(
         callId: callId,
         userId: callerId,
@@ -224,9 +218,8 @@ class CallService extends ChangeNotifier {
       );
 
       notifyListeners();
-      print('[CALL] Call state restored successfully');
     } catch (e) {
-      print('[CALL] Error restoring call state: $e');
+      debugPrint('[CALL] Error restoring call state');
     }
   }
 
@@ -248,14 +241,14 @@ class CallService extends ChangeNotifier {
             callerProfilePic,
           );
         } else {
-          throw Exception(
-            'Cannot restore call state: missing caller information',
-          );
+          debugPrint('Cannot restore call state: missing caller information');
+          return;
         }
       }
 
       if (_activeCall == null && callId == null) {
-        throw Exception('No active call to accept');
+        debugPrint('No active call to accept');
+        return;
       }
 
       if (callId != null && _activeCall != null) {
@@ -311,8 +304,10 @@ class CallService extends ChangeNotifier {
   Future<void> declineCall({String? reason, int? callId}) async {
     try {
       if (_activeCall == null && callId == null) {
-        throw Exception('No active call to accept');
+        debugPrint('No active call to accept');
+        return;
       }
+
       if (callId != null) {
         _activeCall = _activeCall?.copyWith(callId: callId);
         notifyListeners();
@@ -364,7 +359,7 @@ class CallService extends ChangeNotifier {
       try {
         await RingtoneManager.stopRingtone();
       } catch (e) {
-        print('[CALL] Error stopping ringtone: $e');
+        debugPrint('[CALL] Error stopping ringtone: $e');
       }
 
       final prefs = await SharedPreferences.getInstance();
@@ -373,11 +368,10 @@ class CallService extends ChangeNotifier {
       await prefs.remove('current_caller_name');
       await prefs.remove('current_caller_profile_pic');
       await prefs.remove('call_status');
-      print('[CALL] Call data cleared from storage');
 
       await _cleanup();
     } catch (e) {
-      print('[CALL] Error ending call: $e');
+      debugPrint('[CALL] Error ending call');
       await _cleanup();
     }
   }
@@ -410,30 +404,22 @@ class CallService extends ChangeNotifier {
   /// Setup local media stream
   Future<void> _setupLocalMedia() async {
     try {
-      print('[CALL] Setting up local media...');
-
       // Add a small delay to ensure audio system is ready
       await Future.delayed(const Duration(milliseconds: 200));
 
       _localStream = await navigator.mediaDevices.getUserMedia(
         _mediaConstraints,
       );
-      print('[CALL] Local media setup successful');
     } catch (e) {
-      print('[CALL] Error setting up local media: $e');
-
       // Retry once after a delay
       try {
-        print('[CALL] Retrying local media setup...');
         await Future.delayed(const Duration(milliseconds: 500));
 
         _localStream = await navigator.mediaDevices.getUserMedia(
           _mediaConstraints,
         );
-        print('[CALL] Local media setup successful on retry');
       } catch (retryError) {
-        print('[CALL] Failed to setup local media even on retry: $retryError');
-        throw Exception('Failed to access microphone: $retryError');
+        debugPrint('[CALL] Failed to setup local media even on retry');
       }
     }
   }
@@ -464,8 +450,7 @@ class CallService extends ChangeNotifier {
         // Timer is now started when call is accepted, not when connection is established
       };
     } catch (e) {
-      print('[CALL] Error creating peer connection: $e');
-      throw Exception('Failed to create peer connection: $e');
+      debugPrint('[CALL] Error creating peer connection');
     }
   }
 
@@ -489,8 +474,7 @@ class CallService extends ChangeNotifier {
 
       await WebSocketService().sendMessage(message);
     } catch (e) {
-      print('[CALL] Error creating offer: $e');
-      throw Exception('Failed to create offer: $e');
+      debugPrint('[CALL] Error creating offer');
     }
   }
 
@@ -518,7 +502,7 @@ class CallService extends ChangeNotifier {
 
       await WebSocketService().sendMessage(message);
     } catch (e) {
-      print('[CALL] Error handling offer: $e');
+      debugPrint('[CALL] Error handling offer');
     }
   }
 
@@ -530,7 +514,7 @@ class CallService extends ChangeNotifier {
       final answer = RTCSessionDescription(payload['sdp'], payload['type']);
       await _peerConnection!.setRemoteDescription(answer);
     } catch (e) {
-      print('[CALL] Error handling answer: $e');
+      debugPrint('[CALL] Error handling answer');
     }
   }
 
@@ -547,7 +531,7 @@ class CallService extends ChangeNotifier {
 
       await _peerConnection!.addCandidate(candidate);
     } catch (e) {
-      print('[CALL] Error handling ICE candidate: $e');
+      debugPrint('[CALL] Error handling ICE candidate');
     }
   }
 
@@ -570,7 +554,7 @@ class CallService extends ChangeNotifier {
 
       await WebSocketService().sendMessage(message);
     } catch (e) {
-      print('[CALL] Error sending ICE candidate: $e');
+      debugPrint('[CALL] Error sending ICE candidate');
     }
   }
 
@@ -597,14 +581,11 @@ class CallService extends ChangeNotifier {
     _callStartedTimer = Timer(const Duration(seconds: 30), () async {
       // If call is still not accepted after 30 seconds, decline it automatically
       if (_activeCall != null && _activeCall!.status != CallStatus.answered) {
-        print(
-          '[CALL] Call not accepted within 30 seconds, declining automatically',
-        );
         declineCall(reason: 'timeout');
         try {
           await RingtoneManager.stopRingtone();
         } catch (e) {
-          print('[CALL] Error stopping ringtone in timeout: $e');
+          debugPrint('[CALL] Error stopping ringtone in timeout');
         }
       }
     });
@@ -658,7 +639,7 @@ class CallService extends ChangeNotifier {
           try {
             await RingtoneManager.stopRingtone();
           } catch (e) {
-            print('[CALL] Error stopping ringtone in accept: $e');
+            debugPrint('[CALL] Error stopping ringtone in accept');
           }
           // Start timer immediately when call is accepted
           _startCallTimer();
@@ -807,7 +788,7 @@ class CallService extends ChangeNotifier {
     try {
       await RingtoneManager.stopRingtone();
     } catch (e) {
-      print('[CALL] Error stopping ringtone in declined: $e');
+      debugPrint('[CALL] Error stopping ringtone in declined');
     }
     _cleanup();
   }
@@ -817,7 +798,7 @@ class CallService extends ChangeNotifier {
     try {
       await RingtoneManager.stopRingtone();
     } catch (e) {
-      print('[CALL] Error stopping ringtone in ended: $e');
+      debugPrint('[CALL] Error stopping ringtone in ended');
     }
     _cleanup();
   }
@@ -865,11 +846,10 @@ class CallService extends ChangeNotifier {
       await prefs.remove('current_caller_name');
       await prefs.remove('current_caller_profile_pic');
       await prefs.remove('call_status');
-      print('[CALL] Call data cleared from storage');
 
       notifyListeners();
     } catch (e) {
-      print('[CALL] Error during cleanup: $e');
+      debugPrint('[CALL] Error during cleanup');
     }
   }
 
@@ -886,7 +866,7 @@ class CallService extends ChangeNotifier {
         return 'Unknown User';
       }
     } catch (e) {
-      print('[CALL] Error getting current user name: $e');
+      debugPrint('[CALL] Error getting current user name');
       return 'Unknown User';
     }
   }
@@ -902,11 +882,13 @@ class CallService extends ChangeNotifier {
       if (response.statusCode == 200) {
         return response.data;
       } else {
-        print('[CALL] Failed to fetch call status: ${response.statusCode}');
+        debugPrint(
+          '[CALL] Failed to fetch call status: ${response.statusCode}',
+        );
         return null;
       }
     } catch (e) {
-      print('[CALL] Error fetching call status: $e');
+      debugPrint('[CALL] Error fetching call status');
       return null;
     }
   }
@@ -918,7 +900,6 @@ class CallService extends ChangeNotifier {
     }
 
     _pollingCallId = callId;
-    print('[CALL] Starting status polling for call: $callId');
 
     int pollCount = 0;
     const maxPolls = 15; // 30 seconds / 2 seconds = 15 polls
@@ -935,7 +916,6 @@ class CallService extends ChangeNotifier {
 
       // Stop polling after 30 seconds (15 polls)
       if (pollCount > maxPolls) {
-        print('[CALL] Status polling timeout after 30 seconds, stopping...');
         timer.cancel();
         _statusPollingTimer = null;
         _pollingCallId = null;
@@ -947,12 +927,7 @@ class CallService extends ChangeNotifier {
         final callData = statusResponse['data'];
         final status = callData['status'];
 
-        print(
-          '[CALL] Polling - Call status: $status (poll $pollCount/$maxPolls)',
-        );
-
         if (status == 'declined' || status == 'ended') {
-          print('[CALL] Call $status detected via polling, cleaning up...');
           timer.cancel();
           _statusPollingTimer = null;
           _pollingCallId = null;
