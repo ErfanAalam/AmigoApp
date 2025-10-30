@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
@@ -36,15 +37,13 @@ class LastMessageStorageService {
         'created_at':
             messageData['created_at'] ?? DateTime.now().toIso8601String(),
         'conversation_id': conversationId,
+        'attachments': messageData['attachments'],
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       };
 
       await prefs.setString(_lastMessagesKey, json.encode(lastMessages));
-      print(
-        '✅ Stored last message for conversation $conversationId: ${messageData['body']}',
-      );
     } catch (e) {
-      print('❌ Error storing last message: $e');
+      debugPrint('❌ Error storing last message');
     }
   }
 

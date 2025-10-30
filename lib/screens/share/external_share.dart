@@ -61,10 +61,6 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
       setState(() {
         _sharedFiles = widget.initialFiles!;
       });
-      debugPrint(
-        "Shared files received from main.dart: ${_sharedFiles.length} files",
-      );
-      debugPrint("Files: ${_sharedFiles.map((f) => f.path).join(", ")}");
       return;
     }
 
@@ -77,10 +73,6 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
               setState(() {
                 _sharedFiles = value;
               });
-
-              debugPrint(
-                "Shared files received while running: ${value.map((f) => f.path).join(", ")}",
-              );
             }
           },
           onError: (err) {
@@ -96,10 +88,6 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
         setState(() {
           _sharedFiles = value;
         });
-
-        debugPrint(
-          "Shared files received on app start: ${value.map((f) => f.path).join(", ")}",
-        );
       }
     });
   }
@@ -112,31 +100,18 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
 
     try {
       // FIRST: Try to load from local database for instant display
-      debugPrint('🔍 Share Handler - Loading from local DB first...');
       try {
         final chatConversations = await _conversationsRepo
             .getAllConversations();
 
-        print('chatConversations');
-        print(chatConversations);
-
         final groupConversations = await _groupsRepo.getAllGroups();
-
-        print('groupConversations');
-        print(groupConversations);
 
         final localConversations = [
           ...chatConversations,
           ...groupConversations,
         ];
 
-        print('localConversations');
-        print(localConversations);
-
         if (localConversations.isNotEmpty) {
-          debugPrint(
-            '✅ Share Handler - Loaded ${localConversations.length} conversations from local DB',
-          );
           if (mounted) {
             setState(() {
               _availableConversations =
@@ -151,42 +126,23 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
         debugPrint('⚠️ Error loading from local DB: $localError');
       }
 
-      // SECOND: Load from API to get latest data
-      debugPrint('🔍 Share Handler - Requesting conversations from API...');
       final response = await _userService.GetChatList('all');
-      debugPrint('🔍 Share Handler - API response success: ${response}');
 
       if (response['success'] == true && response['data'] != null) {
         final dynamic responseData = response['data'];
-        debugPrint(
-          '🔍 Share Handler - responseData type: ${responseData.runtimeType}',
-        );
 
         List<dynamic> conversationsList = [];
 
         if (responseData is List) {
           conversationsList = responseData;
-          debugPrint(
-            '🔍 Share Handler - Direct list, length: ${conversationsList.length}',
-          );
         } else if (responseData is Map<String, dynamic>) {
-          debugPrint(
-            '🔍 Share Handler - Map response, keys: ${responseData.keys}',
-          );
-
           if (responseData.containsKey('data') &&
               responseData['data'] is List) {
             conversationsList = responseData['data'] as List<dynamic>;
-            debugPrint(
-              '🔍 Share Handler - Found in data key, length: ${conversationsList.length}',
-            );
           } else {
             for (var key in responseData.keys) {
               if (responseData[key] is List) {
                 conversationsList = responseData[key] as List<dynamic>;
-                debugPrint(
-                  '🔍 Share Handler - Found at key $key, length: ${conversationsList.length}',
-                );
                 break;
               }
             }
@@ -215,18 +171,13 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
               _filteredConversations = conversations;
             });
           }
-
-          debugPrint('✅ Loaded ${conversations.length} conversations from API');
         } else {
           debugPrint('⚠️ Share Handler - API returned empty conversation list');
         }
       } else {
         debugPrint('❌ Share Handler - API call not successful');
-        debugPrint('  Response: $response');
       }
     } catch (e) {
-      debugPrint('❌ Error loading conversations from API: $e');
-
       // If API fails and we don't have local conversations, show helpful message
       if (mounted && _availableConversations.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -249,10 +200,6 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
         setState(() {
           _isLoadingConversations = false;
         });
-
-        debugPrint(
-          '🔍 Share Handler - Final state: ${_availableConversations.length} conversations available',
-        );
       }
     }
   }
@@ -402,8 +349,6 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
         }
       }
     } catch (e) {
-      debugPrint('❌ Error in send process: $e');
-
       // Close loading dialog
       if (mounted) {
         Navigator.of(context).pop();

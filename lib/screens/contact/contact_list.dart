@@ -2,6 +2,7 @@
 import 'package:amigo/screens/chat/dm/messaging.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' as material;
 import 'package:flutter_contacts/flutter_contacts.dart';
 import '../../models/contact_model.dart';
 import '../../models/conversation_model.dart';
@@ -11,9 +12,10 @@ import '../../services/contact_service.dart';
 import '../../api/user.service.dart';
 import '../../api/chats.services.dart';
 import '../../services/websocket_service.dart';
+import '../home_layout.dart';
 
 class ContactsPage extends StatefulWidget {
-  const ContactsPage({Key? key}) : super(key: key);
+  const ContactsPage({super.key});
 
   @override
   State<ContactsPage> createState() => _ContactsPageState();
@@ -334,6 +336,13 @@ class _ContactsPageState extends State<ContactsPage>
       try {
         // Create ConversationModel from the response
         final conversationData = response['data'];
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print("conversationData -> ${conversationData}");
+        print(
+          "--------------------------------------------------------------------------------",
+        );
         final conversation = ConversationModel(
           conversationId:
               conversationData['id'] ?? conversationData['conversationId'] ?? 0,
@@ -351,6 +360,11 @@ class _ContactsPageState extends State<ContactsPage>
           'data': {
             'recipient_id': [user.id],
           },
+        });
+
+        await _websocketService.sendMessage({
+          'type': 'active_in_conversation',
+          'conversation_id': conversationData['id'],
         });
 
         Navigator.push(
@@ -416,6 +430,15 @@ class _ContactsPageState extends State<ContactsPage>
           },
         });
 
+        // await _websocketService.sendMessage({
+        //   'type': 'active_in_conversation',
+        //   'conversation_id': conversationData['id'],
+        // });
+
+        material.Navigator.pushReplacement(
+          context,
+          material.MaterialPageRoute(builder: (context) => const MainScreen()),
+        );
         Navigator.push(
           context,
           MaterialPageRoute(

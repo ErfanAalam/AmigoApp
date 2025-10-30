@@ -2,11 +2,12 @@ import 'dart:io';
 import 'package:amigo/env.dart';
 import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
-import 'package:amigo/services/auth_service.dart';
+import 'package:amigo/services/auth/auth.service.dart';
 import 'package:amigo/services/cookie_service.dart';
 import 'package:amigo/services/location_service.dart';
 import 'package:amigo/services/ip_service.dart';
 import 'package:amigo/services/websocket_service.dart';
+import 'package:flutter/material.dart';
 import 'package:mime/mime.dart';
 import 'package:path/path.dart' as path;
 
@@ -18,11 +19,7 @@ class ApiService {
 
   // Singleton pattern
   static final ApiService _instance = ApiService._internal();
-
-  factory ApiService() {
-    return _instance;
-  }
-
+  factory ApiService() => _instance;
   ApiService._internal() {
     _initDio();
   }
@@ -33,7 +30,7 @@ class ApiService {
 
   // Token refresh management
   bool _isRefreshing = false;
-  List<Function> _requestsQueue = [];
+  final List<Function> _requestsQueue = [];
   Future<bool>? _refreshFuture;
 
   Future<void> _initDio() async {
@@ -373,8 +370,6 @@ class ApiService {
   // Update user location and IP after authentication
   Future<void> updateUserLocationAndIp() async {
     try {
-      print('🚀 Updating user location and IP after authentication...');
-
       final LocationService locationService = LocationService();
       final IpService ipService = IpService();
 
@@ -396,33 +391,23 @@ class ApiService {
 
       final response = await authenticatedPost('/user/update-user', data: data);
 
-      print(
-        '-------------------------------------------------------------------------------',
-      );
-      print('this is the response: $response');
-      print(
-        '-------------------------------------------------------------------------------',
-      );
       return response.data;
     } catch (e) {
-      print('❌ Error updating user location and IP: $e');
+      debugPrint('❌ Error updating user location and IP');
     }
   }
 
   /// Update user FCM token
   Future<void> updateFCMToken(String fcmToken) async {
     try {
-      print('🔑 Updating FCM token...');
-
       final response = await authenticatedPost(
         '/user/update-fcm-token',
         data: {'fcm_token': fcmToken},
       );
 
-      print('✅ FCM token updated successfully');
       return response.data;
     } catch (e) {
-      print('❌ Error updating FCM token: $e');
+      debugPrint('❌ Error updating FCM token');
     }
   }
 
@@ -764,7 +749,7 @@ class ApiService {
   Future<void> _disconnectWebSocketOnLogout() async {
     try {
       print('🔌 Disconnecting WebSocket on logout...');
-      await _websocketService.disconnect();
+      await _websocketService.shutdown();
       print('✅ WebSocket disconnected successfully on logout');
     } catch (e) {
       print('❌ Failed to disconnect WebSocket on logout: $e');

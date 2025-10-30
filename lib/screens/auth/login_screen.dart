@@ -2,14 +2,12 @@ import 'package:flutter/material.dart' as material;
 import 'signup_screen.dart';
 import '../home_layout.dart';
 import '../../api/api_service.dart';
-import '../../services/auth_service.dart';
-import '../../services/notification_service.dart';
+import '../../services/auth/auth.service.dart';
 import '../../models/country_model.dart' as country_model;
 import '../../widgets/country_selector_modal.dart';
-import '../../utils/app_restart_helper.dart';
 
 class LoginScreen extends material.StatefulWidget {
-  const LoginScreen({material.Key? key}) : super(key: key);
+  const LoginScreen({super.key});
 
   @override
   material.State<LoginScreen> createState() => _LoginScreenState();
@@ -26,7 +24,6 @@ class _LoginScreenState extends material.State<LoginScreen> {
 
   final ApiService apiService = ApiService();
   final AuthService authService = AuthService();
-  final NotificationService notificationService = NotificationService();
 
   @override
   void dispose() {
@@ -91,37 +88,7 @@ class _LoginScreenState extends material.State<LoginScreen> {
     }
   }
 
-  Future<void> _sendFCMTokenToBackend() async {
-    try {
-      // Initialize notification service if not already done
-      await notificationService.initialize();
-
-      // Get the FCM token
-      final fcmToken = notificationService.fcmToken;
-
-      if (fcmToken != null && fcmToken.isNotEmpty) {
-        print('🔑 Sending FCM token to backend: $fcmToken');
-        await apiService.updateFCMToken(fcmToken);
-        print('✅ FCM token sent successfully');
-      } else {
-        print('⚠️ FCM token not available, will retry later');
-        // Retry getting the token after a short delay
-        await Future.delayed(const Duration(seconds: 2));
-        final retryToken = notificationService.fcmToken;
-        if (retryToken != null && retryToken.isNotEmpty) {
-          await apiService.updateFCMToken(retryToken);
-          print('✅ FCM token sent successfully on retry');
-        }
-      }
-    } catch (e) {
-      print('❌ Error sending FCM token: $e');
-      // Don't fail the login flow for FCM token issues
-    }
-  }
-
   void handleOtpSubmit() async {
-    print('OTP button pressed');
-
     if (_otpController.text.isEmpty || _otpController.text.length < 6) {
       material.ScaffoldMessenger.of(context).showSnackBar(
         const material.SnackBar(
@@ -151,8 +118,7 @@ class _LoginScreenState extends material.State<LoginScreen> {
         );
 
         // Send FCM token to backend after successful login
-        _sendFCMTokenToBackend();
-
+        await authService.sendFCMTokenToBackend(3);
         material.Navigator.pushReplacement(
           context,
           material.MaterialPageRoute(builder: (context) => const MainScreen()),

@@ -712,12 +712,6 @@ class ConversationMeta {
   });
 
   factory ConversationMeta.fromResponse(ConversationHistoryResponse response) {
-    debugPrint(
-      '🔍 ConversationMeta.fromResponse: Creating meta with ${response.members.length} members',
-    );
-    debugPrint(
-      '🔍 ConversationMeta.fromResponse: Members data: ${response.members}',
-    );
     return ConversationMeta(
       totalCount: response.totalCount,
       currentPage: response.currentPage,

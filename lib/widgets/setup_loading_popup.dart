@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class SetupLoadingPopup extends StatefulWidget {
-  const SetupLoadingPopup({Key? key}) : super(key: key);
+  const SetupLoadingPopup({super.key});
 
   @override
   State<SetupLoadingPopup> createState() => _SetupLoadingPopupState();
@@ -16,11 +16,14 @@ class _SetupLoadingPopupState extends State<SetupLoadingPopup>
   void initState() {
     super.initState();
     _animationController = AnimationController(
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 1000),
       vsync: this,
     );
-    _animation = Tween<double>(begin: 0.0, end: 1.0).animate(_animationController);
-    
+    _animation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(_animationController);
+
     // Start the animation and repeat it
     _animationController.forward();
     _animationController.addStatusListener((status) {
@@ -40,9 +43,7 @@ class _SetupLoadingPopupState extends State<SetupLoadingPopup>
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       elevation: 8,
       backgroundColor: Colors.white,
       child: Container(
@@ -66,7 +67,7 @@ class _SetupLoadingPopupState extends State<SetupLoadingPopup>
               ),
             ),
             const SizedBox(height: 24),
-            
+
             // Title
             Text(
               'Setting up your account',
@@ -78,18 +79,15 @@ class _SetupLoadingPopupState extends State<SetupLoadingPopup>
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
-            
+
             // Subtitle
             Text(
               'Please wait while we set up things for you',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey.shade600,
-              ),
+              style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
-            
+
             // Small dots animation
             _buildDotsAnimation(),
           ],
@@ -107,8 +105,11 @@ class _SetupLoadingPopupState extends State<SetupLoadingPopup>
           children: List.generate(3, (index) {
             final delay = index * 0.2;
             final animationValue = (_animation.value - delay).clamp(0.0, 1.0);
-            final opacity = (1.0 - (animationValue - 0.5).abs() * 2).clamp(0.0, 1.0);
-            
+            final opacity = (1.0 - (animationValue - 0.5).abs() * 2).clamp(
+              0.0,
+              1.0,
+            );
+
             return Container(
               margin: const EdgeInsets.symmetric(horizontal: 2),
               child: Opacity(

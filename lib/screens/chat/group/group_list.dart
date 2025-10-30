@@ -6,6 +6,7 @@ import '../../../api/user.service.dart';
 import '../../../repositories/groups_repository.dart';
 import '../../../repositories/communities_repository.dart';
 import '../../../services/websocket_service.dart';
+import '../../../services/websocket_message_handler.dart';
 import '../../../services/last_message_storage_service.dart';
 import '../../../widgets/chat/searchable_list_widget.dart';
 import 'messaging.dart';
@@ -24,6 +25,7 @@ class _GroupsPageState extends State<GroupsPage> {
   final GroupsRepository _groupsRepo = GroupsRepository();
   final CommunitiesRepository _communitiesRepo = CommunitiesRepository();
   final WebSocketService _websocketService = WebSocketService();
+  final WebSocketMessageHandler _messageHandler = WebSocketMessageHandler();
   final LastMessageStorageService _lastMessageStorage =
       LastMessageStorageService.instance;
 
@@ -45,7 +47,9 @@ class _GroupsPageState extends State<GroupsPage> {
   final Map<int, Set<String>> _typingUserNames =
       {}; // conversationId -> Set of userNames
 
-  StreamSubscription<Map<String, dynamic>>? _websocketSubscription;
+  StreamSubscription<Map<String, dynamic>>? _typingSubscription;
+  StreamSubscription<Map<String, dynamic>>? _messageSubscription;
+  StreamSubscription<Map<String, dynamic>>? _mediaSubscription;
 
   @override
   void initState() {
@@ -60,7 +64,9 @@ class _GroupsPageState extends State<GroupsPage> {
   void dispose() {
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
-    _websocketSubscription?.cancel();
+    _typingSubscription?.cancel();
+    _messageSubscription?.cancel();
+    _mediaSubscription?.cancel();
     // Cancel all typing timers
     for (final timer in _typingTimers.values) {
       timer?.cancel();
@@ -177,34 +183,37 @@ class _GroupsPageState extends State<GroupsPage> {
     }
   }
 
-  /// Set up WebSocket listener for real-time updates
+  /// Set up WebSocket listener for real-time updates using centralized handler
   void _setupWebSocketListener() {
-    _websocketSubscription = _websocketService.messageStream.listen(
+    // Listen to typing events for all groups
+    _typingSubscription = _messageHandler.typingStream.listen(
       (message) {
-        _handleIncomingWebSocketMessage(message);
+        _handleTypingMessage(message);
       },
       onError: (error) {
-        debugPrint('❌ WebSocket message stream error in GroupsPage: $error');
+        debugPrint('❌ Typing stream error in GroupsPage: $error');
       },
     );
-  }
 
-  /// Handle incoming WebSocket messages
-  Future<void> _handleIncomingWebSocketMessage(
-    Map<String, dynamic> message,
-  ) async {
-    try {
-      final messageType = message['type'];
+    // Listen to new messages for all groups
+    _messageSubscription = _messageHandler.messageStream.listen(
+      (message) {
+        _handleNewGroupMessage(message);
+      },
+      onError: (error) {
+        debugPrint('❌ Message stream error in GroupsPage: $error');
+      },
+    );
 
-      if (messageType == 'message' || messageType == 'media') {
-        // Update last message for groups
-        await _handleNewGroupMessage(message);
-      } else if (messageType == 'typing') {
-        _handleTypingMessage(message);
-      }
-    } catch (e) {
-      debugPrint('❌ Error handling WebSocket message in GroupsPage: $e');
-    }
+    // Listen to media messages for all groups
+    _mediaSubscription = _messageHandler.mediaStream.listen(
+      (message) {
+        _handleNewGroupMessage(message);
+      },
+      onError: (error) {
+        debugPrint('❌ Media stream error in GroupsPage: $error');
+      },
+    );
   }
 
   /// Handle typing message from WebSocket
@@ -372,11 +381,14 @@ class _GroupsPageState extends State<GroupsPage> {
         final lastMessage = GroupLastMessage(
           id: data['id'] ?? data['media_message_id'] ?? 0,
           body: messageBody,
-          type: data['type'] ?? message['type'] ?? 'text',
+          type: messageBody.isEmpty
+              ? 'attachment'
+              : data['type'] ?? message['type'] ?? 'text',
           senderId: data['sender_id'] ?? data['user_id'] ?? 0,
           senderName: data['sender_name'] ?? '',
           createdAt: data['created_at'] ?? DateTime.now().toIso8601String(),
           conversationId: conversationId,
+          attachmentData: data['attachments'],
         );
 
         // Store the last message in local storage
@@ -1018,27 +1030,38 @@ class GroupListItem extends StatelessWidget {
 
     // Handle media messages based on type
     switch (lastMessage.type.toLowerCase()) {
-      case 'image':
-      case 'images':
-        return '📷 Photo';
-      case 'video':
-      case 'videos':
-        return '📹 Video';
-      case 'audio':
-      case 'audios':
-      case 'voice':
-        return '🎵 Audio';
-      case 'file':
-      case 'document':
-        return '📎 File';
+      case 'attachment':
+        if (lastMessage.attachmentData != null &&
+            lastMessage.attachmentData!.containsKey('category')) {
+          final attachmentType = lastMessage.attachmentData!['category']
+              .toLowerCase();
+          switch (attachmentType) {
+            case 'image':
+            case 'images':
+              return '📷 Photo';
+            case 'video':
+            case 'videos':
+              return '📹 Video';
+            case 'audio':
+            case 'audios':
+            case 'voice':
+              return '🎵 Audio';
+            case 'file':
+            case 'document':
+              return '📎 File';
+          }
+        }
+        return '📎 Attachment';
       case 'location':
         return '📍 Location';
       case 'contact':
         return '👤 Contact';
       case 'media':
         return '📎 Media';
+      case 'text':
+        return lastMessage.body;
       default:
-        return 'New message';
+        return lastMessage.body.isNotEmpty ? lastMessage.body : 'New message';
     }
   }
 

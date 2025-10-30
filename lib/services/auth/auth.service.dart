@@ -3,27 +3,35 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
-import 'cookie_service.dart';
-import 'message_storage_service.dart';
-import 'chat_preferences_service.dart';
-import 'notification_service.dart';
-import 'contact_service.dart';
-import 'user_status_service.dart';
-import 'last_message_storage_service.dart';
-import 'package:amigo/api/user.service.dart' as userService;
+import '../cookie_service.dart';
+import '../websocket_service.dart';
+import '../message_storage_service.dart';
+import '../chat_preferences_service.dart';
+import '../notification_service.dart';
+import '../contact_service.dart';
+import '../user_status_service.dart';
+import '../last_message_storage_service.dart';
+import 'package:amigo/api/user.service.dart' as user_service;
 import 'package:amigo/utils/navigation_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:amigo/screens/auth/login_screen.dart';
 import 'package:amigo/db/database_helper.dart';
-import 'media_cache_service.dart';
+import '../media_cache_service.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 class AuthService {
   static const String _authStatusKey = 'auth_status';
   static const String _lastLoginTimeKey = 'last_login_time';
 
+  // Singleton pattern
+  static final AuthService _instance = AuthService._internal();
+  factory AuthService() => _instance;
+  AuthService._internal();
+
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   final CookieService _cookieService = CookieService();
+
+  final NotificationService notificationService = NotificationService();
 
   // Check if user is authenticated
   Future<bool> isAuthenticated() async {
@@ -73,97 +81,104 @@ class AuthService {
         DateTime.now().millisecondsSinceEpoch,
       );
     } catch (e) {
-      print('Error setting authentication status: $e');
+      debugPrint('Error setting authentication status');
+    }
+  }
+
+  // Send FCM token to backend
+  Future<void> sendFCMTokenToBackend([int? retry]) async {
+    try {
+      // Initialize notification service if not already done
+      await notificationService.initialize();
+
+      // Get the FCM token
+      final fcmToken = notificationService.fcmToken;
+
+      if (fcmToken != null && fcmToken.isNotEmpty) {
+        await ApiService().updateFCMToken(fcmToken);
+      } else {
+        // Retry getting the token after a short delay
+        if (retry == null || retry <= 0) {
+          debugPrint('❌ Failed to get FCM token after multiple attempts');
+          return;
+        }
+        await sendFCMTokenToBackend(retry - 1);
+      }
+    } catch (e) {
+      debugPrint('❌ Error sending FCM token');
     }
   }
 
   // Log out user
   Future<void> logout() async {
     try {
-      print('🚪 Starting comprehensive logout process...');
+      // Ensure websocket is fully shut down and won't auto-reconnect
+      try {
+        await WebSocketService().shutdown();
+      } catch (_) {}
 
-      // 1. Notify server to logout (before clearing cookies!)
-      print("📡 Notifying server to logout...");
       try {
         await ApiService().authenticatedGet("/auth/logout");
-        print('✅ Server logout successful');
       } catch (e) {
-        print('⚠️ Server logout failed (continuing with local logout): $e');
-        // Continue with logout even if server call fails
+        debugPrint('⚠️ Server logout failed (continuing with local logout)');
       }
 
       // 2. Clear authentication status and secure storage
-      print('🔐 Clearing secure storage...');
       await _secureStorage.delete(key: _authStatusKey);
       await _secureStorage.deleteAll();
 
       // 3. Clear SharedPreferences (includes login timestamp and all app preferences)
-      print('📱 Clearing SharedPreferences...');
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_lastLoginTimeKey);
+      await prefs.remove('fcm_token');
       await prefs.clear();
 
       // 4. Clear cookies using the cookie service
-      print('🍪 Clearing cookies...');
       await _cookieService.clearAllCookies();
 
       // 5. Clear message storage cache
-      print('💬 Clearing message storage cache...');
       final messageStorage = MessageStorageService();
       await messageStorage.clearAllCache();
 
       // 6. Clear media cache
-      print('💾 Clearing media cache...');
       final mediaCacheService = MediaCacheService();
       await mediaCacheService.clearAllCache();
 
       // 7. Clear CachedNetworkImage cache
-      print('🖼️ Clearing cached network images...');
       await _clearCachedNetworkImages();
 
       // 8. Clear chat preferences
-      print('⚙️ Clearing chat preferences...');
       final chatPreferences = ChatPreferencesService();
       await chatPreferences.clearAllPreferences();
 
       // 9. Clear notification data
-      print('🔔 Clearing notification data...');
       final notificationService = NotificationService();
       await notificationService.clearNotificationData();
 
       // 10. Clear user status data
-      print('👤 Clearing user status data...');
       final userStatusService = UserStatusService();
       userStatusService.clearAllStatus();
 
       // 11. Clear contact cache
-      print('📞 Clearing contact cache...');
       final contactService = ContactService();
       contactService.clearCache();
 
       // 12. Clear last message storage
-      print('💬 Clearing last message storage...');
       final lastMessageStorage = LastMessageStorageService.instance;
       await lastMessageStorage.clearAllLastMessages();
 
       // 13. Clear local database
-      print('🗄️ Clearing local database...');
       final databaseHelper = DatabaseHelper.instance;
       await databaseHelper.clearAllData();
       await databaseHelper.resetInstance();
 
       // 14. Clear app cache directories
-      print('🗂️ Clearing app cache directories...');
       await _clearAppCacheDirectories();
 
       // 15. Clear temporary files
-      print('🗑️ Clearing temporary files...');
       await _clearTemporaryFiles();
 
-      print('✅ Comprehensive logout completed successfully');
-
       // 16. Restart the app
-      print('🔄 Restarting app...');
       if (NavigationHelper.navigatorKey.currentContext != null) {
         Navigator.pushAndRemoveUntil(
           NavigationHelper.navigatorKey.currentContext!,
@@ -172,8 +187,7 @@ class AuthService {
         );
       }
     } catch (e) {
-      print('❌ Error during logout: $e');
-      // Continue with logout even if some steps fail
+      debugPrint('❌ Error during logout');
     }
   }
 
@@ -183,9 +197,8 @@ class AuthService {
       // Clear both the cache and file system for CachedNetworkImage
       final cacheManager = DefaultCacheManager();
       await cacheManager.emptyCache();
-      print('🖼️ CachedNetworkImage cache cleared successfully');
     } catch (e) {
-      print('❌ Error clearing CachedNetworkImage cache: $e');
+      debugPrint('❌ Error clearing CachedNetworkImage cache');
     }
   }
 
@@ -203,10 +216,8 @@ class AuthService {
       // Clear temporary directory
       final tempDir = await getTemporaryDirectory();
       await _clearDirectoryContents(tempDir);
-
-      print('🗂️ App cache directories cleared');
     } catch (e) {
-      print('❌ Error clearing app cache directories: $e');
+      debugPrint('❌ Error clearing app cache directories');
     }
   }
 
@@ -224,14 +235,12 @@ class AuthService {
             await file.delete();
           } catch (e) {
             // Ignore errors for individual files
-            print('⚠️ Could not delete temp file: ${file.path}');
+            debugPrint('⚠️ Could not delete temp file: ${file.path}');
           }
         }
       }
-
-      print('🗑️ Temporary files cleared');
     } catch (e) {
-      print('❌ Error clearing temporary files: $e');
+      debugPrint('❌ Error clearing temporary files');
     }
   }
 
@@ -251,19 +260,20 @@ class AuthService {
           }
         } catch (e) {
           // Ignore errors for individual files/directories
-          print('⚠️ Could not delete: ${entity.path}');
+          debugPrint('⚠️ Could not delete: ${entity.path}');
         }
       }
     } catch (e) {
-      print('❌ Error clearing directory contents: $e');
+      debugPrint('❌ Error clearing directory contents');
     }
   }
 
   // Get current user ID
   Future<int?> getCurrentUserId() async {
     try {
-      final userServiceInstance = userService.UserService();
+      final userServiceInstance = user_service.UserService();
       final response = await userServiceInstance.getUser();
+
       if (response['success'] == true && response['data'] != null) {
         final userData = response['data'];
         final id = userData['id'];
@@ -278,7 +288,7 @@ class AuthService {
       }
       return null;
     } catch (e) {
-      print('❌ Error getting current user ID: $e');
+      debugPrint('❌ Error getting current user ID');
       return null;
     }
   }

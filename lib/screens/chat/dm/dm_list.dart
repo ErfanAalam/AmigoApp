@@ -4,6 +4,7 @@ import '../../../models/conversation_model.dart';
 import '../../../api/user.service.dart';
 import '../../../services/websocket_service.dart';
 import '../../../services/user_status_service.dart';
+import '../../../services/websocket_message_handler.dart';
 import '../../../services/chat_preferences_service.dart';
 import '../../../services/last_message_storage_service.dart';
 import '../../../widgets/chat_action_menu.dart';
@@ -24,6 +25,7 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   final UserService _userService = UserService();
   final WebSocketService _websocketService = WebSocketService();
   final UserStatusService _userStatusService = UserStatusService();
+  final WebSocketMessageHandler _messageHandler = WebSocketMessageHandler();
   final ChatPreferencesService _chatPreferencesService =
       ChatPreferencesService();
   final ConversationsRepository _conversationsRepo = ConversationsRepository();
@@ -53,7 +55,10 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   final Map<int, bool> _typingUsers = {}; // conversationId -> isTyping
   final Map<int, Timer?> _typingTimers = {}; // conversationId -> timer
   final Map<int, String> _typingUserNames = {}; // conversationId -> userName
-  StreamSubscription<Map<String, dynamic>>? _websocketSubscription;
+  StreamSubscription<Map<String, dynamic>>? _typingSubscription;
+  StreamSubscription<Map<String, dynamic>>? _messageSubscription;
+  StreamSubscription<Map<String, dynamic>>? _mediaSubscription;
+  StreamSubscription<Map<String, dynamic>>? _replySubscription;
   StreamSubscription<Map<int, bool>>? _userStatusSubscription;
 
   @override
@@ -623,14 +628,45 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
     }
   }
 
-  /// Set up WebSocket message listener for typing events
+  /// Set up WebSocket message listener using centralized handler
   void _setupWebSocketListener() {
-    _websocketSubscription = _websocketService.messageStream.listen(
+    // Listen to typing events for all conversations
+    _typingSubscription = _messageHandler.typingStream.listen(
       (message) {
-        _handleIncomingWebSocketMessage(message);
+        _handleTypingMessage(message);
       },
       onError: (error) {
-        debugPrint('❌ WebSocket message stream error in ChatsPage: $error');
+        debugPrint('❌ Typing stream error in ChatsPage: $error');
+      },
+    );
+
+    // Listen to new messages for all conversations
+    _messageSubscription = _messageHandler.messageStream.listen(
+      (message) {
+        _handleNewMessage(message);
+      },
+      onError: (error) {
+        debugPrint('❌ Message stream error in ChatsPage: $error');
+      },
+    );
+
+    // Listen to new replied messages for all conversations
+    _replySubscription = _messageHandler.messageReplyStream.listen(
+      (message) {
+        _handleNewMessage(message);
+      },
+      onError: (error) {
+        debugPrint('❌ Reply stream error in ChatsPage: $error');
+      },
+    );
+
+    // Listen to media messages for all conversations
+    _mediaSubscription = _messageHandler.mediaStream.listen(
+      (message) {
+        _handleNewMessage(message);
+      },
+      onError: (error) {
+        debugPrint('❌ Media stream error in ChatsPage: $error');
       },
     );
   }
@@ -651,38 +687,8 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
     );
   }
 
-  /// Handle incoming WebSocket messages for typing events
-  Future<void> _handleIncomingWebSocketMessage(
-    Map<String, dynamic> message,
-  ) async {
-    try {
-      // Handle different message types
-      final messageType = message['type'];
-      if (messageType == 'typing') {
-        _handleTypingMessage(message);
-      } else if (messageType == 'user_online') {
-        _handleUserOnlineMessage(message);
-      } else if (messageType == 'user_offline') {
-        _handleUserOfflineMessage(message);
-      }
-      // else if (messageType == 'message_delivery_receipt') {
-      //   await _handleMessageDeliveryReceipt(message);
-      // }
-      else if (messageType == 'message' || messageType == 'media') {
-        await _handleNewMessage(message);
-      }
-    } catch (e) {
-      debugPrint('❌ Error handling WebSocket message in ChatsPage: $e');
-    }
-  }
-
-  void _handleUserOnlineMessage(Map<String, dynamic> message) {
-    _userStatusService.handleUserOnlineMessage(message);
-  }
-
-  void _handleUserOfflineMessage(Map<String, dynamic> message) {
-    _userStatusService.handleUserOfflineMessage(message);
-  }
+  // Note: User online/offline messages are now handled centrally by WebSocketMessageHandler
+  // and routed to UserStatusService, which we listen to via _setupUserStatusListener()
 
   /// /// Handle message delivery receipt to update last message and unread count
   /// Future<void> _handleMessageDeliveryReceipt(
@@ -869,10 +875,11 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
         final lastMessage = LastMessage(
           id: messageId,
           body: messageBody,
-          type: messageTypeValue,
+          type: messageBody.isEmpty ? 'attachment' : messageTypeValue,
           senderId: senderId,
           createdAt: createdAt,
           conversationId: conversationId,
+          attachmentData: data['attachments'],
         );
 
         // Store the last message in local storage
@@ -883,6 +890,7 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
           'sender_id': senderId,
           'created_at': createdAt,
           'conversation_id': conversationId,
+          'attachments': data['attachments'],
         });
 
         // Preserve pinnedMessage from existing metadata
@@ -1007,7 +1015,10 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _websocketSubscription?.cancel();
+    _typingSubscription?.cancel();
+    _messageSubscription?.cancel();
+    _replySubscription?.cancel();
+    _mediaSubscription?.cancel();
     _userStatusSubscription?.cancel();
     _searchController.dispose(); // Dispose search controller
     // Cancel all typing timers
@@ -1085,6 +1096,7 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
                     'sender_id': lastMsg.senderId,
                     'created_at': lastMsg.createdAt,
                     'conversation_id': conversation.conversationId,
+                    'attachments': lastMsg.attachmentData,
                   });
             }
           }
@@ -1495,7 +1507,11 @@ class ChatListItem extends StatelessWidget {
     return '?';
   }
 
-  String _formatLastMessageText(String lastMessageBody, String? messageType) {
+  String _formatLastMessageText(
+    String lastMessageBody,
+    String? messageType, [
+    Map<String, dynamic>? attachmentData,
+  ]) {
     // If body is not empty and not a media type identifier, return it
     if (lastMessageBody.isNotEmpty &&
         ![
@@ -1518,25 +1534,34 @@ class ChatListItem extends StatelessWidget {
     // Handle media messages based on type or body
     final type = (messageType ?? lastMessageBody).toLowerCase();
     switch (type) {
-      case 'image':
-      case 'images':
-        return '📷 Photo';
-      case 'video':
-      case 'videos':
-        return '📹 Video';
-      case 'audio':
-      case 'audios':
-      case 'voice':
-        return '🎵 Audio';
-      case 'file':
-      case 'document':
-        return '📎 File';
+      case 'attachment':
+        if (attachmentData != null && attachmentData.containsKey('category')) {
+          final attachmentType = attachmentData['category'].toLowerCase();
+          switch (attachmentType) {
+            case 'image':
+            case 'images':
+              return '📷 Photo';
+            case 'video':
+            case 'videos':
+              return '📹 Video';
+            case 'audio':
+            case 'audios':
+            case 'voice':
+              return '🎵 Audio';
+            case 'file':
+            case 'document':
+              return '📎 File';
+          }
+        }
+        return '📎 Attachment';
       case 'location':
         return '📍 Location';
       case 'contact':
         return '👤 Contact';
       case 'media':
         return '📎 Media';
+      case 'text':
+        return lastMessageBody;
       default:
         return lastMessageBody.isNotEmpty ? lastMessageBody : 'New message';
     }
@@ -1551,6 +1576,7 @@ class ChatListItem extends StatelessWidget {
     final lastMessageText = _formatLastMessageText(
       lastMessageBody,
       lastMessageType,
+      conversation.metadata?.lastMessage.attachmentData,
     );
     final timeText = conversation.metadata?.lastMessage.createdAt != null
         ? _formatTime(conversation.metadata!.lastMessage.createdAt)

@@ -24,6 +24,9 @@ class WebSocketService {
       WebSocketConnectionState.disconnected;
 
   final CookieService _cookieService = CookieService();
+  
+  // If false, do not attempt automatic reconnects (e.g., during logout)
+  bool _allowReconnect = true;
 
   // Connection management
   Timer? _reconnectTimer;
@@ -56,6 +59,8 @@ class WebSocketService {
 
   // Initialize WebSocket connection with access token from cookies
   Future<void> connect([int? conversationId]) async {
+    // Allow reconnects again on any explicit connect
+    _allowReconnect = true;
     if (_connectionState == WebSocketConnectionState.connecting ||
         _connectionState == WebSocketConnectionState.connected) {
       return;
@@ -72,9 +77,6 @@ class WebSocketService {
 
       // Build WebSocket URL with access token as query parameter
       final wsUrl = _buildWebSocketUrl(accessToken);
-
-      // Parse the URI and verify it's correct
-      final uri = Uri.parse(wsUrl);
 
       // Create WebSocket connection using native WebSocket
       print('🔍 About to connect to: $wsUrl');
@@ -161,7 +163,9 @@ class WebSocketService {
   void _handleDisconnection() {
     print('🔌 WebSocket disconnected');
     _updateConnectionState(WebSocketConnectionState.disconnected);
-    _scheduleReconnect();
+    if (_allowReconnect) {
+      _scheduleReconnect();
+    }
   }
 
   /// Handle connection errors
@@ -169,7 +173,9 @@ class WebSocketService {
     print('❌ WebSocket connection error');
     _updateConnectionState(WebSocketConnectionState.error);
     _errorController.add(error);
-    _scheduleReconnect();
+    if (_allowReconnect) {
+      _scheduleReconnect();
+    }
   }
 
   /// Schedule reconnection attempt
@@ -254,6 +260,12 @@ class WebSocketService {
     }
 
     _updateConnectionState(WebSocketConnectionState.disconnected);
+  }
+
+  /// Disconnect and suppress any automatic reconnects (use for logout)
+  Future<void> shutdown() async {
+    _allowReconnect = false;
+    await disconnect();
   }
 
   /// Reconnect WebSocket (useful for token refresh scenarios)

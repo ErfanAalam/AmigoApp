@@ -5,7 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
-import '../../services/auth_service.dart';
+import '../../services/auth/auth.service.dart';
 // import '../../services/cookie_service.dart';
 import '../auth/login_screen.dart';
 import 'edit_profile.dart';
@@ -17,7 +17,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 // import 'package:cached_network_image/cached_network_image.dart';
 
 class ProfilePage extends StatefulWidget {
-  const ProfilePage({Key? key}) : super(key: key);
+  const ProfilePage({super.key});
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();

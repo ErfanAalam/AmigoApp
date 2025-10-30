@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 class MessageModel {
   final int id;
   final String body;
@@ -184,13 +182,6 @@ class ConversationHistoryResponse {
     final messagesData = innerData['messages'] ?? [];
     final pagination = innerData['pagination'] ?? {};
     final membersData = innerData['members'] ?? [];
-
-    debugPrint(
-      '🔍 ConversationHistoryResponse: Parsing members data: $membersData',
-    );
-    debugPrint(
-      '🔍 ConversationHistoryResponse: Members count: ${membersData.length}',
-    );
 
     return ConversationHistoryResponse(
       messages: (messagesData as List)

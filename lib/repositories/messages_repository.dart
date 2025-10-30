@@ -572,13 +572,10 @@ class MessagesRepository {
         }
       }
 
-      print(
-        '🔍 Reply message validation: $validReplyMessagesCount/$replyMessagesCount reply messages are valid',
-      );
       return replyMessagesCount == 0 ||
           validReplyMessagesCount == replyMessagesCount;
     } catch (e) {
-      print('❌ Error validating reply message storage: $e');
+      debugPrint('❌ Error validating reply message storage');
       return false;
     }
   }

@@ -160,6 +160,7 @@ class GroupLastMessage {
   final String senderName;
   final String createdAt;
   final int conversationId;
+  final Map<String, dynamic>? attachmentData;
 
   GroupLastMessage({
     required this.id,
@@ -169,6 +170,7 @@ class GroupLastMessage {
     required this.senderName,
     required this.createdAt,
     required this.conversationId,
+    this.attachmentData,
   });
 
   factory GroupLastMessage.fromJson(Map<String, dynamic> json) {
@@ -180,6 +182,7 @@ class GroupLastMessage {
       senderName: json['sender_name'] ?? json['senderName'] ?? '',
       createdAt: json['created_at'] ?? json['createdAt'] ?? '',
       conversationId: json['conversation_id'] ?? json['conversationId'] ?? 0,
+      attachmentData: json['attachments'] as Map<String, dynamic>?,
     );
   }
 
@@ -192,6 +195,7 @@ class GroupLastMessage {
       'sender_name': senderName,
       'created_at': createdAt,
       'conversation_id': conversationId,
+      'attachments': attachmentData,
     };
   }
 }

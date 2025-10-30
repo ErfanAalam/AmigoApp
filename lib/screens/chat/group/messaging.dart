@@ -23,6 +23,7 @@ import '../../../repositories/user_repository.dart';
 import '../../../repositories/groups_repository.dart';
 import '../../../repositories/group_members_repository.dart';
 import '../../../services/websocket_service.dart';
+import '../../../services/websocket_message_handler.dart';
 import '../../../services/media_cache_service.dart';
 import '../../../utils/chat_helpers.dart';
 import '../../../utils/message_storage_helpers.dart';
@@ -57,6 +58,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _messageController = TextEditingController();
   final WebSocketService _websocketService = WebSocketService();
+  final WebSocketMessageHandler _messageHandler = WebSocketMessageHandler();
   final ImagePicker _imagePicker = ImagePicker();
   final MediaCacheService _mediaCacheService = MediaCacheService();
   List<MessageModel> _messages = [];
@@ -75,8 +77,13 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   // bool _isOtherTyping = false;
   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
 
-  // For optimistic message handling
-  StreamSubscription<Map<String, dynamic>>? _websocketSubscription;
+  // For optimistic message handling - using filtered streams per conversation
+  StreamSubscription<Map<String, dynamic>>? _messageSubscription;
+  StreamSubscription<Map<String, dynamic>>? _typingSubscription;
+  StreamSubscription<Map<String, dynamic>>? _mediaSubscription;
+  StreamSubscription<Map<String, dynamic>>? _messagePinSubscription;
+  StreamSubscription<Map<String, dynamic>>? _messageStarSubscription;
+  StreamSubscription<Map<String, dynamic>>? _messageReplySubscription;
   StreamSubscription? _audioProgressSubscription;
   Timer? _audioProgressTimer;
   DateTime? _audioStartTime;
@@ -1018,7 +1025,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     _scrollController.dispose();
     _messageController.dispose();
     _isOtherTypingNotifier.dispose();
-    _websocketSubscription?.cancel();
+    _messageSubscription?.cancel();
+    _typingSubscription?.cancel();
+    _mediaSubscription?.cancel();
+    _messagePinSubscription?.cancel();
+    _messageStarSubscription?.cancel();
+    _messageReplySubscription?.cancel();
     _typingAnimationController.dispose();
     _typingTimeout?.cancel();
     _scrollDebounceTimer?.cancel();
@@ -1197,8 +1209,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
       // ALWAYS load from local DB first for instant display
       if (!_hasCheckedCache) {
-        debugPrint('📦 Loading from local DB first for instant display...');
-
         final cachedData = await _messagesRepo.getCachedMessages(
           conversationId,
         );
@@ -1433,45 +1443,67 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
   /// Set up WebSocket message listener for real-time group messages
   void _setupWebSocketListener() {
-    _websocketSubscription = _websocketService.messageStream.listen(
-      (message) {
-        _handleIncomingWebSocketMessage(message);
-      },
-      onError: (error) {
-        debugPrint('❌ Group WebSocket message stream error: $error');
-      },
-    );
-  }
+    final conversationId = widget.group.conversationId;
 
-  /// Handle incoming WebSocket messages for group
-  void _handleIncomingWebSocketMessage(Map<String, dynamic> message) {
-    try {
-      // Check if this is a message for our group conversation
-      final messageConversationId =
-          message['conversation_id'] ?? message['data']?['conversation_id'];
+    // Listen to messages filtered for this conversation
+    _messageSubscription = _messageHandler
+        .messagesForConversation(conversationId)
+        .listen(
+          (message) => _handleIncomingMessage(message),
+          onError: (error) {
+            debugPrint('❌ Group message stream error: $error');
+          },
+        );
 
-      if (messageConversationId != widget.group.conversationId) {
-        return; // Not for this group conversation
-      }
+    // Listen to typing events for this conversation
+    _typingSubscription = _messageHandler
+        .typingForConversation(conversationId)
+        .listen(
+          (message) => _reciveTyping(message),
+          onError: (error) {
+            debugPrint('❌ Group typing stream error: $error');
+          },
+        );
 
-      // Handle different message types
-      final messageType = message['type'];
-      if (messageType == 'message') {
-        _handleIncomingMessage(message);
-      } else if (messageType == 'typing') {
-        _reciveTyping(message);
-      } else if (messageType == 'message_reply') {
-        _handleMessageReply(message);
-      } else if (messageType == 'media') {
-        _handleIncomingMediaMessages(message);
-      } else if (messageType == 'message_pin') {
-        _handleMessagePin(message);
-      } else if (messageType == 'message_star') {
-        _handleMessageStar(message);
-      }
-    } catch (e) {
-      debugPrint('❌ Error handling group WebSocket message: $e');
-    }
+    // Listen to media messages for this conversation
+    _mediaSubscription = _messageHandler
+        .mediaForConversation(conversationId)
+        .listen(
+          (message) => _handleIncomingMediaMessages(message),
+          onError: (error) {
+            debugPrint('❌ Group media stream error: $error');
+          },
+        );
+
+    // Listen to message pins for this conversation
+    _messagePinSubscription = _messageHandler
+        .messagePinsForConversation(conversationId)
+        .listen(
+          (message) => _handleMessagePin(message),
+          onError: (error) {
+            debugPrint('❌ Group message pin stream error: $error');
+          },
+        );
+
+    // Listen to message stars for this conversation
+    _messageStarSubscription = _messageHandler
+        .messageStarsForConversation(conversationId)
+        .listen(
+          (message) => _handleMessageStar(message),
+          onError: (error) {
+            debugPrint('❌ Group message star stream error: $error');
+          },
+        );
+
+    // Listen to message replies for this conversation
+    _messageReplySubscription = _messageHandler
+        .messageRepliesForConversation(conversationId)
+        .listen(
+          (message) => _handleMessageReply(message),
+          onError: (error) {
+            debugPrint('❌ Group message reply stream error: $error');
+          },
+        );
   }
 
   /// Handle incoming message from WebSocket
@@ -1612,6 +1644,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       if (mounted) {
         setState(() {
           _messages.add(newMessage);
+          _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
           // Update sticky date separator for new messages
           _currentStickyDate = ChatHelpers.getMessageDateString(
             newMessage.createdAt,
@@ -2175,6 +2208,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       if (mounted) {
         setState(() {
           _messages.add(newMediaMessage);
+          _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
           // Update sticky date separator for new messages
           _currentStickyDate = ChatHelpers.getMessageDateString(
             newMediaMessage.createdAt,
@@ -3494,9 +3528,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: isMyMessage
-              ? Colors.white.withOpacity(0.15)
-              : Colors.grey[200],
+          color: isMyMessage ? Colors.white.withAlpha(15) : Colors.grey[200],
           borderRadius: BorderRadius.circular(8),
           border: Border(
             left: BorderSide(
@@ -3523,9 +3555,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                     ? '${replyMessage.body.substring(0, 50)}...'
                     : replyMessage.body,
                 style: TextStyle(
-                  color: isMyMessage
-                      ? Colors.white.withOpacity(0.8)
-                      : Colors.grey[600],
+                  color: Colors.grey[600],
                   fontSize: 13,
                   height: 1.2,
                 ),
@@ -3534,10 +3564,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               ),
             ] else ...[
               Text(
-                '📎media message',
+                '📎 media',
                 style: TextStyle(
                   color: isMyMessage
-                      ? Colors.white.withOpacity(0.8)
+                      ? Colors.white.withAlpha(80)
                       : Colors.grey[600],
                   fontSize: 13,
                   height: 1.2,
@@ -3623,7 +3653,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         message.type == 'video' ||
         message.type == 'attachment' ||
         message.type == 'docs' ||
+        message.type == 'audio' ||
         message.type == 'audios' ||
+        message.type == 'media' ||
         message.type == 'image_loading' ||
         message.type == 'video_loading' ||
         message.type == 'document_loading' ||
@@ -4213,7 +4245,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                     Icon(Icons.reply, size: 16, color: Colors.teal),
                     const SizedBox(width: 4),
                     Text(
-                      'Replying to ${isRepliedMessageMine ? 'yourself' : replyMessage.senderName}',
+                      isRepliedMessageMine ? 'You' : replyMessage.senderName,
                       style: TextStyle(
                         color: Colors.teal,
                         fontSize: 12,
@@ -4229,9 +4261,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                         ? '${replyMessage.body.substring(0, 50)}...'
                         : replyMessage.body,
                     style: TextStyle(
-                      color: isRepliedMessageMine
-                          ? Colors.white.withOpacity(0.8)
-                          : Colors.grey[600],
+                      color: Colors.grey[600],
                       fontSize: 13,
                       height: 1.2,
                     ),
@@ -4240,11 +4270,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                   ),
                 ] else ...[
                   Text(
-                    '📎media message',
+                    '📎 media',
                     style: TextStyle(
-                      color: isRepliedMessageMine
-                          ? Colors.white.withOpacity(0.8)
-                          : Colors.grey[600],
+                      color: Colors.grey[600],
                       fontSize: 13,
                       height: 1.2,
                     ),
@@ -6547,22 +6575,18 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       }
 
       Navigator.of(context).pop();
-      print('🗑️ Cancelled group voice recording - Timer reset to 0:00');
     } catch (e) {
-      print('❌ Error cancelling group voice recording: $e');
+      debugPrint('❌ Error cancelling group voice recording: $e');
     }
   }
 
   Future<void> _sendRecordedVoice() async {
     try {
-      print('📤 Starting group voice note send process...');
-
       // Stop the recording timer immediately
       _recordingTimer?.cancel();
       _recordingTimer = null;
 
       if (_recordingPath == null) {
-        print('❌ No group recording path found');
         _showErrorDialog('No recording found. Please try again.');
         return;
       }
@@ -6570,6 +6594,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       if (_recorder.isRecording) {
         final path = await _recorder.stopRecorder();
         _recordingPath = path; // overwrite with final file
+        setState(() {
+          _isRecording = false;
+        });
       }
 
       setState(() {
@@ -6578,16 +6605,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
       final voiceFile = File(_recordingPath!);
       if (!await voiceFile.exists()) {
-        print(
-          '❌ Group recording file does not exist at path: ${_recordingPath!}',
-        );
         _showErrorDialog('Recording file not found. Please try again.');
         return;
       }
 
       final fileSize = await voiceFile.length();
       if (fileSize == 0) {
-        print('❌ Group recording file is empty');
         _showErrorDialog('Recording is empty. Please try recording again.');
         return;
       }

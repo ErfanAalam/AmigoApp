@@ -179,6 +179,7 @@ class LastMessage {
   final int senderId;
   final String createdAt;
   final int conversationId;
+  final Map<String, dynamic>? attachmentData;
 
   LastMessage({
     required this.id,
@@ -187,6 +188,7 @@ class LastMessage {
     required this.senderId,
     required this.createdAt,
     required this.conversationId,
+    this.attachmentData,
   });
 
   factory LastMessage.fromJson(Map<String, dynamic> json) {
@@ -197,6 +199,7 @@ class LastMessage {
       senderId: _parseToInt(json['sender_id']),
       createdAt: json['created_at'] ?? '',
       conversationId: _parseToInt(json['conversation_id']),
+      attachmentData: json['attachments'] as Map<String, dynamic>?,
     );
   }
 
@@ -208,6 +211,7 @@ class LastMessage {
       'sender_id': senderId,
       'created_at': createdAt,
       'conversation_id': conversationId,
+      'attachments': attachmentData,
     };
   }
 

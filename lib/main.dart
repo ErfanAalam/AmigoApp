@@ -13,10 +13,11 @@ import 'screens/call/incoming_call_screen.dart';
 import 'screens/chat/dm/messaging.dart';
 import 'screens/chat/group/messaging.dart';
 import 'screens/share/external_share.dart';
-import 'services/auth_service.dart';
+import 'services/auth/auth.service.dart';
 import 'services/cookie_service.dart';
 import 'services/websocket_service.dart';
 import 'services/user_status_service.dart';
+import 'services/websocket_message_handler.dart';
 import 'services/call_service.dart';
 import 'services/notification_service.dart';
 import 'services/call_foreground_service.dart';
@@ -43,6 +44,9 @@ void main() async {
 
   // Initialize UserStatusService
   UserStatusService();
+
+  // Initialize WebSocket message handler (will be initialized in MyApp when authenticated)
+  WebSocketMessageHandler();
 
   // Initialize NotificationService
   await NotificationService().initialize();
@@ -114,7 +118,7 @@ class _MyAppState extends material.State<MyApp> {
         });
       }
     } catch (e) {
-      print('❌ Error loading app version: $e');
+      debugPrint('❌ Error loading app version');
     }
   }
 
@@ -129,7 +133,6 @@ class _MyAppState extends material.State<MyApp> {
       await _notificationService.processInitialMessage();
       _notificationRetryCount = 0; // Reset counter
     } else {
-      print('⚠️ Not ready to process initial notification yet');
       _notificationRetryCount++;
 
       // Retry up to 5 times
@@ -138,7 +141,6 @@ class _MyAppState extends material.State<MyApp> {
           _processInitialNotification();
         });
       } else {
-        print('❌ Max retries reached for initial notification processing');
         _notificationRetryCount = 0; // Reset counter
       }
     }
@@ -154,33 +156,32 @@ class _MyAppState extends material.State<MyApp> {
     // Connect to WebSocket if user is authenticated
     if (isAuthenticated) {
       try {
+        // Initialize centralized WebSocket message handler (only once)
+        WebSocketMessageHandler().initialize();
+
         // Connect to WebSocket and wait for connection
         await _websocketService.connect();
 
-        // Send FCM token to backend
-        final userId = await _authService.getCurrentUserId();
-        if (userId != null) {
-          await _notificationService.sendTokenToBackend(userId.toString());
-        }
+        // // Send FCM token to backend
+        // final userId = await _authService.getCurrentUserId();
+        // if (userId != null) {
+        // await _notificationService.sendTokenToBackend(userId.toString());
+        // }
 
         await _userService.updateUser({'app_version': appVersion});
 
         // await _apiService.updateUserLocationAndIp();
         // Wait a bit for WebSocket to establish connection
         await Future.delayed(const Duration(milliseconds: 500));
-        FlutterCallkitIncoming.requestFullIntentPermission();
+        await _requestPermissions();
 
         final prefs = await SharedPreferences.getInstance();
-
         final callStatus = prefs.getString('call_status');
-
         final callId = prefs.getString('current_call_id');
-
         final callerId = prefs.getString('current_caller_id');
 
         if (callId != null) {
           // Get caller information from storage
-          final callerId = prefs.getString('current_caller_id');
           final callerName =
               prefs.getString('current_caller_name') ?? 'Unknown';
           final callerProfilePic = prefs.getString(
@@ -201,6 +202,7 @@ class _MyAppState extends material.State<MyApp> {
               // // Dispose all notifications from flutter_callkit_incoming
               // await FlutterCallkitIncoming.setCallConnected(callId);
               break;
+
             case 'declined':
               // Call was rejected, clean up
               await CallService().initialize();
@@ -209,9 +211,11 @@ class _MyAppState extends material.State<MyApp> {
                 callId: int.parse(callId),
               );
               return;
+
             case 'ended':
               // Call already ended, clean up
               break;
+
             case 'missed':
               // Call was missed, clean up
               await CallService().initialize();
@@ -220,35 +224,16 @@ class _MyAppState extends material.State<MyApp> {
                 callId: int.parse(callId),
               );
               break;
-            default:
 
+            default:
               // No action needed
               break;
           }
-
-          // Request notification permission for callkit incoming
-          await FlutterCallkitIncoming.requestNotificationPermission({
-            "title": "Notification permission",
-            "rationaleMessagePermission":
-                "Notification permission is required, to show notification.",
-            "postNotificationMessageRequired":
-                "Notification permission is required, Please allow notification permission from setting.",
-          });
-          // Check if can use full screen intent
-          await FlutterCallkitIncoming.canUseFullScreenIntent();
-          // Request full intent permission
-          await FlutterCallkitIncoming.requestFullIntentPermission();
-
-          // clean up after use
-          // prefs.remove('current_call_id');
-          // prefs.remove('current_caller_id');
-          // prefs.remove('call_status');
         }
 
         await _apiService.updateUserLocationAndIp();
       } catch (e) {
-        print('❌ Failed to establish WebSocket connection in main.dart: $e');
-        // Don't prevent app from loading, but log the error
+        debugPrint('❌ Failed to establish WebSocket connection in main.dart');
       }
     }
   }
@@ -262,16 +247,8 @@ class _MyAppState extends material.State<MyApp> {
       }
     });
 
-    // Listen to WebSocket messages
-    _websocketService.messageStream.listen((message) {
-      final type = message['type'] as String?;
-
-      if (type == 'user_online') {
-        _userStatusService.handleUserOnlineMessage(message);
-      } else if (type == 'user_offline') {
-        _userStatusService.handleUserOfflineMessage(message);
-      }
-    });
+    // Note: WebSocket messages are now handled centrally by WebSocketMessageHandler
+    // which is initialized when user is authenticated
 
     // Listen to WebSocket errors
     _websocketService.errorStream.listen((error) {
@@ -344,7 +321,7 @@ class _MyAppState extends material.State<MyApp> {
         return;
       }
     } catch (e) {
-      print('❌ Error fetching conversation: $e');
+      debugPrint('❌ Error fetching conversation');
     }
   }
 
@@ -386,7 +363,7 @@ class _MyAppState extends material.State<MyApp> {
             }
           },
           onError: (err) {
-            print("❌ Error receiving shared files: $err");
+            debugPrint("❌ Error receiving shared files");
           },
         );
 
@@ -407,10 +384,7 @@ class _MyAppState extends material.State<MyApp> {
   /// Handle shared media files
   void _handleSharedMedia(List<SharedMediaFile> files) {
     // Only handle if user is authenticated
-    if (!_isAuthenticated) {
-      print("⚠️ User not authenticated, ignoring shared media");
-      return;
-    }
+    if (!_isAuthenticated) return;
 
     // Navigate to ShareHandlerScreen with files
     if (NavigationHelper.navigatorKey.currentContext != null) {
@@ -431,6 +405,7 @@ class _MyAppState extends material.State<MyApp> {
   void dispose() {
     _intentDataStreamSubscription?.cancel();
     _websocketService.dispose();
+    WebSocketMessageHandler().dispose();
     _userStatusService.dispose();
     _notificationService.dispose();
     super.dispose();

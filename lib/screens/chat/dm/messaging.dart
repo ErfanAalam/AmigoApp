@@ -13,10 +13,12 @@ import '../../../models/message_model.dart';
 import '../../../models/user_model.dart';
 import '../../../api/chats.services.dart';
 import '../../../api/user.service.dart';
+import '../../../repositories/conversations_repository.dart';
 import '../../../services/message_storage_service.dart';
 import '../../../repositories/messages_repository.dart';
 import '../../../repositories/user_repository.dart';
 import '../../../services/websocket_service.dart';
+import '../../../services/websocket_message_handler.dart';
 import '../../../utils/chat_helpers.dart';
 import '../../../utils/message_storage_helpers.dart';
 import '../../../widgets/media_preview_widgets.dart';
@@ -44,8 +46,11 @@ class _InnerChatPageState extends State<InnerChatPage>
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _messageController = TextEditingController();
   final WebSocketService _websocketService = WebSocketService();
+  final WebSocketMessageHandler _messageHandler = WebSocketMessageHandler();
   final ImagePicker _imagePicker = ImagePicker();
   final MediaCacheService _mediaCacheService = MediaCacheService();
+  final ConversationsRepository _conversationsRepo = ConversationsRepository();
+
   List<MessageModel> _messages = [];
   bool _isLoading = false; // Start false, will be set true only if no cache
   bool _isLoadingMore = false;
@@ -63,8 +68,16 @@ class _InnerChatPageState extends State<InnerChatPage>
   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
   Map<int, int?> userLastReadMessageIds = {}; // userId -> lastReadMessageId
 
-  // For optimistic message handling
-  StreamSubscription<Map<String, dynamic>>? _websocketSubscription;
+  // For optimistic message handling - using filtered streams per conversation
+  StreamSubscription<Map<String, dynamic>>? _messageSubscription;
+  StreamSubscription<Map<String, dynamic>>? _typingSubscription;
+  StreamSubscription<Map<String, dynamic>>? _mediaSubscription;
+  StreamSubscription<Map<String, dynamic>>? _deliveryReceiptSubscription;
+  StreamSubscription<Map<String, dynamic>>? _readReceiptSubscription;
+  StreamSubscription<Map<String, dynamic>>? _messagePinSubscription;
+  StreamSubscription<Map<String, dynamic>>? _messageStarSubscription;
+  StreamSubscription<Map<String, dynamic>>? _messageReplySubscription;
+  StreamSubscription<Map<String, dynamic>>? _onlineStatusSubscription;
   StreamSubscription? _audioProgressSubscription;
   Timer? _audioProgressTimer;
   DateTime? _audioStartTime;
@@ -263,8 +276,6 @@ class _InnerChatPageState extends State<InnerChatPage>
         limit: 50, // Get more messages to check for new ones
       );
 
-      print('🚀 Smart sync response: ${response['metadata']}');
-
       if (response['success'] == true && response['data'] != null) {
         final historyResponse = ConversationHistoryResponse.fromJson(
           response['data'],
@@ -318,6 +329,7 @@ class _InnerChatPageState extends State<InnerChatPage>
               );
               _hasMoreMessages = historyResponse.hasNextPage;
             });
+            _populateReplyMessageSenderNames();
           }
         } else if (backendCount == cachedCount) {
           // Just update metadata in case pagination info changed
@@ -368,6 +380,7 @@ class _InnerChatPageState extends State<InnerChatPage>
               );
               _hasMoreMessages = historyResponse.hasNextPage;
             });
+            _populateReplyMessageSenderNames();
           }
         }
       }
@@ -941,7 +954,15 @@ class _InnerChatPageState extends State<InnerChatPage>
     _scrollController.dispose();
     _messageController.dispose();
     _isOtherTypingNotifier.dispose();
-    _websocketSubscription?.cancel();
+    _messageSubscription?.cancel();
+    _typingSubscription?.cancel();
+    _mediaSubscription?.cancel();
+    _deliveryReceiptSubscription?.cancel();
+    _readReceiptSubscription?.cancel();
+    _messagePinSubscription?.cancel();
+    _messageStarSubscription?.cancel();
+    _messageReplySubscription?.cancel();
+    _onlineStatusSubscription?.cancel();
     _typingAnimationController.dispose();
     _typingTimeout?.cancel();
     _scrollDebounceTimer?.cancel();
@@ -949,6 +970,7 @@ class _InnerChatPageState extends State<InnerChatPage>
     _currentStickyDate.dispose();
     _showStickyDate.dispose();
 
+    _conversationsRepo.updateUnreadCount(widget.conversation.conversationId, 0);
     // Send inactive message when actually disposing (leaving the page)
     _websocketService
         .sendMessage({
@@ -1052,8 +1074,6 @@ class _InnerChatPageState extends State<InnerChatPage>
 
       // ALWAYS load from local DB first for instant display
       if (!_hasCheckedCache) {
-        debugPrint('📦 Loading from local DB first for instant display...');
-
         final cachedData = await _messagesRepo.getCachedMessages(
           conversationId,
         );
@@ -1083,6 +1103,7 @@ class _InnerChatPageState extends State<InnerChatPage>
             _validatePinnedMessage();
             _validateStarredMessages();
             _validateReplyMessages();
+            _populateReplyMessageSenderNames();
           }
         } else {
           debugPrint('ℹ️ No cached messages found in local DB');
@@ -1156,6 +1177,8 @@ class _InnerChatPageState extends State<InnerChatPage>
           _validatePinnedMessage();
           _validateStarredMessages();
           _validateReplyMessages();
+
+          _populateReplyMessageSenderNames();
         } else {
           setState(() {
             _errorMessage = response['message'] ?? 'Failed to load messages';
@@ -1218,10 +1241,6 @@ class _InnerChatPageState extends State<InnerChatPage>
     try {
       final conversationId = widget.conversation.conversationId;
 
-      debugPrint(
-        '🌐 Requesting conversation history - ConversationId: $conversationId, Page: ${_currentPage + 1}',
-      );
-
       final response = await _chatsServices.getConversationHistory(
         conversationId: conversationId,
         page: _currentPage + 1,
@@ -1268,7 +1287,8 @@ class _InnerChatPageState extends State<InnerChatPage>
             _currentPage++;
             _isLoadingMore = false;
           });
-          //
+
+          _populateReplyMessageSenderNames();
           //
         } catch (processingError) {
           debugPrint(
@@ -1317,60 +1337,99 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   /// Set up WebSocket message listener for real-time messages
   void _setupWebSocketListener() {
-    _websocketSubscription = _websocketService.messageStream.listen(
-      (message) {
-        _handleIncomingWebSocketMessage(message);
-        print('🔍 WebSocket message handled');
-        print(
-          '-------------------------------------------------------------------------',
+    final conversationId = widget.conversation.conversationId;
+
+    // Listen to messages filtered for this conversation
+    _messageSubscription = _messageHandler
+        .messagesForConversation(conversationId)
+        .listen(
+          (message) {
+            _handleIncomingMessage(message);
+          },
+          onError: (error) {
+            debugPrint('❌ Message stream error: $error');
+          },
         );
-        print(
-          '-------------------------------------------------------------------------',
+
+    // Listen to typing events for this conversation
+    _typingSubscription = _messageHandler
+        .typingForConversation(conversationId)
+        .listen(
+          (message) => _reciveTyping(message),
+          onError: (error) {
+            debugPrint('❌ Typing stream error: $error');
+          },
         );
-      },
-      onError: (error) {
-        debugPrint('❌ WebSocket message stream error: $error');
-      },
-    );
-  }
 
-  /// Handle incoming WebSocket messages
-  void _handleIncomingWebSocketMessage(Map<String, dynamic> message) {
-    try {
-      print('🔍 WebSocket message: $message');
+    // Listen to media messages for this conversation
+    _mediaSubscription = _messageHandler
+        .mediaForConversation(conversationId)
+        .listen(
+          (message) => _handleIncomingMediaMessages(message),
+          onError: (error) {
+            debugPrint('❌ Media stream error: $error');
+          },
+        );
 
-      // Check if this is a message for our conversation
-      final messageConversationId =
-          message['conversation_id'] ?? message['data']?['conversation_id'];
+    // Listen to delivery receipts for this conversation
+    _deliveryReceiptSubscription = _messageHandler
+        .deliveryReceiptsForConversation(conversationId)
+        .listen(
+          (message) => _handleMessageDeliveryReceipt(message),
+          onError: (error) {
+            debugPrint('❌ Delivery receipt stream error: $error');
+          },
+        );
 
-      if (messageConversationId != widget.conversation.conversationId) {
-        return; // Not for this conversation
-      }
+    // Listen to read receipts for this conversation
+    _readReceiptSubscription = _messageHandler
+        .readReceiptsForConversation(conversationId)
+        .listen(
+          (message) => _handleReadReceipt(message),
+          onError: (error) {
+            debugPrint('❌ Read receipt stream error: $error');
+          },
+        );
 
-      // Handle different message types
-      final messageType = message['type'];
-      if (messageType == 'message') {
-        _handleIncomingMessage(message);
-      } else if (messageType == 'typing') {
-        _reciveTyping(message);
-      } else if (messageType == 'message_pin') {
-        _handleMessagePin(message);
-      } else if (messageType == 'message_star') {
-        _handleMessageStar(message);
-      } else if (messageType == 'message_reply') {
-        _handleMessageReply(message);
-      } else if (messageType == 'media') {
-        _handleIncomingMediaMessages(message);
-      } else if (messageType == 'message_delivery_receipt') {
-        _handleMessageDeliveryReceipt(message);
-      } else if (messageType == 'read_receipt') {
-        _handleReadReceipt(message);
-      } else if (messageType == 'online_status') {
-        _handleOnlineStatus(message);
-      }
-    } catch (e) {
-      debugPrint('❌ Error handling WebSocket message: $e');
-    }
+    // Listen to message pins for this conversation
+    _messagePinSubscription = _messageHandler
+        .messagePinsForConversation(conversationId)
+        .listen(
+          (message) => _handleMessagePin(message),
+          onError: (error) {
+            debugPrint('❌ Message pin stream error: $error');
+          },
+        );
+
+    // Listen to message stars for this conversation
+    _messageStarSubscription = _messageHandler
+        .messageStarsForConversation(conversationId)
+        .listen(
+          (message) => _handleMessageStar(message),
+          onError: (error) {
+            debugPrint('❌ Message star stream error: $error');
+          },
+        );
+
+    // Listen to message replies for this conversation
+    _messageReplySubscription = _messageHandler
+        .messageRepliesForConversation(conversationId)
+        .listen(
+          (message) => _handleMessageReply(message),
+          onError: (error) {
+            debugPrint('❌ Message reply stream error: $error');
+          },
+        );
+
+    // Listen to online status for this conversation
+    _onlineStatusSubscription = _messageHandler
+        .onlineStatusForConversation(conversationId)
+        .listen(
+          (message) => _handleOnlineStatus(message),
+          onError: (error) {
+            debugPrint('❌ Online status stream error: $error');
+          },
+        );
   }
 
   void _handleMessageReply(Map<String, dynamic> message) async {
@@ -1760,9 +1819,6 @@ class _InnerChatPageState extends State<InnerChatPage>
   }
 
   void _handleOnlineStatus(Map<String, dynamic> messageData) async {
-    print(
-      "------------------------------------------------------------\n messageData handle OS -> $messageData \n----------------------------------------------------------------",
-    );
     try {
       final data = messageData['data'] as Map<String, dynamic>? ?? {};
       final onlineInConversation = data['online_in_conversation'];
@@ -1805,8 +1861,6 @@ class _InnerChatPageState extends State<InnerChatPage>
       final senderId = _parseToInt(data['sender_id'] ?? data['senderId']);
       final messageId = data['id'] ?? data['messageId'];
 
-      // print('message with optimistic is: $_shallcachedMessages')
-
       final optimisticId = data['optimistic_id'] ?? data['optimisticId'];
 
       // Get sender info from cache/lookup
@@ -1829,9 +1883,6 @@ class _InnerChatPageState extends State<InnerChatPage>
 
       // If this is our own message (sender), update the optimistic message in local storage
       if (_currentUserId != null && senderId == _currentUserId) {
-        debugPrint(
-          '🔄 Updating own message from optimistic ID to server ID in local storage',
-        );
         await _updateOptimisticMessageInStorage(
           optimisticId,
           messageId,
@@ -1865,10 +1916,6 @@ class _InnerChatPageState extends State<InnerChatPage>
           senderProfilePic: _getUserInfo(
             _parseToInt(replyToData['sender_id']),
           )['profile_pic'],
-        );
-
-        debugPrint(
-          '✅ Found reply data in metadata: replying to message $replyToMessageId',
         );
       } else if (data['reply_to_message'] != null) {
         replyToMessage = MessageModel.fromJson(
@@ -1909,14 +1956,10 @@ class _InnerChatPageState extends State<InnerChatPage>
       );
 
       // Add message to UI immediately with animation
-
-      print(
-        'aaaaaa------------------------------- \n recieved new message from websocket \n ------------------------',
-      );
-
       if (mounted) {
         setState(() {
           _messages.add(newMessage);
+          _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
         });
         // Update sticky date separator for new messages - using ValueNotifier
         _currentStickyDate.value = ChatHelpers.getMessageDateString(
@@ -1927,10 +1970,6 @@ class _InnerChatPageState extends State<InnerChatPage>
         _animateNewMessage(newMessage.id);
         _scrollToBottom();
       }
-
-      print(
-        'aaaaa------------------------------- \n recieved new message from websocket \n ------------------------',
-      );
 
       // Store message asynchronously
       _storeMessageAsync(newMessage);
@@ -2228,6 +2267,7 @@ class _InnerChatPageState extends State<InnerChatPage>
       if (mounted) {
         setState(() {
           _messages.add(newMediaMessage);
+          _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
         });
 
         _animateNewMessage(newMediaMessage.id);
@@ -2415,13 +2455,13 @@ class _InnerChatPageState extends State<InnerChatPage>
           );
 
           // Debug reply message storage
-          if (message.replyToMessage != null) {
-            debugPrint(
-              '💾 Reply message stored: ${message.id} -> ${message.replyToMessage!.id} (${message.replyToMessage!.senderName})',
-            );
-          } else {
-            debugPrint('💾 Regular message stored: ${message.id}');
-          }
+          // if (message.replyToMessage != null) {
+          //   debugPrint(
+          //     '💾 Reply message stored: ${message.id} -> ${message.replyToMessage!.id} (${message.replyToMessage!.senderName})',
+          //   );
+          // } else {
+          //   debugPrint('💾 Regular message stored: ${message.id}');
+          // }
 
           // Validate reply message storage periodically
           if (message.replyToMessage != null) {
@@ -3674,6 +3714,13 @@ class _InnerChatPageState extends State<InnerChatPage>
   }
 
   Widget _buildReplyPreview(MessageModel replyMessage, bool isMyMessage) {
+    print(
+      "--------------------------------------------------------------------------------",
+    );
+    print("replyMessage -> ${replyMessage.toJson()}");
+    print(
+      "--------------------------------------------------------------------------------",
+    );
     // Determine if the replied-to message is from current user
     final isRepliedMessageMine = _currentUserId != null
         ? replyMessage.senderId == _currentUserId
@@ -3686,9 +3733,7 @@ class _InnerChatPageState extends State<InnerChatPage>
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: isMyMessage
-              ? Colors.white.withOpacity(0.15)
-              : Colors.grey[200],
+          color: isMyMessage ? Colors.white.withAlpha(15) : Colors.grey[200],
           borderRadius: BorderRadius.circular(8),
           border: Border(
             left: BorderSide(
@@ -3726,7 +3771,7 @@ class _InnerChatPageState extends State<InnerChatPage>
               ),
             ] else ...[
               Text(
-                '📎media message',
+                '📎 media ',
                 style: TextStyle(
                   color: isMyMessage
                       ? Colors.white.withOpacity(0.8)
@@ -5191,6 +5236,8 @@ class _InnerChatPageState extends State<InnerChatPage>
         message.type == 'attachment' ||
         message.type == 'docs' ||
         message.type == 'audio' ||
+        message.type == 'audios' ||
+        message.type == 'media' ||
         message.type == 'image_loading' ||
         message.type == 'video_loading' ||
         message.type == 'document_loading' ||
@@ -6324,7 +6371,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                     Icon(Icons.reply, size: 16, color: Colors.teal),
                     const SizedBox(width: 4),
                     Text(
-                      'Replying to ${isRepliedMessageMine ? 'yourself' : replyMessage.senderName}',
+                      isRepliedMessageMine ? 'You' : replyMessage.senderName,
                       style: TextStyle(
                         color: Colors.teal,
                         fontSize: 12,
@@ -6340,9 +6387,7 @@ class _InnerChatPageState extends State<InnerChatPage>
                         ? '${replyMessage.body.substring(0, 50)}...'
                         : replyMessage.body,
                     style: TextStyle(
-                      color: isRepliedMessageMine
-                          ? Colors.white.withOpacity(0.8)
-                          : Colors.grey[600],
+                      color: Colors.grey[600],
                       fontSize: 13,
                       height: 1.2,
                     ),
@@ -6351,11 +6396,9 @@ class _InnerChatPageState extends State<InnerChatPage>
                   ),
                 ] else ...[
                   Text(
-                    '📎media message',
+                    '📎 media',
                     style: TextStyle(
-                      color: isRepliedMessageMine
-                          ? Colors.white.withOpacity(0.8)
-                          : Colors.grey[600],
+                      color: Colors.grey[600],
                       fontSize: 13,
                       height: 1.2,
                     ),
@@ -6989,8 +7032,6 @@ class _InnerChatPageState extends State<InnerChatPage>
 
   Future<void> _sendRecordedVoice() async {
     try {
-      print('📤 Starting voice note send process...');
-
       // Stop the recording timer immediately
       _recordingTimer?.cancel();
       _recordingTimer = null;
@@ -7015,7 +7056,6 @@ class _InnerChatPageState extends State<InnerChatPage>
 
       final voiceFile = File(_recordingPath!);
       if (!await voiceFile.exists()) {
-        print('❌ Recording file does not exist at path: ${_recordingPath!}');
         _showErrorDialog('Recording file not found. Please try again.');
         return;
       }
@@ -7071,16 +7111,12 @@ class _InnerChatPageState extends State<InnerChatPage>
         _scrollToBottom();
       }
 
-      print('📤 Sending voice note: ${voiceFile.path}');
-      print('📤 Voice note file size: ${await voiceFile.length()} bytes');
-
       try {
         final response = await _chatsServices.sendMediaMessage(voiceFile);
         print('📤 Voice note response: $response');
 
         if (response['success'] == true && response['data'] != null) {
           final mediaData = response['data'];
-          print('✅ Voice note uploaded successfully: ${mediaData['url']}');
 
           // Update the loading message with actual data
           final voiceMessage = MessageModel(
@@ -7139,6 +7175,8 @@ class _InnerChatPageState extends State<InnerChatPage>
             },
             'conversation_id': widget.conversation.conversationId,
           });
+
+          // _stopRecording();
 
           print('💾 Voice message stored locally and displayed');
         } else {
@@ -8108,7 +8146,6 @@ class _VoiceRecordingModalState extends State<_VoiceRecordingModal> {
                                       ? 'Still Recording ${_formatDuration(currentDuration)}'
                                       : _formatDuration(currentDuration),
                                   style: TextStyle(
-                                    backgroundColor: Colors.red,
                                     fontSize: 20,
                                     fontWeight: FontWeight.w600,
                                     color: widget.isRecording

@@ -6,7 +6,7 @@ import '../../../services/contact_service.dart';
 import '../../../services/websocket_service.dart';
 
 class CreateGroupPage extends StatefulWidget {
-  const CreateGroupPage({Key? key}) : super(key: key);
+  const CreateGroupPage({super.key});
 
   @override
   State<CreateGroupPage> createState() => _CreateGroupPageState();

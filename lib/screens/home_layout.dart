@@ -6,7 +6,7 @@ import 'profile/profile_info.dart';
 import 'call/call_logs.dart';
 
 class MainScreen extends StatefulWidget {
-  const MainScreen({Key? key}) : super(key: key);
+  const MainScreen({super.key});
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -21,14 +21,6 @@ class _MainScreenState extends State<MainScreen> {
 
   // List of pages
   late final List<Widget> _pages;
-
-  final List<Color> _pageColors = [
-    Colors.teal,
-    Colors.teal,
-    Colors.teal,
-    Colors.teal,
-    Colors.teal,
-  ];
 
   @override
   void initState() {
@@ -87,7 +79,7 @@ class _MainScreenState extends State<MainScreen> {
       ),
       bottomNavigationBar: NavigationBar(
         onDestinationSelected: _onTabSelected,
-        indicatorColor: _pageColors[_currentPageIndex].withValues(alpha: 0.2),
+        indicatorColor: Colors.teal.withAlpha(20),
         selectedIndex: _currentPageIndex,
         backgroundColor: Colors.grey[100],
         labelTextStyle: WidgetStateProperty.all(
