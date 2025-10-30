@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -90,6 +91,41 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   Duration _customPosition = Duration.zero;
   int _optimisticMessageId = -1;
   final Set<int> _optimisticMessageIds = {};
+  bool _isTestSending = false;
+
+  Future<void> _startTestSequence(int totalMessages) async {
+    if (_isTestSending) return;
+    _isTestSending = true;
+    final random = Random();
+    try {
+      for (int i = 1; i <= totalMessages; i++) {
+        if (!mounted) break;
+        _messageController.text = 'test sequence $i';
+        _sendMessage();
+        // Human-like delay between 300ms to 1200ms
+        final delayMs = 200;
+        await Future.delayed(Duration(milliseconds: delayMs));
+      }
+    } finally {
+      _isTestSending = false;
+    }
+  }
+
+  Widget _buildTestFab(int count, Color color) {
+    return FloatingActionButton(
+      heroTag: 'test-seq-$count',
+      mini: true,
+      backgroundColor: color,
+      onPressed: () => _startTestSequence(count),
+      child: Text(
+        '$count',
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
 
   // User info cache for sender names and profile pics
   final Map<int, Map<String, String?>> _userInfoCache = {};
@@ -2920,6 +2956,18 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             ),
           ],
         ),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerTop,
+      floatingActionButton: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          _buildTestFab(20, Colors.blue),
+          const SizedBox(height: 8),
+          _buildTestFab(50, Colors.orange),
+          const SizedBox(height: 8),
+          _buildTestFab(200, Colors.red),
+        ],
       ),
     );
   }
