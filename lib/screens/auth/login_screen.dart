@@ -1,4 +1,8 @@
+import 'package:amigo/services/websocket_service.dart';
 import 'package:flutter/material.dart' as material;
+import 'package:flutter/widgets.dart';
+import 'package:shared_preferences/shared_preferences.dart'
+    show SharedPreferences;
 import 'signup_screen.dart';
 import '../home_layout.dart';
 import '../../api/api_service.dart';
@@ -24,6 +28,7 @@ class _LoginScreenState extends material.State<LoginScreen> {
 
   final ApiService apiService = ApiService();
   final AuthService authService = AuthService();
+  final WebSocketService wsService = WebSocketService();
 
   @override
   void dispose() {
@@ -116,6 +121,10 @@ class _LoginScreenState extends material.State<LoginScreen> {
             content: material.Text('OTP verified successfully'),
           ),
         );
+
+        // Store user name in shared preferences for later use
+        final prefs = await SharedPreferences.getInstance();
+        prefs.setString('current_user_name', response['data']['name']);
 
         // Send FCM token to backend after successful login
         await authService.sendFCMTokenToBackend(3);

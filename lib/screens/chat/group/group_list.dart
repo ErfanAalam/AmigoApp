@@ -9,18 +9,20 @@ import '../../../services/websocket_service.dart';
 import '../../../services/websocket_message_handler.dart';
 import '../../../services/last_message_storage_service.dart';
 import '../../../widgets/chat/searchable_list_widget.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../providers/draft_provider.dart';
 import 'messaging.dart';
 import 'create_group.dart';
 import 'community_group_list.dart';
 
-class GroupsPage extends StatefulWidget {
+class GroupsPage extends ConsumerStatefulWidget {
   const GroupsPage({super.key});
 
   @override
-  State<GroupsPage> createState() => _GroupsPageState();
+  ConsumerState<GroupsPage> createState() => _GroupsPageState();
 }
 
-class _GroupsPageState extends State<GroupsPage> {
+class _GroupsPageState extends ConsumerState<GroupsPage> {
   final UserService _userService = UserService();
   final GroupsRepository _groupsRepo = GroupsRepository();
   final CommunitiesRepository _communitiesRepo = CommunitiesRepository();
@@ -923,6 +925,7 @@ class _GroupsPageState extends State<GroupsPage> {
               isTyping: isTyping,
               typingUsers: typingUsers,
               typingUsersCount: typingUsersCount,
+              conversationId: item.conversationId,
               onTap: () async {
                 // Set this group as active and clear unread count
                 _setActiveConversation(item.conversationId);
@@ -982,12 +985,13 @@ class _GroupsPageState extends State<GroupsPage> {
   }
 }
 
-class GroupListItem extends StatelessWidget {
+class GroupListItem extends ConsumerWidget {
   final GroupModel group;
   final VoidCallback onTap;
   final bool isTyping;
   final Set<String> typingUsers;
   final int typingUsersCount;
+  final int conversationId;
 
   const GroupListItem({
     super.key,
@@ -996,6 +1000,7 @@ class GroupListItem extends StatelessWidget {
     this.isTyping = false,
     this.typingUsers = const {},
     this.typingUsersCount = 0,
+    required this.conversationId,
   });
 
   String _formatTime(String? dateTimeString) {
@@ -1066,11 +1071,26 @@ class GroupListItem extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Check for draft message
+    final drafts = ref.watch(draftMessagesProvider);
+    final draft = drafts[conversationId];
+
     final hasUnreadMessages = group.unreadCount > 0;
-    final lastMessageText = _formatLastMessageText(group.metadata?.lastMessage);
+    
+    // Use draft if available, otherwise use last message
+    String lastMessageText;
+    if (draft != null && draft.isNotEmpty) {
+      // Show draft as last message
+      lastMessageText = draft;
+    } else {
+      lastMessageText = _formatLastMessageText(group.metadata?.lastMessage);
+    }
+    
     final timeText = _formatTime(group.lastMessageAt ?? group.joinedAt);
-    final displayText = isTyping ? 'Typing...' : lastMessageText;
+    final displayText = isTyping ? 'Typing...' : (draft != null && draft.isNotEmpty 
+        ? 'Draft: $lastMessageText'
+        : lastMessageText);
 
     return Container(
       height: 80,
@@ -1135,8 +1155,13 @@ class GroupListItem extends StatelessWidget {
                         : Text(
                             displayText,
                             style: TextStyle(
-                              color: Colors.grey[600],
+                              color: draft != null && draft.isNotEmpty
+                                  ? Colors.orange[600]
+                                  : Colors.grey[600],
                               fontSize: 14,
+                              fontStyle: draft != null && draft.isNotEmpty
+                                  ? FontStyle.italic
+                                  : FontStyle.normal,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,

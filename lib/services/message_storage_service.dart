@@ -61,15 +61,8 @@ class MessageStorageService {
           final replyInfo = msg.replyToMessage != null
               ? 'replyTo=${msg.replyToMessage!.id}(${msg.replyToMessage!.senderName})'
               : 'no-reply';
-          print(
-            '💾 Message ${msg.id}: senderId=${msg.senderId}, senderName=${msg.senderName}, $replyInfo',
-          );
         }
       }
-
-      print(
-        '💾 Saved ${messages.length} messages for conversation $conversationId',
-      );
     } catch (e) {
       print('❌ Error saving messages for conversation $conversationId: $e');
     }
@@ -122,15 +115,8 @@ class MessageStorageService {
           final replyInfo = msg.replyToMessage != null
               ? 'replyTo=${msg.replyToMessage!.id}(${msg.replyToMessage!.senderName})'
               : 'no-reply';
-          print(
-            '📱 Cached Message ${msg.id}: senderId=${msg.senderId}, senderName=${msg.senderName}, $replyInfo',
-          );
         }
       }
-
-      print(
-        '⚡ Fast retrieved ${messages.length} cached messages for conversation $conversationId',
-      );
 
       return CachedConversationData(
         messages: messages,

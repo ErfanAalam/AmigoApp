@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'screens/auth/login_screen.dart';
@@ -57,11 +58,13 @@ void main() async {
   // Initialize RingtoneManager for call audio
   await RingtoneManager.init();
 
-  // Run the app (with CallService provider)
+  // Run the app (with CallService provider and Riverpod)
   material.runApp(
-    ChangeNotifierProvider<CallService>(
-      create: (_) => CallService()..initialize(),
-      child: MyApp(),
+    ProviderScope(
+      child: ChangeNotifierProvider<CallService>(
+        create: (_) => CallService()..initialize(),
+        child: MyApp(),
+      ),
     ),
   );
 }

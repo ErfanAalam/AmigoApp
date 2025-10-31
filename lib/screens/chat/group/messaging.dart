@@ -29,10 +29,13 @@ import '../../../services/media_cache_service.dart';
 import '../../../utils/chat_helpers.dart';
 import '../../../utils/message_storage_helpers.dart';
 import '../../../widgets/media_preview_widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../services/draft_message_service.dart';
+import '../../../providers/draft_provider.dart';
 import 'group_info.dart';
 import 'dart:io' as io;
 
-class InnerGroupChatPage extends StatefulWidget {
+class InnerGroupChatPage extends ConsumerStatefulWidget {
   final GroupModel group;
   final bool isCommunityGroup;
   final CommunityGroupMetadata? communityGroupMetadata;
@@ -45,10 +48,10 @@ class InnerGroupChatPage extends StatefulWidget {
   });
 
   @override
-  State<InnerGroupChatPage> createState() => _InnerGroupChatPageState();
+  ConsumerState<InnerGroupChatPage> createState() => _InnerGroupChatPageState();
 }
 
-class _InnerGroupChatPageState extends State<InnerGroupChatPage>
+class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     with TickerProviderStateMixin {
   final GroupsService _groupsService = GroupsService();
   final UserService _userService = UserService();
@@ -103,7 +106,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         _messageController.text = 'test sequence $i';
         _sendMessage();
         // Human-like delay between 300ms to 1200ms
-        final delayMs = 200;
+        final delayMs = 400;
         await Future.delayed(Duration(milliseconds: delayMs));
       }
     } finally {
@@ -222,6 +225,9 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
   // Scroll debounce timer
   Timer? _scrollDebounceTimer;
 
+  // Draft save debounce timer
+  Timer? _draftSaveTimer;
+
   // Message animation controllers
   final Map<int, AnimationController> _messageAnimationControllers = {};
   final Map<int, Animation<double>> _messageSlideAnimations = {};
@@ -296,6 +302,40 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
     // Also try a super quick cache check for even faster display
     _quickCacheCheck();
+
+    // Load draft message for this conversation
+    _loadDraft();
+
+    // Listen to text changes for draft saving
+    _messageController.addListener(_onMessageTextChanged);
+  }
+
+  /// Load draft message when opening conversation
+  Future<void> _loadDraft() async {
+    // Load directly from service for immediate access
+    final draftService = DraftMessageService();
+    final draft = await draftService.getDraft(widget.group.conversationId);
+    if (draft != null && draft.isNotEmpty) {
+      _messageController.text = draft;
+      // Also update the provider state
+      final draftNotifier = ref.read(draftMessagesProvider.notifier);
+      draftNotifier.saveDraft(widget.group.conversationId, draft);
+    }
+  }
+
+  /// Handle message text changes with debouncing for draft saving
+  void _onMessageTextChanged() {
+    // Cancel existing timer
+    _draftSaveTimer?.cancel();
+
+    // Create new timer to save draft after 500ms of no typing
+    _draftSaveTimer = Timer(const Duration(milliseconds: 500), () {
+      if (mounted) {
+        final draftNotifier = ref.read(draftMessagesProvider.notifier);
+        final text = _messageController.text;
+        draftNotifier.saveDraft(widget.group.conversationId, text);
+      }
+    });
   }
 
   void _initializeTypingAnimation() {
@@ -759,9 +799,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         setState(() {
           _pinnedMessageId = pinnedMessageId;
         });
-        debugPrint(
-          '✅ Loaded pinned message from group metadata: $pinnedMessageId',
-        );
         return;
       }
     }
@@ -776,9 +813,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       setState(() {
         _pinnedMessageId = pinnedMessageId;
       });
-      debugPrint(
-        '✅ Loaded pinned message from local storage: $pinnedMessageId',
-      );
     }
   }
 
@@ -928,9 +962,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           );
         }
       }
-      debugPrint(
-        '✅ Cached ${_conversationMeta!.members.length} users from metadata to group_members DB',
-      );
     } catch (e) {
       debugPrint('❌ Error caching users from metadata: $e');
     }
@@ -1071,6 +1102,16 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     _typingTimeout?.cancel();
     _scrollDebounceTimer?.cancel();
     _highlightTimer?.cancel();
+    _draftSaveTimer?.cancel();
+
+    // Save draft before disposing
+    if (_messageController.text.isNotEmpty) {
+      final draftNotifier = ref.read(draftMessagesProvider.notifier);
+      draftNotifier.saveDraft(widget.group.conversationId, _messageController.text);
+    }
+
+    // Remove listener
+    _messageController.removeListener(_onMessageTextChanged);
 
     // Dispose message animation controllers
     for (final controller in _messageAnimationControllers.values) {
@@ -1120,7 +1161,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       _stopAudioProgressTimer();
       _audioPlayer.closePlayer();
     } catch (e) {
-      print('Warning: Error closing audio player during dispose: $e');
+      debugPrint('Warning: Error closing audio player during dispose: $e');
     }
 
     super.dispose();
@@ -1280,9 +1321,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           final deduplicatedMessages = messageMap.values.toList()
             ..sort((a, b) => a.id.compareTo(b.id));
 
-          debugPrint(
-            '✅ Loaded ${deduplicatedMessages.length} group messages from local DB (cleaned ${cachedData.messages.length - deduplicatedMessages.length} duplicates)',
-          );
           if (mounted) {
             setState(() {
               _isCheckingCache = false;
@@ -1381,9 +1419,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         // On network error, if we have cached data, keep showing it
         if (mounted) {
           if (_messages.isNotEmpty) {
-            debugPrint(
-              '📦 Network error but we have cached data, showing cache',
-            );
             setState(() {
               _isLoading = false;
               _isLoadingFromCache = false;
@@ -1456,8 +1491,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
         });
 
         _populateReplyMessageSenderNames();
-
-        debugPrint('📄 Loaded ${newMessages.length} more group messages');
 
         // Cache user info from metadata for offline access
         await _cacheUsersFromMetadata();
@@ -1563,9 +1596,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
       // If this is our own message (sender), update the optimistic message in local storage
       if (_currentUserId != null && senderId == _currentUserId) {
-        debugPrint(
-          '🔄 Updating own group message from optimistic ID to server ID in local storage',
-        );
         await _updateOptimisticMessageInStorage(
           optimisticId,
           messageId,
@@ -1796,9 +1826,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             try {
               // Delete the old optimistic message from database
               await _messagesRepo.deleteMessage(optimisticMessage.id);
-              debugPrint(
-                '🗑️ Deleted optimistic media message ${optimisticMessage.id} from DB',
-              );
 
               // Store confirmed message with server ID
               if (_conversationMeta != null) {
@@ -1818,10 +1845,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               );
             }
           });
-
-          debugPrint(
-            '✅ Replaced optimistic group media message with server-confirmed message',
-          );
         } else if (messageType == 'message_reply') {
           // Handle reply messages differently
           final newMessageId = data['new_message_id'];
@@ -1895,8 +1918,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
   void _handleMessageReply(Map<String, dynamic> message) async {
     try {
-      debugPrint('📨 Received group message_reply: $message');
-
       final data = message['data'] as Map<String, dynamic>? ?? {};
       final messageBody = data['new_message'] as String? ?? '';
       final newMessageId = data['new_message_id'];
@@ -1914,18 +1935,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
       // Check if this is our own optimistic message being confirmed
       if (_optimisticMessageIds.contains(optimisticId)) {
-        debugPrint(
-          '🔄 Replacing optimistic group reply message with server message',
-        );
         _replaceOptimisticMessage(optimisticId, message);
         return;
       }
 
       // If this is our own message (sender), update the optimistic message in local storage
       if (_currentUserId != null && userId == _currentUserId) {
-        debugPrint(
-          '🔄 Updating own group reply message from optimistic ID to server ID in local storage',
-        );
         await _updateOptimisticMessageInStorage(
           optimisticId,
           newMessageId,
@@ -2002,8 +2017,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
       // Store message asynchronously in local storage
       _storeMessageAsync(replyMessage);
-
-      debugPrint('✅ Group reply message processed and stored successfully');
     } catch (e) {
       debugPrint('❌ Error processing group message_reply: $e');
     }
@@ -2023,18 +2036,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
 
       // Skip if this is our own optimistic message being echoed back
       if (_optimisticMessageIds.contains(optimisticId)) {
-        debugPrint(
-          '🔄 Replacing optimistic group media message with server message',
-        );
         _replaceOptimisticMessage(optimisticId, messageData);
         return;
       }
 
       // If this is our own message (sender), update the optimistic message in local storage
       if (_currentUserId != null && senderId == _currentUserId) {
-        debugPrint(
-          '🔄 Updating own group media message from optimistic ID to server ID in local storage',
-        );
         await _updateOptimisticMessageInStorage(
           optimisticId,
           messageId,
@@ -2110,10 +2117,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
             senderProfilePic: replySenderProfilePic,
           );
         }
-
-        debugPrint(
-          '✅ Found reply data in group media metadata: replying to message $replyToMessageId',
-        );
       } else if (data['reply_to_message'] != null) {
         replyToMessage = MessageModel.fromJson(
           data['reply_to_message'] as Map<String, dynamic>,
@@ -2292,10 +2295,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       conversationId: conversationId,
       pinnedMessageId: newPinnedMessageId,
     );
-
-    debugPrint(
-      '📌 ${action == 'pin' ? 'Pinned' : 'Unpinned'} message $messageId for group conversation $conversationId',
-    );
   }
 
   /// Handle incoming message star from WebSocket
@@ -2340,6 +2339,10 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
     // Clear input and reply state immediately for better UX
     _messageController.clear();
     _cancelReply();
+
+    // Clear draft when message is sent
+    final draftNotifier = ref.read(draftMessagesProvider.notifier);
+    await draftNotifier.removeDraft(widget.group.conversationId);
 
     // Create optimistic message for immediate display with current UTC time
     final nowUTC = DateTime.now().toUtc();
@@ -2414,7 +2417,6 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
       }
 
       _optimisticMessageId--;
-      debugPrint('✅ Group message sent successfully via WebSocket');
     } catch (e) {
       debugPrint('❌ Error sending group message: $e');
       _retryMessage(optimisticMessage.id);
@@ -4072,6 +4074,7 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
           padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(color: Colors.white),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               IconButton(
                 icon: Icon(
@@ -4107,7 +4110,8 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
                       vertical: 10,
                     ),
                   ),
-                  maxLines: null,
+                  maxLines: 6,
+                  minLines: 1,
                   textInputAction: TextInputAction.newline,
                   onChanged: shouldDisableSending
                       ? null
@@ -4120,12 +4124,12 @@ class _InnerGroupChatPageState extends State<InnerGroupChatPage>
               FloatingActionButton(
                 onPressed: shouldDisableSending
                     ? null
-                    : (_isTyping ? _sendMessage : _sendVoiceNote),
+                    : (_messageController.text.isNotEmpty ? _sendMessage : _sendVoiceNote),
                 backgroundColor: shouldDisableSending
                     ? Colors.grey[400]
                     : Colors.teal,
                 mini: true,
-                child: _isTyping
+                child: _messageController.text.isNotEmpty
                     ? Icon(
                         Icons.send,
                         color: shouldDisableSending

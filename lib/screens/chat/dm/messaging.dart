@@ -23,21 +23,24 @@ import '../../../utils/chat_helpers.dart';
 import '../../../utils/message_storage_helpers.dart';
 import '../../../widgets/media_preview_widgets.dart';
 import '../../../services/call_service.dart';
-import 'package:provider/provider.dart';
+import 'package:provider/provider.dart' as material_provider;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../services/user_status_service.dart';
 import '../../../services/media_cache_service.dart';
+import '../../../services/draft_message_service.dart';
+import '../../../providers/draft_provider.dart';
 import 'dart:io' as io;
 
-class InnerChatPage extends StatefulWidget {
+class InnerChatPage extends ConsumerStatefulWidget {
   final ConversationModel conversation;
 
   const InnerChatPage({super.key, required this.conversation});
 
   @override
-  State<InnerChatPage> createState() => _InnerChatPageState();
+  ConsumerState<InnerChatPage> createState() => _InnerChatPageState();
 }
 
-class _InnerChatPageState extends State<InnerChatPage>
+class _InnerChatPageState extends ConsumerState<InnerChatPage>
     with TickerProviderStateMixin {
   final ChatsServices _chatsServices = ChatsServices();
   final UserService _userService = UserService();
@@ -129,6 +132,9 @@ class _InnerChatPageState extends State<InnerChatPage>
   // Scroll debounce timer
   Timer? _scrollDebounceTimer;
 
+  // Draft save debounce timer
+  Timer? _draftSaveTimer;
+
   // Message animation controllers
   final Map<int, AnimationController> _messageAnimationControllers = {};
   final Map<int, Animation<double>> _messageSlideAnimations = {};
@@ -203,6 +209,40 @@ class _InnerChatPageState extends State<InnerChatPage>
 
     // Also try a super quick cache check for even faster display
     _quickCacheCheck();
+
+    // Load draft message for this conversation
+    _loadDraft();
+
+    // Listen to text changes for draft saving
+    _messageController.addListener(_onMessageTextChanged);
+  }
+
+  /// Load draft message when opening conversation
+  Future<void> _loadDraft() async {
+    // Load directly from service for immediate access
+    final draftService = DraftMessageService();
+    final draft = await draftService.getDraft(widget.conversation.conversationId);
+    if (draft != null && draft.isNotEmpty) {
+      _messageController.text = draft;
+      // Also update the provider state
+      final draftNotifier = ref.read(draftMessagesProvider.notifier);
+      draftNotifier.saveDraft(widget.conversation.conversationId, draft);
+    }
+  }
+
+  /// Handle message text changes with debouncing for draft saving
+  void _onMessageTextChanged() {
+    // Cancel existing timer
+    _draftSaveTimer?.cancel();
+
+    // Create new timer to save draft after 500ms of no typing
+    _draftSaveTimer = Timer(const Duration(milliseconds: 500), () {
+      if (mounted && !_isDisposed) {
+        final draftNotifier = ref.read(draftMessagesProvider.notifier);
+        final text = _messageController.text;
+        draftNotifier.saveDraft(widget.conversation.conversationId, text);
+      }
+    });
   }
 
   void _initializeTypingAnimation() {
@@ -967,6 +1007,16 @@ class _InnerChatPageState extends State<InnerChatPage>
     _typingTimeout?.cancel();
     _scrollDebounceTimer?.cancel();
     _highlightTimer?.cancel();
+    _draftSaveTimer?.cancel();
+
+    // Save draft before disposing
+    if (_messageController.text.isNotEmpty) {
+      final draftNotifier = ref.read(draftMessagesProvider.notifier);
+      draftNotifier.saveDraft(widget.conversation.conversationId, _messageController.text);
+    }
+
+    // Remove listener
+    _messageController.removeListener(_onMessageTextChanged);
     _currentStickyDate.dispose();
     _showStickyDate.dispose();
 
@@ -2295,6 +2345,10 @@ class _InnerChatPageState extends State<InnerChatPage>
     // Clear input and reply state immediately for better UX
     _messageController.clear();
     _cancelReply();
+
+    // Clear draft when message is sent
+    final draftNotifier = ref.read(draftMessagesProvider.notifier);
+    await draftNotifier.removeDraft(widget.conversation.conversationId);
 
     // Create optimistic message for immediate display with current UTC time
     final nowUTC = DateTime.now().toUtc();
@@ -6284,6 +6338,7 @@ class _InnerChatPageState extends State<InnerChatPage>
           padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(color: Colors.white),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               IconButton(
                 icon: Icon(Icons.attach_file, color: Colors.grey[600]),
@@ -6307,7 +6362,8 @@ class _InnerChatPageState extends State<InnerChatPage>
                       vertical: 10,
                     ),
                   ),
-                  maxLines: null,
+                  maxLines: 6,
+                  minLines: 1,
                   textInputAction: TextInputAction.newline,
                   onChanged: (value) {
                     _handleTyping(value);
@@ -6316,10 +6372,12 @@ class _InnerChatPageState extends State<InnerChatPage>
               ),
               const SizedBox(width: 8),
               FloatingActionButton(
-                onPressed: _isTyping ? _sendMessage : _sendVoiceNote,
+                onPressed: _messageController.text.isNotEmpty
+                    ? _sendMessage
+                    : _sendVoiceNote,
                 backgroundColor: Colors.teal,
                 mini: true,
-                child: _isTyping
+                child: _messageController.text.isNotEmpty
                     ? const Icon(Icons.send, color: Colors.white)
                     : const Icon(Icons.mic, color: Colors.white),
               ),
@@ -7848,7 +7906,7 @@ class _InnerChatPageState extends State<InnerChatPage>
     print('Initiating call to 1 ${widget.conversation.userId}');
     try {
       print('Initiating call to 2 ${widget.conversation.userId}');
-      final callService = Provider.of<CallService>(context, listen: false);
+      final callService = material_provider.Provider.of<CallService>(context, listen: false);
 
       // Check WebSocket connection status
       if (!_websocketService.isConnected) {

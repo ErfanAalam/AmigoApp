@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:amigo/env.dart';
 import 'package:dio/dio.dart';
@@ -89,54 +90,27 @@ class ApiService {
           onError: (DioException e, handler) async {
             // Handle auth errors - Token expired
             if (e.response?.statusCode == 401) {
-              print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-              print('🔄 401 Unauthorized detected!');
-              print('📍 Request path: ${e.requestOptions.path}');
-              print('📍 Request method: ${e.requestOptions.method}');
-              print('📍 Is refreshing: $_isRefreshing');
-              print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
               // Don't try to refresh if we're already refreshing
               // or if the failed request was the refresh endpoint itself
               if (_isRefreshing ||
                   e.requestOptions.path.contains('/auth/refresh-mobile')) {
-                print(
-                  '❌ Already refreshing or refresh endpoint failed - logging out',
-                );
                 _authService.logout();
                 _disconnectWebSocketOnLogout();
                 return handler.next(e);
               }
 
-              print('🔄 Attempting to refresh access token...');
-
               // Try to refresh the token
               final refreshSuccess = await _refreshToken();
 
-              print(
-                '📊 Refresh result: ${refreshSuccess ? "SUCCESS ✅" : "FAILED ❌"}',
-              );
-
               if (refreshSuccess) {
-                print(
-                  '✅ Token refreshed successfully - Retrying original request',
-                );
-                print(
-                  '🔄 Retrying: ${e.requestOptions.method} ${e.requestOptions.path}',
-                );
-
                 // Retry the original request with new token
                 try {
                   final response = await _dio.fetch(e.requestOptions);
-                  print('✅ Original request succeeded after token refresh!');
                   return handler.resolve(response);
                 } catch (retryError) {
-                  print('❌ Retry failed after token refresh: $retryError');
                   return handler.next(e);
                 }
               } else {
-                print('❌ Token refresh failed - Logging out user');
-                print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
                 _authService.logout();
                 _disconnectWebSocketOnLogout();
                 return handler.next(e);
@@ -158,15 +132,10 @@ class ApiService {
   Future<bool> _refreshToken() async {
     // If refresh is already in progress, wait for it and return its result
     if (_isRefreshing && _refreshFuture != null) {
-      print('⏳ Token refresh already in progress, waiting for completion...');
       return await _refreshFuture!;
     }
 
     _isRefreshing = true;
-    print('🔄 Starting token refresh process...');
-    print(
-      '📍 Current cookies available: ${await _cookieService.hasAuthCookies()}',
-    );
 
     // Create a future that all concurrent calls will wait for
     _refreshFuture = _performTokenRefresh();
@@ -199,22 +168,16 @@ class ApiService {
         ),
       );
 
-      print('📊 Refresh response status: ${response.statusCode}');
-
       if (response.statusCode == 200) {
-        print('✅ Token refresh successful');
-
         // Check if we received new cookies
         final cookies = response.headers['set-cookie'];
         if (cookies != null && cookies.isNotEmpty) {
-          print('🍪 New tokens received: ${cookies.length} cookie(s)');
           for (var cookie in cookies) {
             // Log cookie names without values for security
             final cookieName = cookie.split('=')[0];
-            print('  - $cookieName');
           }
         } else {
-          print('⚠️ Warning: No set-cookie headers in refresh response');
+          debugPrint('⚠️ Warning: No set-cookie headers in refresh response');
         }
 
         // Process any queued requests
@@ -227,30 +190,24 @@ class ApiService {
         return true;
       } else if (response.statusCode == 401 || response.statusCode == 404) {
         // Refresh token is expired or invalid
-        print(
+        debugPrint(
           '❌ Refresh token expired or invalid (Status: ${response.statusCode})',
         );
-        print('📄 Response: ${response.data}');
         _isRefreshing = false;
         return false;
       } else {
-        print('❌ Token refresh failed with status: ${response.statusCode}');
-        print('📄 Response: ${response.data}');
+        debugPrint(
+          '❌ Token refresh failed with status: ${response.statusCode}',
+        );
         _isRefreshing = false;
         return false;
       }
     } on DioException catch (e) {
-      print('❌ Token refresh DioException: ${e.message}');
-      print('📍 Error type: ${e.type}');
-      if (e.response != null) {
-        print('📍 Response status: ${e.response?.statusCode}');
-        print('📍 Response data: ${e.response?.data}');
-      }
-
+      debugPrint('❌ Token refresh DioException: ${e.message}');
       _isRefreshing = false;
       return false;
     } catch (e) {
-      print('❌ Unexpected error during token refresh: $e');
+      debugPrint('❌ Unexpected error during token refresh: $e');
       _isRefreshing = false;
       return false;
     }
@@ -259,7 +216,6 @@ class ApiService {
   // sign up function
 
   Future generateSignupOtp(String phoneNumber) async {
-    print('this is the phone number: $phoneNumber');
     try {
       Response response = await _dio.post(
         "${Environment.baseUrl}/auth/generate-signup-otp/$phoneNumber",
@@ -287,12 +243,8 @@ class ApiService {
         data: {'phone': phoneNumber, 'otp': otp, 'name': name, 'role': 'user'},
       );
 
-      // Check if we received any cookies
-      final cookies = response.headers['set-cookie'];
-      if (cookies != null && cookies.isNotEmpty) {
-      } else {
-        print('No cookies received');
-      }
+      // // Check if we received any cookies
+      // final cookies = response.headers['set-cookie'];
       return {
         'success': response.statusCode == 200,
         'statusCode': response.statusCode,
@@ -329,25 +281,12 @@ class ApiService {
       Response response = await _dio.post(
         "${Environment.baseUrl}/auth/verify-login-otp",
         data: {'phone': phone_number, 'otp': otp},
-        options: Options(
-          headers: {'Content-Type': 'application/json'},
-          // Ensure cookies are received
-          receiveDataWhenStatusError: true,
-          validateStatus: (status) => true,
-        ),
       );
 
-      // Check if we received any cookies
-      final cookies = response.headers['set-cookie'];
-      if (cookies != null && cookies.isNotEmpty) {
-      } else {}
-
-      return {
-        'success': response.statusCode == 200,
-        'statusCode': response.statusCode,
-        'data': response.data,
-        'message': 'Login OTP verified successfully',
-      };
+      if (response.data is String) {
+        return jsonDecode(response.data as String);
+      }
+      return response.data;
     } catch (e) {
       return {
         'success': false,

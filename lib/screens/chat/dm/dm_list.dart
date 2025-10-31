@@ -11,17 +11,19 @@ import '../../../widgets/chat_action_menu.dart';
 import '../../../repositories/conversations_repository.dart';
 import '../../../api/chats.services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../widgets/chat/searchable_list_widget.dart';
+import '../../../providers/draft_provider.dart';
 import 'messaging.dart';
 
-class ChatsPage extends StatefulWidget {
+class ChatsPage extends ConsumerStatefulWidget {
   const ChatsPage({super.key});
 
   @override
-  State<ChatsPage> createState() => ChatsPageState();
+  ConsumerState<ChatsPage> createState() => ChatsPageState();
 }
 
-class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
+class ChatsPageState extends ConsumerState<ChatsPage> with WidgetsBindingObserver {
   final UserService _userService = UserService();
   final WebSocketService _websocketService = WebSocketService();
   final UserStatusService _userStatusService = UserStatusService();
@@ -1407,6 +1409,7 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
             isMuted: _mutedChats.contains(conversation.conversationId),
             isFavorite: _favoriteChats.contains(conversation.conversationId),
             onLongPress: () => _showChatActions(conversation),
+            conversationId: conversation.conversationId,
             onTap: () async {
               // Set this conversation as active and clear unread count
               _setActiveConversation(conversation.conversationId);
@@ -1444,7 +1447,7 @@ class ChatsPageState extends State<ChatsPage> with WidgetsBindingObserver {
   }
 }
 
-class ChatListItem extends StatelessWidget {
+class ChatListItem extends ConsumerWidget {
   final ConversationModel conversation;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
@@ -1454,6 +1457,7 @@ class ChatListItem extends StatelessWidget {
   final bool isPinned;
   final bool isMuted;
   final bool isFavorite;
+  final int conversationId;
 
   const ChatListItem({
     Key? key,
@@ -1466,6 +1470,7 @@ class ChatListItem extends StatelessWidget {
     this.isPinned = false,
     this.isMuted = false,
     this.isFavorite = false,
+    required this.conversationId,
   }) : super(key: key);
 
   String _formatTime(String dateTimeString) {
@@ -1568,15 +1573,33 @@ class ChatListItem extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Check for draft message
+    final drafts = ref.watch(draftMessagesProvider);
+    final draft = drafts[conversationId];
+
     final hasUnreadMessages = conversation.unreadCount > 0 && !isMuted;
-    final lastMessageBody =
-        conversation.metadata?.lastMessage.body ?? 'No messages yet';
-    final lastMessageType = conversation.metadata?.lastMessage.type;
+    
+    // Use draft if available, otherwise use last message
+    String lastMessageBody;
+    String? lastMessageType;
+    Map<String, dynamic>? attachmentData;
+    
+    if (draft != null && draft.isNotEmpty) {
+      // Show draft as last message
+      lastMessageBody = draft;
+      lastMessageType = 'text';
+      attachmentData = null;
+    } else {
+      lastMessageBody = conversation.metadata?.lastMessage.body ?? 'No messages yet';
+      lastMessageType = conversation.metadata?.lastMessage.type;
+      attachmentData = conversation.metadata?.lastMessage.attachmentData;
+    }
+    
     final lastMessageText = _formatLastMessageText(
       lastMessageBody,
       lastMessageType,
-      conversation.metadata?.lastMessage.attachmentData,
+      attachmentData,
     );
     final timeText = conversation.metadata?.lastMessage.createdAt != null
         ? _formatTime(conversation.metadata!.lastMessage.createdAt)
@@ -1627,10 +1650,17 @@ class ChatListItem extends StatelessWidget {
         subtitle: isTyping
             ? _buildTypingIndicator()
             : Text(
-                lastMessageText,
+                draft != null && draft.isNotEmpty 
+                    ? 'Draft: $lastMessageText'
+                    : lastMessageText,
                 style: TextStyle(
-                  color: isMuted ? Colors.grey[400] : Colors.grey[600],
+                  color: draft != null && draft.isNotEmpty
+                      ? Colors.orange[600]
+                      : (isMuted ? Colors.grey[400] : Colors.grey[600]),
                   fontSize: 14,
+                  fontStyle: draft != null && draft.isNotEmpty
+                      ? FontStyle.italic
+                      : FontStyle.normal,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,

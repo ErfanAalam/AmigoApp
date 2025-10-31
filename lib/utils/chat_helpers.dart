@@ -171,19 +171,6 @@ class ChatHelpers {
       // Place chip above the first message of the current date group
       final shouldShow = currentDate != previousDate;
 
-      // Debug logging
-      if (shouldShow) {
-        debugPrint(
-          '📅 Date separator: Showing at index $index (first message of date group)',
-        );
-        debugPrint(
-          '   Current: ${currentMessage.createdAt} -> ${currentDate.toString().split(' ')[0]}',
-        );
-        debugPrint(
-          '   Prev: ${previousMessage.createdAt} -> ${previousDate.toString().split(' ')[0]}',
-        );
-      }
-
       return shouldShow;
     } catch (e) {
       debugPrint('Error in shouldShowDateSeparator: $e');
@@ -194,7 +181,6 @@ class ChatHelpers {
   /// Debug helper to print all message dates for troubleshooting
   /// Uses device's local timezone
   static void debugMessageDates(List messages) {
-    debugPrint('🔍 Debug: Message dates (from newest to oldest):');
     for (int i = 0; i < messages.length; i++) {
       final message = messages[messages.length - 1 - i];
       final dateTime = convertToLocalTime(message.createdAt);

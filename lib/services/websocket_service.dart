@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/widgets.dart';
+
 import 'cookie_service.dart';
 import '../env.dart';
 import 'package:flutter/material.dart' as material;
@@ -24,7 +26,7 @@ class WebSocketService {
       WebSocketConnectionState.disconnected;
 
   final CookieService _cookieService = CookieService();
-  
+
   // If false, do not attempt automatic reconnects (e.g., during logout)
   bool _allowReconnect = true;
 
@@ -79,7 +81,7 @@ class WebSocketService {
       final wsUrl = _buildWebSocketUrl(accessToken);
 
       // Create WebSocket connection using native WebSocket
-      print('🔍 About to connect to: $wsUrl');
+      debugPrint('🔍 About to connect to: $wsUrl');
       _socket = await WebSocket.connect(wsUrl);
 
       // Listen to messages
@@ -91,7 +93,7 @@ class WebSocketService {
 
       _reconnectAttempts = 0;
       _updateConnectionState(WebSocketConnectionState.connected);
-      print('✅ WebSocket connected successfully');
+      debugPrint('✅ WebSocket connected successfully');
 
       // If a conversation ID is provided, send active_in_conversation message
       if (conversationId != null) {
@@ -101,7 +103,7 @@ class WebSocketService {
         });
       }
     } catch (e) {
-      print('❌ WebSocket connection failed');
+      debugPrint('❌ WebSocket connection failed');
       _handleConnectionError(e.toString());
     }
   }
@@ -142,26 +144,28 @@ class WebSocketService {
       } else if (message is Map<String, dynamic>) {
         data = message;
       } else {
-        print('⚠️ Received unexpected message type: ${message.runtimeType}');
+        debugPrint(
+          '⚠️ Received unexpected message type: ${message.runtimeType}',
+        );
         return;
       }
 
       _messageController.add(data);
     } catch (e) {
-      print('❌ Error parsing WebSocket message');
+      debugPrint('❌ Error parsing WebSocket message');
       _errorController.add('Error parsing message: $e');
     }
   }
 
   /// Handle WebSocket errors
   void _handleError(dynamic error) {
-    print('❌ WebSocket error: $error');
+    debugPrint('❌ WebSocket error: $error');
     _handleConnectionError(error.toString());
   }
 
   /// Handle WebSocket disconnection
   void _handleDisconnection() {
-    print('🔌 WebSocket disconnected');
+    debugPrint('🔌 WebSocket disconnected');
     _updateConnectionState(WebSocketConnectionState.disconnected);
     if (_allowReconnect) {
       _scheduleReconnect();
@@ -170,7 +174,7 @@ class WebSocketService {
 
   /// Handle connection errors
   void _handleConnectionError(String error) {
-    print('❌ WebSocket connection error');
+    debugPrint('❌ WebSocket connection error');
     _updateConnectionState(WebSocketConnectionState.error);
     _errorController.add(error);
     if (_allowReconnect) {
@@ -181,7 +185,7 @@ class WebSocketService {
   /// Schedule reconnection attempt
   void _scheduleReconnect() {
     if (_reconnectAttempts >= maxReconnectAttempts) {
-      print('❌ Max reconnection attempts reached');
+      debugPrint('❌ Max reconnection attempts reached');
       _showInternetIssueDialog();
       return;
     }
@@ -196,7 +200,9 @@ class WebSocketService {
   void _showInternetIssueDialog() {
     final context = NavigationHelper.navigatorKey.currentContext;
     if (context == null) {
-      print('⚠️ Cannot show internet issue dialog: navigator context is null');
+      debugPrint(
+        '⚠️ Cannot show internet issue dialog: navigator context is null',
+      );
       return;
     }
 
@@ -240,11 +246,11 @@ class WebSocketService {
     try {
       final jsonMessage = json.encode(message);
 
-      print('📤 Sending WebSocket message: $jsonMessage');
+      debugPrint('📤 Sending WebSocket message: $jsonMessage');
       _socket!.add(jsonMessage);
       // print('📤 Sent WebSocket message dfdfg: $jsonMessage');
     } catch (e) {
-      print('❌ Error sending WebSocket message: $e');
+      debugPrint('❌ Error sending WebSocket message: $e');
       throw Exception('Failed to send message: $e');
     }
   }

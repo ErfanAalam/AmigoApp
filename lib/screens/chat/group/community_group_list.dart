@@ -154,17 +154,12 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
           )
           .map((g) => _convertGroupModelToCommunityGroupModel(g))
           .toList();
-      debugPrint(
-        '📦 Current local DB has ${localInnerGroups.length} community inner groups',
-      );
     } catch (e) {
       debugPrint('⚠️ Error reading local DB: $e');
     }
 
     try {
-      debugPrint('📥 Loading community inner groups from server...');
       final response = await _userService.GetChatList('community_group');
-      debugPrint('Community group response: $response');
 
       if (response['success']) {
         final dynamic responseData = response['data'];
@@ -172,15 +167,12 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
         List<dynamic> conversationsList = [];
 
         if (responseData is List) {
-          debugPrint("1 if -------->");
           conversationsList = responseData;
         } else if (responseData is Map<String, dynamic>) {
-          debugPrint("2 else if -------->");
           if (responseData.containsKey('data') &&
               responseData['data'] is List) {
             conversationsList = responseData['data'] as List<dynamic>;
           } else {
-            debugPrint("3 else -------->");
             for (var key in responseData.keys) {
               if (responseData[key] is List) {
                 conversationsList = responseData[key] as List<dynamic>;
@@ -189,14 +181,6 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
             }
           }
         }
-
-        debugPrint(
-          "--------------------------------------------------------------------------------",
-        );
-        debugPrint("conversationsList -> ${conversationsList}");
-        debugPrint(
-          "--------------------------------------------------------------------------------",
-        );
 
         // Filter only community groups that belong to this community
         final innerGroups = conversationsList
@@ -207,23 +191,12 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
             .map((json) => CommunityGroupModel.fromJson(json))
             .toList();
 
-        debugPrint(
-          "--------------------------------------------------------------------------------",
-        );
-        debugPrint("innerGroups -> ${innerGroups}");
-        debugPrint(
-          "--------------------------------------------------------------------------------",
-        );
-
         // Persist to local DB if we got data from server
         if (innerGroups.isNotEmpty) {
           final groupModels = innerGroups
               .map((cg) => _convertCommunityGroupModelToGroupModel(cg))
               .toList();
           await _groupsRepo.insertOrUpdateGroups(groupModels);
-          debugPrint(
-            '✅ Persisted ${groupModels.length} community inner groups to local DB',
-          );
         } else {
           debugPrint(
             '⚠️ Server returned 0 community inner groups - keeping local cache',
@@ -240,9 +213,6 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
           });
         }
 
-        debugPrint(
-          '✅ Displaying ${_allInnerGroups.length} community inner groups',
-        );
         return _allInnerGroups;
       } else {
         throw Exception(response['message'] ?? 'Failed to load inner groups');
@@ -260,9 +230,6 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
         });
       }
 
-      debugPrint(
-        '📦 Displaying ${localInnerGroups.length} community inner groups from local DB',
-      );
       return localInnerGroups;
     }
   }
@@ -384,10 +351,6 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
   }
 
   Widget _buildContent() {
-    debugPrint(
-      '🏗️ Building content: _isLoaded=$_isLoaded, filteredInnerGroups=${_filteredInnerGroups.length}',
-    );
-
     // If we have loaded data, show it directly
     if (_isLoaded && _filteredInnerGroups.isNotEmpty) {
       return _buildInnerGroupsList();
