@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
@@ -677,14 +678,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       if (cachedUser != null) {
         // Assume the first user we find in local cache is us
         _currentUserId = cachedUser.id;
-        debugPrint(
-          '✅ Got current user ID from local DB: $_currentUserId (instant!)',
-        );
         return;
       }
 
       // SLOW PATH: Fetch from API (only if not found in cache)
-      debugPrint('🌐 Fetching current user ID from API...');
       final response = await _userService.getUser().timeout(
         Duration(seconds: 2),
         onTimeout: () {
@@ -696,7 +693,6 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       if (response['success'] == true && response['data'] != null) {
         final userData = response['data'];
         _currentUserId = _parseToInt(userData['id']);
-        debugPrint('✅ Got current user ID from API: $_currentUserId');
 
         // Save to local DB for next time
         final userModel = UserModel(
@@ -1107,7 +1103,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // Save draft before disposing
     if (_messageController.text.isNotEmpty) {
       final draftNotifier = ref.read(draftMessagesProvider.notifier);
-      draftNotifier.saveDraft(widget.group.conversationId, _messageController.text);
+      draftNotifier.saveDraft(
+        widget.group.conversationId,
+        _messageController.text,
+      );
     }
 
     // Remove listener
@@ -2741,6 +2740,20 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // The actual message will be sent when user presses send button
   }
 
+  void _copyMessage(MessageModel message) async {
+    if (message.body.isNotEmpty) {
+      await Clipboard.setData(ClipboardData(text: message.body));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Message copied to clipboard'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
   void _cancelReply() {
     setState(() {
       _replyToMessageData = null;
@@ -2959,18 +2972,18 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           ],
         ),
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerTop,
-      floatingActionButton: Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          _buildTestFab(20, Colors.blue),
-          const SizedBox(height: 8),
-          _buildTestFab(50, Colors.orange),
-          const SizedBox(height: 8),
-          _buildTestFab(200, Colors.red),
-        ],
-      ),
+      // floatingActionButtonLocation: FloatingActionButtonLocation.centerTop,
+      // floatingActionButton: Row(
+      //   mainAxisSize: MainAxisSize.min,
+      //   crossAxisAlignment: CrossAxisAlignment.end,
+      //   children: [
+      //     _buildTestFab(20, Colors.blue),
+      //     const SizedBox(height: 8),
+      //     _buildTestFab(50, Colors.orange),
+      //     const SizedBox(height: 8),
+      //     _buildTestFab(200, Colors.red),
+      //   ],
+      // ),
     );
   }
 
@@ -3816,6 +3829,14 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                       },
                     ),
                     _buildActionButton(
+                      icon: Icons.copy,
+                      label: 'Copy',
+                      onTap: () {
+                        Navigator.pop(context);
+                        _copyMessage(message);
+                      },
+                    ),
+                    _buildActionButton(
                       icon: isPinned ? Icons.push_pin_outlined : Icons.push_pin,
                       label: isPinned ? 'Unpin' : 'Pin',
                       onTap: () {
@@ -4124,7 +4145,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
               FloatingActionButton(
                 onPressed: shouldDisableSending
                     ? null
-                    : (_messageController.text.isNotEmpty ? _sendMessage : _sendVoiceNote),
+                    : (_messageController.text.isNotEmpty
+                          ? _sendMessage
+                          : _sendVoiceNote),
                 backgroundColor: shouldDisableSending
                     ? Colors.grey[400]
                     : Colors.teal,

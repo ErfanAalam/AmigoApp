@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -4851,6 +4852,14 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                   },
                 ),
                 _buildActionButton(
+                  icon: Icons.copy,
+                  label: 'Copy',
+                  onTap: () {
+                    Navigator.pop(context);
+                    _copyMessage(message);
+                  },
+                ),
+                _buildActionButton(
                   icon: isPinned ? Icons.push_pin_outlined : Icons.push_pin,
                   label: isPinned ? 'Unpin' : 'Pin',
                   onTap: () {
@@ -6187,6 +6196,20 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     // Focus on the text field for user to type their reply
     // The actual message will be sent when user presses send button
+  }
+
+  void _copyMessage(MessageModel message) async {
+    if (message.body.isNotEmpty) {
+      await Clipboard.setData(ClipboardData(text: message.body));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Message copied to clipboard'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
   }
 
   void _cancelReply() {
