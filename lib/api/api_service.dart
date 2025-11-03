@@ -8,6 +8,7 @@ import 'package:amigo/services/cookie_service.dart';
 import 'package:amigo/services/location_service.dart';
 import 'package:amigo/services/ip_service.dart';
 import 'package:amigo/services/websocket_service.dart';
+import 'package:amigo/services/websocket_message_handler.dart';
 import 'package:flutter/material.dart';
 import 'package:mime/mime.dart';
 import 'package:path/path.dart' as path;
@@ -677,6 +678,11 @@ class ApiService {
   Future<void> _connectWebSocketAfterLogin() async {
     try {
       print('🔌 Connecting to WebSocket after successful login...');
+      
+      // CRITICAL: Initialize message handler BEFORE connecting to WebSocket
+      // This ensures listeners are set up before any messages arrive
+      WebSocketMessageHandler().initialize();
+      
       await _websocketService.connect();
       print('✅ WebSocket connected successfully after login');
     } catch (e) {

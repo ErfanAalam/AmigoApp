@@ -430,10 +430,10 @@ class _ContactsPageState extends State<ContactsPage>
           },
         });
 
-        // await _websocketService.sendMessage({
-        //   'type': 'active_in_conversation',
-        //   'conversation_id': conversationData['id'],
-        // });
+        await _websocketService.sendMessage({
+          'type': 'active_in_conversation',
+          'conversation_id': conversationData['id'],
+        });
 
         material.Navigator.pushReplacement(
           context,

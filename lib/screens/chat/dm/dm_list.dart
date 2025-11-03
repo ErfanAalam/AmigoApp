@@ -23,7 +23,8 @@ class ChatsPage extends ConsumerStatefulWidget {
   ConsumerState<ChatsPage> createState() => ChatsPageState();
 }
 
-class ChatsPageState extends ConsumerState<ChatsPage> with WidgetsBindingObserver {
+class ChatsPageState extends ConsumerState<ChatsPage>
+    with WidgetsBindingObserver {
   final UserService _userService = UserService();
   final WebSocketService _websocketService = WebSocketService();
   final UserStatusService _userStatusService = UserStatusService();
@@ -33,7 +34,6 @@ class ChatsPageState extends ConsumerState<ChatsPage> with WidgetsBindingObserve
   final ConversationsRepository _conversationsRepo = ConversationsRepository();
   final LastMessageStorageService _lastMessageStorage =
       LastMessageStorageService.instance;
-  late Future<List<ConversationModel>> _conversationsFuture;
   final ChatsServices _chatsServices = ChatsServices();
   // Search functionality
   final TextEditingController _searchController = TextEditingController();
@@ -62,16 +62,18 @@ class ChatsPageState extends ConsumerState<ChatsPage> with WidgetsBindingObserve
   StreamSubscription<Map<String, dynamic>>? _mediaSubscription;
   StreamSubscription<Map<String, dynamic>>? _replySubscription;
   StreamSubscription<Map<int, bool>>? _userStatusSubscription;
+  StreamSubscription<Map<String, dynamic>>? _conversationAddedSubscription;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadConversationsFromLocal();
-    _conversationsFuture = _loadConversations();
+    _loadConversations();
     _setupWebSocketListener();
     _setupUserStatusListener();
     _loadChatPreferences();
+    _setupConversationAddedListener();
 
     // Setup search functionality
     _searchController.addListener(_onSearchChanged);
@@ -496,6 +498,17 @@ class ChatsPageState extends ConsumerState<ChatsPage> with WidgetsBindingObserve
     final filteredConversations = conversations
         .where((conv) => !_deletedChats.contains(conv.conversationId))
         .toList();
+    // print(
+    //   "--------------------------------------------------------------------------------",
+    // );
+    // for (var conv in filteredConversations) {
+    //   print(
+    //     "Conversation ID: ${conv.conversationId}, User: ${conv.userName}, Last Message At: ${conv.lastMessageAt}, Pinned: ${_pinnedChats.contains(conv.conversationId)}",
+    //   );
+    // }
+    // print(
+    //   "--------------------------------------------------------------------------------",
+    // );
 
     // Sort conversations: pinned first, then by last message time
     filteredConversations.sort((a, b) {
@@ -507,9 +520,26 @@ class ChatsPageState extends ConsumerState<ChatsPage> with WidgetsBindingObserve
       if (!aPinned && bPinned) return 1;
 
       // Both pinned or both not pinned, sort by last message time
-      final aTime = a.lastMessageAt ?? a.joinedAt;
-      final bTime = b.lastMessageAt ?? b.joinedAt;
-      return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
+      // Prioritize conversations with messages over those without
+      final aHasMessage =
+          a.lastMessageAt != null && a.lastMessageAt!.isNotEmpty;
+      final bHasMessage =
+          b.lastMessageAt != null && b.lastMessageAt!.isNotEmpty;
+
+      // If one has messages and the other doesn't, prioritize the one with messages
+      if (aHasMessage && !bHasMessage) return -1;
+      if (!aHasMessage && bHasMessage) return 1;
+
+      // Both have messages or both don't have messages
+      if (aHasMessage && bHasMessage) {
+        // Both have messages, sort by lastMessageAt (most recent first)
+        return DateTime.parse(
+          b.lastMessageAt!,
+        ).compareTo(DateTime.parse(a.lastMessageAt!));
+      } else {
+        // Neither has messages, sort by joinedAt (most recent first)
+        return DateTime.parse(b.joinedAt).compareTo(DateTime.parse(a.joinedAt));
+      }
     });
 
     return filteredConversations;
@@ -584,11 +614,11 @@ class ChatsPageState extends ConsumerState<ChatsPage> with WidgetsBindingObserve
 
   void _refreshConversations() {
     setState(() {
-      _conversationsFuture = _loadConversations();
       _isLoaded = false; // Reset to show loading state
       _conversations.clear(); // Clear current conversations
       _filteredConversations.clear(); // Clear filtered conversations
     });
+    _loadConversations();
     // Reload chat preferences as well
     _loadChatPreferences();
   }
@@ -627,6 +657,116 @@ class ChatsPageState extends ConsumerState<ChatsPage> with WidgetsBindingObserve
     _activeConversationId = conversationId;
     if (conversationId != null) {
       _clearUnreadCount(conversationId);
+    }
+  }
+
+  /// Set up conversation added listener
+  void _setupConversationAddedListener() {
+    _conversationAddedSubscription = _messageHandler.conversationAddedStream
+        .listen(
+          (message) {
+            _handleConversationAdded(message);
+          },
+          onError: (error) {
+            debugPrint(
+              '❌ Conversation added stream error in ChatsPage: $error',
+            );
+          },
+        );
+  }
+
+  /// Handle conversation added message
+  Future<void> _handleConversationAdded(Map<String, dynamic> message) async {
+    try {
+      final conversationId = message['conversation_id'] as int?;
+      final data = message['data'] as Map<String, dynamic>?;
+
+      if (conversationId == null || data == null) {
+        debugPrint(
+          '⚠️ Invalid conversation_added message: missing conversation_id or data',
+        );
+        return;
+      }
+
+      // Only handle DMs in the DM list screen
+      final conversationType = data['type'] as String?;
+      if (conversationType != 'dm') {
+        return; // Ignore groups, they'll be handled in group_list.dart
+      }
+
+      // Check if conversation already exists in the list
+      final existingIndex = _conversations.indexWhere(
+        (conv) => conv.conversationId == conversationId,
+      );
+
+      if (existingIndex != -1) {
+        debugPrint(
+          'ℹ️ Conversation $conversationId already exists in list, skipping',
+        );
+        return;
+      }
+
+      // Convert the data to ConversationModel
+      try {
+        final conversation = ConversationModel.fromJson(data);
+
+        // Update with stored last message if available
+        final updatedConversations =
+            await _updateConversationsWithStoredLastMessages([conversation]);
+
+        if (updatedConversations.isNotEmpty && mounted) {
+          setState(() {
+            // Add the new conversation to the list
+            _conversations.add(updatedConversations[0]);
+
+            // Sort conversations: pinned first, then by last message time
+            _conversations.sort((a, b) {
+              final aPinned = _pinnedChats.contains(a.conversationId);
+              final bPinned = _pinnedChats.contains(b.conversationId);
+
+              if (aPinned && !bPinned) return -1;
+              if (!aPinned && bPinned) return 1;
+
+              // Prioritize conversations with messages over those without
+              final aHasMessage =
+                  a.lastMessageAt != null && a.lastMessageAt!.isNotEmpty;
+              final bHasMessage =
+                  b.lastMessageAt != null && b.lastMessageAt!.isNotEmpty;
+
+              // If one has messages and the other doesn't, prioritize the one with messages
+              if (aHasMessage && !bHasMessage) return -1;
+              if (!aHasMessage && bHasMessage) return 1;
+
+              // Both have messages or both don't have messages
+              if (aHasMessage && bHasMessage) {
+                // Both have messages, sort by lastMessageAt (most recent first)
+                return DateTime.parse(
+                  b.lastMessageAt!,
+                ).compareTo(DateTime.parse(a.lastMessageAt!));
+              } else {
+                // Neither has messages, sort by joinedAt (most recent first)
+                return DateTime.parse(
+                  b.joinedAt,
+                ).compareTo(DateTime.parse(a.joinedAt));
+              }
+            });
+
+            // Persist to local DB
+            _conversationsRepo.insertOrUpdateConversation(
+              updatedConversations[0],
+            );
+
+            // Update filtered conversations
+            _filterConversations();
+          });
+
+          debugPrint('✅ Added new DM conversation $conversationId to list');
+        }
+      } catch (e) {
+        debugPrint('❌ Error converting conversation data: $e');
+      }
+    } catch (e) {
+      debugPrint('❌ Error handling conversation_added message: $e');
     }
   }
 
@@ -931,10 +1071,28 @@ class ChatsPageState extends ConsumerState<ChatsPage> with WidgetsBindingObserve
             if (aPinned && !bPinned) return -1;
             if (!aPinned && bPinned) return 1;
 
-            // Both pinned or both not pinned, sort by last message time
-            final aTime = a.lastMessageAt ?? a.joinedAt;
-            final bTime = b.lastMessageAt ?? b.joinedAt;
-            return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
+            // Prioritize conversations with messages over those without
+            final aHasMessage =
+                a.lastMessageAt != null && a.lastMessageAt!.isNotEmpty;
+            final bHasMessage =
+                b.lastMessageAt != null && b.lastMessageAt!.isNotEmpty;
+
+            // If one has messages and the other doesn't, prioritize the one with messages
+            if (aHasMessage && !bHasMessage) return -1;
+            if (!aHasMessage && bHasMessage) return 1;
+
+            // Both have messages or both don't have messages
+            if (aHasMessage && bHasMessage) {
+              // Both have messages, sort by lastMessageAt (most recent first)
+              return DateTime.parse(
+                b.lastMessageAt!,
+              ).compareTo(DateTime.parse(a.lastMessageAt!));
+            } else {
+              // Neither has messages, sort by joinedAt (most recent first)
+              return DateTime.parse(
+                b.joinedAt,
+              ).compareTo(DateTime.parse(a.joinedAt));
+            }
           });
 
           // Update filtered conversations to immediately show the updated list
@@ -966,49 +1124,47 @@ class ChatsPageState extends ConsumerState<ChatsPage> with WidgetsBindingObserve
       }
 
       // Find the conversation to get user name
-      _conversationsFuture
-          .then((conversations) {
-            final conversation = conversations.firstWhere(
-              (conv) => conv.conversationId == conversationId,
-              orElse: () => throw StateError('Conversation not found'),
-            );
-            if (mounted) {
-              setState(() {
-                if (isTyping) {
-                  _typingUsers[conversationId] = true;
-                  _typingUserNames[conversationId] = conversation.userName;
+      try {
+        final conversation = _conversations.firstWhere(
+          (conv) => conv.conversationId == conversationId,
+        );
 
-                  // Cancel existing timer
-                  _typingTimers[conversationId]?.cancel();
+        if (mounted) {
+          setState(() {
+            if (isTyping) {
+              _typingUsers[conversationId] = true;
+              _typingUserNames[conversationId] = conversation.userName;
 
-                  // Set timer to hide typing indicator after 2 seconds
-                  _typingTimers[conversationId] = Timer(
-                    const Duration(seconds: 2),
-                    () {
-                      if (mounted) {
-                        setState(() {
-                          _typingUsers[conversationId] = false;
-                          _typingUserNames.remove(conversationId);
-                        });
-                      }
-                      _typingTimers[conversationId] = null;
-                    },
-                  );
-                } else {
-                  // Stop typing immediately
-                  _typingUsers[conversationId] = false;
-                  _typingUserNames.remove(conversationId);
-                  _typingTimers[conversationId]?.cancel();
+              // Cancel existing timer
+              _typingTimers[conversationId]?.cancel();
+
+              // Set timer to hide typing indicator after 2 seconds
+              _typingTimers[conversationId] = Timer(
+                const Duration(seconds: 2),
+                () {
+                  if (mounted) {
+                    setState(() {
+                      _typingUsers[conversationId] = false;
+                      _typingUserNames.remove(conversationId);
+                    });
+                  }
                   _typingTimers[conversationId] = null;
-                }
-              });
+                },
+              );
+            } else {
+              // Stop typing immediately
+              _typingUsers[conversationId] = false;
+              _typingUserNames.remove(conversationId);
+              _typingTimers[conversationId]?.cancel();
+              _typingTimers[conversationId] = null;
             }
-          })
-          .catchError((error) {
-            debugPrint(
-              '⚠️ Error finding conversation for typing indicator: $error',
-            );
           });
+        }
+      } catch (error) {
+        debugPrint(
+          '⚠️ Error finding conversation for typing indicator: $error',
+        );
+      }
     } catch (e) {
       debugPrint('❌ Error handling typing message: $e');
     }
@@ -1022,6 +1178,7 @@ class ChatsPageState extends ConsumerState<ChatsPage> with WidgetsBindingObserve
     _replySubscription?.cancel();
     _mediaSubscription?.cancel();
     _userStatusSubscription?.cancel();
+    _conversationAddedSubscription?.cancel();
     _searchController.dispose(); // Dispose search controller
     // Cancel all typing timers
     for (final timer in _typingTimers.values) {
@@ -1268,28 +1425,6 @@ class ChatsPageState extends ConsumerState<ChatsPage> with WidgetsBindingObserve
     );
   }
 
-  Widget _buildErrorState(String error) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
-          const SizedBox(height: 16),
-          Text(
-            error,
-            style: TextStyle(color: Colors.grey[600], fontSize: 16),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton(
-            onPressed: _refreshConversations,
-            child: const Text('Retry'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildEmptyState() {
     return Center(
       child: Column(
@@ -1333,43 +1468,25 @@ class ChatsPageState extends ConsumerState<ChatsPage> with WidgetsBindingObserve
   }
 
   Widget _buildChatsContent() {
-    // If we have loaded conversations and they're available, show them directly
-    if (_isLoaded && _conversations.isNotEmpty) {
-      final conversationsToShow = _searchQuery.isNotEmpty
-          ? _filteredConversations
-          : _conversations;
-      return _buildChatsList(conversationsToShow);
+    // Show loading skeleton while loading
+    if (!_isLoaded) {
+      return _buildSkeletonLoader();
     }
 
-    // Otherwise, use FutureBuilder for initial load
-    return FutureBuilder<List<ConversationModel>>(
-      future: _conversationsFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting && !_isLoaded) {
-          return _buildSkeletonLoader();
-        } else if (snapshot.hasError && !_isLoaded) {
-          return _buildErrorState(snapshot.error.toString());
-        } else if (snapshot.hasData) {
-          // If we have data but haven't loaded real-time state yet, show the snapshot data
-          final conversations = _isLoaded ? _conversations : snapshot.data!;
-          final conversationsToShow = _searchQuery.isNotEmpty
-              ? _filteredConversations
-              : conversations;
-          if (conversationsToShow.isEmpty) {
-            return _searchQuery.isNotEmpty
-                ? _buildSearchEmptyState()
-                : _buildEmptyState();
-          }
-          return _buildChatsList(conversationsToShow);
-        } else if (_isLoaded && _conversations.isEmpty) {
-          return _searchQuery.isNotEmpty
-              ? _buildSearchEmptyState()
-              : _buildEmptyState();
-        } else {
-          return _buildSkeletonLoader();
-        }
-      },
-    );
+    // Determine which conversations to show
+    final conversationsToShow = _searchQuery.isNotEmpty
+        ? _filteredConversations
+        : _conversations;
+
+    // Show empty state if no conversations
+    if (conversationsToShow.isEmpty) {
+      return _searchQuery.isNotEmpty
+          ? _buildSearchEmptyState()
+          : _buildEmptyState();
+    }
+
+    // Show the conversations list
+    return _buildChatsList(conversationsToShow);
   }
 
   Widget _buildChatsList(List<ConversationModel> conversations) {
@@ -1579,23 +1696,24 @@ class ChatListItem extends ConsumerWidget {
     final draft = drafts[conversationId];
 
     final hasUnreadMessages = conversation.unreadCount > 0 && !isMuted;
-    
+
     // Use draft if available, otherwise use last message
     String lastMessageBody;
     String? lastMessageType;
     Map<String, dynamic>? attachmentData;
-    
+
     if (draft != null && draft.isNotEmpty) {
       // Show draft as last message
       lastMessageBody = draft;
       lastMessageType = 'text';
       attachmentData = null;
     } else {
-      lastMessageBody = conversation.metadata?.lastMessage.body ?? 'No messages yet';
+      lastMessageBody =
+          conversation.metadata?.lastMessage.body ?? 'No messages yet';
       lastMessageType = conversation.metadata?.lastMessage.type;
       attachmentData = conversation.metadata?.lastMessage.attachmentData;
     }
-    
+
     final lastMessageText = _formatLastMessageText(
       lastMessageBody,
       lastMessageType,
@@ -1650,7 +1768,7 @@ class ChatListItem extends ConsumerWidget {
         subtitle: isTyping
             ? _buildTypingIndicator()
             : Text(
-                draft != null && draft.isNotEmpty 
+                draft != null && draft.isNotEmpty
                     ? 'Draft: $lastMessageText'
                     : lastMessageText,
                 style: TextStyle(

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart' as material;
+import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -33,6 +34,7 @@ import 'repositories/conversations_repository.dart';
 import 'repositories/groups_repository.dart';
 import 'api/user.service.dart';
 import 'repositories/user_repository.dart';
+import 'widgets/loading_dots_animation.dart';
 
 void main() async {
   material.WidgetsFlutterBinding.ensureInitialized();
@@ -99,6 +101,7 @@ class _MyAppState extends material.State<MyApp> {
     _initializeSharing();
     _loadAppVersion();
     _getCurrentUser();
+
     // Process initial notification after the first frame is rendered
     // This ensures navigator is ready
     material.WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -441,7 +444,9 @@ class _MyAppState extends material.State<MyApp> {
 
   material.Widget _buildLoadingScreen() {
     return material.Scaffold(
-      body: material.Center(child: material.CircularProgressIndicator()),
+      body: material.Center(
+        child: LoadingDotsAnimation(color: Colors.blue[400]),
+      ),
     );
   }
 }

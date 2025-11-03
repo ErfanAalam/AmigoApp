@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -26,10 +27,12 @@ import '../../../repositories/groups_repository.dart';
 import '../../../repositories/group_members_repository.dart';
 import '../../../services/websocket_service.dart';
 import '../../../services/websocket_message_handler.dart';
+import '../../../widgets/loading_dots_animation.dart';
 import '../../../services/media_cache_service.dart';
 import '../../../utils/chat_helpers.dart';
 import '../../../utils/message_storage_helpers.dart';
 import '../../../widgets/media_preview_widgets.dart';
+import '../../../widgets/chat/message_action_sheet.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../services/draft_message_service.dart';
 import '../../../providers/draft_provider.dart';
@@ -1760,11 +1763,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   /// Replace optimistic message with server-confirmed message
   void _replaceOptimisticMessage(
-    int messageId,
+    int optimisticId,
     Map<String, dynamic> messageData,
-  ) {
+  ) async {
     try {
-      final index = _messages.indexWhere((msg) => msg.id == messageId);
+      final index = _messages.indexWhere((msg) => msg.id == optimisticId);
       if (index != -1) {
         final data = messageData['data'] as Map<String, dynamic>? ?? {};
         final messageType = messageData['type'];
@@ -1876,6 +1879,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             });
           }
 
+          await _messagesRepo.updateOptimisticMessage(
+            optimisticMessage.conversationId,
+            optimisticId,
+            newMessageId,
+            messageData,
+          );
+
           // Store confirmed message with reply data
           _storeMessageAsync(confirmedMessage);
 
@@ -1891,7 +1901,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
           // Create the confirmed message using utility
           final confirmedMessage = MessageStorageHelpers.createConfirmedMessage(
-            messageId,
+            optimisticId,
             messageData,
             _messages[index],
             senderInfo,
@@ -1908,7 +1918,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         }
 
         // Remove from optimistic tracking
-        _optimisticMessageIds.remove(messageId);
+        _optimisticMessageIds.remove(optimisticId);
       }
     } catch (e) {
       debugPrint('❌ Error replacing optimistic group message: $e');
@@ -2746,7 +2756,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Message copied to clipboard'),
+            content: Text('Message copied'),
             duration: Duration(seconds: 2),
           ),
         );
@@ -2992,36 +3002,24 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     if (_isCheckingCache && _messages.isEmpty) {
       return Container(
         color: Colors.white, // Pure white background
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: 30,
-              height: 30,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.teal[400]!),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Loading group messages...',
-              style: TextStyle(color: Colors.grey[600], fontSize: 14),
-            ),
-            const SizedBox(height: 4),
-          ],
-        ),
+        child: Center(child: LoadingDotsAnimation(color: Colors.blue[400])),
       );
     }
 
     // Show appropriate loader based on state
     if (_isLoadingFromCache) {
-      return _buildCacheLoader();
+      return Container(
+        color: Colors.white, // Pure white background
+        child: Center(child: LoadingDotsAnimation(color: Colors.orange[400])),
+      );
     }
 
     // Only show loading if we haven't initialized and don't have messages
     if (_isLoading && !_isInitialized && _messages.isEmpty) {
-      return _buildMinimalLoader();
+      return Container(
+        color: Colors.white, // Pure white background
+        child: Center(child: LoadingDotsAnimation(color: Colors.blue[400])),
+      );
     }
 
     if (_errorMessage != null && _messages.isEmpty) {
@@ -3055,16 +3053,42 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey[400]),
-            const SizedBox(height: 16),
+            Icon(Icons.message_rounded, size: 32, color: Colors.grey[400]),
+            const SizedBox(height: 6),
             Text(
-              'No messages yet',
+              "No message yet",
               style: TextStyle(color: Colors.grey[600], fontSize: 16),
+              textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Start the group conversation!',
-              style: TextStyle(color: Colors.grey[500], fontSize: 14),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _loadInitialMessages,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.grey[100],
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 10,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                elevation: 0,
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.refresh_rounded, size: 16, color: Colors.black),
+                  SizedBox(width: 6),
+                  Text(
+                    'Refresh',
+                    style: TextStyle(
+                      color: Colors.black,
+                      fontSize: 12,
+                      fontWeight: FontWeight.normal,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -3618,7 +3642,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                     ? '${replyMessage.body.substring(0, 50)}...'
                     : replyMessage.body,
                 style: TextStyle(
-                  color: Colors.grey[600],
+                  color: isMyMessage ? Colors.white : Colors.grey[600],
                   fontSize: 13,
                   height: 1.2,
                 ),
@@ -3751,176 +3775,26 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   void _showMessageActions(MessageModel message, bool isMyMessage) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => _buildMessageActionSheet(message, isMyMessage),
-    );
-  }
-
-  Widget _buildMessageActionSheet(MessageModel message, bool isMyMessage) {
     final isPinned = _pinnedMessageId == message.id;
     final isStarred = _starredMessages.contains(message.id);
 
-    return Container(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.6,
-      ),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
-        ),
-      ),
-      child: SafeArea(
-        top: false,
-        bottom: true,
-        // minimum: const EdgeInsets.only(bottom: 20),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Handle bar
-              Container(
-                margin: const EdgeInsets.symmetric(vertical: 8),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              // Message preview
-              Container(
-                margin: const EdgeInsets.all(16),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.grey[50],
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey[200]!),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.message, color: Colors.grey[600], size: 20),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        message.body.length > 50
-                            ? '${message.body.substring(0, 50)}...'
-                            : message.body,
-                        style: TextStyle(color: Colors.grey[700], fontSize: 14),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Action buttons
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  children: [
-                    _buildActionButton(
-                      icon: Icons.reply,
-                      label: 'Reply',
-                      onTap: () {
-                        Navigator.pop(context);
-                        _replyToMessage(message);
-                      },
-                    ),
-                    _buildActionButton(
-                      icon: Icons.copy,
-                      label: 'Copy',
-                      onTap: () {
-                        Navigator.pop(context);
-                        _copyMessage(message);
-                      },
-                    ),
-                    _buildActionButton(
-                      icon: isPinned ? Icons.push_pin_outlined : Icons.push_pin,
-                      label: isPinned ? 'Unpin' : 'Pin',
-                      onTap: () {
-                        Navigator.pop(context);
-                        _togglePinMessage(message.id);
-                      },
-                    ),
-                    _buildActionButton(
-                      icon: isStarred ? Icons.star : Icons.star_border,
-                      label: isStarred ? 'Unstar' : 'Star',
-                      onTap: () {
-                        Navigator.pop(context);
-                        _toggleStarMessage(message.id);
-                      },
-                    ),
-                    _buildActionButton(
-                      icon: Icons.forward,
-                      label: 'Forward',
-                      onTap: () {
-                        Navigator.pop(context);
-                        _forwardMessage(message);
-                      },
-                    ),
-                    _buildActionButton(
-                      icon: Icons.select_all,
-                      label: 'Select',
-                      onTap: () {
-                        Navigator.pop(context);
-                        _enterSelectionMode(message.id);
-                      },
-                    ),
-                    _buildActionButton(
-                      icon: Icons.mark_chat_read_rounded,
-                      label: 'ReadBy',
-                      onTap: () {
-                        Navigator.pop(context);
-                        _showReadByModal(message);
-                      },
-                    ),
-                    if (isMyMessage)
-                      _buildActionButton(
-                        icon: Icons.delete_outline,
-                        label: 'Delete',
-                        color: Colors.red,
-                        onTap: () {
-                          Navigator.pop(context);
-                          _deleteMessage(message.id);
-                        },
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 28),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildActionButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    Color? color,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-        child: Row(
-          children: [
-            Icon(icon, color: color ?? Colors.grey[700], size: 24),
-            const SizedBox(width: 16),
-            Text(
-              label,
-              style: TextStyle(
-                color: color ?? Colors.grey[800],
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => MessageActionSheet(
+        message: message,
+        isMyMessage: isMyMessage,
+        isPinned: isPinned,
+        isStarred: isStarred,
+        showReadBy: true,
+        onReply: () => _replyToMessage(message),
+        onCopy: () => _copyMessage(message),
+        onPin: () => _togglePinMessage(message.id),
+        onStar: () => _toggleStarMessage(message.id),
+        onForward: () => _forwardMessage(message),
+        onSelect: () => _enterSelectionMode(message.id),
+        onReadBy: () => _showReadByModal(message),
+        onDelete: isMyMessage ? () => _deleteMessage(message.id) : null,
       ),
     );
   }
@@ -4011,59 +3885,6 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       debugPrint('❌ Error generating video thumbnail: $e');
       return null;
     }
-  }
-
-  Widget _buildMinimalLoader() {
-    return Container(
-      color: Colors.white, // Pure white background
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 40,
-            height: 40,
-            child: CircularProgressIndicator(
-              strokeWidth: 3,
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.teal[400]!),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Loading group messages...',
-            style: TextStyle(color: Colors.grey[600], fontSize: 16),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCacheLoader() {
-    return Container(
-      color: Colors.white, // Pure white background
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 40,
-            height: 40,
-            child: CircularProgressIndicator(
-              strokeWidth: 3,
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.teal[400]!),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Loading ...',
-            style: TextStyle(color: Colors.grey[600], fontSize: 16),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Much faster! ⚡',
-            style: TextStyle(color: Colors.teal[600], fontSize: 14),
-          ),
-        ],
-      ),
-    );
   }
 
   Widget _buildMessageInput() {

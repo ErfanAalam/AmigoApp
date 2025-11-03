@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart'
+    show SharedPreferences;
+import '../../services/websocket_service.dart';
 import '../home_layout.dart';
 import '../../api/api_service.dart';
 import '../../services/auth/auth.service.dart';
@@ -30,6 +33,7 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
   final ApiService apiService = ApiService();
   final AuthService authService = AuthService();
   final NotificationService notificationService = NotificationService();
+  final WebSocketService wsService = WebSocketService();
 
   @override
   void dispose() {
@@ -169,6 +173,10 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
           content: material.Text('Account created successfully'),
         ),
       );
+
+      // Store user name in shared preferences for later use
+      final prefs = await SharedPreferences.getInstance();
+      prefs.setString('current_user_name', response['data']['name']);
 
       // Restart the app to ensure all services are properly initialized
       // await AppRestartHelper.restartAppWithDialog(context);

@@ -1,6 +1,5 @@
 import 'package:amigo/services/websocket_service.dart';
 import 'package:flutter/material.dart' as material;
-import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart'
     show SharedPreferences;
 import 'signup_screen.dart';

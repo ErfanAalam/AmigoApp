@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:amigo/api/api_service.dart';
 
@@ -15,12 +16,10 @@ class GroupsService {
         data: {'title': title, 'member_ids': memberIds},
       );
 
-      return {
-        'success': response.statusCode == 200,
-        'statusCode': response.statusCode,
-        'data': response.data,
-        'message': 'Group created successfully',
-      };
+      if (response.data is String) {
+        return jsonDecode(response.data as String);
+      }
+      return response.data;
     } on DioException catch (e) {
       return {
         'success': false,
@@ -230,9 +229,11 @@ class GroupsService {
     }
   }
 
-
   // Delete group conversation
-  Future<Map<String, dynamic>> promoteToAdmin(int conversationId, int userId) async {
+  Future<Map<String, dynamic>> promoteToAdmin(
+    int conversationId,
+    int userId,
+  ) async {
     print('group promote to admin request: $conversationId, $userId');
     try {
       final response = await _apiService.authenticatedPost(
@@ -260,7 +261,10 @@ class GroupsService {
     }
   }
 
-  Future<Map<String, dynamic>> demoteToAdmin(int conversationId, int userId) async {
+  Future<Map<String, dynamic>> demoteToAdmin(
+    int conversationId,
+    int userId,
+  ) async {
     try {
       final response = await _apiService.authenticatedPost(
         '/chat/demote-to-member',

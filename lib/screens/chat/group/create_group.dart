@@ -156,9 +156,12 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
           await _websocketService.sendMessage({
             'type': 'join_conversation',
             'conversation_id': response['data']['id'],
-            'data': {
-              'recipient_id': [_selectedUserIds.toList()],
-            },
+            'data': {'recipient_id': _selectedUserIds.toList()},
+          });
+
+          await _websocketService.sendMessage({
+            'type': 'active_in_conversation',
+            'conversation_id': response['data']['id'],
           });
 
           // Go back to groups page

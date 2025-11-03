@@ -44,6 +44,9 @@ class WebSocketMessageHandler {
   final StreamController<Map<String, dynamic>> _onlineStatusController =
       StreamController<Map<String, dynamic>>.broadcast();
 
+  final StreamController<Map<String, dynamic>> _conversationAddedController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
   bool _isInitialized = false;
 
   /// Get stream for messages (type: 'message')
@@ -78,6 +81,10 @@ class WebSocketMessageHandler {
   /// Get stream for online status (type: 'online_status')
   Stream<Map<String, dynamic>> get onlineStatusStream =>
       _onlineStatusController.stream;
+
+  /// Get stream for conversation added events (type: 'conversation_added')
+  Stream<Map<String, dynamic>> get conversationAddedStream =>
+      _conversationAddedController.stream;
 
   /// Initialize the handler - call this once when app starts
   void initialize() {
@@ -146,10 +153,10 @@ class WebSocketMessageHandler {
           break;
 
         case 'message_reply':
-          await ChatStorageService().storeMessageSqlite(
-            message['conversation_id'],
-            message,
-          );
+          // await ChatStorageService().storeMessageSqlite(
+          //   message['conversation_id'],
+          //   message,
+          // );
           _messageReplyController.add(message);
           break;
 
@@ -163,6 +170,10 @@ class WebSocketMessageHandler {
 
         case 'user_offline':
           _userStatusService.handleUserOfflineMessage(message);
+          break;
+
+        case 'conversation_added':
+          _conversationAddedController.add(message);
           break;
 
         default:
@@ -273,6 +284,7 @@ class WebSocketMessageHandler {
     _messageStarController.close();
     _messageReplyController.close();
     _onlineStatusController.close();
+    _conversationAddedController.close();
     _isInitialized = false;
   }
 }

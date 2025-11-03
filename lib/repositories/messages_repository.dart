@@ -112,8 +112,6 @@ class MessagesRepository {
       where: 'id = ?',
       whereArgs: [oldId],
     );
-
-    print('🔄 Updated message ID from $oldId to $newId in DB');
   }
 
   /// Update optimistic message with server data

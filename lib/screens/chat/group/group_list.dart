@@ -30,8 +30,6 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
   final WebSocketMessageHandler _messageHandler = WebSocketMessageHandler();
   final LastMessageStorageService _lastMessageStorage =
       LastMessageStorageService.instance;
-
-  late Future<Map<String, dynamic>> _dataFuture;
   final TextEditingController _searchController = TextEditingController();
 
   // Real-time state management
@@ -52,14 +50,16 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
   StreamSubscription<Map<String, dynamic>>? _typingSubscription;
   StreamSubscription<Map<String, dynamic>>? _messageSubscription;
   StreamSubscription<Map<String, dynamic>>? _mediaSubscription;
+  StreamSubscription<Map<String, dynamic>>? _conversationAddedSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadFromLocal();
-    _dataFuture = _loadGroupsAndCommunities();
+    _loadGroupsAndCommunities();
     _searchController.addListener(_onSearchChanged);
     _setupWebSocketListener();
+    _setupConversationAddedListener();
   }
 
   @override
@@ -69,6 +69,7 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
     _typingSubscription?.cancel();
     _messageSubscription?.cancel();
     _mediaSubscription?.cancel();
+    _conversationAddedSubscription?.cancel();
     // Cancel all typing timers
     for (final timer in _typingTimers.values) {
       timer?.cancel();
@@ -182,6 +183,81 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
     } catch (e) {
       debugPrint('❌ Error updating groups with stored last messages: $e');
       return groups; // Return original groups on error
+    }
+  }
+
+  /// Set up conversation added listener
+  void _setupConversationAddedListener() {
+    _conversationAddedSubscription = _messageHandler.conversationAddedStream.listen(
+      (message) {
+        _handleConversationAdded(message);
+      },
+      onError: (error) {
+        debugPrint('❌ Conversation added stream error in GroupsPage: $error');
+      },
+    );
+  }
+
+  /// Handle conversation added message
+  Future<void> _handleConversationAdded(Map<String, dynamic> message) async {
+    try {
+      final conversationId = message['conversation_id'] as int?;
+      final data = message['data'] as Map<String, dynamic>?;
+
+      if (conversationId == null || data == null) {
+        debugPrint('⚠️ Invalid conversation_added message: missing conversation_id or data');
+        return;
+      }
+
+      // Only handle groups in the group list screen
+      final conversationType = data['type'] as String?;
+      if (conversationType != 'group' && conversationType != 'community_group') {
+        return; // Ignore DMs, they'll be handled in dm_list.dart
+      }
+
+      // Check if group already exists in the list
+      final existingIndex = _allGroups.indexWhere(
+        (group) => group.conversationId == conversationId,
+      );
+
+      if (existingIndex != -1) {
+        debugPrint('ℹ️ Group $conversationId already exists in list, skipping');
+        return;
+      }
+
+      // Convert the data to GroupModel
+      try {
+        final group = _convertToGroupModel(data);
+
+        // Update with stored last message if available
+        final updatedGroups = await _updateGroupsWithStoredLastMessages([group]);
+
+        if (updatedGroups.isNotEmpty && mounted && _isLoaded) {
+          setState(() {
+            // Add the new group to the list
+            _allGroups.add(updatedGroups[0]);
+
+            // Sort groups by last message time (most recent first)
+            _allGroups.sort((a, b) {
+              final aTime = a.lastMessageAt ?? a.joinedAt;
+              final bTime = b.lastMessageAt ?? b.joinedAt;
+              return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
+            });
+
+            // Persist to local DB
+            _groupsRepo.insertOrUpdateGroup(updatedGroups[0]);
+
+            // Update filtered items
+            _onSearchChanged();
+          });
+
+          debugPrint('✅ Added new group $conversationId to list');
+        }
+      } catch (e) {
+        debugPrint('❌ Error converting group data: $e');
+      }
+    } catch (e) {
+      debugPrint('❌ Error handling conversation_added message: $e');
     }
   }
 
@@ -670,9 +746,9 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
 
   void _refreshData() {
     setState(() {
-      _dataFuture = _loadGroupsAndCommunities();
       _isLoaded = false; // Reset to show loading state
     });
+    _loadGroupsAndCommunities();
   }
 
   @override
@@ -758,34 +834,18 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
   }
 
   Widget _buildContent() {
-    // If we have loaded data, show it directly
-    if (_isLoaded && _filteredItems.isNotEmpty) {
-      return _buildItemsList();
+    // Show loading skeleton while loading
+    if (!_isLoaded) {
+      return _buildSkeletonLoader();
     }
 
-    // If we have loaded but no items, show appropriate empty state
-    if (_isLoaded && _filteredItems.isEmpty) {
+    // Show empty state if no items
+    if (_filteredItems.isEmpty) {
       return _buildEmptyState();
     }
 
-    // Otherwise, use FutureBuilder for initial load
-    return FutureBuilder<Map<String, dynamic>>(
-      future: _dataFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting && !_isLoaded) {
-          return _buildSkeletonLoader();
-        } else if (snapshot.hasError && !_isLoaded) {
-          return _buildErrorState(snapshot.error.toString());
-        } else if (snapshot.hasData || _isLoaded) {
-          if (_filteredItems.isEmpty) {
-            return _buildEmptyState();
-          }
-          return _buildItemsList();
-        } else {
-          return _buildSkeletonLoader();
-        }
-      },
-    );
+    // Show the items list
+    return _buildItemsList();
   }
 
   Widget _buildSkeletonLoader() {
@@ -859,25 +919,6 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
               borderRadius: BorderRadius.circular(4),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorState(String error) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
-          const SizedBox(height: 16),
-          Text(
-            error,
-            style: TextStyle(color: Colors.grey[600], fontSize: 16),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton(onPressed: _refreshData, child: const Text('Retry')),
         ],
       ),
     );

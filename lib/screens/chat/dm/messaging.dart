@@ -23,6 +23,8 @@ import '../../../services/websocket_message_handler.dart';
 import '../../../utils/chat_helpers.dart';
 import '../../../utils/message_storage_helpers.dart';
 import '../../../widgets/media_preview_widgets.dart';
+import '../../../widgets/chat/message_action_sheet.dart';
+import '../../../widgets/loading_dots_animation.dart';
 import '../../../services/call_service.dart';
 import 'package:provider/provider.dart' as material_provider;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -222,7 +224,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   Future<void> _loadDraft() async {
     // Load directly from service for immediate access
     final draftService = DraftMessageService();
-    final draft = await draftService.getDraft(widget.conversation.conversationId);
+    final draft = await draftService.getDraft(
+      widget.conversation.conversationId,
+    );
     if (draft != null && draft.isNotEmpty) {
       _messageController.text = draft;
       // Also update the provider state
@@ -463,15 +467,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           .catchError((e) {
             debugPrint('❌ Error sending active_in_conversation: $e');
           });
-
-      _websocketService
-          .sendMessage({
-            'type': 'online_status',
-            'conversation_id': widget.conversation.conversationId,
-          })
-          .catchError((e) {
-            debugPrint('❌ Error sending online_status: $e');
-          });
     });
   }
 
@@ -483,9 +478,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         final localUser = await _userRepo.getUserById(_currentUserId!);
         if (localUser != null) {
           _hasCallAccess = localUser.callAccess;
-          debugPrint(
-            '✅ Got call access from local DB: $_hasCallAccess (instant!)',
-          );
 
           // Update UI immediately with cached value
           if (mounted) {
@@ -1013,7 +1005,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Save draft before disposing
     if (_messageController.text.isNotEmpty) {
       final draftNotifier = ref.read(draftMessagesProvider.notifier);
-      draftNotifier.saveDraft(widget.conversation.conversationId, _messageController.text);
+      draftNotifier.saveDraft(
+        widget.conversation.conversationId,
+        _messageController.text,
+      );
     }
 
     // Remove listener
@@ -1071,7 +1066,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       _stopAudioProgressTimer();
       _audioPlayer.closePlayer();
     } catch (e) {
-      print('Warning: Error closing audio player during dispose: $e');
+      debugPrint('Warning: Error closing audio player during dispose: $e');
     }
 
     // Clear message keys to prevent memory leaks
@@ -1502,11 +1497,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       }
 
       // Check if this is our own optimistic message being confirmed
-      // if (_optimisticMessageIds.contains(optimisticId)) {
-      //   debugPrint('🔄 Replacing optimistic reply message with server message');
-      //   _replaceOptimisticMessage(optimisticId, message);
-      //   return;
-      // }
+      if (_optimisticMessageIds.contains(optimisticId)) {
+        debugPrint('🔄 Replacing optimistic reply message with server message');
+        _replaceOptimisticMessage(optimisticId, message);
+        return;
+      }
 
       // If this is our own message (sender), update the optimistic message in local storage
       if (_currentUserId != null && userId == _currentUserId) {
@@ -1517,6 +1512,15 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           optimisticId,
           newMessageId,
           message,
+        );
+        return;
+      }
+
+      // Check for duplicate message before processing
+      if (newMessageId != null &&
+          _messages.any((msg) => msg.id == newMessageId)) {
+        debugPrint(
+          '⚠️ Duplicate reply message detected (ID: $newMessageId), skipping',
         );
         return;
       }
@@ -1567,6 +1571,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       if (mounted) {
         setState(() {
           _messages.add(replyMessage);
+          // Sort messages by ID to maintain proper order
+          _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
         });
 
         _animateNewMessage(replyMessage.id);
@@ -1584,13 +1590,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   /// Handle incoming message pin from WebSocket
   void _handleMessagePin(Map<String, dynamic> message) async {
-    print(
-      '-------------------------------------------------------------------------',
-    );
-    print('🔍 handleMessagePin called with message: $message');
-    print(
-      '-------------------------------------------------------------------------',
-    );
     final data = message['data'] as Map<String, dynamic>? ?? {};
     // Get message ID from message_ids array
     final messageIds = message['message_ids'] as List<dynamic>? ?? [];
@@ -1920,11 +1919,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       final senderProfilePic = senderInfo['profile_pic'];
 
       // Skip if this is our own optimistic message being echoed back
-      // if (_optimisticMessageIds.contains(optimisticId)) {
-      //   debugPrint('🔄 Replacing optimistic message with server message');
-      //   _replaceOptimisticMessage(optimisticId, messageData);
-      //   return;
-      // }
+      if (_optimisticMessageIds.contains(optimisticId)) {
+        debugPrint('🔄 Replacing optimistic message with server message');
+        _replaceOptimisticMessage(optimisticId, messageData);
+        return;
+      }
 
       _websocketService.sendMessage({
         'type': 'read_receipt',
@@ -2098,6 +2097,169 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
   }
 
+  void _replaceOptimisticMessage(
+    int optimisticId,
+    Map<String, dynamic> messageData,
+  ) async {
+    try {
+      final index = _messages.indexWhere((msg) => msg.id == optimisticId);
+      if (index != -1) {
+        final data = messageData['data'] as Map<String, dynamic>? ?? {};
+        final messageType = messageData['type'];
+
+        // Handle media messages
+        if (messageType == 'media') {
+          final optimisticMessage = _messages[index];
+          final mediaType = data['message_type'] ?? data['type'] ?? 'image';
+          final mediaData = data['media'] as Map<String, dynamic>? ?? data;
+          final serverId = data['id'] ?? data['messageId'];
+
+          // Determine the actual message type based on loading type or media type
+          String actualType;
+          if (optimisticMessage.type == 'image_loading') {
+            actualType = 'image';
+          } else if (optimisticMessage.type == 'video_loading') {
+            actualType = 'video';
+          } else if (optimisticMessage.type == 'document_loading') {
+            actualType = 'document';
+          } else if (optimisticMessage.type == 'audio_loading') {
+            actualType =
+                'audios'; // Use 'audios' to match the UI rendering logic
+          } else {
+            // Use the media type from server
+            actualType = mediaType.toLowerCase();
+            // Audio messages use 'audios' type
+            if (actualType == 'audio' || actualType == 'voice') {
+              actualType = 'audios';
+            }
+          }
+
+          // Create confirmed media message preserving all optimistic data
+          final confirmedMessage = MessageModel(
+            id: serverId ?? optimisticMessage.id,
+            body: optimisticMessage.body,
+            type: actualType,
+            senderId: optimisticMessage.senderId,
+            conversationId: optimisticMessage.conversationId,
+            createdAt: data['created_at'] ?? optimisticMessage.createdAt,
+            editedAt: data['edited_at'],
+            metadata: data['metadata'] ?? optimisticMessage.metadata,
+            attachments: mediaData,
+            deleted: data['deleted'] == true,
+            senderName: optimisticMessage.senderName,
+            senderProfilePic: optimisticMessage.senderProfilePic,
+            replyToMessage: optimisticMessage.replyToMessage,
+            replyToMessageId: optimisticMessage.replyToMessageId,
+          );
+
+          if (mounted) {
+            setState(() {
+              _messages[index] = confirmedMessage;
+            });
+          }
+
+          // Delete old optimistic message and add confirmed message to database
+          Future.microtask(() async {
+            try {
+              // Delete the old optimistic message from database
+              await _messagesRepo.deleteMessage(optimisticMessage.id);
+
+              // Store confirmed message with server ID
+              if (_conversationMeta != null) {
+                await _messagesRepo.addMessageToCache(
+                  conversationId: widget.conversation.conversationId,
+                  newMessage: confirmedMessage,
+                  updatedMeta: _conversationMeta!,
+                  insertAtBeginning: false,
+                );
+                debugPrint(
+                  '💾 Stored confirmed media message ${confirmedMessage.id} to DB',
+                );
+              }
+            } catch (e) {
+              debugPrint(
+                '❌ Error replacing optimistic media message in DB: $e',
+              );
+            }
+          });
+        } else if (messageType == 'message_reply') {
+          // Handle reply messages differently
+          final newMessageId = data['new_message_id'];
+          final messageBody = data['new_message'] ?? _messages[index].body;
+          final timestamp =
+              messageData['timestamp'] ?? _messages[index].createdAt;
+
+          // Preserve the reply relationship from the optimistic message
+          final optimisticMessage = _messages[index];
+
+          // Create confirmed reply message
+          final confirmedMessage = MessageModel(
+            id: newMessageId ?? DateTime.now().millisecondsSinceEpoch,
+            body: messageBody,
+            type: 'text',
+            senderId: optimisticMessage.senderId,
+            conversationId: optimisticMessage.conversationId,
+            createdAt: timestamp,
+            deleted: false,
+            senderName: optimisticMessage.senderName,
+            senderProfilePic: optimisticMessage.senderProfilePic,
+            replyToMessage:
+                optimisticMessage.replyToMessage, // Preserve reply relationship
+            replyToMessageId: optimisticMessage.replyToMessageId,
+          );
+
+          if (mounted) {
+            setState(() {
+              _messages[index] = confirmedMessage;
+            });
+          }
+
+          await _messagesRepo.updateOptimisticMessage(
+            optimisticMessage.conversationId,
+            optimisticId,
+            newMessageId,
+            messageData,
+          );
+
+          // Store confirmed message with reply data
+          _storeMessageAsync(confirmedMessage);
+
+          debugPrint(
+            '✅ Replaced optimistic group reply message with server-confirmed message',
+          );
+        } else {
+          // Handle regular text messages
+          final senderId = data['sender_id'] != null
+              ? _parseToInt(data['sender_id'])
+              : _messages[index].senderId;
+          final senderInfo = _getUserInfo(senderId);
+
+          // Create the confirmed message using utility
+          final confirmedMessage = MessageStorageHelpers.createConfirmedMessage(
+            optimisticId,
+            messageData,
+            _messages[index],
+            senderInfo,
+          );
+
+          if (mounted) {
+            setState(() {
+              _messages[index] = confirmedMessage;
+            });
+          }
+
+          // Store confirmed message
+          _storeMessageAsync(confirmedMessage);
+        }
+
+        // Remove from optimistic tracking
+        _optimisticMessageIds.remove(optimisticId);
+      }
+    } catch (e) {
+      debugPrint('❌ Error replacing optimistic group message: $e');
+    }
+  }
+
   void _handleTyping(String value) async {
     // final wasTyping = _isTyping;
     final isTyping = value.isNotEmpty;
@@ -2161,11 +2323,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       final senderProfilePic = senderInfo['profile_pic'];
 
       // Skip if this is our own optimistic message being echoed back
-      // if (_optimisticMessageIds.contains(optimisticId)) {
-      //   debugPrint('🔄 Replacing optimistic media message with server message');
-      //   _replaceOptimisticMessage(optimisticId, messageData);
-      //   return;
-      // }
+      if (_optimisticMessageIds.contains(optimisticId)) {
+        debugPrint('🔄 Replacing optimistic media message with server message');
+        _replaceOptimisticMessage(optimisticId, messageData);
+        return;
+      }
 
       // If this is our own message (sender), update the optimistic message in local storage
       if (_currentUserId != null && senderId == _currentUserId) {
@@ -3044,36 +3206,24 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     if (_isCheckingCache && _messages.isEmpty) {
       return Container(
         color: Colors.white, // Pure white background
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: 30,
-              height: 30,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.green[400]!),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Loading messages...',
-              style: TextStyle(color: Colors.grey[600], fontSize: 14),
-            ),
-            const SizedBox(height: 4),
-          ],
-        ),
+        child: Center(child: LoadingDotsAnimation(color: Colors.blue[400])),
       );
     }
 
     // Show appropriate loader based on state
     if (_isLoadingFromCache) {
-      return _buildCacheLoader();
+      return Container(
+        color: Colors.white, // Pure white background
+        child: Center(child: LoadingDotsAnimation(color: Colors.orange[400])),
+      );
     }
 
     // Only show loading if we haven't initialized and don't have messages
     if (_isLoading && !_isInitialized && _messages.isEmpty) {
-      return _buildMinimalLoader();
+      return Container(
+        color: Colors.white, // Pure white background
+        child: Center(child: LoadingDotsAnimation(color: Colors.blue[400])),
+      );
     }
 
     if (_errorMessage != null && _messages.isEmpty) {
@@ -3082,9 +3232,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.message_rounded, size: 32, color: Colors.grey[400]),
-            const SizedBox(height: 16),
+            const SizedBox(height: 6),
             Text(
-              "Conversation not started yet",
+              "No message yet",
               style: TextStyle(color: Colors.grey[600], fontSize: 16),
               textAlign: TextAlign.center,
             ),
@@ -3092,23 +3242,30 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             ElevatedButton(
               onPressed: _loadInitialMessages,
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.teal[50],
+                backgroundColor: Colors.grey[100],
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
+                  horizontal: 20,
+                  vertical: 10,
                 ),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(100),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                elevation: 2,
+                elevation: 0,
               ),
-              child: const Text(
-                'Refresh',
-                style: TextStyle(
-                  color: Colors.black,
-                  fontSize: 12,
-                  fontWeight: FontWeight.normal,
-                ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.refresh_rounded, size: 16, color: Colors.black),
+                  SizedBox(width: 6),
+                  Text(
+                    'Refresh',
+                    style: TextStyle(
+                      color: Colors.black,
+                      fontSize: 12,
+                      fontWeight: FontWeight.normal,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -3769,13 +3926,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Widget _buildReplyPreview(MessageModel replyMessage, bool isMyMessage) {
-    print(
-      "--------------------------------------------------------------------------------",
-    );
-    print("replyMessage -> ${replyMessage.toJson()}");
-    print(
-      "--------------------------------------------------------------------------------",
-    );
     // Determine if the replied-to message is from current user
     final isRepliedMessageMine = _currentUserId != null
         ? replyMessage.senderId == _currentUserId
@@ -4707,59 +4857,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
   }
 
-  Widget _buildMinimalLoader() {
-    return Container(
-      color: Colors.white, // Pure white background
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 40,
-            height: 40,
-            child: CircularProgressIndicator(
-              strokeWidth: 3,
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.teal[400]!),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Loading messages...',
-            style: TextStyle(color: Colors.grey[600], fontSize: 16),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCacheLoader() {
-    return Container(
-      color: Colors.white, // Pure white background
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 40,
-            height: 40,
-            child: CircularProgressIndicator(
-              strokeWidth: 3,
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.green[400]!),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Loading ...',
-            style: TextStyle(color: Colors.grey[600], fontSize: 16),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Much faster! ⚡',
-            style: TextStyle(color: Colors.green[600], fontSize: 14),
-          ),
-        ],
-      ),
-    );
-  }
-
   // Message action methods
   void _toggleMessageSelection(int messageId) {
     setState(() {
@@ -4782,158 +4879,25 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   void _showMessageActions(MessageModel message, bool isMyMessage) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => _buildMessageActionSheet(message, isMyMessage),
-    );
-  }
-
-  Widget _buildMessageActionSheet(MessageModel message, bool isMyMessage) {
     final isPinned = _pinnedMessageId == message.id;
     final isStarred = _starredMessages.contains(message.id);
 
-    return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
-        ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Handle bar
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.grey[300],
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          // Message preview
-          Container(
-            margin: const EdgeInsets.all(16),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.grey[50],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey[200]!),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.message, color: Colors.grey[600], size: 20),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    message.body.length > 50
-                        ? '${message.body.substring(0, 50)}...'
-                        : message.body,
-                    style: TextStyle(color: Colors.grey[700], fontSize: 14),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Action buttons
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-            child: Column(
-              children: [
-                _buildActionButton(
-                  icon: Icons.reply,
-                  label: 'Reply',
-                  onTap: () {
-                    Navigator.pop(context);
-                    _replyToMessage(message);
-                  },
-                ),
-                _buildActionButton(
-                  icon: Icons.copy,
-                  label: 'Copy',
-                  onTap: () {
-                    Navigator.pop(context);
-                    _copyMessage(message);
-                  },
-                ),
-                _buildActionButton(
-                  icon: isPinned ? Icons.push_pin_outlined : Icons.push_pin,
-                  label: isPinned ? 'Unpin' : 'Pin',
-                  onTap: () {
-                    Navigator.pop(context);
-                    _togglePinMessage(message.id);
-                  },
-                ),
-                _buildActionButton(
-                  icon: isStarred ? Icons.star : Icons.star_border,
-                  label: isStarred ? 'Unstar' : 'Star',
-                  onTap: () {
-                    Navigator.pop(context);
-                    _toggleStarMessage(message.id);
-                  },
-                ),
-                _buildActionButton(
-                  icon: Icons.forward,
-                  label: 'Forward',
-                  onTap: () {
-                    Navigator.pop(context);
-                    _forwardMessage(message);
-                  },
-                ),
-                _buildActionButton(
-                  icon: Icons.select_all,
-                  label: 'Select',
-                  onTap: () {
-                    Navigator.pop(context);
-                    _enterSelectionMode(message.id);
-                  },
-                ),
-                if (isMyMessage)
-                  _buildActionButton(
-                    icon: Icons.delete_outline,
-                    label: 'Delete',
-                    color: Colors.red,
-                    onTap: () {
-                      Navigator.pop(context);
-                      _deleteMessage(message.id);
-                    },
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    Color? color,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-        child: Row(
-          children: [
-            Icon(icon, color: color ?? Colors.grey[700], size: 24),
-            const SizedBox(width: 16),
-            Text(
-              label,
-              style: TextStyle(
-                color: color ?? Colors.grey[800],
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => MessageActionSheet(
+        message: message,
+        isMyMessage: isMyMessage,
+        isPinned: isPinned,
+        isStarred: isStarred,
+        showReadBy: false,
+        onReply: () => _replyToMessage(message),
+        onCopy: () => _copyMessage(message),
+        onPin: () => _togglePinMessage(message.id),
+        onStar: () => _toggleStarMessage(message.id),
+        onForward: () => _forwardMessage(message),
+        onSelect: () => _enterSelectionMode(message.id),
+        onDelete: isMyMessage ? () => _deleteMessage(message.id) : null,
       ),
     );
   }
@@ -6204,8 +6168,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Message copied to clipboard'),
-            duration: Duration(seconds: 2),
+            content: Text('Message copied'),
+            duration: Duration(seconds: 1),
           ),
         );
       }
@@ -7929,7 +7893,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     print('Initiating call to 1 ${widget.conversation.userId}');
     try {
       print('Initiating call to 2 ${widget.conversation.userId}');
-      final callService = material_provider.Provider.of<CallService>(context, listen: false);
+      final callService = material_provider.Provider.of<CallService>(
+        context,
+        listen: false,
+      );
 
       // Check WebSocket connection status
       if (!_websocketService.isConnected) {
