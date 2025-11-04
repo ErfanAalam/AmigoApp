@@ -1,3 +1,5 @@
+import 'package:amigo/api/user.service.dart';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart'
@@ -34,7 +36,7 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
   final AuthService authService = AuthService();
   final NotificationService notificationService = NotificationService();
   final WebSocketService wsService = WebSocketService();
-
+  final UserService userService = UserService();
   @override
   void dispose() {
     _firstNameController.dispose();
@@ -77,6 +79,8 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
       (route) => false,
     );
   }
+
+
 
   void _showCountrySelector() {
     material.showDialog(
@@ -165,6 +169,9 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
 
       // Show the setup loading popup
       _showSetupLoadingPopup();
+
+      final appVersion = await UserUtils().getAppVersion();
+      await userService.updateUser({'app_version': appVersion});
       // Authentication is handled in the API service interceptor
       // which automatically stores cookies and updates auth state
       if (!mounted) return;

@@ -1712,7 +1712,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       if (mounted) {
         setState(() {
           _messages.add(newMessage);
-          _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
+          // _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
           // Update sticky date separator for new messages
           _currentStickyDate = ChatHelpers.getMessageDateString(
             newMessage.createdAt,
@@ -2256,7 +2256,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       if (mounted) {
         setState(() {
           _messages.add(newMediaMessage);
-          _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
+          // _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
           // Update sticky date separator for new messages
           _currentStickyDate = ChatHelpers.getMessageDateString(
             newMediaMessage.createdAt,
@@ -2915,15 +2915,15 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                             fontSize: 16,
                           ),
                         ),
-                        if (_isOtherTypingNotifier.value) ...[
-                          Text(
-                            'Typing...',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
+                        // if (_isOtherTypingNotifier.value) ...[
+                        //   Text(
+                        //     'Typing...',
+                        //     style: TextStyle(
+                        //       color: Colors.white70,
+                        //       fontSize: 12,
+                        //     ),
+                        //   ),
+                        // ],
                       ],
                     ),
                   ),
@@ -2960,6 +2960,17 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       body: SafeArea(
         child: Stack(
           children: [
+            // Background Image
+            Positioned.fill(
+              child: Container(
+                decoration: const BoxDecoration(
+                  image: DecorationImage(
+                    image: AssetImage('assets/images/chat_bg.jpg'),
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
+            ),
             Column(
               children: [
                 // Pinned Message Section
@@ -3001,7 +3012,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // Show cache loader while checking cache (prevent black screen)
     if (_isCheckingCache && _messages.isEmpty) {
       return Container(
-        color: Colors.white, // Pure white background
+        color: Colors.transparent, // Transparent to show background image
         child: Center(child: LoadingDotsAnimation(color: Colors.blue[400])),
       );
     }
@@ -3009,7 +3020,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // Show appropriate loader based on state
     if (_isLoadingFromCache) {
       return Container(
-        color: Colors.white, // Pure white background
+        color: Colors.transparent, // Transparent to show background image
         child: Center(child: LoadingDotsAnimation(color: Colors.orange[400])),
       );
     }
@@ -3017,7 +3028,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // Only show loading if we haven't initialized and don't have messages
     if (_isLoading && !_isInitialized && _messages.isEmpty) {
       return Container(
-        color: Colors.white, // Pure white background
+        color: Colors.transparent, // Transparent to show background image
         child: Center(child: LoadingDotsAnimation(color: Colors.blue[400])),
       );
     }
@@ -3096,7 +3107,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
 
     return Container(
-      color: Colors.white, // Pure white background
+      color: Colors.transparent, // Transparent to show background image
       child: ListView.builder(
         controller: _scrollController,
         reverse: true, // Start from bottom (newest messages)

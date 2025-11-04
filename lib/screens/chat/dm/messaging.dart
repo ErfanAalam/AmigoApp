@@ -1572,7 +1572,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         setState(() {
           _messages.add(replyMessage);
           // Sort messages by ID to maintain proper order
-          _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
+          // _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
         });
 
         _animateNewMessage(replyMessage.id);
@@ -2009,7 +2009,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       if (mounted) {
         setState(() {
           _messages.add(newMessage);
-          _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
+          // _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
         });
         // Update sticky date separator for new messages - using ValueNotifier
         _currentStickyDate.value = ChatHelpers.getMessageDateString(
@@ -2018,7 +2018,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         _showStickyDate.value = true;
 
         _animateNewMessage(newMessage.id);
-        _scrollToBottom();
+        // _scrollToBottom();
       }
 
       // Store message asynchronously
@@ -2480,11 +2480,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       if (mounted) {
         setState(() {
           _messages.add(newMediaMessage);
-          _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
+          // _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
         });
 
         _animateNewMessage(newMediaMessage.id);
-        _scrollToBottom();
+        // _scrollToBottom();
       }
 
       // Store message asynchronously in local storage
@@ -3081,6 +3081,16 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       body: SafeArea(
         child: Stack(
           children: [
+            Positioned.fill(
+              child: Container(
+                decoration: const BoxDecoration(
+                  image: DecorationImage(
+                    image: AssetImage('assets/images/chat_bg.jpg'),
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
+            ),
             Column(
               children: [
                 // Pinned Message Section
@@ -3205,7 +3215,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Show cache loader while checking cache (prevent black screen)
     if (_isCheckingCache && _messages.isEmpty) {
       return Container(
-        color: Colors.white, // Pure white background
+        color: Colors.transparent, // Pure white background
         child: Center(child: LoadingDotsAnimation(color: Colors.blue[400])),
       );
     }
@@ -3213,7 +3223,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Show appropriate loader based on state
     if (_isLoadingFromCache) {
       return Container(
-        color: Colors.white, // Pure white background
+        color: Colors.transparent, // Pure white background
         child: Center(child: LoadingDotsAnimation(color: Colors.orange[400])),
       );
     }
@@ -3221,7 +3231,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Only show loading if we haven't initialized and don't have messages
     if (_isLoading && !_isInitialized && _messages.isEmpty) {
       return Container(
-        color: Colors.white, // Pure white background
+        color: Colors.transparent,   // Pure white background
         child: Center(child: LoadingDotsAnimation(color: Colors.blue[400])),
       );
     }
@@ -3299,7 +3309,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
 
     return Container(
-      color: Colors.white, // Pure white background
+      color: Colors.transparent, // Pure white background
       child: ListView.builder(
         controller: _scrollController,
         reverse: true, // Start from bottom (newest messages)

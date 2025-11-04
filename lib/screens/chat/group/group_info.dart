@@ -586,22 +586,23 @@ class _GroupInfoPageState extends State<GroupInfoPage>
       return;
     }
 
-    // Load available users first
-    await _loadAvailableUsers();
 
-    if (_availableUsers.isEmpty) {
-      _showSnackBar(
-        'No available contacts to add. All your contacts may already be in this group or you may need to sync your contacts first.',
-        isError: true,
-      );
-      return;
-    }
+
+    // if (_availableUsers.isEmpty) {
+    //   _showSnackBar(
+    //     'No available contacts to add. All your contacts may already be in this group or you may need to sync your contacts first.',
+    //     isError: true,
+    //   );
+    //   return;
+    // }
 
     // Reset selection
     _selectedUserIds.clear();
 
     // Show the animated dialog
     await _showAnimatedAddMemberDialog();
+        // Load available users first
+    await _loadAvailableUsers();
   }
 
   Future<void> _refreshContacts() async {
@@ -796,7 +797,9 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                         ),
                         child: Row(
                           children: [
-                            Checkbox(
+                            if(_availableUsers.isNotEmpty)
+                            ...[
+                              Checkbox(
                               value:
                                   _selectedUserIds.length ==
                                   _availableUsers.length,
@@ -817,16 +820,16 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                 borderRadius: BorderRadius.circular(4),
                               ),
                             ),
+                            ],
                             const SizedBox(width: 8),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    _selectedUserIds.length ==
-                                            _availableUsers.length
-                                        ? 'Deselect All'
-                                        : 'Select All',
+                                   _availableUsers.isEmpty
+                                        ? 'No remaining contacts'
+                                        : _selectedUserIds.length == _availableUsers.length ? 'Deselect All' : 'Select All',
                                     style: const TextStyle(
                                       fontWeight: FontWeight.w600,
                                       fontSize: 16,
@@ -834,7 +837,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
-                                    '${_availableUsers.length} contacts available',
+                                    '${_availableUsers.length} available contact${_availableUsers.length > 1 ? 's' : ''}',
                                     style: TextStyle(
                                       color: Colors.grey.shade600,
                                       fontSize: 12,
@@ -2074,12 +2077,13 @@ class _GroupInfoPageState extends State<GroupInfoPage>
               child: SlideTransition(
                 position: _slideAnimation,
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(2),
                   child: Column(
                     children: [
                       // Group Header Card
                       Card(
-                        elevation: 2,
+                        elevation: 0,
+                        color: Colors.grey[50],
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
                         ),
@@ -2147,7 +2151,8 @@ class _GroupInfoPageState extends State<GroupInfoPage>
 
                       // Members Section
                       Card(
-                        elevation: 2,
+                        elevation: 0,
+                        color: Colors.grey[100],
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
                         ),

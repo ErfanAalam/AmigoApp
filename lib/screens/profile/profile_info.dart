@@ -1,6 +1,7 @@
 import 'package:amigo/api/user.service.dart';
 import 'package:amigo/models/user_model.dart';
 import 'package:amigo/repositories/user_repository.dart';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -13,7 +14,6 @@ import 'deleted_dms.dart';
 import '../../api/api_service.dart';
 import '../../services/chat_preferences_service.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 // import 'package:cached_network_image/cached_network_image.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -37,7 +37,6 @@ class _ProfilePageState extends State<ProfilePage> {
   bool isUpdatingProfilePic = false;
   int deletedChatsCount = 0;
   String appVersion = '';
-  String buildNumber = '';
 
   final UserRepository _userRepo = UserRepository();
 
@@ -66,11 +65,10 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> _loadAppVersion() async {
     try {
-      final packageInfo = await PackageInfo.fromPlatform();
+      final appVersion = await UserUtils().getAppVersion();
       if (mounted) {
         setState(() {
-          appVersion = packageInfo.version;
-          buildNumber = packageInfo.buildNumber;
+          this.appVersion = appVersion;
         });
       }
     } catch (e) {
@@ -78,26 +76,6 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  // Future<void> _loadUserData() async {
-  //   try {
-  //     final response = await _userService.getUser();
-
-  //     if (response['success'] && mounted) {
-  //       setState(() {
-  //         userData = response['data'];
-  //         isLoading = false;
-  //       });
-  //     } else {
-  //       setState(() {
-  //         isLoading = false;
-  //       });
-  //     }
-  //   } catch (e) {
-  //     setState(() {
-  //       isLoading = false;
-  //     });
-  //   }
-  // }
 
   // load user: first local, then remote & sync
   Future<void> _loadUserData() async {

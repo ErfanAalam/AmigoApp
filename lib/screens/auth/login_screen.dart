@@ -1,4 +1,6 @@
+import 'package:amigo/api/user.service.dart';
 import 'package:amigo/services/websocket_service.dart';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:shared_preferences/shared_preferences.dart'
     show SharedPreferences;
@@ -28,6 +30,7 @@ class _LoginScreenState extends material.State<LoginScreen> {
   final ApiService apiService = ApiService();
   final AuthService authService = AuthService();
   final WebSocketService wsService = WebSocketService();
+  final UserService _userService = UserService();
 
   @override
   void dispose() {
@@ -76,6 +79,7 @@ class _LoginScreenState extends material.State<LoginScreen> {
           content: material.Text('OTP sent successfully'),
         ),
       );
+
       setState(() {
         _isPhoneSubmitted = true;
       });
@@ -120,6 +124,8 @@ class _LoginScreenState extends material.State<LoginScreen> {
             content: material.Text('OTP verified successfully'),
           ),
         );
+        final appVersion = await UserUtils().getAppVersion();
+        await _userService.updateUser({'app_version': appVersion});
 
         // Store user name in shared preferences for later use
         final prefs = await SharedPreferences.getInstance();

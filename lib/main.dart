@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
@@ -90,7 +91,7 @@ class _MyAppState extends material.State<MyApp> {
   bool _isAuthenticated = false;
   StreamSubscription? _intentDataStreamSubscription;
   int _notificationRetryCount = 0;
-  String appVersion = '';
+  // String appVersion = '';
 
   @override
   void initState() {
@@ -99,7 +100,7 @@ class _MyAppState extends material.State<MyApp> {
     _checkAuthentication();
     _setupWebSocketListeners();
     _initializeSharing();
-    _loadAppVersion();
+    // _loadAppVersion();
     _getCurrentUser();
 
     // Process initial notification after the first frame is rendered
@@ -115,18 +116,18 @@ class _MyAppState extends material.State<MyApp> {
     prefs.setString('current_user_name', userInfo?.name ?? '');
   }
 
-  Future<void> _loadAppVersion() async {
-    try {
-      final packageInfo = await PackageInfo.fromPlatform();
-      if (mounted) {
-        setState(() {
-          appVersion = packageInfo.version;
-        });
-      }
-    } catch (e) {
-      debugPrint('❌ Error loading app version');
-    }
-  }
+  // Future<void> _loadAppVersion() async {
+  //   try {
+  //     final packageInfo = await PackageInfo.fromPlatform();
+  //     if (mounted) {
+  //       setState(() {
+  //         appVersion = packageInfo.version;
+  //       });
+  //     }
+  //   } catch (e) {
+  //     debugPrint('❌ Error loading app version');
+  //   }
+  // }
 
   /// Process initial notification from terminated state
   Future<void> _processInitialNotification() async {
@@ -173,7 +174,7 @@ class _MyAppState extends material.State<MyApp> {
         // if (userId != null) {
         // await _notificationService.sendTokenToBackend(userId.toString());
         // }
-
+        final appVersion = await UserUtils().getAppVersion();
         await _userService.updateUser({'app_version': appVersion});
 
         // await _apiService.updateUserLocationAndIp();
