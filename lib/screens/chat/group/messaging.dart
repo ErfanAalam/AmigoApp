@@ -82,6 +82,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   bool _hasCheckedCache = false;
   bool _isCheckingCache = true;
   bool _isTyping = false;
+  bool _isAdminOrStaff = false;
   // bool _isOtherTyping = false;
   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
 
@@ -310,6 +311,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // Load draft message for this conversation
     _loadDraft();
 
+    // Check admin or staff status
+    _updateIsAdminOrStaff();
+
     // Listen to text changes for draft saving
     _messageController.addListener(_onMessageTextChanged);
   }
@@ -324,6 +328,28 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       // Also update the provider state
       final draftNotifier = ref.read(draftMessagesProvider.notifier);
       draftNotifier.saveDraft(widget.group.conversationId, draft);
+    }
+  }
+
+  Future<void> _updateIsAdminOrStaff() async {
+    // Load directly from service for immediate access
+
+    if (widget.group.role == 'admin') {
+      setState(() {
+        _isAdminOrStaff = true;
+      });
+    } else {
+      // Check if user role is 'staff'
+      try {
+        final currentUser = await _userRepo.getFirstUser();
+        if (currentUser != null && currentUser.role == 'staff') {
+          setState(() {
+            _isAdminOrStaff = true;
+          });
+        }
+      } catch (e) {
+        debugPrint('❌ Error checking user role: $e');
+      }
     }
   }
 
@@ -681,6 +707,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       if (cachedUser != null) {
         // Assume the first user we find in local cache is us
         _currentUserId = cachedUser.id;
+        // Cache admin/staff status
+        _isAdminOrStaff =
+            widget.group.role == 'admin' || cachedUser.role == 'staff';
         return;
       }
 
@@ -707,6 +736,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           callAccess: userData['call_access'] == true,
         );
         await _userRepo.insertOrUpdateUser(userModel);
+        // Cache admin/staff status
+        _isAdminOrStaff =
+            widget.group.role == 'admin' || userModel.role == 'staff';
       } else {
         debugPrint('⚠️ Could not get current user ID from API');
       }
@@ -716,6 +748,21 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     if (_currentUserId == null) {
       debugPrint('⚠️ WARNING: Could not determine current user ID for group');
+    }
+
+    // Initialize admin/staff status if not already set
+
+    // Try to get user role from cache
+    try {
+      final cachedUser = await _userRepo.getFirstUser();
+      if (cachedUser != null) {
+        setState(() {
+          _isAdminOrStaff =
+              widget.group.role == 'admin' || cachedUser.role == 'staff';
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error checking admin/staff status: $e');
     }
   }
 
@@ -2932,23 +2979,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         backgroundColor: Colors.teal,
         elevation: 0,
         actions: _isSelectionMode
-            ? [
-                IconButton(
-                  icon: const Icon(Icons.star_border, color: Colors.white),
-                  onPressed: _bulkStarMessages,
-                  tooltip: 'Star messages',
-                ),
-                IconButton(
-                  icon: const Icon(Icons.forward, color: Colors.white),
-                  onPressed: _bulkForwardMessages,
-                  tooltip: 'Forward messages',
-                ),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.white),
-                  onPressed: _bulkDeleteMessages,
-                  tooltip: 'Delete messages',
-                ),
-              ]
+            ? _buildSelectionModeActions()
             : [
                 IconButton(
                   icon: const Icon(Icons.info_outline, color: Colors.white),
@@ -3785,9 +3816,38 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
   }
 
-  void _showMessageActions(MessageModel message, bool isMyMessage) {
+  Future<void> _showMessageActions(
+    MessageModel message,
+    bool isMyMessage,
+  ) async {
     final isPinned = _pinnedMessageId == message.id;
     final isStarred = _starredMessages.contains(message.id);
+
+    // Check if the current user is group admin or user role = staff
+    bool isAdmin = false;
+
+    // Check if user is group admin
+    if (widget.group.role == 'admin') {
+      isAdmin = true;
+      setState(() {
+        _isAdminOrStaff = true;
+      });
+    } else {
+      // Check if user role is 'staff'
+      try {
+        final currentUser = await _userRepo.getFirstUser();
+        if (currentUser != null && currentUser.role == 'staff') {
+          isAdmin = true;
+          setState(() {
+            _isAdminOrStaff = true;
+          });
+        }
+      } catch (e) {
+        debugPrint('❌ Error checking user role: $e');
+      }
+    }
+
+    if (!mounted) return;
 
     showModalBottomSheet(
       context: context,
@@ -3797,6 +3857,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         isMyMessage: isMyMessage,
         isPinned: isPinned,
         isStarred: isStarred,
+        isAdmin: isAdmin,
         showReadBy: true,
         onReply: () => _replyToMessage(message),
         onCopy: () => _copyMessage(message),
@@ -3805,7 +3866,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         onForward: () => _forwardMessage(message),
         onSelect: () => _enterSelectionMode(message.id),
         onReadBy: () => _showReadByModal(message),
-        onDelete: isMyMessage ? () => _deleteMessage(message.id) : null,
+        onDelete: isAdmin || _isAdminOrStaff
+            ? () => _deleteMessage(message.id)
+            : null,
       ),
     );
   }
@@ -7111,6 +7174,82 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     });
   }
 
+  /// Check if current user is group admin or has staff role
+  Future<bool> _isUserAdminOrStaff() async {
+    // Check if user is group admin
+    if (widget.group.role == 'admin') {
+      return true;
+    }
+
+    // Check if user role is 'staff'
+    try {
+      final currentUser = await _userRepo.getFirstUser();
+      if (currentUser != null && currentUser.role == 'staff') {
+        return true;
+      }
+    } catch (e) {
+      debugPrint('❌ Error checking user role: $e');
+    }
+
+    return false;
+  }
+
+  /// Check if all selected messages belong to the current user
+  bool _areAllSelectedMessagesMine() {
+    if (_currentUserId == null || _selectedMessages.isEmpty) {
+      return false;
+    }
+
+    return _selectedMessages.every((messageId) {
+      final message = _messages.firstWhere(
+        (msg) => msg.id == messageId,
+        orElse: () => MessageModel(
+          id: 0,
+          body: '',
+          type: 'text',
+          senderId: 0,
+          conversationId: widget.group.conversationId,
+          createdAt: DateTime.now().toIso8601String(),
+          deleted: false,
+          senderName: '',
+        ),
+      );
+      return message.senderId == _currentUserId;
+    });
+  }
+
+  /// Build selection mode actions with conditional delete button
+  List<Widget> _buildSelectionModeActions() {
+    final actions = <Widget>[
+      IconButton(
+        icon: const Icon(Icons.star_border, color: Colors.white),
+        onPressed: _bulkStarMessages,
+        tooltip: 'Star messages',
+      ),
+      IconButton(
+        icon: const Icon(Icons.forward, color: Colors.white),
+        onPressed: _bulkForwardMessages,
+        tooltip: 'Forward messages',
+      ),
+    ];
+
+    // Show delete button if:
+    // 1. User is admin/staff, OR
+    // 2. All selected messages belong to the current user
+
+    if (_isAdminOrStaff) {
+      actions.add(
+        IconButton(
+          icon: const Icon(Icons.delete_outline, color: Colors.white),
+          onPressed: _bulkDeleteMessages,
+          tooltip: 'Delete messages',
+        ),
+      );
+    }
+
+    return actions;
+  }
+
   void _exitSelectionMode() {
     setState(() {
       _selectedMessages.clear();
@@ -7209,7 +7348,25 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   void _deleteMessage(int messageId) async {
-    final response = await _chatsServices.deleteMessage([messageId]);
+    // bool isAdminOrStaff = false;
+    //
+    // if (widget.group.role == 'admin') {
+    //   isAdminOrStaff = true;
+    // } else {
+    //   // Check if user role is 'staff'
+    //   try {
+    //     final currentUser = await _userRepo.getFirstUser();
+    //     if (currentUser != null && currentUser.role == 'staff') {
+    //       isAdminOrStaff = true;
+    //     }
+    //   } catch (e) {
+    //     debugPrint('❌ Error checking user role: $e');
+    //   }
+    // }
+
+    final response = await _chatsServices.deleteMessage([
+      messageId,
+    ], _isAdminOrStaff);
 
     if (response['success'] == true) {
       debugPrint('✅ Group message deleted successfully');
@@ -7301,6 +7458,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   void _bulkDeleteMessages() async {
     final response = await _chatsServices.deleteMessage(
       _selectedMessages.map((id) => id).toList(),
+      _isAdminOrStaff,
     );
 
     if (response['success'] == true) {

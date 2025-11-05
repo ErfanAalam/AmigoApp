@@ -87,11 +87,14 @@ class ChatsServices {
     }
   }
 
-  Future<Map<String, dynamic>> deleteMessage(List<int> messageIds) async {
+  Future<Map<String, dynamic>> deleteMessage(
+    List<int> messageIds, [
+    bool? isAdminOrStaff,
+  ]) async {
     try {
       final response = await _apiService.authenticatedDelete(
         '/chat/soft-delete-message',
-        body: {'message_ids': messageIds},
+        body: {'message_ids': messageIds, 'is_admin_or_staff': isAdminOrStaff},
       );
       return response.data;
     } catch (e) {

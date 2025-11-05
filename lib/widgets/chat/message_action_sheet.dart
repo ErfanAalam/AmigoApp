@@ -6,6 +6,7 @@ class MessageActionSheet extends StatelessWidget {
   final MessageModel message;
   final bool isMyMessage;
   final bool isPinned;
+  final bool isAdmin;
   final bool isStarred;
   final bool showReadBy;
   final VoidCallback onReply;
@@ -23,6 +24,7 @@ class MessageActionSheet extends StatelessWidget {
     required this.isMyMessage,
     required this.isPinned,
     required this.isStarred,
+    this.isAdmin = false,
     this.showReadBy = false,
     required this.onReply,
     required this.onCopy,
@@ -147,7 +149,8 @@ class MessageActionSheet extends StatelessWidget {
                         onReadBy!();
                       },
                     ),
-                  if (isMyMessage && onDelete != null)
+                  // if ((isMyMessage && onDelete != null && !isAdmin) || (isAdmin && onDelete != null))
+                  if (isAdmin && onDelete != null)
                     MessageActionButton(
                       icon: Icons.delete_outline,
                       label: 'Delete',

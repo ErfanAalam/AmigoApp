@@ -3056,11 +3056,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                   onPressed: _bulkForwardMessages,
                   tooltip: 'Forward messages',
                 ),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.white),
-                  onPressed: _bulkDeleteMessages,
-                  tooltip: 'Delete messages',
-                ),
+                // IconButton(
+                //   icon: const Icon(Icons.delete_outline, color: Colors.white),
+                //   onPressed: _bulkDeleteMessages,
+                //   tooltip: 'Delete messages',
+                // ),
               ]
             : [
                 // Only show call button if user has call access
@@ -3215,7 +3215,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Show cache loader while checking cache (prevent black screen)
     if (_isCheckingCache && _messages.isEmpty) {
       return Container(
-        color: Colors.transparent, // Pure white background
+        color: Colors.black.withAlpha(20),
         child: Center(child: LoadingDotsAnimation(color: Colors.blue[400])),
       );
     }
@@ -3223,7 +3223,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Show appropriate loader based on state
     if (_isLoadingFromCache) {
       return Container(
-        color: Colors.transparent, // Pure white background
+        color: Colors.black.withAlpha(20),
         child: Center(child: LoadingDotsAnimation(color: Colors.orange[400])),
       );
     }
@@ -3231,7 +3231,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Only show loading if we haven't initialized and don't have messages
     if (_isLoading && !_isInitialized && _messages.isEmpty) {
       return Container(
-        color: Colors.transparent,   // Pure white background
+        color: Colors.black.withAlpha(20),
         child: Center(child: LoadingDotsAnimation(color: Colors.blue[400])),
       );
     }
@@ -3309,7 +3309,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
 
     return Container(
-      color: Colors.transparent, // Pure white background
+      color: Colors.black.withAlpha(20), // Pure white background
       child: ListView.builder(
         controller: _scrollController,
         reverse: true, // Start from bottom (newest messages)
@@ -3810,7 +3810,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                             decoration: BoxDecoration(
                               color: isMyMessage
                                   ? Colors.teal[600]
-                                  : Colors.grey[100],
+                                  : Colors.white,
                               borderRadius: BorderRadius.only(
                                 topLeft: const Radius.circular(14),
                                 topRight: const Radius.circular(14),
@@ -3948,7 +3948,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: isMyMessage ? Colors.white.withAlpha(15) : Colors.grey[200],
+          color: isMyMessage ? Colors.white.withAlpha(20) : Colors.grey[100],
           borderRadius: BorderRadius.circular(8),
           border: Border(
             left: BorderSide(

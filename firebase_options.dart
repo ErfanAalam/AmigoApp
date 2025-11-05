@@ -56,7 +56,7 @@ class DefaultFirebaseOptions {
     apiKey: 'AIzaSyDudOOwiZzbOsj6_Goicvk4xfwkVhXN5q8',
     appId: '1:111586287924:android:79fcef6238b2cc3a224561',
     messagingSenderId: '111586287924',
-    projectId: 'hehe-fd133',
-    storageBucket: 'hehe-fd133.firebasestorage.app',
+    projectId: 'amigo-ec5be',
+    storageBucket: 'amigo-ec5be.firebasestorage.app',
   );
 }
