@@ -1,5 +1,5 @@
 import 'package:amigo/api/user.service.dart';
-import 'package:amigo/services/websocket_service.dart';
+import 'package:amigo/services/socket/websocket_service.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:shared_preferences/shared_preferences.dart'

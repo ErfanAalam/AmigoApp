@@ -4,7 +4,7 @@ import 'package:flutter/material.dart' as material;
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart'
     show SharedPreferences;
-import '../../services/websocket_service.dart';
+import '../../services/socket/websocket_service.dart';
 import '../home_layout.dart';
 import '../../api/api_service.dart';
 import '../../services/auth/auth.service.dart';

@@ -18,12 +18,13 @@ import '../../../repositories/conversations_repository.dart';
 import '../../../services/message_storage_service.dart';
 import '../../../repositories/messages_repository.dart';
 import '../../../repositories/user_repository.dart';
-import '../../../services/websocket_service.dart';
-import '../../../services/websocket_message_handler.dart';
+import '../../../services/socket/websocket_service.dart';
+import '../../../services/socket/websocket_message_handler.dart';
 import '../../../utils/chat_helpers.dart';
 import '../../../utils/message_storage_helpers.dart';
 import '../../../widgets/media_preview_widgets.dart';
 import '../../../widgets/chat/message_action_sheet.dart';
+import '../../../widgets/chat/date.widgets.dart';
 import '../../../widgets/loading_dots_animation.dart';
 import '../../../services/call_service.dart';
 import 'package:provider/provider.dart' as material_provider;
@@ -84,6 +85,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   StreamSubscription<Map<String, dynamic>>? _messageStarSubscription;
   StreamSubscription<Map<String, dynamic>>? _messageReplySubscription;
   StreamSubscription<Map<String, dynamic>>? _onlineStatusSubscription;
+  StreamSubscription<Map<String, dynamic>>? _messageDeleteSubscription;
   StreamSubscription? _audioProgressSubscription;
   Timer? _audioProgressTimer;
   DateTime? _audioStartTime;
@@ -996,6 +998,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     _messageStarSubscription?.cancel();
     _messageReplySubscription?.cancel();
     _onlineStatusSubscription?.cancel();
+    _messageDeleteSubscription?.cancel();
     _typingAnimationController.dispose();
     _typingTimeout?.cancel();
     _scrollDebounceTimer?.cancel();
@@ -1467,6 +1470,16 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           },
         );
 
+    // Listen to message delete events for this conversation
+    _messageDeleteSubscription = _messageHandler
+        .messageDeletesForConversation(conversationId)
+        .listen(
+          (message) => _handleMessageDelete(message),
+          onError: (error) {
+            debugPrint('❌ Message delete stream error: $error');
+          },
+        );
+
     // Listen to online status for this conversation
     _onlineStatusSubscription = _messageHandler
         .onlineStatusForConversation(conversationId)
@@ -1646,6 +1659,35 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       debugPrint(
         '❌ Error updating starred messages from WebSocket in storage: $e',
       );
+    }
+  }
+
+  /// Handle message delete event from WebSocket
+  void _handleMessageDelete(Map<String, dynamic> message) async {
+    try {
+      final messageIds = message['message_ids'] as List<dynamic>? ?? [];
+      if (messageIds.isEmpty) return;
+
+      final deletedMessageIds = messageIds.map((id) => id as int).toList();
+
+      debugPrint('🗑️ Received message_delete event for messages: $deletedMessageIds');
+
+      // Remove from UI
+      if (mounted) {
+        setState(() {
+          _messages.removeWhere((msg) => deletedMessageIds.contains(msg.id));
+        });
+      }
+
+      // Remove from local storage cache
+      await _messagesRepo.removeMessageFromCache(
+        conversationId: widget.conversation.conversationId,
+        messageIds: deletedMessageIds,
+      );
+
+      debugPrint('✅ Removed deleted messages from UI and cache');
+    } catch (e) {
+      debugPrint('❌ Error handling message delete event: $e');
     }
   }
 
@@ -3091,6 +3133,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                 ),
               ),
             ),
+            Positioned.fill(
+              child: Container(color: Colors.white.withAlpha(100)),
+            ),
             Column(
               children: [
                 // Pinned Message Section
@@ -3214,26 +3259,17 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   Widget _buildMessagesList() {
     // Show cache loader while checking cache (prevent black screen)
     if (_isCheckingCache && _messages.isEmpty) {
-      return Container(
-        color: Colors.black.withAlpha(20),
-        child: Center(child: LoadingDotsAnimation(color: Colors.blue[400])),
-      );
+      return Center(child: LoadingDotsAnimation(color: Colors.blue[400]));
     }
 
     // Show appropriate loader based on state
     if (_isLoadingFromCache) {
-      return Container(
-        color: Colors.black.withAlpha(20),
-        child: Center(child: LoadingDotsAnimation(color: Colors.orange[400])),
-      );
+      return Center(child: LoadingDotsAnimation(color: Colors.orange[400]));
     }
 
     // Only show loading if we haven't initialized and don't have messages
     if (_isLoading && !_isInitialized && _messages.isEmpty) {
-      return Container(
-        color: Colors.black.withAlpha(20),
-        child: Center(child: LoadingDotsAnimation(color: Colors.blue[400])),
-      );
+      return Center(child: LoadingDotsAnimation(color: Colors.blue[400]));
     }
 
     if (_errorMessage != null && _messages.isEmpty) {
@@ -3308,115 +3344,109 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       );
     }
 
-    return Container(
-      color: Colors.black.withAlpha(20), // Pure white background
-      child: ListView.builder(
-        controller: _scrollController,
-        reverse: true, // Start from bottom (newest messages)
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        physics:
-            const ClampingScrollPhysics(), // Better performance than bouncing
-        cacheExtent: 100, // Reduce cache extent to save memory
-        addAutomaticKeepAlives: false, // Don't keep all items alive
-        addRepaintBoundaries:
-            true, // Add repaint boundaries for better performance
-        itemCount: _messages.length + (_isLoadingMore ? 1 : 0),
-        // (_isLoadingMore ? 1 : 0) +
-        // (!_hasMoreMessages && _messages.isNotEmpty ? 1 : 0),
-        itemBuilder: (context, index) {
-          // Show loading indicator at the top when loading older messages
-          if (index == 0 && _isLoadingMore) {
-            return Container(
-              padding: const EdgeInsets.all(16),
-              margin: const EdgeInsets.symmetric(vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.grey[50],
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey[200]!),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        Colors.teal[400]!,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Loading older messages...',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }
-
-          // Calculate the actual message index, accounting for indicators
-          int messageIndex = index;
-
-          // Subtract 1 if there's a "no more messages" indicator at index 0
-          if (!_hasMoreMessages && _messages.isNotEmpty && !_isLoadingMore) {
-            messageIndex = index - 1;
-          }
-
-          // Subtract 1 if there's a loading indicator at index 0
-          if (_isLoadingMore) {
-            messageIndex = index - 1;
-          }
-
-          // Bounds check to prevent index out of bounds errors
-          if (messageIndex < 0 || messageIndex >= _messages.length) {
-            // Removed expensive debug prints during scroll - causes lag
-            return const SizedBox.shrink(); // Return empty widget for invalid indices
-          }
-
-          final message =
-              _messages[_messages.length -
-                  1 -
-                  messageIndex]; // Show newest at bottom
-
-          // Keep pinned message in regular list - it will also be shown in pinned section
-
-          // Determine if message is from current user
-          // If _currentUserId is known, use it
-          // If not, infer: in a DM, any message NOT from conversation.userId is from us
-          final isMyMessage = _currentUserId != null
-              ? message.senderId == _currentUserId
-              : message.senderId != widget.conversation.userId;
-
-          // Ensure we have a GlobalKey for this message for precise scrolling
-          if (!_messageKeys.containsKey(message.id)) {
-            _messageKeys[message.id] = GlobalKey();
-          }
-
-          // Wrap the message with a container that has a key for scrolling
+    return ListView.builder(
+      controller: _scrollController,
+      reverse: true, // Start from bottom (newest messages)
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      physics:
+          const ClampingScrollPhysics(), // Better performance than bouncing
+      cacheExtent: 100, // Reduce cache extent to save memory
+      addAutomaticKeepAlives: false, // Don't keep all items alive
+      addRepaintBoundaries:
+          true, // Add repaint boundaries for better performance
+      itemCount: _messages.length + (_isLoadingMore ? 1 : 0),
+      // (_isLoadingMore ? 1 : 0) +
+      // (!_hasMoreMessages && _messages.isNotEmpty ? 1 : 0),
+      itemBuilder: (context, index) {
+        // Show loading indicator at the top when loading older messages
+        if (index == 0 && _isLoadingMore) {
           return Container(
-            key: _messageKeys[message.id],
-            child: Column(
+            padding: const EdgeInsets.all(16),
+            margin: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey[200]!),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Date separator - show the date for the group of messages that starts here
-                if (ChatHelpers.shouldShowDateSeparator(
-                  _messages,
-                  messageIndex,
-                ))
-                  _buildDateSeparator(message.createdAt),
-                // Message bubble with long press
-                _buildMessageWithActions(message, isMyMessage),
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      Colors.teal[400]!,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Loading older messages...',
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
               ],
             ),
           );
-        },
-      ),
+        }
+
+        // Calculate the actual message index, accounting for indicators
+        int messageIndex = index;
+
+        // Subtract 1 if there's a "no more messages" indicator at index 0
+        if (!_hasMoreMessages && _messages.isNotEmpty && !_isLoadingMore) {
+          messageIndex = index - 1;
+        }
+
+        // Subtract 1 if there's a loading indicator at index 0
+        if (_isLoadingMore) {
+          messageIndex = index - 1;
+        }
+
+        // Bounds check to prevent index out of bounds errors
+        if (messageIndex < 0 || messageIndex >= _messages.length) {
+          // Removed expensive debug prints during scroll - causes lag
+          return const SizedBox.shrink(); // Return empty widget for invalid indices
+        }
+
+        final message =
+            _messages[_messages.length -
+                1 -
+                messageIndex]; // Show newest at bottom
+
+        // Keep pinned message in regular list - it will also be shown in pinned section
+
+        // Determine if message is from current user
+        // If _currentUserId is known, use it
+        // If not, infer: in a DM, any message NOT from conversation.userId is from us
+        final isMyMessage = _currentUserId != null
+            ? message.senderId == _currentUserId
+            : message.senderId != widget.conversation.userId;
+
+        // Ensure we have a GlobalKey for this message for precise scrolling
+        if (!_messageKeys.containsKey(message.id)) {
+          _messageKeys[message.id] = GlobalKey();
+        }
+
+        // Wrap the message with a container that has a key for scrolling
+        return Container(
+          key: _messageKeys[message.id],
+          child: Column(
+            children: [
+              // Date separator - show the date for the group of messages that starts here
+              if (ChatHelpers.shouldShowDateSeparator(_messages, messageIndex))
+                DateSeparator(dateTimeString: message.createdAt),
+              // Message bubble with long press
+              _buildMessageWithActions(message, isMyMessage),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -3451,15 +3481,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.teal[600],
+                  color: Colors.white,
                   borderRadius: BorderRadius.circular(100),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.teal.withOpacity(0.3),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
                 ),
                 // show a loading indicator when  _isLoadingMore is true else day
                 child: Text(
@@ -3469,10 +3492,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                           messageWithCurrentDate.createdAt,
                         ),
                   style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
+                    color: Colors.black,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
@@ -3480,35 +3502,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           },
         );
       },
-    );
-  }
-
-  Widget _buildDateSeparator(String dateTimeString) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 16),
-      child: Row(
-        children: [
-          Expanded(child: Container(height: 1, color: Colors.grey[300])),
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey[300]!),
-            ),
-            child: Text(
-              ChatHelpers.formatDateSeparator(dateTimeString),
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          Expanded(child: Container(height: 1, color: Colors.grey[300])),
-        ],
-      ),
     );
   }
 
@@ -6362,6 +6355,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                   maxLines: 6,
                   minLines: 1,
                   textInputAction: TextInputAction.newline,
+                  textCapitalization: TextCapitalization.sentences,
                   onChanged: (value) {
                     _handleTyping(value);
                   },

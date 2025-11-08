@@ -2,9 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../models/conversation_model.dart';
 import '../../../api/user.service.dart';
-import '../../../services/websocket_service.dart';
+import '../../../services/socket/websocket_service.dart';
 import '../../../services/user_status_service.dart';
-import '../../../services/websocket_message_handler.dart';
+import '../../../services/socket/websocket_message_handler.dart';
 import '../../../services/chat_preferences_service.dart';
 import '../../../services/last_message_storage_service.dart';
 import '../../../widgets/chat_action_menu.dart';
@@ -63,6 +63,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
   StreamSubscription<Map<String, dynamic>>? _replySubscription;
   StreamSubscription<Map<int, bool>>? _userStatusSubscription;
   StreamSubscription<Map<String, dynamic>>? _conversationAddedSubscription;
+  StreamSubscription<Map<String, dynamic>>? _messageDeleteSubscription;
 
   @override
   void initState() {
@@ -811,6 +812,16 @@ class ChatsPageState extends ConsumerState<ChatsPage>
         debugPrint('❌ Media stream error in ChatsPage: $error');
       },
     );
+
+    // Listen to message delete events for all conversations
+    _messageDeleteSubscription = _messageHandler.messageDeleteStream.listen(
+      (message) {
+        _handleMessageDelete(message);
+      },
+      onError: (error) {
+        debugPrint('❌ Message delete stream error in ChatsPage: $error');
+      },
+    );
   }
 
   /// Set up user status listener to update conversations when status changes
@@ -1108,6 +1119,122 @@ class ChatsPageState extends ConsumerState<ChatsPage>
     }
   }
 
+  /// Handle message delete event to update last_message if needed
+  Future<void> _handleMessageDelete(Map<String, dynamic> message) async {
+    try {
+      final conversationId = message['conversation_id'] as int?;
+      final messageIds = message['message_ids'] as List<dynamic>? ?? [];
+
+      if (conversationId == null || messageIds.isEmpty) {
+        debugPrint('⚠️ Invalid message delete: missing conversationId or messageIds');
+        return;
+      }
+
+      final deletedMessageIds = messageIds.map((id) => id as int).toList();
+
+      // Find the conversation
+      final conversationIndex = _conversations.indexWhere(
+        (conv) => conv.conversationId == conversationId,
+      );
+
+      if (conversationIndex == -1) {
+        debugPrint('⚠️ Conversation not found for message delete: $conversationId');
+        return;
+      }
+
+      final conversation = _conversations[conversationIndex];
+      final lastMessage = conversation.metadata?.lastMessage;
+
+      // Check if the deleted message was the last_message
+      if (lastMessage != null && deletedMessageIds.contains(lastMessage.id)) {
+        // Fetch the new last message from the server
+        try {
+          final historyResponse = await _chatsServices.getConversationHistory(
+            conversationId: conversationId,
+            page: 1,
+            limit: 1,
+          );
+
+          if (historyResponse['success'] == true && mounted && _isLoaded) {
+            final messages = historyResponse['data']['messages'] as List<dynamic>? ?? [];
+            
+            if (messages.isNotEmpty) {
+              final newLastMessageData = messages[0] as Map<String, dynamic>;
+              final newLastMessage = LastMessage(
+                id: newLastMessageData['id'] ?? 0,
+                body: newLastMessageData['body'] ?? '',
+                type: newLastMessageData['type'] ?? 'text',
+                senderId: newLastMessageData['sender_id'] ?? 0,
+                createdAt: newLastMessageData['created_at'] ?? DateTime.now().toIso8601String(),
+                conversationId: conversationId,
+              );
+
+              final updatedMetadata = ConversationMetadata(
+                lastMessage: newLastMessage,
+                pinnedMessage: conversation.metadata?.pinnedMessage,
+              );
+
+              final updatedConversation = conversation.copyWith(
+                metadata: updatedMetadata,
+                lastMessageAt: newLastMessage.createdAt,
+              );
+
+              // Update local storage
+              await _lastMessageStorage.storeLastMessage(conversationId, {
+                'id': newLastMessage.id,
+                'body': newLastMessage.body,
+                'type': newLastMessage.type,
+                'sender_id': newLastMessage.senderId,
+                'created_at': newLastMessage.createdAt,
+                'conversation_id': conversationId,
+              });
+
+              // Persist to local DB
+              _conversationsRepo.insertOrUpdateConversation(updatedConversation);
+
+              if (mounted) {
+                setState(() {
+                  _conversations[conversationIndex] = updatedConversation;
+                  _filterConversations();
+                });
+              }
+            } else {
+              // No messages left, set metadata to null (which means no last message)
+              final updatedConversation = conversation.copyWith(
+                metadata: null,
+                lastMessageAt: null,
+              );
+
+              // Remove from local storage - clear the stored last message
+              await _lastMessageStorage.storeLastMessage(conversationId, {
+                'id': 0,
+                'body': '',
+                'type': 'text',
+                'sender_id': 0,
+                'created_at': DateTime.now().toIso8601String(),
+                'conversation_id': conversationId,
+              });
+
+              // Persist to local DB
+              _conversationsRepo.insertOrUpdateConversation(updatedConversation);
+
+              if (mounted) {
+                setState(() {
+                  _conversations[conversationIndex] = updatedConversation;
+                  _filterConversations();
+                });
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint('❌ Error fetching new last message after delete: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error handling message delete: $e');
+    }
+  }
+
   /// Handle typing message from WebSocket
   void _handleTypingMessage(Map<String, dynamic> message) {
     try {
@@ -1179,6 +1306,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
     _mediaSubscription?.cancel();
     _userStatusSubscription?.cancel();
     _conversationAddedSubscription?.cancel();
+    _messageDeleteSubscription?.cancel();
     _searchController.dispose(); // Dispose search controller
     // Cancel all typing timers
     for (final timer in _typingTimers.values) {
@@ -1773,12 +1901,13 @@ class ChatListItem extends ConsumerWidget {
                     : lastMessageText,
                 style: TextStyle(
                   color: draft != null && draft.isNotEmpty
-                      ? Colors.orange[600]
+                      ? Colors.green[600]
                       : (isMuted ? Colors.grey[400] : Colors.grey[600]),
                   fontSize: 14,
-                  fontStyle: draft != null && draft.isNotEmpty
-                      ? FontStyle.italic
-                      : FontStyle.normal,
+                  fontStyle: FontStyle.normal,
+                  fontWeight: draft != null && draft.isNotEmpty
+                      ? FontWeight.w600
+                      : FontWeight.normal,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,

@@ -3,7 +3,7 @@ import '../../../models/user_model.dart';
 import '../../../api/groups.services.dart';
 import '../../../api/user.service.dart';
 import '../../../services/contact_service.dart';
-import '../../../services/websocket_service.dart';
+import '../../../services/socket/websocket_service.dart';
 
 class CreateGroupPage extends StatefulWidget {
   const CreateGroupPage({super.key});

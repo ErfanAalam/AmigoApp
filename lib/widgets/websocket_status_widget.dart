@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/websocket_service.dart';
+import '../services/socket/websocket_service.dart';
 
 class WebSocketStatusWidget extends StatelessWidget {
   const WebSocketStatusWidget({Key? key}) : super(key: key);

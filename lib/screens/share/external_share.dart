@@ -6,7 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/conversation_model.dart';
 import '../../api/user.service.dart';
 import '../../api/chats.services.dart';
-import '../../services/websocket_service.dart';
+import '../../services/socket/websocket_service.dart';
 import '../../repositories/conversations_repository.dart';
 import '../../repositories/groups_repository.dart';
 

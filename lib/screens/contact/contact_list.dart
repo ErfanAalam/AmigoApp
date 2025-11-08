@@ -11,7 +11,7 @@ import '../../repositories/contacts_repository.dart';
 import '../../services/contact_service.dart';
 import '../../api/user.service.dart';
 import '../../api/chats.services.dart';
-import '../../services/websocket_service.dart';
+import '../../services/socket/websocket_service.dart';
 import '../home_layout.dart';
 
 class ContactsPage extends StatefulWidget {

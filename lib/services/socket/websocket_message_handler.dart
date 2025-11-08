@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'chat/storage.service.dart';
+import 'package:flutter/material.dart';
+import '../chat/storage.service.dart';
 import 'websocket_service.dart';
-import 'user_status_service.dart';
+import '../user_status_service.dart';
+import '../../utils/navigation_helper.dart';
 
 /// Centralized WebSocket message handler that processes all messages once
 /// and distributes them via filtered streams for widgets to consume
@@ -47,6 +49,9 @@ class WebSocketMessageHandler {
   final StreamController<Map<String, dynamic>> _conversationAddedController =
       StreamController<Map<String, dynamic>>.broadcast();
 
+  final StreamController<Map<String, dynamic>> _messageDeleteController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
   bool _isInitialized = false;
 
   /// Get stream for messages (type: 'message')
@@ -85,6 +90,10 @@ class WebSocketMessageHandler {
   /// Get stream for conversation added events (type: 'conversation_added')
   Stream<Map<String, dynamic>> get conversationAddedStream =>
       _conversationAddedController.stream;
+
+  /// Get stream for message delete events (type: 'message_delete')
+  Stream<Map<String, dynamic>> get messageDeleteStream =>
+      _messageDeleteController.stream;
 
   /// Initialize the handler - call this once when app starts
   void initialize() {
@@ -174,6 +183,14 @@ class WebSocketMessageHandler {
 
         case 'conversation_added':
           _conversationAddedController.add(message);
+          break;
+
+        case 'message_delete':
+          _messageDeleteController.add(message);
+          break;
+
+        case 'socket_health_check':
+          _showHealthCheckDialog(message);
           break;
 
         default:
@@ -271,6 +288,81 @@ class WebSocketMessageHandler {
     });
   }
 
+  /// Get a filtered stream for conversation added events in a specific conversation
+  Stream<Map<String, dynamic>> conversationAddedForConversation(int conversationId) {
+    return conversationAddedStream.where((message) {
+      final msgConversationId =
+          message['conversation_id'] ?? message['data']?['conversation_id'];
+      return msgConversationId == conversationId;
+    });
+  }
+
+  /// Get a filtered stream for message delete events in a specific conversation
+  Stream<Map<String, dynamic>> messageDeletesForConversation(int conversationId) {
+    return messageDeleteStream.where((message) {
+      final msgConversationId =
+          message['conversation_id'] ?? message['data']?['conversation_id'];
+      return msgConversationId == conversationId;
+    });
+  }
+
+  /// Show health check dialog
+  void _showHealthCheckDialog(Map<String, dynamic> message) {
+    final data = message['data'] as Map<String, dynamic>?;
+    final time = data?['time'] as String? ?? 'Unknown time';
+    final messageText = data?['message'] as String? ?? 'No message';
+
+    // Get the navigator context
+    final context = NavigationHelper.navigatorKey.currentContext;
+    if (context == null) {
+      debugPrint('⚠️ Cannot show health check dialog: Navigator context is null');
+      return;
+    }
+
+    // Show the dialog
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.health_and_safety, color: Colors.green[600], size: 28),
+              const SizedBox(width: 12),
+              const Text('Socket Health Check'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (messageText.isNotEmpty) ...[
+                Text(
+                  messageText,
+                  style: const TextStyle(fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 12),
+              ],
+              Text(
+                'Time: $time',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[600],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   /// Dispose resources
   void dispose() {
     _messageSubscription?.cancel();
@@ -285,6 +377,7 @@ class WebSocketMessageHandler {
     _messageReplyController.close();
     _onlineStatusController.close();
     _conversationAddedController.close();
+    _messageDeleteController.close();
     _isInitialized = false;
   }
 }

@@ -3,10 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/widgets.dart';
 
-import 'cookie_service.dart';
-import '../env.dart';
+import '../cookie_service.dart';
+import '../../env.dart';
 import 'package:flutter/material.dart' as material;
-import '../utils/navigation_helper.dart';
+import '../../utils/navigation_helper.dart';
 
 enum WebSocketConnectionState {
   disconnected,

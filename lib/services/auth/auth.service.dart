@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import '../cookie_service.dart';
-import '../websocket_service.dart';
+import '../socket/websocket_service.dart';
 import '../message_storage_service.dart';
 import '../chat_preferences_service.dart';
 import '../notification_service.dart';

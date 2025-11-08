@@ -5,10 +5,11 @@ import '../../../models/community_model.dart';
 import '../../../api/user.service.dart';
 import '../../../repositories/groups_repository.dart';
 import '../../../repositories/communities_repository.dart';
-import '../../../services/websocket_service.dart';
-import '../../../services/websocket_message_handler.dart';
+import '../../../services/socket/websocket_service.dart';
+import '../../../services/socket/websocket_message_handler.dart';
 import '../../../services/last_message_storage_service.dart';
 import '../../../widgets/chat/searchable_list_widget.dart';
+import '../../../api/chats.services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../providers/draft_provider.dart';
 import 'messaging.dart';
@@ -30,6 +31,7 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
   final WebSocketMessageHandler _messageHandler = WebSocketMessageHandler();
   final LastMessageStorageService _lastMessageStorage =
       LastMessageStorageService.instance;
+  final ChatsServices _chatsServices = ChatsServices();
   final TextEditingController _searchController = TextEditingController();
 
   // Real-time state management
@@ -50,6 +52,7 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
   StreamSubscription<Map<String, dynamic>>? _typingSubscription;
   StreamSubscription<Map<String, dynamic>>? _messageSubscription;
   StreamSubscription<Map<String, dynamic>>? _mediaSubscription;
+  StreamSubscription<Map<String, dynamic>>? _messageDeleteSubscription;
   StreamSubscription<Map<String, dynamic>>? _conversationAddedSubscription;
 
   @override
@@ -69,6 +72,7 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
     _typingSubscription?.cancel();
     _messageSubscription?.cancel();
     _mediaSubscription?.cancel();
+    _messageDeleteSubscription?.cancel();
     _conversationAddedSubscription?.cancel();
     // Cancel all typing timers
     for (final timer in _typingTimers.values) {
@@ -188,14 +192,17 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
 
   /// Set up conversation added listener
   void _setupConversationAddedListener() {
-    _conversationAddedSubscription = _messageHandler.conversationAddedStream.listen(
-      (message) {
-        _handleConversationAdded(message);
-      },
-      onError: (error) {
-        debugPrint('❌ Conversation added stream error in GroupsPage: $error');
-      },
-    );
+    _conversationAddedSubscription = _messageHandler.conversationAddedStream
+        .listen(
+          (message) {
+            _handleConversationAdded(message);
+          },
+          onError: (error) {
+            debugPrint(
+              '❌ Conversation added stream error in GroupsPage: $error',
+            );
+          },
+        );
   }
 
   /// Handle conversation added message
@@ -205,13 +212,16 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
       final data = message['data'] as Map<String, dynamic>?;
 
       if (conversationId == null || data == null) {
-        debugPrint('⚠️ Invalid conversation_added message: missing conversation_id or data');
+        debugPrint(
+          '⚠️ Invalid conversation_added message: missing conversation_id or data',
+        );
         return;
       }
 
       // Only handle groups in the group list screen
       final conversationType = data['type'] as String?;
-      if (conversationType != 'group' && conversationType != 'community_group') {
+      if (conversationType != 'group' &&
+          conversationType != 'community_group') {
         return; // Ignore DMs, they'll be handled in dm_list.dart
       }
 
@@ -230,7 +240,9 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
         final group = _convertToGroupModel(data);
 
         // Update with stored last message if available
-        final updatedGroups = await _updateGroupsWithStoredLastMessages([group]);
+        final updatedGroups = await _updateGroupsWithStoredLastMessages([
+          group,
+        ]);
 
         if (updatedGroups.isNotEmpty && mounted && _isLoaded) {
           setState(() {
@@ -290,6 +302,16 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
       },
       onError: (error) {
         debugPrint('❌ Media stream error in GroupsPage: $error');
+      },
+    );
+
+    // Listen to message delete events for all groups
+    _messageDeleteSubscription = _messageHandler.messageDeleteStream.listen(
+      (message) {
+        _handleMessageDelete(message);
+      },
+      onError: (error) {
+        debugPrint('❌ Message delete stream error in GroupsPage: $error');
       },
     );
   }
@@ -526,6 +548,169 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
       }
     } catch (e) {
       debugPrint('❌ Error handling new group message: $e');
+    }
+  }
+
+  /// Handle message delete event to update last_message if needed
+  Future<void> _handleMessageDelete(Map<String, dynamic> message) async {
+    try {
+      final conversationId = message['conversation_id'] as int?;
+      final messageIds = message['message_ids'] as List<dynamic>? ?? [];
+
+      if (conversationId == null || messageIds.isEmpty) {
+        debugPrint('⚠️ Invalid message delete: missing conversationId or messageIds');
+        return;
+      }
+
+      final deletedMessageIds = messageIds.map((id) => id as int).toList();
+
+      // Find the group
+      final groupIndex = _allGroups.indexWhere(
+        (group) => group.conversationId == conversationId,
+      );
+
+      if (groupIndex == -1) {
+        debugPrint('⚠️ Group not found for message delete: $conversationId');
+        return;
+      }
+
+      final group = _allGroups[groupIndex];
+      final lastMessage = group.metadata?.lastMessage;
+
+      // Check if the deleted message was the last_message
+      if (lastMessage != null && deletedMessageIds.contains(lastMessage.id)) {
+        // Fetch the new last message from the server
+        try {
+          final historyResponse = await _chatsServices.getConversationHistory(
+            conversationId: conversationId,
+            page: 1,
+            limit: 1,
+          );
+
+          if (historyResponse['success'] == true && mounted && _isLoaded) {
+            final messages = historyResponse['data']['messages'] as List<dynamic>? ?? [];
+            
+            if (messages.isNotEmpty) {
+              final newLastMessageData = messages[0] as Map<String, dynamic>;
+              final messageBody = newLastMessageData['body'] ?? '';
+              
+              final newLastMessage = GroupLastMessage(
+                id: newLastMessageData['id'] ?? 0,
+                body: messageBody,
+                type: messageBody.isEmpty ? 'attachment' : newLastMessageData['type'] ?? 'text',
+                senderId: newLastMessageData['sender_id'] ?? 0,
+                senderName: newLastMessageData['sender_name'] ?? '',
+                createdAt: newLastMessageData['created_at'] ?? DateTime.now().toIso8601String(),
+                conversationId: conversationId,
+                attachmentData: newLastMessageData['attachments'],
+              );
+
+              final updatedMetadata = GroupMetadata(
+                lastMessage: newLastMessage,
+                totalMessages: group.metadata?.totalMessages ?? 0,
+                createdAt: group.metadata?.createdAt,
+                createdBy: group.metadata?.createdBy ?? 0,
+              );
+
+              final updatedGroup = GroupModel(
+                conversationId: group.conversationId,
+                title: group.title,
+                type: group.type,
+                members: group.members,
+                metadata: updatedMetadata,
+                unreadCount: group.unreadCount,
+                lastMessageAt: newLastMessage.createdAt,
+                role: group.role,
+                joinedAt: group.joinedAt,
+              );
+
+              // Update local storage
+              await _lastMessageStorage.storeGroupLastMessage(conversationId, {
+                'id': newLastMessage.id,
+                'body': newLastMessage.body,
+                'type': newLastMessage.type,
+                'sender_id': newLastMessage.senderId,
+                'sender_name': newLastMessage.senderName,
+                'created_at': newLastMessage.createdAt,
+                'conversation_id': conversationId,
+              });
+
+              // Persist to local DB
+              _groupsRepo.insertOrUpdateGroup(updatedGroup);
+
+              if (mounted) {
+                setState(() {
+                  _allGroups[groupIndex] = updatedGroup;
+
+                  // Sort groups by last message time
+                  _allGroups.sort((a, b) {
+                    final aTime = a.lastMessageAt ?? a.joinedAt;
+                    final bTime = b.lastMessageAt ?? b.joinedAt;
+                    return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
+                  });
+
+                  // Update filtered items
+                  _onSearchChanged();
+                });
+              }
+            } else {
+              // No messages left, clear last_message
+              final updatedMetadata = GroupMetadata(
+                lastMessage: null,
+                totalMessages: group.metadata?.totalMessages ?? 0,
+                createdAt: group.metadata?.createdAt,
+                createdBy: group.metadata?.createdBy ?? 0,
+              );
+
+              final updatedGroup = GroupModel(
+                conversationId: group.conversationId,
+                title: group.title,
+                type: group.type,
+                members: group.members,
+                metadata: updatedMetadata,
+                unreadCount: group.unreadCount,
+                lastMessageAt: null,
+                role: group.role,
+                joinedAt: group.joinedAt,
+              );
+
+              // Remove from local storage - clear the stored last message
+              await _lastMessageStorage.storeGroupLastMessage(conversationId, {
+                'id': 0,
+                'body': '',
+                'type': 'text',
+                'sender_id': 0,
+                'sender_name': '',
+                'created_at': DateTime.now().toIso8601String(),
+                'conversation_id': conversationId,
+              });
+
+              // Persist to local DB
+              _groupsRepo.insertOrUpdateGroup(updatedGroup);
+
+              if (mounted) {
+                setState(() {
+                  _allGroups[groupIndex] = updatedGroup;
+
+                  // Sort groups by last message time
+                  _allGroups.sort((a, b) {
+                    final aTime = a.lastMessageAt ?? a.joinedAt;
+                    final bTime = b.lastMessageAt ?? b.joinedAt;
+                    return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
+                  });
+
+                  // Update filtered items
+                  _onSearchChanged();
+                });
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint('❌ Error fetching new last message after delete: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error handling message delete: $e');
     }
   }
 
@@ -1118,7 +1303,7 @@ class GroupListItem extends ConsumerWidget {
     final draft = drafts[conversationId];
 
     final hasUnreadMessages = group.unreadCount > 0;
-    
+
     // Use draft if available, otherwise use last message
     String lastMessageText;
     if (draft != null && draft.isNotEmpty) {
@@ -1127,11 +1312,13 @@ class GroupListItem extends ConsumerWidget {
     } else {
       lastMessageText = _formatLastMessageText(group.metadata?.lastMessage);
     }
-    
+
     final timeText = _formatTime(group.lastMessageAt ?? group.joinedAt);
-    final displayText = isTyping ? 'Typing...' : (draft != null && draft.isNotEmpty 
-        ? 'Draft: $lastMessageText'
-        : lastMessageText);
+    final displayText = isTyping
+        ? 'Typing...'
+        : (draft != null && draft.isNotEmpty
+              ? 'Draft: $lastMessageText'
+              : lastMessageText);
 
     return Container(
       height: 80,
@@ -1197,12 +1384,13 @@ class GroupListItem extends ConsumerWidget {
                             displayText,
                             style: TextStyle(
                               color: draft != null && draft.isNotEmpty
-                                  ? Colors.orange[600]
+                                  ? Colors.green[600]
                                   : Colors.grey[600],
                               fontSize: 14,
-                              fontStyle: draft != null && draft.isNotEmpty
-                                  ? FontStyle.italic
-                                  : FontStyle.normal,
+                              fontStyle: FontStyle.normal,
+                              fontWeight: draft != null && draft.isNotEmpty
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,

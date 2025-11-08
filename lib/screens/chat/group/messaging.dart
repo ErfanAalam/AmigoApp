@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -25,14 +24,15 @@ import '../../../repositories/messages_repository.dart';
 import '../../../repositories/user_repository.dart';
 import '../../../repositories/groups_repository.dart';
 import '../../../repositories/group_members_repository.dart';
-import '../../../services/websocket_service.dart';
-import '../../../services/websocket_message_handler.dart';
+import '../../../services/socket/websocket_service.dart';
+import '../../../services/socket/websocket_message_handler.dart';
 import '../../../widgets/loading_dots_animation.dart';
 import '../../../services/media_cache_service.dart';
 import '../../../utils/chat_helpers.dart';
 import '../../../utils/message_storage_helpers.dart';
 import '../../../widgets/media_preview_widgets.dart';
 import '../../../widgets/chat/message_action_sheet.dart';
+import '../../../widgets/chat/date.widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../services/draft_message_service.dart';
 import '../../../providers/draft_provider.dart';
@@ -93,6 +93,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   StreamSubscription<Map<String, dynamic>>? _messagePinSubscription;
   StreamSubscription<Map<String, dynamic>>? _messageStarSubscription;
   StreamSubscription<Map<String, dynamic>>? _messageReplySubscription;
+  StreamSubscription<Map<String, dynamic>>? _messageDeleteSubscription;
   StreamSubscription? _audioProgressSubscription;
   Timer? _audioProgressTimer;
   DateTime? _audioStartTime;
@@ -1144,6 +1145,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     _messagePinSubscription?.cancel();
     _messageStarSubscription?.cancel();
     _messageReplySubscription?.cancel();
+    _messageDeleteSubscription?.cancel();
     _typingAnimationController.dispose();
     _typingTimeout?.cancel();
     _scrollDebounceTimer?.cancel();
@@ -1306,23 +1308,15 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         decoration: BoxDecoration(
-          color: Colors.teal[600],
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.teal.withOpacity(0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(100),
         ),
         child: Text(
           ChatHelpers.formatDateSeparator(messageWithCurrentDate.createdAt),
           style: const TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.5,
+            color: Colors.black,
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
           ),
         ),
       ),
@@ -1620,6 +1614,16 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           (message) => _handleMessageReply(message),
           onError: (error) {
             debugPrint('❌ Group message reply stream error: $error');
+          },
+        );
+
+    // Listen to message delete events for this conversation
+    _messageDeleteSubscription = _messageHandler
+        .messageDeletesForConversation(conversationId)
+        .listen(
+          (message) => _handleMessageDelete(message),
+          onError: (error) {
+            debugPrint('❌ Group message delete stream error: $error');
           },
         );
   }
@@ -2383,6 +2387,37 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
   }
 
+  /// Handle message delete event from WebSocket
+  void _handleMessageDelete(Map<String, dynamic> message) async {
+    try {
+      final messageIds = message['message_ids'] as List<dynamic>? ?? [];
+      if (messageIds.isEmpty) return;
+
+      final deletedMessageIds = messageIds.map((id) => id as int).toList();
+
+      debugPrint(
+        '🗑️ Received message_delete event for messages: $deletedMessageIds',
+      );
+
+      // Remove from UI
+      if (mounted) {
+        setState(() {
+          _messages.removeWhere((msg) => deletedMessageIds.contains(msg.id));
+        });
+      }
+
+      // Remove from local storage cache
+      await _messagesRepo.removeMessageFromCache(
+        conversationId: widget.group.conversationId,
+        messageIds: deletedMessageIds,
+      );
+
+      debugPrint('✅ Removed deleted messages from UI and cache');
+    } catch (e) {
+      debugPrint('❌ Error handling message delete event: $e');
+    }
+  }
+
   /// Send group message with immediate display (optimistic UI)
   void _sendMessage() async {
     final messageText = _messageController.text.trim();
@@ -3002,6 +3037,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                 ),
               ),
             ),
+            Positioned.fill(
+              child: Container(color: Colors.white.withAlpha(100)),
+            ),
             Column(
               children: [
                 // Pinned Message Section
@@ -3042,26 +3080,17 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   Widget _buildMessagesList() {
     // Show cache loader while checking cache (prevent black screen)
     if (_isCheckingCache && _messages.isEmpty) {
-      return Container(
-        color: Colors.transparent, // Transparent to show background image
-        child: Center(child: LoadingDotsAnimation(color: Colors.blue[400])),
-      );
+      return Center(child: LoadingDotsAnimation(color: Colors.blue[400]));
     }
 
     // Show appropriate loader based on state
     if (_isLoadingFromCache) {
-      return Container(
-        color: Colors.transparent, // Transparent to show background image
-        child: Center(child: LoadingDotsAnimation(color: Colors.orange[400])),
-      );
+      return Center(child: LoadingDotsAnimation(color: Colors.orange[400]));
     }
 
     // Only show loading if we haven't initialized and don't have messages
     if (_isLoading && !_isInitialized && _messages.isEmpty) {
-      return Container(
-        color: Colors.transparent, // Transparent to show background image
-        child: Center(child: LoadingDotsAnimation(color: Colors.blue[400])),
-      );
+      return Center(child: LoadingDotsAnimation(color: Colors.blue[400]));
     }
 
     if (_errorMessage != null && _messages.isEmpty) {
@@ -3106,7 +3135,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             ElevatedButton(
               onPressed: _loadInitialMessages,
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.grey[100],
+                backgroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(
                   horizontal: 20,
                   vertical: 10,
@@ -3137,83 +3166,51 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       );
     }
 
-    return Container(
-      color: Colors.transparent, // Transparent to show background image
-      child: ListView.builder(
-        controller: _scrollController,
-        reverse: true, // Start from bottom (newest messages)
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        itemCount: _messages.length + (_isLoadingMore ? 1 : 0),
-        cacheExtent: 500, // Cache more items for smoother scrolling
-        addAutomaticKeepAlives: true, // Keep message widgets alive
-        addRepaintBoundaries: true, // Optimize repainting
-        itemBuilder: (context, index) {
-          if (index == 0 && _isLoadingMore) {
-            return Container(
-              padding: const EdgeInsets.all(16),
-              alignment: Alignment.center,
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.teal[300]!),
-                ),
+    return ListView.builder(
+      controller: _scrollController,
+      reverse: true, // Start from bottom (newest messages)
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      itemCount: _messages.length + (_isLoadingMore ? 1 : 0),
+      cacheExtent: 500, // Cache more items for smoother scrolling
+      addAutomaticKeepAlives: true, // Keep message widgets alive
+      addRepaintBoundaries: true, // Optimize repainting
+      itemBuilder: (context, index) {
+        if (index == 0 && _isLoadingMore) {
+          return Container(
+            padding: const EdgeInsets.all(16),
+            alignment: Alignment.center,
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.teal[300]!),
               ),
-            );
-          }
-
-          // Adjust index for loading indicator
-          final messageIndex = _isLoadingMore ? index - 1 : index;
-          final message =
-              _messages[_messages.length -
-                  1 -
-                  messageIndex]; // Show newest at bottom
-
-          // Debug: Check user ID comparison
-          final isMyMessage =
-              _currentUserId != null && message.senderId == _currentUserId;
-
-          return Column(
-            children: [
-              // Date separator - show the date for the group of messages that starts here
-              if (ChatHelpers.shouldShowDateSeparator(_messages, messageIndex))
-                _buildDateSeparator(message.createdAt),
-              // Message bubble with long press
-              _buildMessageWithActions(message, isMyMessage),
-            ],
+            ),
           );
-        },
-      ),
-    );
-  }
+        }
 
-  Widget _buildDateSeparator(String dateTimeString) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 16),
-      child: Row(
-        children: [
-          Expanded(child: Container(height: 1, color: Colors.grey[300])),
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey[300]!),
-            ),
-            child: Text(
-              ChatHelpers.formatDateSeparator(dateTimeString),
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          Expanded(child: Container(height: 1, color: Colors.grey[300])),
-        ],
-      ),
+        // Adjust index for loading indicator
+        final messageIndex = _isLoadingMore ? index - 1 : index;
+        final message =
+            _messages[_messages.length -
+                1 -
+                messageIndex]; // Show newest at bottom
+
+        // Debug: Check user ID comparison
+        final isMyMessage =
+            _currentUserId != null && message.senderId == _currentUserId;
+
+        return Column(
+          children: [
+            // Date separator - show the date for the group of messages that starts here
+            if (ChatHelpers.shouldShowDateSeparator(_messages, messageIndex))
+              DateSeparator(dateTimeString: message.createdAt),
+            // Message bubble with long press
+            _buildMessageWithActions(message, isMyMessage),
+          ],
+        );
+      },
     );
   }
 
@@ -4029,6 +4026,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                   maxLines: 6,
                   minLines: 1,
                   textInputAction: TextInputAction.newline,
+                  textCapitalization: TextCapitalization.sentences,
                   onChanged: shouldDisableSending
                       ? null
                       : (value) {

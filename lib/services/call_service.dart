@@ -16,7 +16,7 @@ import 'package:proximity_sensor/proximity_sensor.dart';
 import 'package:proximity_screen_lock/proximity_screen_lock.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import '../models/call_model.dart';
-import '../services/websocket_service.dart';
+import 'socket/websocket_service.dart';
 import '../services/call_foreground_service.dart';
 import '../api/user.service.dart';
 import '../utils/ringing_tone.dart';
