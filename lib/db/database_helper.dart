@@ -428,9 +428,6 @@ class DatabaseHelper {
           where: 'id != ?',
           whereArgs: [currentUser['id']],
         );
-        print(
-          '✅ Cleaned up users table, kept only current user: ${currentUser['id']}',
-        );
       }
     }
 

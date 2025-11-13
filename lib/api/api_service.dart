@@ -426,13 +426,13 @@ class ApiService {
       final fileSize = await file.length();
       final mimeType = lookupMimeType(file.path) ?? 'application/octet-stream';
 
-      // Validate file size (50MB limit)
-      const maxFileSize = 50 * 1024 * 1024; // 50MB in bytes
+      // Validate file size (500MB limit)
+      const maxFileSize = 500 * 1024 * 1024; // 500MB in bytes
       if (fileSize > maxFileSize) {
         return {
           'success': false,
           'error': 'File too large',
-          'message': 'File size cannot exceed 50MB',
+          'message': 'File size cannot exceed 500MB',
         };
       }
 

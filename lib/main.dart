@@ -116,19 +116,6 @@ class _MyAppState extends material.State<MyApp> {
     prefs.setString('current_user_name', userInfo?.name ?? '');
   }
 
-  // Future<void> _loadAppVersion() async {
-  //   try {
-  //     final packageInfo = await PackageInfo.fromPlatform();
-  //     if (mounted) {
-  //       setState(() {
-  //         appVersion = packageInfo.version;
-  //       });
-  //     }
-  //   } catch (e) {
-  //     debugPrint('❌ Error loading app version');
-  //   }
-  // }
-
   /// Process initial notification from terminated state
   Future<void> _processInitialNotification() async {
     // Wait for authentication to complete and UI to be ready

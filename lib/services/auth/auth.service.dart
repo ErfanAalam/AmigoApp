@@ -1,4 +1,5 @@
 import 'package:amigo/api/api_service.dart';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -179,7 +180,13 @@ class AuthService {
       // 15. Clear temporary files
       await _clearTemporaryFiles();
 
-      // 16. Restart the app
+      // 16. Clear user details from shared preferences
+      await UserUtils().clearUserDetails();
+
+      // 17. Clear current_user_name
+      await prefs.remove('current_user_name');
+
+      // 18. Restart the app
       if (NavigationHelper.navigatorKey.currentContext != null) {
         Navigator.pushAndRemoveUntil(
           NavigationHelper.navigatorKey.currentContext!,

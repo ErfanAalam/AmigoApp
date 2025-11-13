@@ -1,18 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'chat/dm/dm_list.dart';
 import 'chat/group/group_list.dart';
 import 'contact/contact_list.dart';
 import 'profile/profile_info.dart';
 import 'call/call_logs.dart';
+import '../widgets/badge_widget.dart';
+import '../providers/notification_badge_provider.dart';
 
-class MainScreen extends StatefulWidget {
+class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
 
   @override
-  State<MainScreen> createState() => _MainScreenState();
+  ConsumerState<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends ConsumerState<MainScreen> {
   int _currentPageIndex = 0;
   final GlobalKey<ChatsPageState> _chatsPageKey = GlobalKey<ChatsPageState>();
   final GlobalKey<CallsPageState> _callsPageKey = GlobalKey<CallsPageState>();
@@ -56,11 +59,15 @@ class _MainScreenState extends State<MainScreen> {
       _chatsPageKey.currentState?.onPageVisible();
     } else if (index == 3) {
       _callsPageKey.currentState?.onPageVisible();
+      // Mark calls as seen when call screen is viewed
+      ref.read(notificationBadgeProvider.notifier).markCallsAsSeen();
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final badgeState = ref.watch(notificationBadgeProvider);
+
     return Scaffold(
       body: PageView(
         controller: _pageController,
@@ -74,6 +81,8 @@ class _MainScreenState extends State<MainScreen> {
             _chatsPageKey.currentState?.onPageVisible();
           } else if (index == 3) {
             _callsPageKey.currentState?.onPageVisible();
+            // Mark calls as seen when call screen is viewed
+            ref.read(notificationBadgeProvider.notifier).markCallsAsSeen();
           }
         },
       ),
@@ -89,24 +98,36 @@ class _MainScreenState extends State<MainScreen> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        destinations: const <Widget>[
+        destinations: <Widget>[
           NavigationDestination(
-            selectedIcon: Icon(Icons.message, color: Colors.teal),
-            icon: Icon(
-              Icons.message_outlined,
-              color: Color.fromARGB(255, 65, 64, 64),
+            selectedIcon: BadgeWidget(
+              count: badgeState.chatCount,
+              child: const Icon(Icons.message, color: Colors.teal),
+            ),
+            icon: BadgeWidget(
+              count: badgeState.chatCount,
+              child: const Icon(
+                Icons.message_outlined,
+                color: Color.fromARGB(255, 65, 64, 64),
+              ),
             ),
             label: 'Chats',
           ),
           NavigationDestination(
-            selectedIcon: Icon(Icons.group, color: Colors.teal),
-            icon: Icon(
-              Icons.group_outlined,
-              color: Color.fromARGB(255, 65, 64, 64),
+            selectedIcon: BadgeWidget(
+              count: badgeState.groupCount,
+              child: const Icon(Icons.group, color: Colors.teal),
+            ),
+            icon: BadgeWidget(
+              count: badgeState.groupCount,
+              child: const Icon(
+                Icons.group_outlined,
+                color: Color.fromARGB(255, 65, 64, 64),
+              ),
             ),
             label: 'Groups',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             selectedIcon: Icon(Icons.contacts_rounded, color: Colors.teal),
             icon: Icon(
               Icons.contacts_outlined,
@@ -115,14 +136,20 @@ class _MainScreenState extends State<MainScreen> {
             label: 'Contacts',
           ),
           NavigationDestination(
-            selectedIcon: Icon(Icons.call, color: Colors.teal),
-            icon: Icon(
-              Icons.call_outlined,
-              color: Color.fromARGB(255, 65, 64, 64),
+            selectedIcon: BadgeWidget(
+              count: badgeState.callCount,
+              child: const Icon(Icons.call, color: Colors.teal),
+            ),
+            icon: BadgeWidget(
+              count: badgeState.callCount,
+              child: const Icon(
+                Icons.call_outlined,
+                color: Color.fromARGB(255, 65, 64, 64),
+              ),
             ),
             label: 'Calls',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             selectedIcon: Icon(Icons.person_rounded, color: Colors.teal),
             icon: Icon(
               Icons.person_outline,

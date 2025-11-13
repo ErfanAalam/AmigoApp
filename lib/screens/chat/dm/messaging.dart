@@ -3,12 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter_sound/flutter_sound.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:video_thumbnail/video_thumbnail.dart';
 import '../../../models/conversation_model.dart';
 import '../../../models/message_model.dart';
 import '../../../models/user_model.dart';
@@ -20,20 +16,32 @@ import '../../../repositories/messages_repository.dart';
 import '../../../repositories/user_repository.dart';
 import '../../../services/socket/websocket_service.dart';
 import '../../../services/socket/websocket_message_handler.dart';
-import '../../../utils/chat_helpers.dart';
+import '../../../utils/chat/chat_helpers.dart';
+import '../../../utils/chat/sync_messages.utils.dart';
 import '../../../utils/message_storage_helpers.dart';
-import '../../../widgets/media_preview_widgets.dart';
+import '../../../utils/animations.utils.dart';
 import '../../../widgets/chat/message_action_sheet.dart';
 import '../../../widgets/chat/date.widgets.dart';
 import '../../../widgets/loading_dots_animation.dart';
-import '../../../services/call_service.dart';
-import 'package:provider/provider.dart' as material_provider;
+import '../../../widgets/chat/scroll_to_bottom_button.dart';
+import '../../../widgets/chat/attachment_action_sheet.dart';
+import '../../../widgets/chat/messagewidget.dart';
+import '../../../widgets/chat/forward_message_widget.dart';
+import '../../../widgets/chat/voice_recording_widget.dart';
+import '../../../widgets/chat/pinned_message.widget.dart';
+import '../../../utils/chat/forward_message.utils.dart';
+import '../../../utils/chat/attachments.utils.dart';
+import '../../../utils/chat/preview_media.utils.dart';
+import '../../../utils/chat/audio_playback.utils.dart';
+import '../../../utils/chat/sendMediaMessage.utils.dart';
+import '../../../utils/chat/chatActions.utils.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../services/user_status_service.dart';
 import '../../../services/media_cache_service.dart';
 import '../../../services/draft_message_service.dart';
 import '../../../providers/draft_provider.dart';
-import 'dart:io' as io;
+import '../../../widgets/chat/inputcontainer.widget.dart';
+import '../../../widgets/chat/media_messages.widget.dart';
 
 class InnerChatPage extends ConsumerStatefulWidget {
   final ConversationModel conversation;
@@ -72,8 +80,15 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   bool _hasCheckedCache = false; // Track if we've checked cache
   bool _isCheckingCache = true; // Show brief cache check state
   bool _isTyping = false;
+  bool isloadingMediamessage = false;
   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
   Map<int, int?> userLastReadMessageIds = {}; // userId -> lastReadMessageId
+
+  // Scroll to bottom button state
+  bool _isAtBottom = true;
+  int _unreadCountWhileScrolled = 0;
+  double _lastScrollPosition = 0.0;
+  int _previousMessageCount = 0;
 
   // For optimistic message handling - using filtered streams per conversation
   StreamSubscription<Map<String, dynamic>>? _messageSubscription;
@@ -86,10 +101,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   StreamSubscription<Map<String, dynamic>>? _messageReplySubscription;
   StreamSubscription<Map<String, dynamic>>? _onlineStatusSubscription;
   StreamSubscription<Map<String, dynamic>>? _messageDeleteSubscription;
-  StreamSubscription? _audioProgressSubscription;
-  Timer? _audioProgressTimer;
-  DateTime? _audioStartTime;
-  Duration _customPosition = Duration.zero;
   int _optimisticMessageId = -1; // Negative IDs for optimistic messages
   final Set<int> _optimisticMessageIds = {}; // Track optimistic messages
   bool _isDisposed = false; // Track if the page is being disposed
@@ -166,12 +177,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       0.4; // Threshold for swipe completion (0.0 to 1.0)
 
   // Voice recording related variables
-  late FlutterSoundRecorder _recorder;
-  late FlutterSoundPlayer _audioPlayer;
-  bool _isRecording = false;
-  String? _recordingPath;
-  Timer? _recordingTimer;
-  Duration _recordingDuration = Duration.zero;
   late AnimationController _voiceModalAnimationController;
   late AnimationController _zigzagAnimationController;
   late Animation<double> _voiceModalAnimation;
@@ -179,15 +184,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   final StreamController<Duration> _timerStreamController =
       StreamController<Duration>.broadcast();
 
-  // Audio playback related variables
-  final Map<String, bool> _playingAudios = {};
-  final Map<String, Duration> _audioDurations = {};
-  final Map<String, Duration> _audioPositions = {};
-  String? _currentPlayingAudioKey;
+  // Audio playback manager
+  late AudioPlaybackManager _audioPlaybackManager;
 
-  // Audio animation controllers
-  final Map<String, AnimationController> _audioAnimationControllers = {};
-  final Map<String, Animation<double>> _audioAnimations = {};
+  // Voice recording manager
+  late VoiceRecordingManager _voiceRecordingManager;
 
   // Video thumbnail cache
   final Map<String, String?> _videoThumbnailCache = {};
@@ -253,35 +254,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   void _initializeTypingAnimation() {
-    _typingAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 1200),
-      vsync: this,
-    );
-
-    // Create simple staggered animations for each dot with safe intervals
-    _typingDotAnimations = [
-      // Dot 0: 0.0 to 0.5
-      Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(
-          parent: _typingAnimationController,
-          curve: const Interval(0.0, 0.5, curve: Curves.easeInOut),
-        ),
-      ),
-      // Dot 1: 0.2 to 0.7
-      Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(
-          parent: _typingAnimationController,
-          curve: const Interval(0.2, 0.7, curve: Curves.easeInOut),
-        ),
-      ),
-      // Dot 2: 0.4 to 0.9
-      Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(
-          parent: _typingAnimationController,
-          curve: const Interval(0.4, 0.9, curve: Curves.easeInOut),
-        ),
-      ),
-    ];
+    final result = initializeTypingDotAnimation(this);
+    _typingAnimationController = result.controller;
+    _typingDotAnimations = result.dotAnimations;
   }
 
   /// Ultra-fast cache check that runs immediately
@@ -491,9 +466,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           return;
         }
       }
-
-      // PRIORITY 3: If no local data, fetch from server
-      debugPrint('🌐 No local call access data, fetching from server...');
       await _syncCallAccessFromServer(null);
     } catch (e) {
       debugPrint('❌ Error fetching user call access: $e');
@@ -507,7 +479,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       final response = await _userService.getUser().timeout(
         Duration(seconds: 3),
         onTimeout: () {
-          debugPrint('⏰ fetchCallAccess from server timed out');
           return {'success': false, 'message': 'Timeout'};
         },
       );
@@ -522,9 +493,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
         if (hasChanged || existingUser == null) {
           _hasCallAccess = serverCallAccess;
-          debugPrint(
-            '📡 Call access from server: $_hasCallAccess${hasChanged ? " (CHANGED!)" : ""}',
-          );
 
           // Update local DB with new value
           if (_currentUserId != null) {
@@ -537,7 +505,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
               callAccess: serverCallAccess,
             );
             await _userRepo.insertOrUpdateUser(userModel);
-            debugPrint('💾 Updated call access in local DB');
           }
 
           // Update UI if value changed
@@ -556,56 +523,34 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   /// Quick cache check and load for instant display
   Future<void> _tryLoadFromCacheFirst() async {
-    if (_hasCheckedCache) return; // Avoid double-checking
+    final conversationId = widget.conversation.conversationId;
 
-    try {
-      final conversationId = widget.conversation.conversationId;
-
-      final cachedData = await _messagesRepo.getCachedMessages(conversationId);
-
-      if (cachedData != null && cachedData.messages.isNotEmpty && mounted) {
-        setState(() {
-          _isCheckingCache = false; // Stop cache checking state
-          _isLoadingFromCache = false; // No loading state needed for cache
-          _messages =
-              cachedData.messages; // Don't reverse - keep chronological order
-          _conversationMeta = cachedData.meta;
-          _hasMoreMessages = cachedData.meta.hasNextPage;
-          _currentPage = cachedData.meta.currentPage;
-          _isInitialized = true;
-          _isLoading = false;
-          _errorMessage = null;
-          _hasCheckedCache = true;
-        });
-
-        // Validate pinned message and starred messages exist in cached messages
-        _validatePinnedMessage();
-        _validateStarredMessages();
-
-        // Validate reply message storage
-        _validateReplyMessages();
-
-        // Fix reply message sender names after loading from cache
-        _populateReplyMessageSenderNames();
-      } else {
-        if (mounted) {
-          setState(() {
-            _isCheckingCache = false;
-            _isLoading = false; // Don't show loading yet
-            _hasCheckedCache = true;
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint('⚡ Error in quick cache check: $e');
-      if (mounted) {
-        setState(() {
-          _isCheckingCache = false;
-          _isLoading = false; // Don't show loading on error
-          _hasCheckedCache = true;
-        });
-      }
-    }
+    await tryLoadFromCacheFirst(
+      TryLoadFromCacheFirstConfig(
+        conversationId: conversationId,
+        messagesRepo: _messagesRepo,
+        mounted: () => mounted,
+        setState: setState,
+        hasCheckedCache: () => _hasCheckedCache,
+        setHasCheckedCache: (value) => _hasCheckedCache = value,
+        setMessages: (value) => _messages = value,
+        setConversationMeta: (value) => _conversationMeta = value,
+        setHasMoreMessages: (value) => _hasMoreMessages = value,
+        setCurrentPage: (value) => _currentPage = value,
+        setIsInitialized: (value) => _isInitialized = value,
+        setIsLoading: (value) => _isLoading = value,
+        setErrorMessage: (value) => _errorMessage = value,
+        setIsCheckingCache: (value) => _isCheckingCache = value,
+        setIsLoadingFromCache: (value) => _isLoadingFromCache = value,
+        validateMessages: (messages) {
+          _validatePinnedMessage();
+          _validateStarredMessages();
+          _validateReplyMessages();
+        },
+        populateReplyMessageSenderNames: _populateReplyMessageSenderNames,
+        getErrorLogMessage: () => 'Error in quick cache check',
+      ),
+    );
   }
 
   Future<void> _getCurrentUserId() async {
@@ -626,9 +571,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         for (final msg in cachedMessages) {
           if (msg.senderId != otherUserId) {
             _currentUserId = msg.senderId;
-            debugPrint(
-              '✅ Got current user ID from cached messages: $_currentUserId (instant!)',
-            );
             return; // Found it! Return immediately
           }
         }
@@ -638,11 +580,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       }
 
       // SLOW PATH: Try API with timeout (only if no cache found us)
-      debugPrint('🌐 Fetching current user ID from API...');
       final response = await _userService.getUser().timeout(
         Duration(seconds: 2), // Reduced to 2 seconds
         onTimeout: () {
-          debugPrint('⏰ getUser() timed out after 2 seconds');
           return {'success': false, 'message': 'Timeout'};
         },
       );
@@ -650,7 +590,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       if (response['success'] == true && response['data'] != null) {
         final userData = response['data'];
         _currentUserId = _parseToInt(userData['id']);
-        debugPrint('✅ Got current user ID from API: $_currentUserId');
       } else {
         debugPrint('⚠️ Could not get current user ID from API');
         // Will be determined when user sends first message
@@ -700,9 +639,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         setState(() {
           _pinnedMessageId = pinnedMessageId;
         });
-        debugPrint(
-          '✅ Loaded pinned message from conversation metadata: $pinnedMessageId',
-        );
         return;
       }
     }
@@ -717,9 +653,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       setState(() {
         _pinnedMessageId = pinnedMessageId;
       });
-      debugPrint(
-        '✅ Loaded pinned message from local storage: $pinnedMessageId',
-      );
     }
   }
 
@@ -747,9 +680,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     if (_pinnedMessageId != null && _messages.length > 20) {
       final messageExists = _messages.any((msg) => msg.id == _pinnedMessageId);
       if (!messageExists && mounted) {
-        debugPrint(
-          '⚠️ Pinned message $_pinnedMessageId not found in current messages, but keeping it (might be paginated)',
-        );
         // Don't clear the pinned message - it might just be in a different page
         // Only clear if we explicitly receive an unpin action via WebSocket
       }
@@ -765,10 +695,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           .toList();
 
       if (invalidStarredMessages.isNotEmpty && mounted) {
-        debugPrint(
-          '⚠️ ${invalidStarredMessages.length} starred messages not found in current messages, cleaning up',
-        );
-
         setState(() {
           _starredMessages.removeAll(invalidStarredMessages);
         });
@@ -796,16 +722,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             )
             .toList();
 
-        debugPrint(
-          '🔍 Found ${replyMessagesInUI.length} reply messages in cache',
-        );
-
         // Validate each reply message
         for (final message in replyMessagesInUI) {
           if (message.replyToMessage != null) {
-            debugPrint(
-              '✅ Reply message ${message.id} has complete reply data: "${message.replyToMessage!.body}" by ${message.replyToMessage!.senderName}',
-            );
           } else if (message.replyToMessageId != null) {
             // Try to find the referenced message in current messages
             MessageModel? referencedMessage;
@@ -890,22 +809,24 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
         updatedMessages.add(updatedMessage);
         hasUpdates = true;
-
-        debugPrint(
-          '🔧 Updated reply message sender name for message ${message.id}',
-        );
       } else {
         updatedMessages.add(message);
       }
     }
 
     if (hasUpdates && mounted) {
+      // Track new messages if scrolled up
+      if (!_isAtBottom && updatedMessages.length > _previousMessageCount) {
+        final newMessageCount = updatedMessages.length - _previousMessageCount;
+        setState(() {
+          _unreadCountWhileScrolled += newMessageCount;
+        });
+      }
+      _previousMessageCount = updatedMessages.length;
+
       setState(() {
         _messages = updatedMessages;
       });
-      debugPrint(
-        '✅ Updated ${updatedMessages.where((m) => m.replyToMessage != null).length} reply messages with sender names',
-      );
     }
   }
 
@@ -1046,31 +967,16 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     _swipeAnimationControllers.clear();
     _swipeAnimations.clear();
 
-    // Dispose audio animation controllers
-    for (final controller in _audioAnimationControllers.values) {
-      controller.dispose();
-    }
-    _audioAnimationControllers.clear();
-    _audioAnimations.clear();
+    // Dispose audio playback manager
+    _audioPlaybackManager.dispose();
+
+    // Dispose voice recording manager
+    _voiceRecordingManager.dispose();
 
     // Dispose voice recording controllers
     _voiceModalAnimationController.dispose();
     _zigzagAnimationController.dispose();
-    _recordingTimer?.cancel();
     _timerStreamController.close();
-    _recorder.closeRecorder();
-
-    // Properly close the audio player
-    try {
-      if (_audioPlayer.isPlaying) {
-        _audioPlayer.stopPlayer();
-      }
-      _audioProgressSubscription?.cancel();
-      _stopAudioProgressTimer();
-      _audioPlayer.closePlayer();
-    } catch (e) {
-      debugPrint('Warning: Error closing audio player during dispose: $e');
-    }
 
     // Clear message keys to prevent memory leaks
     _messageKeys.clear();
@@ -1100,6 +1006,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       }
     });
 
+    // Update scroll to bottom button state
+    _updateScrollToBottomState();
+
     // With reverse: true, when scrolling to see older messages (scrolling "up" in the UI),
     // we're actually scrolling towards maxScrollExtent
     // Load older messages when we're near the top of the scroll (close to maxScrollExtent)
@@ -1108,208 +1017,53 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     final distanceFromTop = maxScrollExtent - scrollPosition;
 
     if (distanceFromTop <= 200) {
-      if (!_isLoadingMore && _hasMoreMessages && _isInitialized) {
-        debugPrint(
-          '🔄 Triggering load more messages - Distance from top: $distanceFromTop',
-        );
-      }
       _loadMoreMessages();
     }
   }
 
   Future<void> _loadInitialMessages() async {
-    try {
-      final conversationId = widget.conversation.conversationId;
+    final conversationId = widget.conversation.conversationId;
 
-      // ALWAYS load from local DB first for instant display
-      if (!_hasCheckedCache) {
-        final cachedData = await _messagesRepo.getCachedMessages(
-          conversationId,
-        );
-
-        if (cachedData != null && cachedData.messages.isNotEmpty) {
-          debugPrint(
-            '✅ Loaded ${cachedData.messages.length} messages from local DB',
-          );
-          if (mounted) {
-            setState(() {
-              _isCheckingCache = false;
-              _isLoadingFromCache = false;
-              _messages = cachedData.messages;
-              _conversationMeta = cachedData.meta;
-              _hasMoreMessages = cachedData.meta.hasNextPage;
-              _currentPage = cachedData.meta.currentPage;
-              _isInitialized = true;
-              _isLoading = false;
-              _errorMessage = null;
-              _hasCheckedCache = true;
-            });
-
-            // Debug message dates
-            ChatHelpers.debugMessageDates(_messages);
-
-            // Validate messages
-            _validatePinnedMessage();
-            _validateStarredMessages();
-            _validateReplyMessages();
-            _populateReplyMessageSenderNames();
-          }
-        } else {
-          debugPrint('ℹ️ No cached messages found in local DB');
-          _hasCheckedCache = true;
-        }
-      }
-
-      // If we already have messages from cache, do smart sync silently
-      if (_messages.isNotEmpty) {
-        debugPrint('📡 Silently syncing with server in background...');
-        await _performSmartSync(conversationId);
-        return;
-      }
-
-      // Show loading only if we don't have cached messages
-      if (_messages.isEmpty && mounted) {
-        setState(() {
-          _isCheckingCache = false;
-          _isLoading = true;
-          _isLoadingFromCache = false;
-          _errorMessage = null;
-        });
-      }
-
-      try {
-        final response = await _chatsServices.getConversationHistory(
-          conversationId: conversationId,
-          page: 1,
-          limit: 20,
-        );
-
-        if (!mounted) return;
-
-        if (response['success'] == true && response['data'] != null) {
-          final historyResponse = ConversationHistoryResponse.fromJson(
-            response['data'],
-          );
-
-          final processedMessages = historyResponse.messages;
-          _conversationMeta = ConversationMeta.fromResponse(historyResponse);
-
-          // Process read status from members data
-          final membersData =
-              response['data']['data']['members'] as List<dynamic>? ?? [];
-
-          userLastReadMessageIds.addEntries(
-            membersData.map((member) {
-              final userId = member['user_id'] as int;
-              final lastReadMessageId = member['last_read_message_id'] as int;
-              return MapEntry(userId, lastReadMessageId);
-            }),
-          );
-
-          // Save to local DB
-          await _messagesRepo.saveMessages(
-            conversationId: conversationId,
-            messages: processedMessages,
-            meta: _conversationMeta!,
-          );
-
-          setState(() {
-            _messages = processedMessages;
-            _hasMoreMessages = historyResponse.hasNextPage;
-            _currentPage = 1;
-            _isLoading = false;
-            _isLoadingFromCache = false;
-            _isInitialized = true;
-          });
-
-          ChatHelpers.debugMessageDates(_messages);
+    await loadInitialMessages(
+      LoadInitialMessagesConfig(
+        conversationId: conversationId,
+        messagesRepo: _messagesRepo,
+        chatsServices: _chatsServices,
+        mounted: () => mounted,
+        setState: setState,
+        hasCheckedCache: () => _hasCheckedCache,
+        getMessages: () => _messages,
+        getConversationMeta: () => _conversationMeta,
+        getHasMoreMessages: () => _hasMoreMessages,
+        getCurrentPage: () => _currentPage,
+        getIsInitialized: () => _isInitialized,
+        getIsLoading: () => _isLoading,
+        getErrorMessage: () => _errorMessage,
+        getIsCheckingCache: () => _isCheckingCache,
+        getIsLoadingFromCache: () => _isLoadingFromCache,
+        setHasCheckedCache: (value) => _hasCheckedCache = value,
+        setMessages: (value) => _messages = value,
+        setConversationMeta: (value) => _conversationMeta = value,
+        setHasMoreMessages: (value) => _hasMoreMessages = value,
+        setCurrentPage: (value) => _currentPage = value,
+        setIsInitialized: (value) => _isInitialized = value,
+        setIsLoading: (value) => _isLoading = value,
+        setErrorMessage: (value) => _errorMessage = value,
+        setIsCheckingCache: (value) => _isCheckingCache = value,
+        setIsLoadingFromCache: (value) => _isLoadingFromCache = value,
+        performSmartSync: _performSmartSync,
+        validateMessages: (messages) {
           _validatePinnedMessage();
           _validateStarredMessages();
           _validateReplyMessages();
-
-          _populateReplyMessageSenderNames();
-        } else {
-          setState(() {
-            _errorMessage = response['message'] ?? 'Failed to load messages';
-            _isLoading = false;
-            _isLoadingFromCache = false;
-            _isInitialized = true;
-          });
-        }
-      } catch (e) {
-        debugPrint('❌ Error loading messages from server: $e');
-
-        // On network error, if we have cached data, keep showing it
-        if (mounted) {
-          if (_messages.isNotEmpty) {
-            // We have cache, just stop loading
-            debugPrint(
-              '📦 Network error but we have cached data, showing cache',
-            );
-            setState(() {
-              _isLoading = false;
-              _isLoadingFromCache = false;
-              _isInitialized = true;
-              _errorMessage = null; // Don't show error if we have cache
-            });
-          } else {
-            // No cache, show error
-            setState(() {
-              _errorMessage = 'No internet connection';
-              _isLoading = false;
-              _isLoadingFromCache = false;
-              _isInitialized = true;
-            });
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ Critical error in _loadInitialMessages: $e');
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Failed to load messages: ${e.toString()}';
-          _isLoading = false;
-          _isLoadingFromCache = false;
-          _isInitialized = true;
-        });
-      }
-    }
-  }
-
-  Future<void> _loadMoreMessages() async {
-    if (_isLoadingMore || !_hasMoreMessages || !mounted) return;
-
-    debugPrint(
-      '📚 Loading more messages - Page: ${_currentPage + 1}, Current messages: ${_messages.length}',
-    );
-
-    setState(() {
-      _isLoadingMore = true;
-    });
-
-    try {
-      final conversationId = widget.conversation.conversationId;
-
-      final response = await _chatsServices.getConversationHistory(
-        conversationId: conversationId,
-        page: _currentPage + 1,
-        limit: 20,
-      );
-
-      debugPrint('📡 Response received: Success');
-
-      if (!mounted) return;
-
-      if (response['success'] == true && response['data'] != null) {
-        try {
-          final historyResponse = ConversationHistoryResponse.fromJson(
-            response['data'],
-          );
-
-          // Process read status from members data
+        },
+        populateReplyMessageSenderNames: _populateReplyMessageSenderNames,
+        onAfterLoadFromCache: (messages) {
+          ChatHelpers.debugMessageDates(messages);
+        },
+        processMembersData: (response) {
           final membersData =
               response['data']['data']['members'] as List<dynamic>? ?? [];
-
           userLastReadMessageIds.addEntries(
             membersData.map((member) {
               final userId = member['user_id'] as int;
@@ -1317,71 +1071,67 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
               return MapEntry(userId, lastReadMessageId);
             }),
           );
+        },
+        getErrorMessageText: () => 'Failed to load messages',
+        getNoCacheMessage: () => 'ℹ️ No cached messages found in local DB',
+      ),
+    );
+  }
 
-          // Update conversation metadata
-          _conversationMeta = ConversationMeta.fromResponse(historyResponse);
+  Future<void> _loadMoreMessages() async {
+    final conversationId = widget.conversation.conversationId;
 
-          // Add to cache (insert at beginning for older messages)
-          await _messagesRepo.addMessagesToCache(
-            conversationId: conversationId,
-            newMessages: historyResponse.messages, // Save with read status
-            updatedMeta: _conversationMeta!,
-            insertAtBeginning: true,
+    await loadMoreMessages(
+      LoadMoreMessagesConfig(
+        conversationId: conversationId,
+        messagesRepo: _messagesRepo,
+        chatsServices: _chatsServices,
+        mounted: () => mounted,
+        setState: setState,
+        isLoadingMore: () => _isLoadingMore,
+        hasMoreMessages: () => _hasMoreMessages,
+        currentPage: () => _currentPage,
+        getMessages: () => _messages,
+        getConversationMeta: () => _conversationMeta,
+        setIsLoadingMore: (value) => _isLoadingMore = value,
+        setHasMoreMessages: (value) => _hasMoreMessages = value,
+        setCurrentPage: (value) => _currentPage = value,
+        setMessages: (value) => _messages = value,
+        setConversationMeta: (value) => _conversationMeta = value,
+        populateReplyMessageSenderNames: _populateReplyMessageSenderNames,
+        processMembersData: (response) {
+          final membersData =
+              response['data']['data']['members'] as List<dynamic>? ?? [];
+          userLastReadMessageIds.addEntries(
+            membersData.map((member) {
+              final userId = member['user_id'] as int;
+              final lastReadMessageId = member['last_read_message_id'] as int;
+              return MapEntry(userId, lastReadMessageId);
+            }),
           );
-
-          setState(() {
-            // Insert older messages at the beginning (chronologically)
-            _messages.insertAll(0, historyResponse.messages);
-            _hasMoreMessages = historyResponse.hasNextPage;
-            _currentPage++;
-            _isLoadingMore = false;
-          });
-
-          _populateReplyMessageSenderNames();
-          //
-        } catch (processingError) {
-          debugPrint(
-            '❌ Error processing message history response: $processingError',
-          );
-          if (mounted) {
-            setState(() {
-              _isLoadingMore = false;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  'Failed to process older messages. Please try again.',
-                ),
-                duration: Duration(seconds: 3),
-                backgroundColor: Colors.red[600],
+        },
+        onProcessingError: (error) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Failed to process older messages. Please try again.',
               ),
-            );
-          }
-        }
-      } else {
-        if (mounted) {
-          setState(() {
-            _isLoadingMore = false;
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ Error loading more messages: $e');
-      if (mounted) {
-        setState(() {
-          _isLoadingMore = false;
-        });
-
-        // Show a brief error message to the user without breaking the UI
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to load older messages. Please try again.'),
-            duration: Duration(seconds: 3),
-            backgroundColor: Colors.red[600],
-          ),
-        );
-      }
-    }
+              duration: Duration(seconds: 3),
+              backgroundColor: Colors.red[600],
+            ),
+          );
+        },
+        onLoadError: (error) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to load older messages. Please try again.'),
+              duration: Duration(seconds: 3),
+              backgroundColor: Colors.red[600],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   /// Set up WebSocket message listener for real-time messages
@@ -1518,9 +1268,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
       // If this is our own message (sender), update the optimistic message in local storage
       if (_currentUserId != null && userId == _currentUserId) {
-        debugPrint(
-          '🔄 Updating own reply message from optimistic ID to server ID in local storage',
-        );
         await _updateOptimisticMessageInStorage(
           optimisticId,
           newMessageId,
@@ -1589,13 +1336,15 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         });
 
         _animateNewMessage(replyMessage.id);
-        _scrollToBottom();
+        if (_isAtBottom) {
+          _scrollToBottom();
+        } else {
+          _trackNewMessage();
+        }
       }
 
       // Store message asynchronously in local storage
       _storeMessageAsync(replyMessage);
-
-      debugPrint('✅ Reply message processed and stored successfully');
     } catch (e) {
       debugPrint('❌ Error processing message_reply: $e');
     }
@@ -1603,100 +1352,48 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   /// Handle incoming message pin from WebSocket
   void _handleMessagePin(Map<String, dynamic> message) async {
-    final data = message['data'] as Map<String, dynamic>? ?? {};
-    // Get message ID from message_ids array
-    final messageIds = message['message_ids'] as List<dynamic>? ?? [];
-    final messageId = messageIds.isNotEmpty ? messageIds[0] as int? : null;
-    final action = data['action'] ?? 'pin';
-    final conversationId = widget.conversation.conversationId;
-
-    int? newPinnedMessageId;
-    if (action == 'pin') {
-      newPinnedMessageId = messageId;
-    } else {
-      newPinnedMessageId = null;
-    }
-
-    setState(() {
-      _pinnedMessageId = newPinnedMessageId;
-    });
-
-    // Save to local storage
-    await _messagesRepo.savePinnedMessage(
-      conversationId: conversationId,
-      pinnedMessageId: newPinnedMessageId,
-    );
-
-    debugPrint(
-      '📌 ${action == 'pin' ? 'Pinned' : 'Unpinned'} message $messageId for conversation $conversationId',
+    await handleMessagePin(
+      HandleMessagePinConfig(
+        message: message,
+        conversationId: widget.conversation.conversationId,
+        mounted: () => mounted,
+        setState: setState,
+        getPinnedMessageId: () => _pinnedMessageId,
+        setPinnedMessageId: (value) => _pinnedMessageId = value,
+        messagesRepo: _messagesRepo,
+      ),
     );
   }
 
   /// Handle incoming message star from WebSocket
   void _handleMessageStar(Map<String, dynamic> message) async {
-    final data = message['data'] as Map<String, dynamic>? ?? {};
-    final messagesIds = message['message_ids'] as List<int>? ?? [];
-    final action = data['action'] ?? 'star';
-
-    setState(() {
-      if (action == 'star') {
-        _starredMessages.addAll(messagesIds);
-      } else {
-        _starredMessages.removeAll(messagesIds);
-      }
-    });
-
-    // Save to local storage
-    try {
-      for (final messageId in messagesIds) {
-        if (action == 'star') {
-          await _messagesRepo.starMessage(messageId);
-        } else {
-          await _messagesRepo.unstarMessage(messageId);
-        }
-      }
-    } catch (e) {
-      debugPrint(
-        '❌ Error updating starred messages from WebSocket in storage: $e',
-      );
-    }
+    await handleMessageStar(
+      HandleMessageStarConfig(
+        message: message,
+        mounted: () => mounted,
+        setState: setState,
+        starredMessages: _starredMessages,
+        messagesRepo: _messagesRepo,
+      ),
+    );
   }
 
   /// Handle message delete event from WebSocket
   void _handleMessageDelete(Map<String, dynamic> message) async {
-    try {
-      final messageIds = message['message_ids'] as List<dynamic>? ?? [];
-      if (messageIds.isEmpty) return;
-
-      final deletedMessageIds = messageIds.map((id) => id as int).toList();
-
-      debugPrint('🗑️ Received message_delete event for messages: $deletedMessageIds');
-
-      // Remove from UI
-      if (mounted) {
-        setState(() {
-          _messages.removeWhere((msg) => deletedMessageIds.contains(msg.id));
-        });
-      }
-
-      // Remove from local storage cache
-      await _messagesRepo.removeMessageFromCache(
+    await handleMessageDelete(
+      HandleMessageDeleteConfig(
+        message: message,
+        mounted: () => mounted,
+        setState: setState,
+        messages: _messages,
         conversationId: widget.conversation.conversationId,
-        messageIds: deletedMessageIds,
-      );
-
-      debugPrint('✅ Removed deleted messages from UI and cache');
-    } catch (e) {
-      debugPrint('❌ Error handling message delete event: $e');
-    }
+        messagesRepo: _messagesRepo,
+      ),
+    );
   }
 
   /// Build message status ticks (single/double) based on delivery and read status
   Widget _buildMessageStatusTicks(MessageModel message) {
-    // Check if any user is currently active in the conversation
-    // Check if any other user's online status is true (excluding current user)
-    // bool hasActiveUsers = _activeUsers.values.any((isActive) => isActive);
-
     bool hasActiveUsers = _onlineUsers
         .where((userId) => userId != _currentUserId)
         .isNotEmpty;
@@ -1817,14 +1514,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             }
           });
         }
-        // // Optionally, if you want to clear last read for users in unreadBy:
-        // if (unreadBy.isNotEmpty) {
-        //   for (final userId in unreadBy) {
-        //     if (userId != null) {
-        //       userLastReadMessageIds[userId] = null;
-        //     }
-        //   }
-        // }
 
         // Update in storage for all messages that the current user sent (batch update)
         if (_currentUserId != null && isDelivered) {
@@ -1834,10 +1523,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             isDelivered: isDelivered,
           );
         }
-
-        debugPrint(
-          '✅ Updated message $actualMessageId and all messages from sender: delivered=$isDelivered, read=$isRead',
-        );
       } else {
         debugPrint(
           '⚠️ Message not found for delivery receipt - messageId: $messageId, optimisticId: $optimisticId',
@@ -1856,17 +1541,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       final readAll = data['read_all'] ?? false;
       final userActive = data['user_active'] ?? false;
       final lastReadMessageId = data['message_id'];
-
-      // setState(() {
-      //   _isOtherUserActive = userActive;
-      // });
-
-      if (lastReadMessageId != null) {
-        // setState(() {
-        //   _lastReadMessageId = lastReadMessageId;
-        // });
-      }
-
       // Skip if this is our own read receipt
       if (_currentUserId != null && userId == _currentUserId) {
         return;
@@ -1874,20 +1548,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
       // Update the active user state
       _activeUsers[userId] = userActive;
-
-      debugPrint(
-        '📖 Read receipt - User: $userId, Active: $userActive, ReadAll: $readAll',
-      );
-      debugPrint('📖 Active users: $_activeUsers');
-
       if (mounted) {
         setState(() {
           // Update userLastReadMessageIds when we receive a read receipt
           if (lastReadMessageId != null && userId != null) {
             userLastReadMessageIds[userId] = lastReadMessageId;
-            debugPrint(
-              '📖 @@@@@@@@@@@@@ Updated userLastReadMessageIds[$userId] = $lastReadMessageId',
-            );
           }
 
           // If user became active, mark delivered messages as read
@@ -2060,6 +1725,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         _showStickyDate.value = true;
 
         _animateNewMessage(newMessage.id);
+        if (!_isAtBottom) {
+          _trackNewMessage();
+        }
         // _scrollToBottom();
       }
 
@@ -2158,9 +1826,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
           // Determine the actual message type based on loading type or media type
           String actualType;
-          if (optimisticMessage.type == 'image_loading') {
-            actualType = 'image';
-          } else if (optimisticMessage.type == 'video_loading') {
+          if (optimisticMessage.type == 'video_loading') {
             actualType = 'video';
           } else if (optimisticMessage.type == 'document_loading') {
             actualType = 'document';
@@ -2214,9 +1880,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                   updatedMeta: _conversationMeta!,
                   insertAtBeginning: false,
                 );
-                debugPrint(
-                  '💾 Stored confirmed media message ${confirmedMessage.id} to DB',
-                );
               }
             } catch (e) {
               debugPrint(
@@ -2267,7 +1930,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           _storeMessageAsync(confirmedMessage);
 
           debugPrint(
-            '✅ Replaced optimistic group reply message with server-confirmed message',
+            '✅ Replaced optimistic dm reply message with server-confirmed message',
           );
         } else {
           // Handle regular text messages
@@ -2526,7 +2189,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         });
 
         _animateNewMessage(newMediaMessage.id);
-        // _scrollToBottom();
+        if (!_isAtBottom) {
+          _trackNewMessage();
+        }
       }
 
       // Store message asynchronously in local storage
@@ -2651,28 +2316,28 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
   }
 
-  /// Handle media upload failure
-  void _handleMediaUploadFailure(int messageId, String error) {
+  /// Handle media upload failure - update only metadata to mark as failed
+  void _handleMediaUploadFailure(MessageModel loadingMessage, String error) {
     if (!mounted) return;
 
-    // Find and remove the failed loading message
-    final index = _messages.indexWhere((msg) => msg.id == messageId);
+    // Find the message and update only metadata
+    final index = _messages.indexWhere((msg) => msg.id == loadingMessage.id);
     if (index != -1) {
-      setState(() {
-        _messages.removeAt(index);
-      });
-
-      // Remove from optimistic tracking
-      _optimisticMessageIds.remove(messageId);
-
-      // Show error to user
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(error),
-          backgroundColor: Colors.teal,
-          duration: const Duration(seconds: 4),
-        ),
+      final failedMessage = _messages[index];
+      final updatedMetadata = Map<String, dynamic>.from(
+        failedMessage.metadata ?? {},
       );
+      updatedMetadata['is_uploading'] = false;
+      updatedMetadata['upload_failed'] = true;
+
+      setState(() {
+        // Use copyWith to update only metadata, explicitly preserve attachments
+        _messages[index] = failedMessage.copyWith(
+          metadata: updatedMetadata,
+          attachments:
+              failedMessage.attachments, // Explicitly preserve attachments
+        );
+      });
     }
   }
 
@@ -2713,15 +2378,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             insertAtBeginning: false, // Add new messages at the end
           );
 
-          // Debug reply message storage
-          // if (message.replyToMessage != null) {
-          //   debugPrint(
-          //     '💾 Reply message stored: ${message.id} -> ${message.replyToMessage!.id} (${message.replyToMessage!.senderName})',
-          //   );
-          // } else {
-          //   debugPrint('💾 Regular message stored: ${message.id}');
-          // }
-
           // Validate reply message storage periodically
           if (message.replyToMessage != null) {
             await _messagesRepo.validateReplyMessageStorage(
@@ -2737,17 +2393,70 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   /// Scroll to bottom of message list
   void _scrollToBottom() {
-    if (_scrollController.hasClients) {
-      Future.delayed(const Duration(milliseconds: 100), () {
-        if (_scrollController.hasClients) {
-          _scrollController.animateTo(
-            0, // Since we're using reverse: true, 0 is the bottom
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          );
+    ChatHelpers.scrollToBottom(
+      scrollController: _scrollController,
+      onScrollComplete: () {
+        if (mounted) {
+          setState(() {
+            _unreadCountWhileScrolled = 0;
+            _isAtBottom = true;
+          });
         }
+      },
+      mounted: mounted,
+    );
+  }
+
+  /// Handle scroll to bottom button tap
+  void _handleScrollToBottomTap() {
+    _scrollToBottom();
+    // Clear unread count
+    setState(() {
+      _unreadCountWhileScrolled = 0;
+    });
+  }
+
+  /// Update scroll to bottom button state
+  void _updateScrollToBottomState() {
+    if (!_scrollController.hasClients) return;
+
+    final scrollPosition = _scrollController.position.pixels;
+
+    // With reverse: true, 0 is the bottom, maxScrollExtent is the top
+    // Check if we're within 100px of the bottom
+    final isAtBottomNow = scrollPosition <= 100;
+
+    // Check if user scrolled up significantly
+    final scrolledUp = scrollPosition > _lastScrollPosition + 50;
+
+    if (isAtBottomNow) {
+      // User is at bottom - clear unread count
+      if (mounted && (!_isAtBottom || _unreadCountWhileScrolled > 0)) {
+        setState(() {
+          _isAtBottom = true;
+          _unreadCountWhileScrolled = 0;
+        });
+      }
+    } else if (scrolledUp || scrollPosition > 100) {
+      // User scrolled up - show button
+      if (mounted && _isAtBottom) {
+        setState(() {
+          _isAtBottom = false;
+        });
+      }
+    }
+
+    _lastScrollPosition = scrollPosition;
+  }
+
+  /// Track new messages when added while scrolled up
+  void _trackNewMessage() {
+    if (!_isAtBottom && mounted) {
+      setState(() {
+        _unreadCountWhileScrolled++;
       });
     }
+    _previousMessageCount = _messages.length;
   }
 
   /// Scroll to a specific message
@@ -2758,17 +2467,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       debugPrint('❌ Max retry attempts reached for message $messageId');
       return;
     }
-
-    debugPrint(
-      '🎯 Attempting to scroll to message: $messageId (retry: $retryCount)',
-    );
-
     // Check if the message exists in the current loaded messages
     final messageIndex = _messages.indexWhere((msg) => msg.id == messageId);
 
     if (messageIndex == -1) {
-      debugPrint('⚠️ Message $messageId not in current loaded messages');
-
       // Message not loaded yet - we need to load more messages
       // Keep loading until we find the message or run out of messages
       bool messageFound = false;
@@ -2776,10 +2478,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       const maxAttempts = 20; // Prevent infinite loops
 
       while (!messageFound && _hasMoreMessages && attempts < maxAttempts) {
-        debugPrint(
-          '📥 Loading more messages to find message $messageId (attempt ${attempts + 1})',
-        );
-
         // Load more messages
         await _loadMoreMessages();
 
@@ -2792,10 +2490,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       }
 
       if (!messageFound) {
-        debugPrint(
-          '❌ Could not find message $messageId after loading all available messages',
-        );
-
         // Show a user-friendly message
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -2808,8 +2502,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         }
         return;
       }
-
-      debugPrint('✅ Found message $messageId after loading more messages');
 
       // Update messageIndex after loading
       final updatedIndex = _messages.indexWhere((msg) => msg.id == messageId);
@@ -2839,8 +2531,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
       // If message is likely off-screen, scroll approximately to it first
       if ((approximatePosition - currentPosition).abs() > viewportHeight / 2) {
-        debugPrint('📍 Phase 1: Scrolling approximately to message area');
-
         try {
           await _scrollController.animateTo(
             approximatePosition,
@@ -2859,10 +2549,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // PHASE 2: Use GlobalKey for precise scrolling
     final messageKey = _messageKeys[messageId];
     if (messageKey?.currentContext != null) {
-      debugPrint(
-        '📍 Phase 2: Scrolling precisely using Scrollable.ensureVisible',
-      );
-
       try {
         // Use Scrollable.ensureVisible for precise scrolling
         await Scrollable.ensureVisible(
@@ -2890,14 +2576,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             }
           });
         }
-
-        debugPrint('✅ Successfully scrolled to message $messageId');
       } catch (e) {
         debugPrint('❌ Error in precise scroll: $e');
       }
     } else {
-      debugPrint('⚠️ Message key context not found, will retry after rebuild');
-
       // Only retry if we haven't exceeded max retries
       if (retryCount < maxRetries - 1 && mounted) {
         // Force a rebuild and wait a bit longer
@@ -2907,10 +2589,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         await Future.delayed(const Duration(milliseconds: 300));
         _scrollToMessage(messageId, retryCount: retryCount + 1);
       } else {
-        debugPrint(
-          '⚠️ Could not scroll to message precisely, staying at approximate position',
-        );
-
         // Still highlight the message even if we can't scroll precisely
         if (mounted) {
           setState(() {
@@ -3098,11 +2776,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                   onPressed: _bulkForwardMessages,
                   tooltip: 'Forward messages',
                 ),
-                // IconButton(
-                //   icon: const Icon(Icons.delete_outline, color: Colors.white),
-                //   onPressed: _bulkDeleteMessages,
-                //   tooltip: 'Delete messages',
-                // ),
               ]
             : [
                 // Only show call button if user has call access
@@ -3111,13 +2784,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                     icon: const Icon(Icons.call, color: Colors.white),
                     onPressed: () => _initiateCall(context),
                   ),
-                // IconButton(
-                //   icon: const Icon(Icons.videocam, color: Colors.white),
-                //   onPressed: () {
-                //     // TODO: Implement video call functionality
-                //     debugPrint('Video call pressed');
-                //   },
-                // ),
               ],
       ),
       body: SafeArea(
@@ -3139,7 +2805,17 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             Column(
               children: [
                 // Pinned Message Section
-                if (_pinnedMessageId != null) _buildPinnedMessageSection(),
+                if (_pinnedMessageId != null)
+                  PinnedMessageSection(
+                    pinnedMessage: _messages.firstWhere(
+                      (message) => message.id == _pinnedMessageId,
+                    ),
+                    currentUserId: _currentUserId,
+                    conversationUserId: widget.conversation.userId,
+                    isGroupChat: false,
+                    onTap: () => _scrollToMessage(_pinnedMessageId!),
+                    onUnpin: () => _togglePinMessage(_pinnedMessageId!),
+                  ),
 
                 // Messages List
                 Expanded(child: _buildMessagesList()),
@@ -3155,100 +2831,22 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
               right: 0,
               child: _buildStickyDateSeparator(),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPinnedMessageSection() {
-    final pinnedMessage = _messages.firstWhere(
-      (message) => message.id == _pinnedMessageId,
-      // orElse: () => throw StateError('Pinned message not found'),
-    );
-
-    // Determine if pinned message is from current user (same logic as message list)
-    final isMyMessage = _currentUserId != null
-        ? pinnedMessage.senderId == _currentUserId
-        : pinnedMessage.senderId != widget.conversation.userId;
-    final messageTime = ChatHelpers.formatMessageTime(pinnedMessage.createdAt);
-
-    return GestureDetector(
-      onTap: () => _scrollToMessage(pinnedMessage.id),
-      child: Container(
-        // margin: const EdgeInsets.all(16),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.blue[50],
-          // borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.blue[200]!, width: 1),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.blue.withValues(alpha: 0.1),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            // Pin icon
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.blue[400],
-                borderRadius: BorderRadius.circular(8),
+            // Scroll to Bottom Button - positioned at right bottom
+            Positioned(
+              right: 16,
+              bottom: _isReplying
+                  ? 150.0
+                  : 80.0, // Position above message input
+              child: ScrollToBottomButton(
+                scrollController: _scrollController,
+                onTap: _handleScrollToBottomTap,
+                isAtBottom: _isAtBottom,
+                unreadCount: _unreadCountWhileScrolled > 0
+                    ? _unreadCountWhileScrolled
+                    : null,
+                bottomPadding:
+                    0.0, // Not used anymore, positioning handled by parent
               ),
-              child: const Icon(Icons.push_pin, size: 16, color: Colors.white),
-            ),
-            const SizedBox(width: 12),
-
-            // Message content
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Sender name and time
-                  Row(
-                    children: [
-                      Text(
-                        isMyMessage ? 'You' : pinnedMessage.senderName,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue[800],
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        messageTime,
-                        style: TextStyle(color: Colors.blue[600], fontSize: 11),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-
-                  // Message text
-                  Text(
-                    pinnedMessage.body,
-                    style: TextStyle(
-                      color: Colors.grey[800],
-                      fontSize: 14,
-                      height: 1.3,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-
-            // Unpin button
-            IconButton(
-              onPressed: () => _togglePinMessage(pinnedMessage.id),
-              icon: Icon(Icons.close, size: 18, color: Colors.blue[600]),
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              padding: EdgeInsets.zero,
             ),
           ],
         ),
@@ -3418,8 +3016,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             _messages[_messages.length -
                 1 -
                 messageIndex]; // Show newest at bottom
-
-        // Keep pinned message in regular list - it will also be shown in pinned section
 
         // Determine if message is from current user
         // If _currentUserId is known, use it
@@ -3725,291 +3321,39 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Check if this message is currently highlighted
     final isHighlighted = _highlightedMessageId == message.id;
 
-    Widget messageContent = RepaintBoundary(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          mainAxisAlignment: isMyMessage
-              ? MainAxisAlignment.end
-              : MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Flexible(
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.75,
-                ),
-                margin: EdgeInsets.only(
-                  left: isMyMessage ? 40 : 8,
-                  right: isMyMessage ? 8 : 40,
-                ),
-                padding: isHighlighted
-                    ? const EdgeInsets.all(10)
-                    : EdgeInsets.zero,
-                decoration: BoxDecoration(
-                  color: isHighlighted
-                      ? Colors.blue.withAlpha(100)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(24),
-                    topRight: const Radius.circular(24),
-                    bottomLeft: Radius.circular(isMyMessage ? 24 : 0),
-                    bottomRight: Radius.circular(isMyMessage ? 0 : 24),
-                  ),
-                ),
-                child: Stack(
-                  children: [
-                    // Check if this is a media message (image/video)
-                    _isMediaMessage(message)
-                        ? Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Reply message preview (if this is a reply)
-                              if (message.replyToMessage != null)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isMyMessage
-                                        ? Colors.teal[600]
-                                        : Colors.grey[100],
-
-                                    borderRadius: BorderRadius.only(
-                                      topLeft: const Radius.circular(0),
-                                      topRight: const Radius.circular(0),
-                                      bottomLeft: const Radius.circular(4),
-                                      bottomRight: const Radius.circular(4),
-                                    ),
-                                  ),
-                                  child: _buildReplyPreview(
-                                    message.replyToMessage!,
-                                    isMyMessage,
-                                  ),
-                                ),
-                              // Media content without outer padding
-                              _buildMessageContent(message, isMyMessage),
-                            ],
-                          )
-                        : Container(
-                            padding: const EdgeInsets.only(
-                              top: 5,
-                              bottom: 2,
-                              left: 10,
-                              right: 10,
-                            ),
-                            decoration: BoxDecoration(
-                              color: isMyMessage
-                                  ? Colors.teal[600]
-                                  : Colors.white,
-                              borderRadius: BorderRadius.only(
-                                topLeft: const Radius.circular(14),
-                                topRight: const Radius.circular(14),
-                                bottomLeft: Radius.circular(
-                                  isMyMessage ? 14 : 0,
-                                ),
-                                bottomRight: Radius.circular(
-                                  isMyMessage ? 0 : 14,
-                                ),
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.05),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: IntrinsicWidth(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  // Reply message preview (if this is a reply)
-                                  if (message.replyToMessage != null)
-                                    _buildReplyPreview(
-                                      message.replyToMessage!,
-                                      isMyMessage,
-                                    ),
-
-                                  // Message content (text, image, or video)
-                                  _buildMessageContent(message, isMyMessage),
-
-                                  // gap between content and time
-                                  const SizedBox(height: 1),
-                                  // Time and status row - aligned to right
-                                  Align(
-                                    alignment: Alignment.centerRight,
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        if (isStarred) ...[
-                                          Icon(
-                                            Icons.star,
-                                            size: 14,
-                                            color: isMyMessage
-                                                ? Colors.amber[600]
-                                                : Colors.amber[600],
-                                          ),
-                                          const SizedBox(width: 4),
-                                        ],
-                                        Text(
-                                          messageTime,
-                                          style: TextStyle(
-                                            color: isMyMessage
-                                                ? Colors.white70
-                                                : Colors.grey[600],
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w400,
-                                          ),
-                                        ),
-                                        // Show delivery/read status ticks for own messages
-                                        if (isMyMessage) ...[
-                                          const SizedBox(width: 4),
-                                          _buildMessageStatusTicks(message),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                    // Pin indicator
-                    // if (isPinned)
-                    //   Positioned(
-                    //     top: -4,
-                    //     right: isMyMessage ? 8 : null,
-                    //     left: isMyMessage ? null : 8,
-                    //     child: Container(
-                    //       padding: const EdgeInsets.all(4),
-                    //       decoration: BoxDecoration(
-                    //         color: Colors.orange[400],
-                    //         shape: BoxShape.circle,
-                    //         boxShadow: [
-                    //           BoxShadow(
-                    //             color: Colors.black.withOpacity(0.1),
-                    //             blurRadius: 4,
-                    //             offset: const Offset(0, 2),
-                    //           ),
-                    //         ],
-                    //       ),
-                    //       child: const Icon(
-                    //         Icons.push_pin,
-                    //         size: 12,
-                    //         color: Colors.white,
-                    //       ),
-                    //     ),
-                    //   ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
+    return MessageBubble(
+      config: MessageBubbleConfig(
+        message: message,
+        isMyMessage: isMyMessage,
+        isPinned: isPinned,
+        isStarred: isStarred,
+        isHighlighted: isHighlighted,
+        messageTime: messageTime,
+        shouldAnimate: shouldAnimate,
+        animationController: _messageAnimationControllers[message.id],
+        slideAnimation: slideAnimation,
+        fadeAnimation: fadeAnimation,
+        context: context,
+        buildMessageContent: _buildMessageContent,
+        isMediaMessage: _isMediaMessage,
+        buildMessageStatusTicks: _buildMessageStatusTicks,
+        isGroupChat: false,
+        nonMyMessageBackgroundColor: Colors.white,
+        useIntrinsicWidth: true,
+        useStackContainer: true,
+        currentUserId: _currentUserId,
+        conversationUserId: widget.conversation.userId,
+        onReplyTap: _scrollToMessage,
       ),
     );
-
-    // Apply animation if available
-    if (shouldAnimate && slideAnimation != null && fadeAnimation != null) {
-      return AnimatedBuilder(
-        animation: _messageAnimationControllers[message.id]!,
-        builder: (context, child) {
-          return Transform.translate(
-            offset: Offset(0, slideAnimation.value),
-            child: Opacity(opacity: fadeAnimation.value, child: messageContent),
-          );
-        },
-      );
-    }
-
-    return messageContent;
   }
+  // Helper methods for file attachments
 
-  Widget _buildReplyPreview(MessageModel replyMessage, bool isMyMessage) {
-    // Determine if the replied-to message is from current user
-    final isRepliedMessageMine = _currentUserId != null
-        ? replyMessage.senderId == _currentUserId
-        : replyMessage.senderId != widget.conversation.userId;
-
-    return GestureDetector(
-      onTap: () => _scrollToMessage(replyMessage.id),
-      child: Container(
-        width: double.infinity,
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: isMyMessage ? Colors.white.withAlpha(20) : Colors.grey[100],
-          borderRadius: BorderRadius.circular(8),
-          border: Border(
-            left: BorderSide(
-              color: isMyMessage ? Colors.white : Colors.teal,
-              width: 1,
-            ),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              isRepliedMessageMine ? 'You' : replyMessage.senderName,
-              style: TextStyle(
-                color: isMyMessage ? Colors.white : Colors.teal,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 2),
-            if (replyMessage.body.isNotEmpty) ...[
-              Text(
-                replyMessage.body.length > 50
-                    ? '${replyMessage.body.substring(0, 50)}...'
-                    : replyMessage.body,
-                style: TextStyle(
-                  color: isMyMessage
-                      ? Colors.white.withOpacity(0.8)
-                      : Colors.grey[600],
-                  fontSize: 13,
-                  height: 1.2,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ] else ...[
-              Text(
-                '📎 media ',
-                style: TextStyle(
-                  color: isMyMessage
-                      ? Colors.white.withOpacity(0.8)
-                      : Colors.grey[600],
-                  fontSize: 13,
-                  height: 1.2,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
+  bool _isMediaMessage(MessageModel message) {
+    return isMediaMessage(message);
   }
 
   Widget _buildMessageContent(MessageModel message, bool isMyMessage) {
-    // Handle loading states first
-    switch (message.type) {
-      case 'image_loading':
-        return _buildImageLoadingMessage(message, isMyMessage);
-      case 'video_loading':
-        return _buildVideoLoadingMessage(message, isMyMessage);
-      case 'document_loading':
-        return _buildDocumentLoadingMessage(message, isMyMessage);
-      case 'audio_loading':
-        return _buildAudioLoadingMessage(message, isMyMessage);
-    }
-
     // Handle attachments based on category
     if (message.attachments != null) {
       final attachmentData = message.attachments as Map<String, dynamic>;
@@ -4056,822 +3400,74 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Widget _buildImageMessage(MessageModel message, bool isMyMessage) {
-    if (message.attachments == null) {
-      return Text(
-        'Image not available',
-        style: TextStyle(
-          color: isMyMessage ? Colors.white70 : Colors.grey[600],
-          fontSize: 14,
-          fontStyle: FontStyle.italic,
-        ),
-      );
-    }
+    return buildImageMessage(_buildMediaMessageConfig(message, isMyMessage));
+  }
 
-    final imageData = message.attachments as Map<String, dynamic>;
-    final imageUrl = imageData['url'] as String?;
-
-    if (imageUrl == null || imageUrl.isEmpty) {
-      return Text(
-        'Image not available',
-        style: TextStyle(
-          color: isMyMessage ? Colors.white70 : Colors.grey[600],
-          fontSize: 14,
-          fontStyle: FontStyle.italic,
-        ),
-      );
-    }
-
-    return ClipRRect(
-      child: Container(
-        width: 200,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border.all(
-            color: isMyMessage
-                ? const Color(0xFF008080)
-                : const Color(0xFF008080),
-            width: 4,
-          ),
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(14),
-            topRight: const Radius.circular(14),
-            bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
-            bottomRight: Radius.circular(isMyMessage ? 0 : 14),
-          ),
-        ),
-        child: Stack(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(10),
-                    topRight: const Radius.circular(10),
-                    bottomLeft: Radius.circular(isMyMessage ? 10 : 0),
-                    bottomRight: Radius.circular(isMyMessage ? 0 : 10),
-                  ),
-                  child: GestureDetector(
-                    onTap: () => _openImagePreview(imageUrl, message.body),
-                    child: Hero(
-                      tag: imageUrl,
-                      child: _buildCachedImage(
-                        imageUrl,
-                        message.localMediaPath,
-                        message.id,
-                      ),
-                    ),
-                  ),
-                ),
-                if (message.body.isNotEmpty)
-                  Container(
-                    width: 200,
-                    padding: const EdgeInsets.only(
-                      bottom: 20.0,
-                      left: 8.0,
-                      right: 8.0,
-                      top: 4.0,
-                    ),
-                    child: Text(
-                      message.body,
-                      style: TextStyle(
-                        color: Colors.black87,
-                        fontSize: 14,
-                        height: 1.3,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            // Timestamp overlay positioned at bottom right
-            Positioned(
-              bottom: 4,
-              right: 8,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.6),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      ChatHelpers.formatMessageTime(message.createdAt),
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w400,
-                      ),
-                    ),
-                    if (isMyMessage) ...[
-                      const SizedBox(width: 4),
-                      _buildMessageStatusTicks(message),
-                    ],
-                  ],
-                ),
+  MediaMessageConfig _buildMediaMessageConfig(
+    MessageModel message,
+    bool isMyMessage,
+  ) {
+    return MediaMessageConfig(
+      message: message,
+      isMyMessage: isMyMessage,
+      isStarred: _starredMessages.contains(message.id),
+      mounted: () => mounted,
+      setState: () => setState(() {}),
+      showErrorDialog: _showErrorDialog,
+      buildMessageStatusTicks: _buildMessageStatusTicks,
+      onImagePreview: (url, caption) => _openImagePreview(url, caption),
+      onRetryImage: (file, source, {MessageModel? failedMessage}) =>
+          _sendImageMessage(file, source, failedMessage: failedMessage),
+      onCacheImage: (url, id) {
+        ChatHelpers.cacheMediaForMessage(
+          url: url,
+          messageId: id,
+          messagesRepo: _messagesRepo,
+          mediaCacheService: _mediaCacheService,
+        );
+      },
+      onVideoPreview: (url, caption, fileName) =>
+          _openVideoPreview(url, caption, fileName),
+      onRetryVideo: (file, source, {MessageModel? failedMessage}) =>
+          _sendVideoMessage(file, source, failedMessage: failedMessage),
+      videoThumbnailCache: _videoThumbnailCache,
+      videoThumbnailFutures: _videoThumbnailFutures,
+      onDocumentPreview: (url, fileName, caption, fileSize) =>
+          _openDocumentPreview(url, fileName, caption, fileSize),
+      onRetryDocument:
+          (file, fileName, extension, {MessageModel? failedMessage}) =>
+              _sendDocumentMessage(
+                file,
+                fileName,
+                extension,
+                failedMessage: failedMessage,
               ),
-            ),
-            if (_starredMessages.contains(message.id))
-              Positioned(
-                bottom: 4,
-                left: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 2,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.6),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // const SizedBox(width: 4),
-                      Icon(Icons.star, size: 14, color: Colors.yellow),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
+      audioPlaybackManager: _audioPlaybackManager,
+      onRetryAudio: ({MessageModel? failedMessage}) =>
+          _sendRecordedVoice(failedMessage: failedMessage),
     );
   }
 
   Widget _buildDocumentMessage(MessageModel message, bool isMyMessage) {
-    if (message.attachments == null) {
-      return Text(
-        'Document not available',
-        style: TextStyle(
-          color: isMyMessage ? Colors.teal : Colors.grey[600],
-          fontSize: 14,
-          fontStyle: FontStyle.italic,
-        ),
-      );
-    }
-
-    final documentData = message.attachments as Map<String, dynamic>;
-    final documentUrl = documentData['url'] as String?;
-    final fileName = documentData['file_name'] as String?;
-    final fileSize = documentData['file_size'] as int?;
-    final mimeType = documentData['mime_type'] as String?;
-
-    if (documentUrl == null || documentUrl.isEmpty) {
-      return Text(
-        'Document not available',
-        style: TextStyle(
-          color: isMyMessage ? Colors.white70 : Colors.grey[600],
-          fontSize: 14,
-          fontStyle: FontStyle.italic,
-        ),
-      );
-    }
-
-    IconData docIcon = Icons.description;
-    if (mimeType != null) {
-      if (mimeType.contains('pdf')) {
-        docIcon = Icons.picture_as_pdf;
-      } else if (mimeType.contains('word') || mimeType.contains('doc')) {
-        docIcon = Icons.description;
-      } else if (mimeType.contains('excel') || mimeType.contains('sheet')) {
-        docIcon = Icons.table_chart;
-      } else if (mimeType.contains('powerpoint') ||
-          mimeType.contains('presentation')) {
-        docIcon = Icons.slideshow;
-      } else if (mimeType.contains('zip') || mimeType.contains('rar')) {
-        docIcon = Icons.archive;
-      }
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        GestureDetector(
-          onTap: () => _openDocumentPreview(
-            documentUrl,
-            fileName,
-            message.body,
-            fileSize,
-          ),
-          child: Container(
-            width: 280,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: isMyMessage ? Colors.teal : Colors.white,
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(14),
-                topRight: const Radius.circular(14),
-                bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
-                bottomRight: Radius.circular(isMyMessage ? 0 : 14),
-              ),
-              border: Border.all(
-                color: isMyMessage ? Colors.teal : Colors.grey[300]!,
-                width: 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withAlpha(5),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: isMyMessage
-                        ? Colors.teal.withAlpha(25)
-                        : Colors.teal.withAlpha(10),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    docIcon,
-                    size: 24,
-                    color: isMyMessage ? Colors.white : Colors.teal[700],
-                  ),
-                ),
-                if (_starredMessages.contains(message.id))
-                  Positioned(
-                    bottom: 4,
-                    left: 8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 2,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withAlpha(60),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // const SizedBox(width: 4),
-                          Icon(Icons.star, size: 14, color: Colors.yellow),
-                        ],
-                      ),
-                    ),
-                  ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        (fileName != null && fileName.isNotEmpty)
-                            ? fileName
-                            : 'Document',
-                        style: TextStyle(
-                          color: isMyMessage ? Colors.white : Colors.black87,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1,
-                      ),
-                      if (fileSize != null) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          ChatHelpers.formatFileSize(fileSize),
-                          style: TextStyle(
-                            color: isMyMessage
-                                ? Colors.white
-                                : Colors.grey[600],
-                            fontSize: 13,
-                            fontWeight: FontWeight.w400,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                Icon(
-                  Icons.visibility,
-                  size: 22,
-                  color: isMyMessage ? Colors.white : Colors.teal[600],
-                ),
-              ],
-            ),
-          ),
-        ),
-        if (message.body.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Text(
-            message.body,
-            style: TextStyle(
-              color: isMyMessage ? Colors.white : Colors.black87,
-              fontSize: 16,
-              height: 1.4,
-            ),
-          ),
-        ],
-      ],
-    );
+    return buildDocumentMessage(_buildMediaMessageConfig(message, isMyMessage));
   }
 
   Widget _buildAudioMessage(MessageModel message, bool isMyMessage) {
-    if (message.attachments == null) {
-      return Text(
-        'Audio not available',
-        style: TextStyle(
-          color: isMyMessage ? Colors.white70 : Colors.grey[600],
-          fontSize: 14,
-          fontStyle: FontStyle.italic,
-        ),
-      );
-    }
-
-    final audioData = message.attachments as Map<String, dynamic>;
-    final audioUrl = audioData['url'] as String?;
-    final fileSize = audioData['file_size'] as int?;
-
-    if (audioUrl == null || audioUrl.isEmpty) {
-      return Text(
-        'Audio not available',
-        style: TextStyle(
-          color: isMyMessage ? Colors.white70 : Colors.grey[600],
-          fontSize: 14,
-          fontStyle: FontStyle.italic,
-        ),
-      );
-    }
-
-    final audioKey = '${message.id}_$audioUrl';
-    final isPlaying = _playingAudios[audioKey] ?? false;
-    final duration = _audioDurations[audioKey] ?? Duration.zero;
-    final position = _audioPositions[audioKey] ?? Duration.zero;
-
-    // Get animation for this audio
-    _getAudioAnimationController(audioKey); // Ensure controller exists
-    final animation = _audioAnimations[audioKey]!;
-
-    // If we don't have duration yet, schedule it to be estimated after build
-    if (duration == Duration.zero && !isPlaying) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _estimateAudioDuration(audioKey, fileSize);
-      });
-    }
-
-    // Calculate progress for the progress bar
-    double progressValue = 0.0;
-    if (duration.inMilliseconds > 0) {
-      progressValue = position.inMilliseconds / duration.inMilliseconds;
-      progressValue = progressValue.clamp(0.0, 1.0);
-    }
-
-    return AnimatedBuilder(
-      animation: animation,
-      builder: (context, child) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 250,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: isMyMessage ? Colors.teal : Colors.grey[100],
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(14),
-                  topRight: const Radius.circular(14),
-                  bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
-                  bottomRight: Radius.circular(isMyMessage ? 0 : 14),
-                ),
-              ),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: () => _toggleAudioPlayback(audioKey, audioUrl),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: isPlaying
-                            ? (isMyMessage
-                                  ? Colors.white.withAlpha(40)
-                                  : Colors.blue.withAlpha(30))
-                            : (isMyMessage
-                                  ? Colors.white.withAlpha(20)
-                                  : Colors.grey[200]),
-                        borderRadius: BorderRadius.circular(100),
-                        boxShadow: isPlaying
-                            ? [
-                                BoxShadow(
-                                  color:
-                                      (isMyMessage ? Colors.white : Colors.blue)
-                                          .withAlpha(30),
-                                  blurRadius: 8,
-                                  spreadRadius: 2,
-                                ),
-                              ]
-                            : null,
-                      ),
-                      child: Transform.scale(
-                        scale: isPlaying ? animation.value : 1.0,
-                        child: Icon(
-                          isPlaying ? Icons.pause : Icons.play_arrow,
-                          size: 20,
-                          color: isPlaying
-                              ? (isMyMessage ? Colors.white : Colors.blue[700])
-                              : (isMyMessage ? Colors.white : Colors.grey[700]),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            if (isPlaying)
-                              _buildAnimatedWaveform(isMyMessage, animation)
-                            else
-                              Icon(
-                                Icons.audiotrack,
-                                size: 16,
-                                color: isMyMessage
-                                    ? Colors.white70
-                                    : Colors.grey[600],
-                              ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Container(
-                                height: 3,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(2),
-                                  color: isMyMessage
-                                      ? Colors.white30
-                                      : Colors.grey[300],
-                                ),
-                                child: LinearProgressIndicator(
-                                  value: progressValue,
-                                  backgroundColor: Colors.transparent,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                    isMyMessage ? Colors.white : Colors.blue,
-                                  ),
-                                  minHeight: 3,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            const SizedBox(width: 8),
-                            if (_starredMessages.contains(message.id))
-                              Icon(Icons.star, size: 14, color: Colors.yellow),
-                            Text(
-                              _formatDuration(isPlaying ? position : duration),
-                              style: TextStyle(
-                                color: isMyMessage
-                                    ? Colors.white70
-                                    : Colors.grey[600],
-                                fontSize: 12,
-                              ),
-                            ),
-                            const Spacer(),
-                            Text(
-                              ChatHelpers.formatMessageTime(message.createdAt),
-                              style: TextStyle(
-                                color: isMyMessage
-                                    ? Colors.white70
-                                    : Colors.grey[600],
-                                fontSize: 12,
-                              ),
-                            ),
-
-                            // Show delivery/read status ticks for own messages
-                            if (isMyMessage) ...[
-                              const SizedBox(width: 4),
-                              _buildMessageStatusTicks(message),
-                            ],
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (message.body.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                message.body,
-                style: TextStyle(
-                  color: isMyMessage ? Colors.white : Colors.black87,
-                  fontSize: 16,
-                  height: 1.4,
-                ),
-              ),
-            ],
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildAnimatedWaveform(bool isMyMessage, Animation<double> animation) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List.generate(4, (index) {
-        return AnimatedBuilder(
-          animation: animation,
-          builder: (context, child) {
-            final delay = index * 0.2;
-            final animValue = (animation.value + delay) % 1.0;
-            final height = 4 + (animValue * 8);
-
-            return Container(
-              margin: const EdgeInsets.symmetric(horizontal: 1),
-              width: 2,
-              height: height,
-              decoration: BoxDecoration(
-                color: isMyMessage ? Colors.white70 : Colors.blue[600],
-                borderRadius: BorderRadius.circular(1),
-              ),
-            );
-          },
-        );
-      }),
-    );
+    return buildAudioMessage(_buildMediaMessageConfig(message, isMyMessage));
   }
 
   Widget _buildVideoMessage(MessageModel message, bool isMyMessage) {
-    if (message.attachments == null) {
-      return Text(
-        'Video not available',
-        style: TextStyle(
-          color: isMyMessage ? Colors.white70 : Colors.grey[600],
-          fontSize: 14,
-          fontStyle: FontStyle.italic,
-        ),
-      );
-    }
-
-    final videoData = message.attachments as Map<String, dynamic>;
-    final videoUrl = videoData['url'] as String?;
-
-    if (videoUrl == null || videoUrl.isEmpty) {
-      return Text(
-        'Video not available',
-        style: TextStyle(
-          color: isMyMessage ? Colors.white70 : Colors.grey[600],
-          fontSize: 14,
-          fontStyle: FontStyle.italic,
-        ),
-      );
-    }
-
-    return ClipRRect(
-      child: Container(
-        width: 200,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border.all(
-            color: isMyMessage
-                ? const Color(0xFF008080)
-                : const Color(0xFF008080),
-            width: 4,
-          ),
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(14),
-            topRight: const Radius.circular(14),
-            bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
-            bottomRight: Radius.circular(isMyMessage ? 0 : 14),
-          ),
-        ),
-        child: Stack(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                GestureDetector(
-                  onTap: () => _openVideoPreview(
-                    videoUrl,
-                    message.body,
-                    videoData['file_name'] as String?,
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(10),
-                      topRight: const Radius.circular(10),
-                      bottomLeft: Radius.circular(isMyMessage ? 10 : 0),
-                      bottomRight: Radius.circular(isMyMessage ? 0 : 10),
-                    ),
-                    child: Container(
-                      width: 220,
-                      height: 220,
-                      color: Colors.black87,
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          // Video thumbnail - use cached version
-                          _buildVideoThumbnail(videoUrl),
-                          // Play button overlay
-                          Center(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: Colors.black.withAlpha(100),
-                                shape: BoxShape.circle,
-                              ),
-                              padding: const EdgeInsets.all(8),
-                              child: Icon(
-                                Icons.play_circle_filled,
-                                size: 50,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                if (message.body.isNotEmpty)
-                  Container(
-                    width: 200,
-                    padding: const EdgeInsets.only(
-                      bottom: 20.0,
-                      left: 8.0,
-                      right: 8.0,
-                      top: 4.0,
-                    ),
-                    child: Text(
-                      message.body,
-                      style: TextStyle(
-                        color: Colors.black87,
-                        fontSize: 14,
-                        height: 1.3,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            // Timestamp overlay positioned at bottom right
-            Positioned(
-              bottom: 4,
-              right: 8,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.black.withAlpha(60),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      ChatHelpers.formatMessageTime(message.createdAt),
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w400,
-                      ),
-                    ),
-                    if (isMyMessage) ...[
-                      const SizedBox(width: 4),
-                      _buildMessageStatusTicks(message),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            if (_starredMessages.contains(message.id))
-              Positioned(
-                bottom: 4,
-                left: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 2,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withAlpha(60),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // const SizedBox(width: 4),
-                      Icon(Icons.star, size: 14, color: Colors.yellow),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Build video thumbnail widget with caching to prevent rebuilds
-  Widget _buildVideoThumbnail(String videoUrl) {
-    // Check if we already have the thumbnail cached
-    if (_videoThumbnailCache.containsKey(videoUrl)) {
-      final thumbnailPath = _videoThumbnailCache[videoUrl];
-      if (thumbnailPath != null && File(thumbnailPath).existsSync()) {
-        return Image.file(
-          File(thumbnailPath),
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            return Container(color: Colors.black87);
-          },
-        );
-      } else {
-        // Cached but path is null or file doesn't exist
-        return Container(color: Colors.black87);
-      }
-    }
-
-    // Thumbnail not yet generated - trigger generation and show loading
-    // Use a post-frame callback to avoid calling setState during build
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_videoThumbnailCache.containsKey(videoUrl) &&
-          !_videoThumbnailFutures.containsKey(videoUrl)) {
-        _generateVideoThumbnail(videoUrl).then((_) {
-          if (mounted) {
-            setState(() {}); // Rebuild to show the thumbnail
-          }
-        });
-      }
-    });
-
-    // Show loading state
-    return Container(
-      color: Colors.black87,
-      child: Center(
-        child: CircularProgressIndicator(
-          valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
-          strokeWidth: 2,
-        ),
-      ),
-    );
-  }
-
-  Future<String?> _generateVideoThumbnail(String videoUrl) async {
-    // Check if thumbnail is already cached
-    if (_videoThumbnailCache.containsKey(videoUrl)) {
-      return _videoThumbnailCache[videoUrl];
-    }
-
-    // Check if thumbnail is currently being generated
-    if (_videoThumbnailFutures.containsKey(videoUrl)) {
-      return await _videoThumbnailFutures[videoUrl];
-    }
-
-    // Generate new thumbnail
-    final future = _performThumbnailGeneration(videoUrl);
-    _videoThumbnailFutures[videoUrl] = future;
-
-    try {
-      final thumbnailPath = await future;
-      _videoThumbnailCache[videoUrl] = thumbnailPath;
-      _videoThumbnailFutures.remove(videoUrl);
-      return thumbnailPath;
-    } catch (e) {
-      _videoThumbnailFutures.remove(videoUrl);
-      _videoThumbnailCache[videoUrl] = null;
-      return null;
-    }
-  }
-
-  Future<String?> _performThumbnailGeneration(String videoUrl) async {
-    try {
-      final thumbnailPath = await VideoThumbnail.thumbnailFile(
-        video: videoUrl,
-        thumbnailPath: (await getTemporaryDirectory()).path,
-        imageFormat: ImageFormat.PNG,
-        maxWidth: 220,
-        quality: 75,
-      );
-      debugPrint('✅ Generated video thumbnail: $thumbnailPath');
-      return thumbnailPath;
-    } catch (e) {
-      debugPrint('❌ Error generating video thumbnail: $e');
-      return null;
-    }
+    return buildVideoMessage(_buildMediaMessageConfig(message, isMyMessage));
   }
 
   // Message action methods
   void _toggleMessageSelection(int messageId) {
-    setState(() {
-      if (_selectedMessages.contains(messageId)) {
-        _selectedMessages.remove(messageId);
-        if (_selectedMessages.isEmpty) {
-          _isSelectionMode = false;
-        }
-      } else {
-        _selectedMessages.add(messageId);
-      }
-    });
+    ChatHelpers.toggleMessageSelection(
+      messageId: messageId,
+      selectedMessages: _selectedMessages,
+      setIsSelectionMode: (value) => _isSelectionMode = value,
+      setState: setState,
+    );
   }
 
   void _exitSelectionMode() {
@@ -4895,7 +3491,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         isStarred: isStarred,
         showReadBy: false,
         onReply: () => _replyToMessage(message),
-        onCopy: () => _copyMessage(message),
         onPin: () => _togglePinMessage(message.id),
         onStar: () => _toggleStarMessage(message.id),
         onForward: () => _forwardMessage(message),
@@ -4910,432 +3505,53 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (context) => _buildAttachmentModal(),
-    );
-  }
-
-  Widget _buildAttachmentModal() {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(25),
-          topRight: Radius.circular(25),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 10,
-            spreadRadius: 0,
-            offset: Offset(0, -2),
-          ),
-        ],
+      builder: (context) => AttachmentActionSheet(
+        onCameraTap: () => _handleCameraAttachment(),
+        onGalleryTap: () => _handleGalleryAttachment(),
+        onDocumentTap: () => _handleDocumentAttachment(),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Handle bar
-          Container(
-            margin: const EdgeInsets.only(top: 12, bottom: 8),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.grey[300],
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          // Title
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            child: Row(
-              children: [
-                Icon(Icons.attach_file, color: Colors.grey[700], size: 24),
-                const SizedBox(width: 12),
-                Text(
-                  'Attach File',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey[800],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Attachment options
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildAttachmentOption(
-                  icon: Icons.camera_alt,
-                  label: 'Camera',
-                  color: const Color(0xFF4CAF50),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _handleCameraAttachment();
-                  },
-                ),
-                _buildAttachmentOption(
-                  icon: Icons.perm_media,
-                  label: 'Media',
-                  color: const Color(0xFF2196F3),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _handleGalleryAttachment();
-                  },
-                ),
-                _buildAttachmentOption(
-                  icon: Icons.description,
-                  label: 'Document',
-                  color: const Color(0xFFFF9800),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _handleDocumentAttachment();
-                  },
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 48),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAttachmentOption({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.0, end: 1.0),
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.elasticOut,
-      builder: (context, value, child) {
-        return Transform.scale(
-          scale: value,
-          child: GestureDetector(
-            onTapDown: (_) {
-              // Add subtle haptic feedback if available
-            },
-            onTap: () {
-              // Add a small scale animation on tap
-              onTap();
-            },
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeInOut,
-                    width: 64,
-                    height: 64,
-                    decoration: BoxDecoration(
-                      color: color.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: color.withOpacity(0.3),
-                        width: 1,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: color.withOpacity(0.15),
-                          blurRadius: 8,
-                          spreadRadius: 0,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Icon(icon, color: color, size: 32),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.grey[700],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 
   void _handleCameraAttachment() async {
-    // Check and request camera permission
-    PermissionStatus cameraStatus = await Permission.camera.status;
-
-    // If permission is not granted, request it
-    if (!cameraStatus.isGranted) {
-      cameraStatus = await Permission.camera.request();
-    }
-
-    if (!cameraStatus.isGranted) {
-      if (cameraStatus.isPermanentlyDenied) {
-        _showPermissionDeniedDialog('Camera');
-      } else {
-        _showErrorDialog('Camera permission is required to take photos.');
-      }
-      return;
-    }
-
-    debugPrint('📸 Opening camera...');
-
-    try {
-      final XFile? image = await _imagePicker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 80, // Compress to reduce file size
-        maxWidth: 1920,
-        maxHeight: 1080,
-      );
-
-      if (image != null) {
-        debugPrint('📸 Camera image captured: ${image.path}');
-        debugPrint('📸 Image name: ${image.name}');
-        debugPrint('📸 Image size: ${await image.length()} bytes');
-
-        // Print image details
-        final File imageFile = File(image.path);
-        if (await imageFile.exists()) {
-          debugPrint('📸 Image file exists at: ${imageFile.path}');
-          debugPrint('📸 Image file size: ${await imageFile.length()} bytes');
-        }
-
-        // TODO: Implement send image functionality
-        _sendImageMessage(imageFile, 'camera');
-      } else {
-        debugPrint('📸 Camera capture cancelled by user');
-      }
-    } catch (e) {
-      debugPrint('❌ Error capturing image from camera: $e');
-      if (e.toString().contains('permission')) {
-        _showErrorDialog(
-          'Camera permission is required to take photos. Please grant permission in your device settings.',
-        );
-      } else {
-        _showErrorDialog('Failed to capture image from camera');
-      }
-    }
+    await handleCameraAttachment(
+      imagePicker: _imagePicker,
+      context: context,
+      onImageSelected: (imageFile, source) {
+        _sendImageMessage(imageFile, source);
+      },
+      onError: (message) {
+        _showErrorDialog(message);
+      },
+      onPermissionDenied: (permissionType) {
+        openAppSettings();
+      },
+    );
   }
 
   void _handleGalleryAttachment() async {
-    try {
-      debugPrint('🖼️ Opening gallery...');
-
-      // Use file picker to allow both images and videos
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.media,
-        allowMultiple: false,
-        allowCompression: true,
-      );
-
-      if (result != null && result.files.single.path != null) {
-        final PlatformFile file = result.files.first;
-        final File mediaFile = File(file.path!);
-        final String extension = file.extension?.toLowerCase() ?? '';
-
-        // Check if it's a video file
-        final bool isVideo = [
-          'mp4',
-          'mov',
-          'avi',
-          'mkv',
-          '3gp',
-          'webm',
-          'flv',
-          'wmv',
-        ].contains(extension);
-
-        if (isVideo) {
-          debugPrint('🎥 Gallery video selected: ${file.path}');
-          debugPrint('🎥 Video name: ${file.name}');
-          debugPrint('🎥 Video size: ${file.size} bytes');
-          debugPrint('🎥 Video extension: ${file.extension}');
-
-          if (await mediaFile.exists()) {
-            debugPrint('🎥 Video file exists at: ${mediaFile.path}');
-            debugPrint('🎥 Video file size: ${await mediaFile.length()} bytes');
-          }
-
-          _sendVideoMessage(mediaFile, 'gallery');
-        } else {
-          debugPrint('🖼️ Gallery image selected: ${file.path}');
-          debugPrint('🖼️ Image name: ${file.name}');
-          debugPrint('🖼️ Image size: ${file.size} bytes');
-          debugPrint('🖼️ Image extension: ${file.extension}');
-
-          if (await mediaFile.exists()) {
-            debugPrint('🖼️ Image file exists at: ${mediaFile.path}');
-            debugPrint(
-              '🖼️ Image file size: ${await mediaFile.length()} bytes',
-            );
-          }
-
-          _sendImageMessage(mediaFile, 'gallery');
-        }
-      } else {
-        debugPrint('🖼️ Gallery selection cancelled');
-      }
-    } catch (e) {
-      debugPrint('❌ Error selecting from gallery: $e');
-      if (e.toString().contains('permission')) {
-        _showErrorDialog(
-          'Gallery permission is required to select media. Please grant permission in your device settings.',
-        );
-      } else {
-        _showErrorDialog('Failed to select from gallery');
-      }
-    }
+    await handleGalleryAttachment(
+      context: context,
+      onImageSelected: (imageFile, source) {
+        _sendImageMessage(imageFile, source);
+      },
+      onVideoSelected: (videoFile, source) {
+        _sendVideoMessage(videoFile, source);
+      },
+      onError: (message) {
+        _showErrorDialog(message);
+      },
+    );
   }
 
   void _handleDocumentAttachment() async {
-    debugPrint('📄 Opening document picker...');
-
-    try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.any,
-        allowMultiple: false,
-        allowCompression: true,
-        withData: false, // Don't load file data into memory for large files
-        withReadStream: true, // Use stream for large files
-      );
-
-      if (result != null && result.files.single.path != null) {
-        final PlatformFile file = result.files.first;
-        final File documentFile = File(file.path!);
-
-        debugPrint('📄 Document selected: ${file.path}');
-        debugPrint('📄 Document name: ${file.name}');
-        debugPrint('📄 Document size: ${file.size} bytes');
-        debugPrint('📄 Document extension: ${file.extension}');
-
-        if (await documentFile.exists()) {
-          debugPrint('📄 Document file exists at: ${documentFile.path}');
-          debugPrint(
-            '📄 Document file size: ${await documentFile.length()} bytes',
-          );
-        }
-
-        // Check file size (limit to 50MB)
-        if (file.size > 50 * 1024 * 1024) {
-          _showErrorDialog('File too large. Maximum size is 50MB');
-          return;
-        }
-
-        _sendDocumentMessage(documentFile, file.name, file.extension ?? '');
-      } else {
-        debugPrint('📄 Document selection cancelled');
-      }
-    } catch (e) {
-      debugPrint('❌ Error selecting document: $e');
-      if (e.toString().contains('permission')) {
-        _showErrorDialog(
-          'Storage permission is required to access documents. Please grant permission in your device settings.',
-        );
-      } else {
-        _showErrorDialog('Failed to select document');
-      }
-    }
-  }
-
-  // Helper methods for file attachments
-
-  bool _isMediaMessage(MessageModel message) {
-    // if (message.attachments != null) {
-    //   final attachmentData = message.attachments as Map<String, dynamic>;
-    //   final category = attachmentData['category'] as String?;
-    //   return category?.toLowerCase() == 'images' ||
-    //       category?.toLowerCase() == 'videos' ||
-    //       category?.toLowerCase() == 'docs' ||
-    //       category?.toLowerCase() == 'audios';
-    // }
-    return message.type == 'image' ||
-        message.type == 'video' ||
-        message.type == 'attachment' ||
-        message.type == 'docs' ||
-        message.type == 'audio' ||
-        message.type == 'audios' ||
-        message.type == 'media' ||
-        message.type == 'image_loading' ||
-        message.type == 'video_loading' ||
-        message.type == 'document_loading' ||
-        message.type == 'audio_loading';
-  }
-
-  // String _formatFileSize(int bytes) {
-  //   if (bytes < 1024) {
-  //     return '${bytes} B';
-  //   } else if (bytes < 1024 * 1024) {
-  //     return '${(bytes / 1024).toStringAsFixed(1)} KB';
-  //   } else if (bytes < 1024 * 1024 * 1024) {
-  //     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-  //   } else {
-  //     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
-  //   }
-  // }
-
-  void _showPermissionDeniedDialog(String permissionType) {
-    showDialog(
+    await handleDocumentAttachment(
       context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Row(
-            children: [
-              Icon(Icons.warning_amber, color: Colors.orange[600], size: 28),
-              const SizedBox(width: 12),
-              const Text('Permission Required'),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '$permissionType permission has been permanently denied.',
-                style: const TextStyle(fontWeight: FontWeight.w500),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'To use this feature, please:',
-                style: TextStyle(fontWeight: FontWeight.w500),
-              ),
-              const SizedBox(height: 8),
-              const Text('1. Go to App Settings'),
-              const Text('2. Find Permissions'),
-              Text('3. Enable $permissionType permission'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Not Now'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                openAppSettings();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Open Settings'),
-            ),
-          ],
-        );
+      onDocumentSelected: (documentFile, fileName, extension) {
+        _sendDocumentMessage(documentFile, fileName, extension);
+      },
+      onError: (message) {
+        _showErrorDialog(message);
       },
     );
   }
@@ -5368,7 +3584,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       enableDrag: true,
-      builder: (context) => _ForwardMessageModal(
+      builder: (context) => ForwardMessageModal(
         messagesToForward: _messagesToForward,
         availableConversations: _availableConversations,
         isLoading: _isLoadingConversations,
@@ -5379,301 +3595,88 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Future<void> _loadAvailableConversations() async {
-    setState(() {
-      _isLoadingConversations = true;
-    });
-
-    try {
-      final response = await _userService.GetChatList('all');
-      debugPrint('🔍 Forward modal - Raw API response: $response');
-
-      if (response['success'] == true && response['data'] != null) {
-        final dynamic responseData = response['data'];
-        debugPrint(
-          '🔍 Forward modal - Response data type: ${responseData.runtimeType}',
-        );
-        debugPrint('🔍 Forward modal - Response data: $responseData');
-        List<dynamic> conversationsList = [];
-
-        if (responseData is List) {
-          conversationsList = responseData;
-        } else if (responseData is Map<String, dynamic>) {
-          if (responseData.containsKey('data') &&
-              responseData['data'] is List) {
-            conversationsList = responseData['data'] as List<dynamic>;
-          } else {
-            for (var key in responseData.keys) {
-              if (responseData[key] is List) {
-                conversationsList = responseData[key] as List<dynamic>;
-                break;
-              }
-            }
-          }
-        }
-
-        if (conversationsList.isNotEmpty) {
-          final conversations = <ConversationModel>[];
-
-          debugPrint(
-            '🔍 Forward modal - Processing ${conversationsList.length} conversations',
-          );
-
-          for (int i = 0; i < conversationsList.length; i++) {
-            final json = conversationsList[i];
-            try {
-              final conversation = ConversationModel.fromJson(
-                json as Map<String, dynamic>,
-              );
-              debugPrint(
-                '✅ Forward modal - Successfully parsed conversation: ${conversation.displayName} (Type: ${conversation.type}, ID: ${conversation.conversationId})',
-              );
-
-              // Exclude current conversation
-              if (conversation.conversationId !=
-                  widget.conversation.conversationId) {
-                conversations.add(conversation);
-              } else {
-                debugPrint(
-                  '🚫 Forward modal - Excluding current conversation: ${conversation.conversationId}',
-                );
-              }
-            } catch (e) {
-              debugPrint('⚠️ Error parsing conversation $i: $e');
-              debugPrint('📄 Raw conversation data: $json');
-              // Skip this conversation and continue with others
-              continue;
-            }
-          }
-
+    await loadAvailableConversations(
+      LoadAvailableConversationsConfig(
+        userService: _userService,
+        currentConversationId: widget.conversation.conversationId,
+        setIsLoading: (isLoading) {
+          setState(() {
+            _isLoadingConversations = isLoading;
+          });
+        },
+        setAvailableConversations: (conversations) {
           setState(() {
             _availableConversations = conversations;
           });
-
-          debugPrint(
-            '✅ Forward modal - Successfully loaded ${conversations.length} conversations for forwarding',
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ Error loading conversations for forward: $e');
-      if (mounted) {
-        _showErrorDialog('Failed to load conversations. Please try again.');
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoadingConversations = false;
-        });
-      }
-    }
+        },
+        mounted: mounted,
+        showErrorDialog: _showErrorDialog,
+      ),
+    );
   }
 
   Future<void> _handleForwardToConversations(
     List<int> selectedConversationIds,
   ) async {
-    if (_messagesToForward.isEmpty || selectedConversationIds.isEmpty) {
-      return;
-    }
-
-    try {
-      // Send WebSocket message for forwarding
-      await _websocketService.sendMessage({
-        'type': 'message_forward',
-        'data': {
-          'user_id': _currentUserId,
-          'source_conversation_id': widget.conversation.conversationId,
-          'target_conversation_ids': selectedConversationIds,
+    await handleForwardToConversations(
+      HandleForwardToConversationsConfig(
+        messagesToForward: _messagesToForward,
+        selectedConversationIds: selectedConversationIds,
+        websocketService: _websocketService,
+        currentUserId: _currentUserId!,
+        sourceConversationId: widget.conversation.conversationId,
+        context: context,
+        mounted: mounted,
+        clearMessagesToForward: (messages) {
+          setState(() {
+            _messagesToForward.clear();
+          });
         },
-        'message_ids': _messagesToForward.toList(),
-      });
-
-      // Show success message
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Forwarded ${_messagesToForward.length} message${_messagesToForward.length > 1 ? 's' : ''} to ${selectedConversationIds.length} chat${selectedConversationIds.length > 1 ? 's' : ''}',
-            ),
-            backgroundColor: Colors.green[600],
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-
-      // Clear forward state
-      setState(() {
-        _messagesToForward.clear();
-      });
-
-      debugPrint('✅ Messages forwarded successfully');
-    } catch (e) {
-      debugPrint('❌ Error forwarding messages: $e');
-      if (mounted) {
-        _showErrorDialog('Failed to forward messages. Please try again.');
-      }
-    }
-  }
-
-  void _initializeVoiceAnimations() {
-    _recorder = FlutterSoundRecorder();
-    _audioPlayer = FlutterSoundPlayer();
-
-    // Initialize the audio player asynchronously
-    _initializeAudioPlayer();
-
-    _voiceModalAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 300),
-      vsync: this,
-    );
-
-    _zigzagAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 1200),
-      vsync: this,
-    );
-
-    _voiceModalAnimation = CurvedAnimation(
-      parent: _voiceModalAnimationController,
-      curve: Curves.easeOutBack,
-    );
-
-    _zigzagAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _zigzagAnimationController,
-        curve: Curves.easeInOut,
+        showErrorDialog: _showErrorDialog,
       ),
     );
   }
 
-  Future<void> _initializeAudioPlayer() async {
-    try {
-      // Ensure player is closed first
-      if (!_audioPlayer.isStopped) {
-        await _audioPlayer.closePlayer();
-      }
+  void _initializeVoiceAnimations() {
+    final result = initializeVoiceAnimations(this);
+    _voiceModalAnimationController = result.voiceModalController;
+    _zigzagAnimationController = result.zigzagController;
+    _voiceModalAnimation = result.voiceModalAnimation;
+    _zigzagAnimation = result.zigzagAnimation;
 
-      await _audioPlayer.openPlayer();
+    // Initialize voice recording manager
+    _voiceRecordingManager = VoiceRecordingManager(
+      mounted: () => mounted,
+      setState: () => setState(() {}),
+      showErrorDialog: _showErrorDialog,
+      context: context,
+      voiceModalAnimationController: _voiceModalAnimationController,
+      zigzagAnimationController: _zigzagAnimationController,
+      timerStreamController: _timerStreamController,
+      filePrefix: 'voice_note_',
+    );
 
-      // Cancel existing subscription if any
-      await _audioProgressSubscription?.cancel();
+    // Initialize audio playback manager
+    _audioPlaybackManager = AudioPlaybackManager(
+      vsync: this,
+      mounted: () => mounted,
+      setState: () => setState(() {}),
+      showErrorDialog: _showErrorDialog,
+      mediaCacheService: _mediaCacheService,
+      messagesRepo: _messagesRepo,
+      messages: _messages,
+    );
 
-      // Set up onProgress listener as primary method
-      _audioProgressSubscription = _audioPlayer.onProgress!.listen(
-        (event) {
-          if (mounted && _currentPlayingAudioKey != null) {
-            final audioKey = _currentPlayingAudioKey!;
-            if (_playingAudios[audioKey] ?? false) {
-              setState(() {
-                _audioDurations[audioKey] = event.duration;
-                _audioPositions[audioKey] = event.position;
-              });
-              print(
-                '🎵 OnProgress Stream: ${event.position.inSeconds}s / ${event.duration.inSeconds}s for $audioKey',
-              );
-            }
-          }
-        },
-        onError: (error) {
-          print('❌ Audio progress stream error: $error');
-        },
-      );
-
-      print('🔊 Audio player initialized successfully');
-    } catch (e) {
-      print('❌ Error initializing audio player: $e');
-    }
-  }
-
-  void _startAudioProgressTimer(String audioKey) {
-    _audioProgressTimer?.cancel();
-
-    // Get current position for resume functionality
-    final currentPosition = _audioPositions[audioKey] ?? Duration.zero;
-
-    // Adjust start time to account for current position (for resume)
-    _audioStartTime = DateTime.now().subtract(currentPosition);
-    _customPosition = currentPosition;
-
-    _audioProgressTimer = Timer.periodic(const Duration(milliseconds: 100), (
-      timer,
-    ) async {
-      if (!mounted ||
-          _currentPlayingAudioKey != audioKey ||
-          !(_playingAudios[audioKey] ?? false)) {
-        timer.cancel();
-        _audioStartTime = null;
-        return;
-      }
-
-      try {
-        if (_audioPlayer.isPlaying && _audioStartTime != null) {
-          // Calculate custom position based on elapsed time
-          final elapsed = DateTime.now().difference(_audioStartTime!);
-          _customPosition = elapsed;
-
-          // Get duration from getProgress (this part works)
-          final progress = await _audioPlayer.getProgress();
-          final duration = progress['duration'] ?? Duration.zero;
-
-          if (mounted && duration.inMilliseconds > 0) {
-            // Don't let position exceed duration
-            final clampedPosition = Duration(
-              milliseconds: _customPosition.inMilliseconds.clamp(
-                0,
-                duration.inMilliseconds,
-              ),
-            );
-
-            setState(() {
-              _audioDurations[audioKey] = duration;
-              _audioPositions[audioKey] = clampedPosition;
-            });
-
-            // Only log every second to reduce console spam
-            if (clampedPosition.inSeconds % 1 == 0 &&
-                clampedPosition.inMilliseconds % 1000 < 200) {
-              print(
-                '🎵 Progress: ${clampedPosition.inSeconds}s / ${duration.inSeconds}s',
-              );
-            }
-
-            // Check if we've reached the end
-            if (clampedPosition.inMilliseconds >=
-                duration.inMilliseconds - 100) {
-              print('🏁 Audio should be finishing soon...');
-            }
-          }
-        } else {
-          print('⚠️ Player not playing - stopping timer');
-          timer.cancel();
-          _audioStartTime = null;
-        }
-      } catch (e) {
-        print('❌ Error in custom progress tracking: $e');
-      }
-    });
-  }
-
-  void _stopAudioProgressTimer() {
-    _audioProgressTimer?.cancel();
-    _audioProgressTimer = null;
-    _audioStartTime = null;
-    _customPosition = Duration.zero;
+    // Initialize the audio player asynchronously
+    _audioPlaybackManager.initialize();
   }
 
   void _sendVoiceNote() async {
-    print('📤 Sending voice note');
-
-    // Check microphone permission first
-    PermissionStatus micStatus = await Permission.microphone.status;
-
+    final micStatus = await Permission.microphone.status;
     if (micStatus.isGranted) {
-      // Permission already granted, show modal directly
       _showVoiceRecordingModal();
     } else {
-      // Permission not granted, show permission dialog
       await _checkAndRequestMicrophonePermission();
-
-      // Check again after permission dialog
       final newStatus = await Permission.microphone.status;
       if (newStatus.isGranted) {
         _showVoiceRecordingModal();
@@ -5681,478 +3684,152 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
   }
 
-  void _sendImageMessage(File imageFile, String source) async {
-    // Store reply message reference
-    final replyMessage = _replyToMessageData;
-    final replyMessageId = _replyToMessageData?.id;
-
-    // Clear reply state immediately for better UX
-    if (_isReplying) {
-      _cancelReply();
-    }
-
-    // Create loading message for immediate display
-    final loadingMessage = MessageModel(
-      id: _optimisticMessageId, // Use negative ID for optimistic message
-      conversationId: widget.conversation.conversationId,
-      senderId: _currentUserId ?? 0,
-      senderName: 'You', // Current user name
-      body: '', // Empty body for image message
-      type: 'image_loading', // Special type for loading state
-      createdAt: DateTime.now().toIso8601String(),
-      deleted: false,
-      attachments: {
-        'local_path': imageFile.path,
-      }, // Store local path for preview
-      replyToMessageId: replyMessageId,
-      replyToMessage: replyMessage,
-      metadata: {
-        'optimistic_id': _optimisticMessageId,
-      }, // Store optimistic_id in metadata
+  void _sendImageMessage(
+    File imageFile,
+    String source, {
+    MessageModel? failedMessage,
+  }) async {
+    await sendImageMessage(
+      SendMediaMessageConfig(
+        mediaFile: imageFile,
+        conversationId: widget.conversation.conversationId,
+        currentUserId: _currentUserId,
+        optimisticMessageId: _optimisticMessageId,
+        replyToMessage: _replyToMessageData,
+        replyToMessageId: _replyToMessageData?.id,
+        failedMessage: failedMessage,
+        messageType: 'image',
+        messages: _messages,
+        optimisticMessageIds: _optimisticMessageIds,
+        conversationMeta: _conversationMeta,
+        messagesRepo: _messagesRepo,
+        chatsServices: _chatsServices,
+        websocketService: _websocketService,
+        mounted: () => mounted,
+        setState: setState,
+        handleMediaUploadFailure: _handleMediaUploadFailure,
+        animateNewMessage: _animateNewMessage,
+        scrollToBottom: _scrollToBottom,
+        cancelReply: _cancelReply,
+        isReplying: _isReplying,
+      ),
     );
 
-    // Track this as an optimistic message
-    _optimisticMessageIds.add(_optimisticMessageId);
-
-    // Add loading message to UI immediately
-    if (mounted) {
-      setState(() {
-        _messages.add(loadingMessage);
-      });
-      _animateNewMessage(loadingMessage.id);
-      _scrollToBottom();
+    // Only decrement optimistic ID if this was a new message (not a retry)
+    if (failedMessage == null) {
+      _optimisticMessageId--;
     }
-
-    try {
-      final response = await _chatsServices.sendMediaMessage(imageFile);
-
-      if (response['success'] == true && response['data'] != null) {
-        final mediaData = response['data'];
-
-        // Update the loading message with actual data
-        final imageMessage = MessageModel(
-          id: loadingMessage.id, // Keep same ID
-          conversationId: widget.conversation.conversationId,
-          senderId: _currentUserId ?? 0,
-          senderName: 'You', // Current user name
-          body: '', // Empty body for image message
-          type: 'image', // Change to actual image type
-          createdAt: DateTime.now().toIso8601String(),
-          deleted: false,
-          attachments: mediaData, // Store the media data as attachment
-          replyToMessageId: replyMessageId,
-          replyToMessage: replyMessage,
-        );
-
-        // Update message in local list
-        if (mounted) {
-          final index = _messages.indexWhere(
-            (msg) => msg.id == loadingMessage.id,
-          );
-          if (index != -1) {
-            setState(() {
-              _messages[index] = imageMessage;
-            });
-          }
-        }
-
-        // Store in local storage
-        final updatedMeta =
-            _conversationMeta?.copyWith() ??
-            ConversationMeta(
-              totalCount: _messages.length,
-              currentPage: 1,
-              totalPages: 1,
-              hasNextPage: false,
-              hasPreviousPage: false,
-            );
-
-        await _messagesRepo.addMessageToCache(
-          conversationId: widget.conversation.conversationId,
-          newMessage: imageMessage,
-          updatedMeta: updatedMeta,
-          insertAtBeginning: false, // Add at end (newest)
-        );
-
-        // Send to websocket for real-time messaging
-        await _websocketService.sendMessage({
-          'type': 'media',
-          'data': {
-            ...response['data'],
-            'conversation_id': widget.conversation.conversationId,
-            'optimistic_id': _optimisticMessageId,
-            'reply_to_message_id': replyMessageId,
-          },
-          'conversation_id': widget.conversation.conversationId,
-        });
-
-        debugPrint('📡 Image message sent to websocket for real-time delivery');
-      } else {
-        // Handle upload failure - replace loading message with error
-        _handleMediaUploadFailure(
-          loadingMessage.id,
-          'Failed to upload image: ${response['message'] ?? 'Upload failed'}',
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ Error sending image message: $e');
-      _handleMediaUploadFailure(
-        loadingMessage.id,
-        'Failed to send image. Please try again.',
-      );
-    }
-
-    _optimisticMessageId--;
   }
 
-  void _sendVideoMessage(File videoFile, String source) async {
-    debugPrint('📤 Sending video message from $source');
-
-    // Store reply message reference
-    final replyMessage = _replyToMessageData;
-    final replyMessageId = _replyToMessageData?.id;
-
-    // Clear reply state immediately for better UX
-    if (_isReplying) {
-      _cancelReply();
-    }
-
-    // Create loading message for immediate display
-    final loadingMessage = MessageModel(
-      id: _optimisticMessageId, // Use negative ID for optimistic message
-      conversationId: widget.conversation.conversationId,
-      senderId: _currentUserId ?? 0,
-      senderName: 'You', // Current user name
-      body: '', // Empty body for video message
-      type: 'video_loading', // Special type for loading state
-      createdAt: DateTime.now().toIso8601String(),
-      deleted: false,
-      attachments: {
-        'local_path': videoFile.path,
-      }, // Store local path for preview
-      replyToMessageId: replyMessageId,
-      replyToMessage: replyMessage,
-      metadata: {
-        'optimistic_id': _optimisticMessageId,
-      }, // Store optimistic_id in metadata
+  void _sendVideoMessage(
+    File videoFile,
+    String source, {
+    MessageModel? failedMessage,
+  }) async {
+    await sendVideoMessage(
+      SendMediaMessageConfig(
+        mediaFile: videoFile,
+        conversationId: widget.conversation.conversationId,
+        currentUserId: _currentUserId,
+        optimisticMessageId: _optimisticMessageId,
+        replyToMessage: _replyToMessageData,
+        replyToMessageId: _replyToMessageData?.id,
+        failedMessage: failedMessage,
+        messageType: 'video',
+        messages: _messages,
+        optimisticMessageIds: _optimisticMessageIds,
+        conversationMeta: _conversationMeta,
+        messagesRepo: _messagesRepo,
+        chatsServices: _chatsServices,
+        websocketService: _websocketService,
+        mounted: () => mounted,
+        setState: setState,
+        handleMediaUploadFailure: _handleMediaUploadFailure,
+        animateNewMessage: _animateNewMessage,
+        scrollToBottom: _scrollToBottom,
+        cancelReply: _cancelReply,
+        isReplying: _isReplying,
+      ),
     );
 
-    // Track this as an optimistic message
-    _optimisticMessageIds.add(_optimisticMessageId);
-
-    // Add loading message to UI immediately
-    if (mounted) {
-      setState(() {
-        _messages.add(loadingMessage);
-      });
-      _animateNewMessage(loadingMessage.id);
-      _scrollToBottom();
+    // Only decrement optimistic ID if this was a new message (not a retry)
+    if (failedMessage == null) {
+      _optimisticMessageId--;
     }
-
-    try {
-      debugPrint('📤 Uploading video to server...');
-      final response = await _chatsServices.sendMediaMessage(videoFile);
-
-      if (response['success'] == true && response['data'] != null) {
-        final mediaData = response['data'];
-        debugPrint('✅ Video uploaded successfully: ${mediaData['url']}');
-
-        // Update the loading message with actual data
-        final videoMessage = MessageModel(
-          id: loadingMessage.id, // Keep same ID
-          conversationId: widget.conversation.conversationId,
-          senderId: _currentUserId ?? 0,
-          senderName: 'You', // Current user name
-          body: '', // Empty body for video message
-          type: 'video', // Change to actual video type
-          createdAt: DateTime.now().toIso8601String(),
-          deleted: false,
-          attachments: mediaData, // Store the media data as attachment
-          replyToMessageId: replyMessageId,
-          replyToMessage: replyMessage,
-        );
-
-        // Update message in local list
-        if (mounted) {
-          final index = _messages.indexWhere(
-            (msg) => msg.id == loadingMessage.id,
-          );
-          if (index != -1) {
-            setState(() {
-              _messages[index] = videoMessage;
-            });
-          }
-        }
-
-        // Store in local storage
-        final updatedMeta =
-            _conversationMeta?.copyWith() ??
-            ConversationMeta(
-              totalCount: _messages.length,
-              currentPage: 1,
-              totalPages: 1,
-              hasNextPage: false,
-              hasPreviousPage: false,
-            );
-
-        await _messagesRepo.addMessageToCache(
-          conversationId: widget.conversation.conversationId,
-          newMessage: videoMessage,
-          updatedMeta: updatedMeta,
-          insertAtBeginning: false, // Add at end (newest)
-        );
-
-        debugPrint('💾 Video message stored locally and displayed');
-
-        // Send to websocket for real-time messaging
-        await _websocketService.sendMessage({
-          'type': 'media',
-          'data': {
-            ...response['data'],
-            'conversation_id': widget.conversation.conversationId,
-            'message_type': 'video',
-            'optimistic_id': _optimisticMessageId,
-            'reply_to_message_id': replyMessageId,
-          },
-          'conversation_id': widget.conversation.conversationId,
-        });
-
-        debugPrint('📡 Video message sent to websocket for real-time delivery');
-      } else {
-        // Handle upload failure - replace loading message with error
-        _handleMediaUploadFailure(
-          loadingMessage.id,
-          'Failed to upload video: ${response['message'] ?? 'Upload failed'}',
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ Error sending video message: $e');
-      _handleMediaUploadFailure(
-        loadingMessage.id,
-        'Failed to send video. Please try again.',
-      );
-    }
-
-    _optimisticMessageId--;
   }
 
   void _sendDocumentMessage(
     File documentFile,
     String fileName,
-    String extension,
-  ) async {
-    // Store reply message reference
-    final replyMessage = _replyToMessageData;
-    final replyMessageId = _replyToMessageData?.id;
-
-    // Clear reply state immediately for better UX
-    if (_isReplying) {
-      _cancelReply();
-    }
-
-    // Create loading message for immediate display
-    final loadingMessage = MessageModel(
-      id: _optimisticMessageId, // Use negative ID for optimistic message
-      conversationId: widget.conversation.conversationId,
-      senderId: _currentUserId ?? 0,
-      senderName: 'You', // Current user name
-      body: '', // Empty body for document message
-      type: 'document_loading', // Special type for loading state
-      createdAt: DateTime.now().toIso8601String(),
-      deleted: false,
-      attachments: {
-        'local_path': documentFile.path,
-        'file_name': fileName,
-        'file_extension': extension,
-      }, // Store local info for preview
-      replyToMessageId: replyMessageId,
-      replyToMessage: replyMessage,
-      metadata: {
-        'optimistic_id': _optimisticMessageId,
-      }, // Store optimistic_id in metadata
+    String extension, {
+    MessageModel? failedMessage,
+  }) async {
+    await sendDocumentMessage(
+      SendMediaMessageConfig(
+        mediaFile: documentFile,
+        conversationId: widget.conversation.conversationId,
+        currentUserId: _currentUserId,
+        optimisticMessageId: _optimisticMessageId,
+        replyToMessage: _replyToMessageData,
+        replyToMessageId: _replyToMessageData?.id,
+        failedMessage: failedMessage,
+        messageType: 'document',
+        fileName: fileName,
+        extension: extension,
+        messages: _messages,
+        optimisticMessageIds: _optimisticMessageIds,
+        conversationMeta: _conversationMeta,
+        messagesRepo: _messagesRepo,
+        chatsServices: _chatsServices,
+        websocketService: _websocketService,
+        mounted: () => mounted,
+        setState: setState,
+        handleMediaUploadFailure: _handleMediaUploadFailure,
+        animateNewMessage: _animateNewMessage,
+        scrollToBottom: _scrollToBottom,
+        cancelReply: _cancelReply,
+        isReplying: _isReplying,
+      ),
     );
 
-    // Track this as an optimistic message
-    _optimisticMessageIds.add(_optimisticMessageId);
-
-    // Add loading message to UI immediately
-    if (mounted) {
-      setState(() {
-        _messages.add(loadingMessage);
-      });
-      _animateNewMessage(loadingMessage.id);
-      _scrollToBottom();
+    // Only decrement optimistic ID if this was a new message (not a retry)
+    if (failedMessage == null) {
+      _optimisticMessageId--;
     }
-
-    try {
-      final response = await _chatsServices.sendMediaMessage(documentFile);
-
-      if (response['success'] == true && response['data'] != null) {
-        final mediaData = response['data'];
-        debugPrint('✅ Document uploaded successfully: ${mediaData['url']}');
-
-        // Update the loading message with actual data
-        final documentMessage = MessageModel(
-          id: loadingMessage.id, // Keep same ID
-          conversationId: widget.conversation.conversationId,
-          senderId: _currentUserId ?? 0,
-          senderName: 'You', // Current user name
-          body: '', // Empty body for document message
-          type: 'document', // Change to actual document type
-          createdAt: DateTime.now().toIso8601String(),
-          deleted: false,
-          attachments: mediaData, // Store the media data as attachment
-          replyToMessageId: replyMessageId,
-          replyToMessage: replyMessage,
-        );
-
-        // Update message in local list
-        if (mounted) {
-          final index = _messages.indexWhere(
-            (msg) => msg.id == loadingMessage.id,
-          );
-          if (index != -1) {
-            setState(() {
-              _messages[index] = documentMessage;
-            });
-          }
-        }
-
-        // Store in local storage
-        final updatedMeta =
-            _conversationMeta?.copyWith() ??
-            ConversationMeta(
-              totalCount: _messages.length,
-              currentPage: 1,
-              totalPages: 1,
-              hasNextPage: false,
-              hasPreviousPage: false,
-            );
-
-        await _messagesRepo.addMessageToCache(
-          conversationId: widget.conversation.conversationId,
-          newMessage: documentMessage,
-          updatedMeta: updatedMeta,
-          insertAtBeginning: false, // Add at end (newest)
-        );
-
-        // Send to websocket for real-time messaging
-        await _websocketService.sendMessage({
-          'type': 'media',
-          'data': {
-            ...response['data'],
-            'conversation_id': widget.conversation.conversationId,
-            'message_type': 'document',
-            'optimistic_id': _optimisticMessageId,
-            'reply_to_message_id': replyMessageId,
-          },
-          'conversation_id': widget.conversation.conversationId,
-        });
-
-        // Scroll to bottom to show new message
-        _scrollToBottom();
-
-        debugPrint('💾 Document message stored locally and displayed');
-        debugPrint(
-          '📡 Document message sent to websocket for real-time delivery',
-        );
-      } else {
-        // Handle upload failure - replace loading message with error
-        _handleMediaUploadFailure(
-          loadingMessage.id,
-          'Failed to upload document: ${response['message'] ?? 'Upload failed'}',
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ Error sending document message: $e');
-      _handleMediaUploadFailure(
-        loadingMessage.id,
-        'Failed to send document. Please try again.',
-      );
-    }
-
-    _optimisticMessageId--;
   }
 
   void _enterSelectionMode(int messageId) {
-    setState(() {
-      _isSelectionMode = true;
-      _selectedMessages.add(messageId);
-    });
+    ChatHelpers.enterSelectionMode(
+      messageId: messageId,
+      selectedMessages: _selectedMessages,
+      setIsSelectionMode: (value) => _isSelectionMode = value,
+      setState: setState,
+    );
   }
 
   void _togglePinMessage(int messageId) async {
-    final conversationId = widget.conversation.conversationId;
-    final wasPinned = messageId == _pinnedMessageId;
-
-    setState(() {
-      if (wasPinned) {
-        _pinnedMessageId = null;
-      } else {
-        _pinnedMessageId = messageId;
-      }
-    });
-
-    // Save to local storage
-    await _messagesRepo.savePinnedMessage(
-      conversationId: conversationId,
-      pinnedMessageId: _pinnedMessageId,
+    await ChatHelpers.togglePinMessage(
+      messageId: messageId,
+      conversationId: widget.conversation.conversationId,
+      getPinnedMessageId: () => _pinnedMessageId,
+      setPinnedMessageId: (value) => _pinnedMessageId = value,
+      currentUserId: _currentUserId,
+      messagesRepo: _messagesRepo,
+      websocketService: _websocketService,
+      setState: setState,
     );
-
-    // Send WebSocket message to other users
-    await _websocketService.sendMessage({
-      'type': 'message_pin',
-      'data': {
-        'user_id': _currentUserId,
-        'action': wasPinned ? 'unpin' : 'pin',
-      },
-      'conversation_id': conversationId,
-      'message_ids': [messageId],
-    });
   }
 
   void _toggleStarMessage(int messageId) async {
-    final conversationId = widget.conversation.conversationId;
-    final isCurrentlyStarred = _starredMessages.contains(messageId);
-
-    // Update UI immediately
-    setState(() {
-      if (isCurrentlyStarred) {
-        _starredMessages.remove(messageId);
-      } else {
-        _starredMessages.add(messageId);
-      }
-    });
-
-    // Save to local storage
-    try {
-      await _messagesRepo.toggleStarMessage(messageId);
-      debugPrint(
-        '⭐ ${isCurrentlyStarred ? 'Unstarred' : 'Starred'} message $messageId in local storage',
-      );
-    } catch (e) {
-      debugPrint('❌ Error saving star state to storage: $e');
-      // Revert UI state on storage error
-      setState(() {
-        if (isCurrentlyStarred) {
-          _starredMessages.add(messageId);
-        } else {
-          _starredMessages.remove(messageId);
-        }
-      });
-    }
-
-    // Send WebSocket message to other users
-    await _websocketService.sendMessage({
-      'type': 'message_star',
-      'data': {
-        'user_id': _currentUserId,
-        'message_id': messageId,
-        'action': _starredMessages.contains(messageId) ? 'star' : 'unstar',
-      },
-      'conversation_id': conversationId,
-      'message_ids': [messageId],
-    });
+    await ChatHelpers.toggleStarMessage(
+      messageId: messageId,
+      conversationId: widget.conversation.conversationId,
+      starredMessages: _starredMessages,
+      currentUserId: _currentUserId,
+      messagesRepo: _messagesRepo,
+      websocketService: _websocketService,
+      setState: setState,
+    );
   }
 
   void _replyToMessage(MessageModel message) async {
@@ -6160,23 +3837,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       _replyToMessageData = message;
       _isReplying = true;
     });
-
-    // Focus on the text field for user to type their reply
-    // The actual message will be sent when user presses send button
-  }
-
-  void _copyMessage(MessageModel message) async {
-    if (message.body.isNotEmpty) {
-      await Clipboard.setData(ClipboardData(text: message.body));
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Message copied'),
-            duration: Duration(seconds: 1),
-          ),
-        );
-      }
-    }
   }
 
   void _cancelReply() {
@@ -6187,432 +3847,87 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   void _forwardMessage(MessageModel message) async {
-    setState(() {
-      _messagesToForward.clear();
-      _messagesToForward.add(message.id);
-    });
-
-    await _showForwardModal();
+    await ChatHelpers.forwardMessage(
+      messageId: message.id,
+      messagesToForward: _messagesToForward,
+      setState: setState,
+      showForwardModal: _showForwardModal,
+    );
   }
 
   void _deleteMessage(int messageId) async {
-    final response = await _chatsServices.deleteMessage([messageId]);
-
-    if (response['success'] == true) {
-      debugPrint('✅ Message deleted successfully');
-
-      // Remove from local state
-      setState(() {
-        _messages.removeWhere((message) => message.id == messageId);
-      });
-
-      // Remove from local storage cache
-      await _messagesRepo.removeMessageFromCache(
-        conversationId: widget.conversation.conversationId,
-        messageIds: [messageId],
-      );
-    } else {
-      debugPrint(
-        '❌ Failed to delete message: ${response['message'] ?? 'Unknown error'}',
-      );
-    }
+    await ChatHelpers.deleteMessage(
+      messageId: messageId,
+      conversationId: widget.conversation.conversationId,
+      messages: _messages,
+      chatsServices: _chatsServices,
+      messagesRepo: _messagesRepo,
+      setState: setState,
+    );
   }
 
   void _bulkStarMessages() async {
-    final conversationId = widget.conversation.conversationId;
-    final messagesToStar = _selectedMessages.toList();
-    final areAllStarred = messagesToStar.every(
-      (id) => _starredMessages.contains(id),
+    await ChatHelpers.bulkStarMessages(
+      conversationId: widget.conversation.conversationId,
+      selectedMessages: _selectedMessages,
+      starredMessages: _starredMessages,
+      currentUserId: _currentUserId,
+      messagesRepo: _messagesRepo,
+      websocketService: _websocketService,
+      setState: setState,
+      exitSelectionMode: _exitSelectionMode,
     );
-
-    // Determine action - if all are starred, unstar them; otherwise star them
-    final action = areAllStarred ? 'unstar' : 'star';
-
-    // Update UI immediately
-    setState(() {
-      if (areAllStarred) {
-        _starredMessages.removeAll(messagesToStar);
-      } else {
-        _starredMessages.addAll(messagesToStar);
-      }
-    });
-    _exitSelectionMode();
-
-    // Save each message to local storage
-    try {
-      for (final messageId in messagesToStar) {
-        if (areAllStarred) {
-          await _messagesRepo.unstarMessage(messageId);
-        } else {
-          await _messagesRepo.starMessage(messageId);
-        }
-      }
-      debugPrint(
-        '⭐ Bulk ${action}red ${messagesToStar.length} messages in local storage',
-      );
-    } catch (e) {
-      debugPrint('❌ Error bulk ${action}ring messages in storage: $e');
-      // Revert UI state on storage error
-      setState(() {
-        if (areAllStarred) {
-          _starredMessages.addAll(messagesToStar);
-        } else {
-          _starredMessages.removeAll(messagesToStar);
-        }
-      });
-    }
-
-    // Send WebSocket message
-    await _websocketService.sendMessage({
-      'type': 'message_star',
-      'data': {
-        'user_id': _currentUserId,
-        'message_ids': messagesToStar,
-        'action': action,
-      },
-      'conversation_id': conversationId,
-      'message_ids': messagesToStar,
-    });
   }
 
   void _bulkForwardMessages() async {
-    setState(() {
-      _messagesToForward.clear();
-      _messagesToForward.addAll(_selectedMessages);
-    });
-
-    _exitSelectionMode();
-    await _showForwardModal();
-  }
-
-  void _bulkDeleteMessages() async {
-    final response = await _chatsServices.deleteMessage(
-      _selectedMessages.map((id) => id).toList(),
+    await ChatHelpers.bulkForwardMessages(
+      selectedMessages: _selectedMessages,
+      messagesToForward: _messagesToForward,
+      setState: setState,
+      exitSelectionMode: _exitSelectionMode,
+      showForwardModal: _showForwardModal,
     );
-
-    if (response['success'] == true) {
-      setState(() {
-        _messages.removeWhere(
-          (message) => _selectedMessages.contains(message.id),
-        );
-      });
-      await _messagesRepo.removeMessageFromCache(
-        conversationId: widget.conversation.conversationId,
-        messageIds: _selectedMessages.map((id) => id).toList(),
-      );
-    } else {
-      debugPrint(
-        '❌ Failed to delete messages: ${response['message'] ?? 'Unknown error'}',
-      );
-    }
-    _exitSelectionMode();
   }
 
   Widget _buildMessageInput() {
-    return Column(
-      children: [
-        // Typing indicator
-        ValueListenableBuilder<bool>(
-          valueListenable: _isOtherTypingNotifier,
-          builder: (context, isOtherTyping, child) {
-            return isOtherTyping
-                ? _buildTypingIndicator()
-                : const SizedBox.shrink();
-          },
-        ),
-
-        // Reply container
-        if (_isReplying && _replyToMessageData != null) _buildReplyContainer(),
-
-        Container(
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(color: Colors.white),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              IconButton(
-                icon: Icon(Icons.attach_file, color: Colors.grey[600]),
-                onPressed: () {
-                  _showAttachmentModal();
-                },
-              ),
-              Expanded(
-                child: TextField(
-                  controller: _messageController,
-                  decoration: InputDecoration(
-                    hintText: 'Message',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(25),
-                      borderSide: BorderSide.none,
-                    ),
-                    filled: true,
-                    fillColor: Colors.grey[100],
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 10,
-                    ),
-                  ),
-                  maxLines: 6,
-                  minLines: 1,
-                  textInputAction: TextInputAction.newline,
-                  textCapitalization: TextCapitalization.sentences,
-                  onChanged: (value) {
-                    _handleTyping(value);
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              FloatingActionButton(
-                onPressed: _messageController.text.isNotEmpty
-                    ? _sendMessage
-                    : _sendVoiceNote,
-                backgroundColor: Colors.teal,
-                mini: true,
-                child: _messageController.text.isNotEmpty
-                    ? const Icon(Icons.send, color: Colors.white)
-                    : const Icon(Icons.mic, color: Colors.white),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildReplyContainer() {
-    final replyMessage = _replyToMessageData!;
-    // Determine if replied message is from current user
-    final isRepliedMessageMine = _currentUserId != null
-        ? replyMessage.senderId == _currentUserId
-        : replyMessage.senderId != widget.conversation.userId;
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(12),
-          topRight: Radius.circular(12),
-        ),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Row(
-        children: [
-          // Reply indicator line
-          Container(
-            width: 3,
-            height: 40,
-            decoration: BoxDecoration(
-              color: Colors.teal,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(width: 12),
-
-          // Reply content
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.reply, size: 16, color: Colors.teal),
-                    const SizedBox(width: 4),
-                    Text(
-                      isRepliedMessageMine ? 'You' : replyMessage.senderName,
-                      style: TextStyle(
-                        color: Colors.teal,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                if (replyMessage.body.isNotEmpty) ...[
-                  Text(
-                    replyMessage.body.length > 50
-                        ? '${replyMessage.body.substring(0, 50)}...'
-                        : replyMessage.body,
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 13,
-                      height: 1.2,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ] else ...[
-                  Text(
-                    '📎 media',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 13,
-                      height: 1.2,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ],
-            ),
-          ),
-
-          // Cancel reply button
-          IconButton(
-            onPressed: _cancelReply,
-            icon: Icon(Icons.close, size: 20, color: Colors.grey[600]),
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            padding: EdgeInsets.zero,
-          ),
-        ],
-      ),
+    return MessageInputContainer(
+      messageController: _messageController,
+      isOtherTypingNotifier: _isOtherTypingNotifier,
+      typingIndicator: _buildTypingIndicator(),
+      isReplying: _isReplying,
+      replyToMessageData: _replyToMessageData,
+      currentUserId: _currentUserId,
+      onSendMessage: _sendMessage,
+      onSendVoiceNote: _sendVoiceNote,
+      onAttachmentTap: _showAttachmentModal,
+      onTyping: _handleTyping,
+      onCancelReply: _cancelReply,
+      conversation: widget.conversation,
     );
   }
 
   Widget _buildTypingIndicator() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 12,
-            backgroundColor: Colors.grey[300],
-            backgroundImage: widget.conversation.userProfilePic != null
-                ? CachedNetworkImageProvider(
-                    widget.conversation.userProfilePic!,
-                  )
-                : null,
-            child: widget.conversation.userProfilePic == null
-                ? Text(
-                    widget.conversation.userName.isNotEmpty
-                        ? widget.conversation.userName[0].toUpperCase()
-                        : '?',
-                    style: const TextStyle(
-                      color: Colors.grey,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 10,
-                    ),
-                  )
-                : null,
-          ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [_buildTypingAnimation()],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTypingAnimation() {
-    return SizedBox(
-      width: 24,
-      height: 12,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [_buildTypingDot(0), _buildTypingDot(1), _buildTypingDot(2)],
-      ),
+    return ChatHelpers.buildTypingIndicator(
+      typingDotAnimations: _typingDotAnimations,
+      isGroupChat: false,
+      userProfilePic: widget.conversation.userProfilePic,
+      userName: widget.conversation.userName,
     );
   }
 
   /// Debug method to test reply message storage and retrieval
 
-  Widget _buildTypingDot(int index) {
-    return AnimatedBuilder(
-      animation: _typingDotAnimations[index],
-      builder: (context, child) {
-        return Transform.translate(
-          offset: Offset(0, _typingDotAnimations[index].value * -4),
-          child: Container(
-            width: 4,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.grey[500],
-              shape: BoxShape.circle,
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   // Media preview methods
   void _openImagePreview(String imageUrl, String? caption) async {
-    try {
-      // Find the message to get localMediaPath
-      final message = _messages.firstWhere(
-        (msg) =>
-            msg.attachments != null &&
-            (msg.attachments as Map<String, dynamic>)['url'] == imageUrl,
-        orElse: () => _messages.first,
-      );
-
-      debugPrint('🖼️ Opening image preview for message ${message.id}');
-      debugPrint('🖼️ Image URL: $imageUrl');
-      debugPrint('🖼️ Local path from message: ${message.localMediaPath}');
-
-      // Get local path or download if needed
-      String? localPath = message.localMediaPath;
-
-      // Check if local file exists
-      if (localPath != null && io.File(localPath).existsSync()) {
-        debugPrint('✅ Local image file exists: $localPath');
-      } else {
-        debugPrint('⏬ Local file not found, checking cache...');
-
-        // Try to get from cache first
-        localPath = await _mediaCacheService.getCachedFilePath(imageUrl);
-
-        if (localPath == null) {
-          debugPrint('📥 Image not in cache, will download in background');
-          // Start caching in background (don't wait for it)
-          _cacheMediaForMessage(imageUrl, message.id);
-        } else {
-          debugPrint('✅ Image found in cache: $localPath');
-          // Update database with local path if not already set
-          if (message.localMediaPath == null) {
-            await _messagesRepo.updateLocalMediaPath(message.id, localPath);
-          }
-        }
-      }
-
-      if (!mounted) return;
-
-      debugPrint('🖼️ Opening image viewer with localPath: $localPath');
-
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => ImagePreviewScreen(
-            imageUrls: [imageUrl],
-            initialIndex: 0,
-            captions: caption != null && caption.isNotEmpty ? [caption] : null,
-            localPaths: localPath != null ? [localPath] : null,
-          ),
-        ),
-      );
-    } catch (e) {
-      debugPrint('❌ Error opening image preview: $e');
-
-      // Show error message
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to open image: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
+    await openImagePreview(
+      context: context,
+      imageUrl: imageUrl,
+      caption: caption,
+      messages: _messages,
+      mediaCacheService: _mediaCacheService,
+      messagesRepo: _messagesRepo,
+      mounted: mounted,
+    );
   }
 
   void _openVideoPreview(
@@ -6620,101 +3935,24 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     String? caption,
     String? fileName,
   ) async {
-    // Show loading indicator
-    showDialog(
+    await openVideoPreview(
       context: context,
-      barrierDismissible: false,
-      builder: (context) =>
-          const Center(child: CircularProgressIndicator(color: Colors.white)),
-    );
-
-    try {
-      // Find the message to get localMediaPath and cache if needed
-      final message = _messages.firstWhere(
-        (msg) =>
-            msg.attachments != null &&
-            (msg.attachments as Map<String, dynamic>)['url'] == videoUrl,
-        orElse: () => _messages.first,
-      );
-
-      debugPrint('🎬 Opening video preview for message ${message.id}');
-      debugPrint('🎬 Video URL: $videoUrl');
-      debugPrint('🎬 Local path from message: ${message.localMediaPath}');
-
-      // Get local path or download if needed
-      String? localPath = message.localMediaPath;
-
-      // Check if local file exists
-      if (localPath != null && io.File(localPath).existsSync()) {
-        debugPrint('✅ Local video file exists: $localPath');
-      } else {
-        debugPrint('⏬ Local file not found, checking cache or downloading...');
-
-        // Try to get from cache first
-        localPath = await _mediaCacheService.getCachedFilePath(videoUrl);
-
-        if (localPath == null) {
-          debugPrint('📥 Downloading video to cache...');
-          // Download and wait for completion
-          localPath = await _mediaCacheService.downloadAndCacheMedia(videoUrl);
-
-          if (localPath != null) {
-            debugPrint('✅ Video downloaded successfully: $localPath');
-            // Update database with local path
-            await _messagesRepo.updateLocalMediaPath(message.id, localPath);
-
-            // Update the message in memory
-            final index = _messages.indexWhere((m) => m.id == message.id);
-            if (index != -1 && mounted) {
-              setState(() {
-                _messages[index] = message.copyWith(localMediaPath: localPath);
-              });
-            }
-          } else {
-            debugPrint('⚠️ Video download failed, will use network URL');
-          }
-        } else {
-          debugPrint('✅ Video found in cache: $localPath');
+      videoUrl: videoUrl,
+      caption: caption,
+      fileName: fileName,
+      messages: _messages,
+      mediaCacheService: _mediaCacheService,
+      messagesRepo: _messagesRepo,
+      mounted: mounted,
+      onMessageUpdated: (updatedMessage) {
+        final index = _messages.indexWhere((m) => m.id == updatedMessage.id);
+        if (index != -1 && mounted) {
+          setState(() {
+            _messages[index] = updatedMessage;
+          });
         }
-      }
-
-      // Close loading dialog
-      if (mounted) {
-        Navigator.of(context).pop();
-      }
-
-      if (!mounted) return;
-
-      debugPrint('🎬 Opening video player with localPath: $localPath');
-
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => VideoPreviewScreen(
-            videoUrl: videoUrl,
-            caption: caption,
-            fileName: fileName,
-            localPath: localPath,
-          ),
-        ),
-      );
-    } catch (e) {
-      debugPrint('❌ Error opening video preview: $e');
-
-      // Close loading dialog
-      if (mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-
-      // Show error message
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to open video: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
+      },
+    );
   }
 
   void _openDocumentPreview(
@@ -6723,154 +3961,17 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     String? caption,
     int? fileSize,
   ) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => DocumentPreviewScreen(
-          documentUrl: documentUrl,
-          fileName: fileName,
-          caption: caption,
-          fileSize: fileSize,
-        ),
-      ),
+    openDocumentPreview(
+      context: context,
+      documentUrl: documentUrl,
+      fileName: fileName,
+      caption: caption,
+      fileSize: fileSize,
     );
   }
 
   Future<void> _checkAndRequestMicrophonePermission() async {
-    try {
-      PermissionStatus micStatus = await Permission.microphone.status;
-
-      if (micStatus.isGranted) {
-        return; // Permission already granted
-      }
-
-      if (micStatus.isDenied) {
-        // First time asking for permission
-        micStatus = await Permission.microphone.request();
-
-        if (micStatus.isGranted) {
-          return; // Permission granted
-        } else if (micStatus.isDenied) {
-          _showMicrophonePermissionDialog();
-          return;
-        }
-      }
-
-      if (micStatus.isPermanentlyDenied) {
-        _showMicrophonePermissionDeniedDialog();
-        return;
-      }
-
-      // If we reach here, permission is not granted
-      _showMicrophonePermissionDialog();
-    } catch (e) {
-      print('❌ Error checking microphone permission: $e');
-      _showErrorDialog(
-        'Failed to check microphone permission. Please try again.',
-      );
-    }
-  }
-
-  void _showMicrophonePermissionDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Row(
-            children: [
-              Icon(Icons.mic, color: Colors.blue[600], size: 28),
-              const SizedBox(width: 12),
-              const Text('Microphone Access'),
-            ],
-          ),
-          content: const Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'This app needs microphone access to record voice notes.',
-                style: TextStyle(fontWeight: FontWeight.w500),
-              ),
-              SizedBox(height: 12),
-              Text('Please grant microphone permission to continue.'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                Navigator.of(context).pop();
-                final status = await Permission.microphone.request();
-                if (status.isGranted) {
-                  _startRecording();
-                } else if (status.isPermanentlyDenied) {
-                  _showMicrophonePermissionDeniedDialog();
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Grant Permission'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void _showMicrophonePermissionDeniedDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Row(
-            children: [
-              Icon(Icons.warning_amber, color: Colors.orange[600], size: 28),
-              const SizedBox(width: 12),
-              const Text('Permission Required'),
-            ],
-          ),
-          content: const Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Microphone permission has been permanently denied.',
-                style: TextStyle(fontWeight: FontWeight.w500),
-              ),
-              SizedBox(height: 12),
-              Text('To record voice notes, please:'),
-              SizedBox(height: 8),
-              Text('1. Go to App Settings'),
-              Text('2. Find Permissions'),
-              Text('3. Enable Microphone permission'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                openAppSettings();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Open Settings'),
-            ),
-          ],
-        );
-      },
-    );
+    await _voiceRecordingManager.checkAndRequestMicrophonePermission();
   }
 
   void _showVoiceRecordingModal() {
@@ -6884,16 +3985,18 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             alignment: Alignment.bottomCenter,
             child: Padding(
               padding: const EdgeInsets.only(bottom: 80, left: 16, right: 16),
-              child: _VoiceRecordingModal(
+              child: VoiceRecordingModal(
                 onStartRecording: _startRecording,
                 onStopRecording: _stopRecording,
                 onCancelRecording: _cancelRecording,
                 onSendRecording: _sendRecordedVoice,
-                isRecording: _isRecording,
-                recordingDuration: _recordingDuration,
+                isRecording: _voiceRecordingManager.isRecording,
+                recordingDuration: _voiceRecordingManager.recordingDuration,
                 zigzagAnimation: _zigzagAnimation,
                 voiceModalAnimation: _voiceModalAnimation,
                 timerStream: _timerStreamController.stream,
+                recordingTextPrefix: 'Still Recording',
+                sendButtonColor: Colors.green,
               ),
             ),
           );
@@ -6903,1909 +4006,108 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Future<void> _startRecording() async {
-    try {
-      // Check microphone permission first
-      await _checkAndRequestMicrophonePermission();
-
-      // Double check permission status
-      final micStatus = await Permission.microphone.status;
-      if (!micStatus.isGranted) {
-        return; // Permission dialog already handled in _checkAndRequestMicrophonePermission
-      }
-
-      // Initialize recorder if not already done
-      if (_recorder.isStopped) {
-        await _recorder.openRecorder();
-      }
-
-      // Get temporary directory for recording
-      final Directory tempDir = await getTemporaryDirectory();
-      final String recordingPath =
-          '${tempDir.path}/voice_note_${DateTime.now().millisecondsSinceEpoch}.m4a';
-
-      print('📁 Recording path: $recordingPath');
-      print('📁 Temp directory exists: ${await tempDir.exists()}');
-
-      // Start recording with AAC MP4 format (most widely supported)
-      print('🎙️ Starting recorder...');
-      await _recorder.startRecorder(
-        toFile: recordingPath,
-        codec: Codec.aacMP4,
-        bitRate: 128000,
-        sampleRate: 44100,
-        numChannels: 1, // Mono recording for smaller file size
-      );
-
-      print('✅ Recorder started successfully');
-
-      setState(() {
-        _isRecording = true;
-        _recordingPath = recordingPath;
-        _recordingDuration = Duration.zero;
-      });
-
-      // Initialize timer stream
-      _timerStreamController.add(_recordingDuration);
-
-      // Start animation
-      _voiceModalAnimationController.forward();
-      _zigzagAnimationController.repeat();
-
-      // Start timer for recording duration
-      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        if (mounted) {
-          _recordingDuration = Duration(seconds: timer.tick);
-          setState(() {});
-          // Emit timer update to stream for modal
-          _timerStreamController.add(_recordingDuration);
-
-          // Check if we're actually recording audio
-          debugPrint('⏱️ Recording duration: ${_recordingDuration.inSeconds}s');
-        }
-      });
-
-      debugPrint('🎤 Started recording voice note at: $recordingPath');
-    } catch (e) {
-      debugPrint('❌ Error starting voice recording: $e');
-      _showErrorDialog('Failed to start recording. Please try again.');
-    }
+    await _voiceRecordingManager.startRecording();
   }
 
   Future<void> _stopRecording() async {
-    try {
-      if (!_isRecording) {
-        print('⚠️ Not currently recording, cannot stop');
-        return;
-      }
-
-      // Check minimum recording duration (at least 1 second)
-      if (_recordingDuration.inSeconds < 1) {
-        print('⚠️ Recording too short (${_recordingDuration.inSeconds}s)');
-        _showErrorDialog(
-          'Recording is too short. Please record for at least 1 second.',
-        );
-        return;
-      }
-
-      print(
-        '🛑 Stopping recording after ${_recordingDuration.inSeconds} seconds...',
-      );
-
-      // Add a small delay to ensure audio is captured
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      final recordingPath = await _recorder.stopRecorder();
-      _recordingTimer?.cancel();
-      _zigzagAnimationController.stop();
-
-      print('✅ Recording stopped successfully');
-      print('📁 Final recording path: $recordingPath');
-
-      // Wait a moment for file to be written completely
-      await Future.delayed(const Duration(milliseconds: 200));
-
-      // Verify the file was created and has content
-      if (recordingPath != null) {
-        final file = File(recordingPath);
-        final exists = await file.exists();
-        final size = exists ? await file.length() : 0;
-        print('📄 Recording file exists: $exists');
-        print('📏 Recording file size: $size bytes');
-
-        // For M4A files, minimum size should be much larger than 44 bytes
-        if (!exists || size < 1000) {
-          print('❌ Recording file is empty or too small (${size} bytes)');
-          _showErrorDialog(
-            'Recording failed - no audio was captured. Please check microphone permissions and try again.',
-          );
-          return;
-        }
-      } else {
-        print('❌ Recording path is null');
-        _showErrorDialog(
-          'Recording failed - no file path returned. Please try again.',
-        );
-        return;
-      }
-
-      setState(() {
-        _isRecording = false;
-        _recordingPath = recordingPath;
-      });
-
-      debugPrint('🎤 Stopped recording voice note. Path: $recordingPath');
-    } catch (e) {
-      debugPrint('❌ Error stopping voice recording: $e');
-      debugPrint('❌ Stack trace: ${e.toString()}');
-      _showErrorDialog('Failed to stop recording. Please try again. Error: $e');
-    }
+    await _voiceRecordingManager.stopRecording();
   }
 
   void _cancelRecording() async {
-    try {
-      if (_isRecording) {
-        await _recorder.stopRecorder();
-        _zigzagAnimationController.stop();
-      }
-
-      // Cancel and reset timer
-      _recordingTimer?.cancel();
-      _recordingTimer = null;
-      _voiceModalAnimationController.reverse();
-
-      // Delete the recording file if it exists
-      if (_recordingPath != null) {
-        final file = File(_recordingPath!);
-        if (await file.exists()) {
-          await file.delete();
-        }
-      }
-
-      // Reset all recording state including timer
-      _recordingDuration = Duration.zero; // Reset timer to 0:00
-      _timerStreamController.add(_recordingDuration); // Emit reset to stream
-
-      if (mounted) {
-        setState(() {
-          _isRecording = false;
-          _recordingPath = null;
-        });
-      }
-
-      Navigator.of(context).pop();
-      print('🗑️ Cancelled voice recording - Timer reset to 0:00');
-    } catch (e) {
-      print('❌ Error cancelling voice recording: $e');
-    }
+    await _voiceRecordingManager.cancelRecording();
   }
 
-  Future<void> _sendRecordedVoice() async {
+  Future<void> _sendRecordedVoice({MessageModel? failedMessage}) async {
     try {
-      // Stop the recording timer immediately
-      _recordingTimer?.cancel();
-      _recordingTimer = null;
+      File? voiceFile;
+      int? duration;
 
-      if (_recordingPath == null) {
-        print('❌ No recording path found');
-        _showErrorDialog('No recording found. Please try again.');
-        return;
+      if (failedMessage != null) {
+        // Retry: Get file info from failed message
+        final attachments = failedMessage.attachments;
+        final localPath = attachments?['local_path'] as String?;
+        duration = attachments?['duration'] as int?;
+
+        if (localPath == null || !File(localPath).existsSync()) {
+          _showErrorDialog(
+            'Original recording not found. Please record again.',
+          );
+          return;
+        }
+
+        voiceFile = File(localPath);
+      } else {
+        // New send: Stop recording if still recording
+        final recordingPath = await _voiceRecordingManager.stopIfRecording();
+
+        if (recordingPath == null) {
+          _showErrorDialog('No recording found. Please try again.');
+          return;
+        }
+
+        voiceFile = File(recordingPath);
+        if (!await voiceFile.exists()) {
+          _showErrorDialog('Recording file not found. Please try again.');
+          return;
+        }
+
+        final fileSize = await voiceFile.length();
+        if (fileSize == 0) {
+          _showErrorDialog('Recording is empty. Please try recording again.');
+          return;
+        }
+
+        duration = _voiceRecordingManager.recordingDuration.inSeconds;
       }
 
-      if (_recorder.isRecording) {
-        final path = await _recorder.stopRecorder();
-        _recordingPath = path; // overwrite with final file
-        setState(() {
-          _isRecording = false;
-        });
-      }
-
-      setState(() {
-        _recordingPath = _recordingPath;
-      });
-
-      final voiceFile = File(_recordingPath!);
-      if (!await voiceFile.exists()) {
-        _showErrorDialog('Recording file not found. Please try again.');
-        return;
-      }
-
-      final fileSize = await voiceFile.length();
-      if (fileSize == 0) {
-        print('❌ Recording file is empty');
-        _showErrorDialog('Recording is empty. Please try recording again.');
-        return;
-      }
-
-      // Store reply message reference before closing modal
-      final replyMessage = _replyToMessageData;
-      final replyMessageId = _replyToMessageData?.id;
-
-      // Clear reply state immediately for better UX
-      if (_isReplying) {
-        _cancelReply();
-      }
-
-      Navigator.of(context).pop();
-
-      // Create loading message for immediate display
-      final loadingMessage = MessageModel(
-        id: _optimisticMessageId, // Use negative ID for optimistic message
-        conversationId: widget.conversation.conversationId,
-        senderId: _currentUserId ?? 0,
-        senderName: 'You',
-        body: '',
-        type: 'audio_loading', // Special type for loading state
-        createdAt: DateTime.now().toIso8601String(),
-        deleted: false,
-        attachments: {
-          'local_path': voiceFile.path,
-          'duration': _recordingDuration.inSeconds,
-        }, // Store local info for preview
-        replyToMessageId: replyMessageId,
-        replyToMessage: replyMessage,
-        metadata: {
-          'optimistic_id': _optimisticMessageId,
-        }, // Store optimistic_id in metadata
+      await sendRecordedVoice(
+        SendMediaMessageConfig(
+          mediaFile: voiceFile,
+          conversationId: widget.conversation.conversationId,
+          currentUserId: _currentUserId,
+          optimisticMessageId: _optimisticMessageId,
+          replyToMessage: _replyToMessageData,
+          replyToMessageId: _replyToMessageData?.id,
+          failedMessage: failedMessage,
+          messageType: 'audio',
+          duration: duration,
+          messages: _messages,
+          optimisticMessageIds: _optimisticMessageIds,
+          conversationMeta: _conversationMeta,
+          messagesRepo: _messagesRepo,
+          chatsServices: _chatsServices,
+          websocketService: _websocketService,
+          mounted: () => mounted,
+          setState: setState,
+          handleMediaUploadFailure: _handleMediaUploadFailure,
+          animateNewMessage: _animateNewMessage,
+          scrollToBottom: _scrollToBottom,
+          cancelReply: _cancelReply,
+          isReplying: _isReplying,
+          context: context,
+          closeModal: failedMessage == null
+              ? () => Navigator.of(context).pop()
+              : null,
+        ),
       );
 
-      // Track this as an optimistic message
-      _optimisticMessageIds.add(_optimisticMessageId);
-
-      // Add loading message to UI immediately
-      if (mounted) {
-        setState(() {
-          _messages.add(loadingMessage);
-        });
-        _animateNewMessage(loadingMessage.id);
-        _scrollToBottom();
+      // Only decrement optimistic ID if this was a new message (not a retry)
+      if (failedMessage == null) {
+        _optimisticMessageId--;
       }
-
-      try {
-        final response = await _chatsServices.sendMediaMessage(voiceFile);
-        print('📤 Voice note response: $response');
-
-        if (response['success'] == true && response['data'] != null) {
-          final mediaData = response['data'];
-
-          // Update the loading message with actual data
-          final voiceMessage = MessageModel(
-            id: loadingMessage.id, // Keep same ID
-            conversationId: widget.conversation.conversationId,
-            senderId: _currentUserId ?? 0,
-            senderName: 'You',
-            body: '',
-            type: 'audio', // Change to actual audio type
-            createdAt: DateTime.now().toIso8601String(),
-            deleted: false,
-            attachments: mediaData,
-            replyToMessageId: replyMessageId,
-            replyToMessage: replyMessage,
-          );
-
-          // Update message in local list
-          if (mounted) {
-            final index = _messages.indexWhere(
-              (msg) => msg.id == loadingMessage.id,
-            );
-            if (index != -1) {
-              setState(() {
-                _messages[index] = voiceMessage;
-              });
-            }
-          }
-
-          // Store in local storage
-          final updatedMeta =
-              _conversationMeta?.copyWith() ??
-              ConversationMeta(
-                totalCount: _messages.length,
-                currentPage: 1,
-                totalPages: 1,
-                hasNextPage: false,
-                hasPreviousPage: false,
-              );
-
-          await _messagesRepo.addMessageToCache(
-            conversationId: widget.conversation.conversationId,
-            newMessage: voiceMessage,
-            updatedMeta: updatedMeta,
-            insertAtBeginning: false,
-          );
-
-          // Send to websocket for real-time messaging
-          await _websocketService.sendMessage({
-            'type': 'media',
-            'data': {
-              ...response['data'],
-              'conversation_id': widget.conversation.conversationId,
-              'message_type': 'audio',
-              'optimistic_id': _optimisticMessageId,
-              'reply_to_message_id': replyMessageId,
-            },
-            'conversation_id': widget.conversation.conversationId,
-          });
-
-          // _stopRecording();
-
-          print('💾 Voice message stored locally and displayed');
-        } else {
-          // Handle upload failure - replace loading message with error
-          _handleMediaUploadFailure(
-            loadingMessage.id,
-            'Failed to upload voice note: ${response['message'] ?? 'Upload failed'}',
-          );
-        }
-      } catch (e) {
-        print('❌ Error uploading voice note: $e');
-        _handleMediaUploadFailure(
-          loadingMessage.id,
-          'Failed to send voice note. Please try again.',
-        );
-      }
-
-      // Clean up
-      setState(() {
-        _recordingPath = null;
-        _recordingDuration = Duration.zero;
-      });
-
-      // Delete the temporary file
-      if (await voiceFile.exists()) {
-        await voiceFile.delete();
-      }
-
-      _optimisticMessageId--;
     } catch (e) {
-      print('❌ Error sending voice note: $e');
       _showErrorDialog('Failed to send voice note. Please try again.');
     }
   }
 
-  Future<void> _toggleAudioPlayback(String audioKey, String audioUrl) async {
-    try {
-      // Ensure audio player is initialized
-      if (_audioPlayer.isStopped) {
-        await _initializeAudioPlayer();
-      }
-
-      final isCurrentlyPlaying = _playingAudios[audioKey] ?? false;
-
-      if (isCurrentlyPlaying) {
-        // Stop playback
-        await _audioPlayer.stopPlayer();
-
-        // Stop animation
-        final controller = _audioAnimationControllers[audioKey];
-        controller?.stop();
-
-        // Stop progress timer and save current position
-        _stopAudioProgressTimer();
-
-        setState(() {
-          _playingAudios[audioKey] = false;
-          _currentPlayingAudioKey = null;
-          // Keep the current position when paused
-        });
-      } else {
-        // Stop any currently playing audio
-        _stopAudioProgressTimer();
-        for (final key in _playingAudios.keys) {
-          _playingAudios[key] = false;
-        }
-
-        // Only reset position if this is a fresh start (not resume)
-        final currentPosition = _audioPositions[audioKey] ?? Duration.zero;
-        final currentDuration = _audioDurations[audioKey] ?? Duration.zero;
-
-        // If we're at the end, start from beginning; otherwise resume from current position
-        if (currentPosition.inMilliseconds >=
-            currentDuration.inMilliseconds - 100) {
-          setState(() {
-            _audioPositions[audioKey] = Duration.zero;
-          });
-        }
-        // If resuming, we'll adjust the start time to account for current position
-
-        setState(() {
-          _playingAudios[audioKey] = true;
-          _currentPlayingAudioKey = audioKey;
-        });
-
-        // Start animation
-        final controller = _getAudioAnimationController(audioKey);
-        controller.repeat(reverse: true);
-
-        // Get local cached path or use remote URL
-        // Extract message ID from audioKey (format: messageId_url)
-        final messageId = int.tryParse(audioKey.split('_').first);
-        String playbackUrl = audioUrl;
-
-        if (messageId != null) {
-          final message = _messages.firstWhere(
-            (msg) => msg.id == messageId,
-            orElse: () => _messages.first,
-          );
-
-          // Try to use local cached file
-          playbackUrl = await _getMediaPath(audioUrl, message.localMediaPath);
-
-          // If using remote URL and not cached yet, cache it in background
-          if (playbackUrl == audioUrl && message.localMediaPath == null) {
-            _cacheMediaForMessage(audioUrl, messageId);
-          }
-        }
-
-        // Start new playback
-        await _audioPlayer.startPlayer(
-          fromURI: playbackUrl,
-          whenFinished: () {
-            if (mounted) {
-              // Stop animation
-              final controller = _audioAnimationControllers[audioKey];
-              controller?.stop();
-
-              // Stop progress timer
-              _stopAudioProgressTimer();
-
-              setState(() {
-                _playingAudios[audioKey] = false;
-                // Keep position at duration when finished so we show total duration
-                final duration = _audioDurations[audioKey] ?? Duration.zero;
-                _audioPositions[audioKey] = duration;
-                _currentPlayingAudioKey = null;
-              });
-            }
-          },
-        );
-
-        // Verify player is actually playing
-        await Future.delayed(const Duration(milliseconds: 100));
-
-        // Start progress timer as fallback
-        _startAudioProgressTimer(audioKey);
-
-        print('🔊 Started audio playback for: $audioKey');
-      }
-    } catch (e) {
-      if (e.toString().contains('has not been initialized')) {
-        try {
-          await _audioPlayer.openPlayer();
-          _showErrorDialog(
-            'Audio player was not ready. Please try playing again.',
-          );
-        } catch (initError) {
-          _showErrorDialog(
-            'Failed to initialize audio player. Please restart the app.',
-          );
-        }
-      } else {
-        _showErrorDialog('Failed to play audio. Please try again.');
-      }
-    }
-  }
-
-  void _estimateAudioDuration(String audioKey, int? fileSize) {
-    // Skip if we already have duration
-    if (_audioDurations[audioKey] != null &&
-        _audioDurations[audioKey]!.inMilliseconds > 0) {
-      return;
-    }
-
-    if (fileSize != null && fileSize > 0) {
-      // Rough estimation: M4A files are typically 1MB per minute at 128kbps
-      // This is just a rough estimate for display purposes
-      final estimatedSeconds = (fileSize / (128 * 1024 / 8))
-          .round(); // bytes per second at 128kbps
-      final estimatedDuration = Duration(
-        seconds: estimatedSeconds.clamp(1, 3600),
-      ); // min 1s, max 1 hour
-
-      setState(() {
-        _audioDurations[audioKey] = estimatedDuration;
-      });
-
-      print(
-        '📏 Estimated duration for $audioKey: ${estimatedDuration.inSeconds}s (${fileSize} bytes)',
-      );
-    }
-  }
-
-  AnimationController _getAudioAnimationController(String audioKey) {
-    if (!_audioAnimationControllers.containsKey(audioKey)) {
-      final controller = AnimationController(
-        duration: const Duration(milliseconds: 1000),
-        vsync: this,
-      );
-
-      final animation = Tween<double>(
-        begin: 0.5,
-        end: 1.0,
-      ).animate(CurvedAnimation(parent: controller, curve: Curves.easeInOut));
-
-      _audioAnimationControllers[audioKey] = controller;
-      _audioAnimations[audioKey] = animation;
-    }
-    return _audioAnimationControllers[audioKey]!;
-  }
-
-  String _formatDuration(Duration duration) {
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-    final minutes = twoDigits(duration.inMinutes);
-    final seconds = twoDigits(duration.inSeconds % 60);
-    return '$minutes:$seconds';
-  }
-
-  // Loading message builders
-  Widget _buildImageLoadingMessage(MessageModel message, bool isMyMessage) {
-    final attachmentData = message.attachments as Map<String, dynamic>;
-    final localPath = attachmentData['local_path'] as String?;
-
-    return ClipRRect(
-      child: Container(
-        width: 200,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border.all(
-            color: isMyMessage
-                ? const Color(0xFF008080)
-                : const Color(0xFF008080),
-            width: 4,
-          ),
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(14),
-            topRight: const Radius.circular(14),
-            bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
-            bottomRight: Radius.circular(isMyMessage ? 0 : 14),
-          ),
-        ),
-        child: Stack(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(10),
-                    topRight: Radius.circular(10),
-                    bottomLeft: message.body.isNotEmpty
-                        ? Radius.zero
-                        : Radius.circular(10),
-                    bottomRight: message.body.isNotEmpty
-                        ? Radius.zero
-                        : Radius.circular(10),
-                  ),
-                  child: localPath != null
-                      ? Image.file(
-                          File(localPath),
-                          width: 200,
-                          height: 200,
-                          fit: BoxFit.cover,
-                        )
-                      : Container(
-                          width: 200,
-                          height: 200,
-                          color: Colors.grey[200],
-                          child: Icon(
-                            Icons.image,
-                            size: 50,
-                            color: Colors.grey[400],
-                          ),
-                        ),
-                ),
-                if (message.body.isNotEmpty)
-                  Container(
-                    width: 200,
-                    padding: const EdgeInsets.only(
-                      bottom: 20.0,
-                      left: 8.0,
-                      right: 8.0,
-                      top: 4.0,
-                    ),
-                    child: Text(
-                      message.body,
-                      style: TextStyle(
-                        color: Colors.black87,
-                        fontSize: 14,
-                        height: 1.3,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            // Loading overlay
-            Positioned.fill(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.5),
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(10),
-                    topRight: const Radius.circular(10),
-                    bottomLeft: Radius.circular(isMyMessage ? 10 : 0),
-                    bottomRight: Radius.circular(isMyMessage ? 0 : 10),
-                  ),
-                ),
-                child: Center(
-                  child: CircularProgressIndicator(
-                    strokeWidth: 3,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildVideoLoadingMessage(MessageModel message, bool isMyMessage) {
-    final attachmentData = message.attachments as Map<String, dynamic>;
-    final localPath = attachmentData['local_path'] as String?;
-    return ClipRRect(
-      child: Container(
-        width: 200,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border.all(
-            color: isMyMessage
-                ? const Color(0xFF008080)
-                : const Color(0xFF008080),
-            width: 4,
-          ),
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(14),
-            topRight: const Radius.circular(14),
-            bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
-            bottomRight: Radius.circular(isMyMessage ? 0 : 14),
-          ),
-        ),
-        child: Stack(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(10),
-                    topRight: const Radius.circular(10),
-                    bottomLeft: Radius.circular(isMyMessage ? 10 : 0),
-                    bottomRight: Radius.circular(isMyMessage ? 0 : 10),
-                  ),
-                  child: localPath != null
-                      ? FutureBuilder<String?>(
-                          future: _generateVideoThumbnail(localPath),
-                          builder: (context, snapshot) {
-                            if (snapshot.connectionState ==
-                                    ConnectionState.done &&
-                                snapshot.hasData &&
-                                snapshot.data != null) {
-                              return Image.file(
-                                File(snapshot.data!),
-                                width: 200,
-                                height: 200,
-                                fit: BoxFit.cover,
-                              );
-                            }
-                            return Container(
-                              width: 200,
-                              height: 200,
-                              color: Colors.grey[800],
-                              child: Icon(
-                                Icons.videocam,
-                                size: 50,
-                                color: Colors.grey[400],
-                              ),
-                            );
-                          },
-                        )
-                      : Container(
-                          width: 200,
-                          height: 200,
-                          color: Colors.grey[200],
-                          child: Icon(
-                            Icons.videocam,
-                            size: 50,
-                            color: Colors.grey[400],
-                          ),
-                        ),
-                ),
-                if (message.body.isNotEmpty)
-                  Container(
-                    width: 200,
-                    padding: const EdgeInsets.only(
-                      bottom: 20.0,
-                      left: 8.0,
-                      right: 8.0,
-                      top: 4.0,
-                    ),
-                    child: Text(
-                      message.body,
-                      style: TextStyle(
-                        color: Colors.black87,
-                        fontSize: 14,
-                        height: 1.3,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            // Loading overlay
-            Positioned.fill(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.7),
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(10),
-                    topRight: const Radius.circular(10),
-                    bottomLeft: Radius.circular(isMyMessage ? 10 : 0),
-                    bottomRight: Radius.circular(isMyMessage ? 0 : 10),
-                  ),
-                ),
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      SizedBox(
-                        width: 30,
-                        height: 30,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 3,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Uploading video...',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDocumentLoadingMessage(MessageModel message, bool isMyMessage) {
-    final attachmentData = message.attachments as Map<String, dynamic>;
-    final fileName = attachmentData['file_name'] as String? ?? 'Document';
-    final extension = attachmentData['file_extension'] as String? ?? '';
-
-    IconData docIcon = Icons.description;
-    if (extension.isNotEmpty) {
-      if (extension.contains('pdf')) {
-        docIcon = Icons.picture_as_pdf;
-      } else if (extension.contains('doc')) {
-        docIcon = Icons.description;
-      } else if (extension.contains('xls')) {
-        docIcon = Icons.table_chart;
-      } else if (extension.contains('ppt')) {
-        docIcon = Icons.slideshow;
-      } else if (extension.contains('zip') || extension.contains('rar')) {
-        docIcon = Icons.archive;
-      }
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 280,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: isMyMessage ? Colors.teal : Colors.white,
-            borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(14),
-              topRight: const Radius.circular(14),
-              bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
-              bottomRight: Radius.circular(isMyMessage ? 0 : 14),
-            ),
-            border: Border.all(
-              color: isMyMessage ? Colors.teal : Colors.grey[300]!,
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withAlpha(5),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: isMyMessage
-                      ? Colors.teal.withAlpha(25)
-                      : Colors.teal.withAlpha(10),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  docIcon,
-                  size: 24,
-                  color: isMyMessage ? Colors.white : Colors.teal[700],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      fileName,
-                      style: TextStyle(
-                        color: isMyMessage ? Colors.white : Colors.black87,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Uploading...',
-                      style: TextStyle(
-                        color: isMyMessage ? Colors.white70 : Colors.grey[600],
-                        fontSize: 13,
-                        fontWeight: FontWeight.w400,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    isMyMessage ? Colors.white : Colors.teal,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAudioLoadingMessage(MessageModel message, bool isMyMessage) {
-    final attachmentData = message.attachments as Map<String, dynamic>;
-    final duration = attachmentData['duration'] as int? ?? 0;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 250,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: isMyMessage ? Colors.teal : Colors.grey[100],
-            borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(14),
-              topRight: const Radius.circular(14),
-              bottomLeft: Radius.circular(isMyMessage ? 14 : 0),
-              bottomRight: Radius.circular(isMyMessage ? 0 : 14),
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: isMyMessage
-                      ? Colors.white.withAlpha(20)
-                      : Colors.grey[200],
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Icon(
-                  Icons.mic,
-                  size: 20,
-                  color: isMyMessage ? Colors.white : Colors.grey[700],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.audiotrack,
-                          size: 16,
-                          color: isMyMessage
-                              ? Colors.white70
-                              : Colors.grey[600],
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Container(
-                            height: 3,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(2),
-                              color: isMyMessage
-                                  ? Colors.white30
-                                  : Colors.grey[300],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        const SizedBox(width: 8),
-                        Text(
-                          _formatDuration(Duration(seconds: duration)),
-                          style: TextStyle(
-                            color: isMyMessage
-                                ? Colors.white70
-                                : Colors.grey[600],
-                            fontSize: 12,
-                          ),
-                        ),
-                        const Spacer(),
-                        SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              isMyMessage ? Colors.white70 : Colors.teal,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Uploading...',
-                          style: TextStyle(
-                            color: isMyMessage
-                                ? Colors.white70
-                                : Colors.grey[600],
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
   /// Initiate audio call
   Future<void> _initiateCall(BuildContext context) async {
-    print('Initiating call to 1 ${widget.conversation.userId}');
-    try {
-      print('Initiating call to 2 ${widget.conversation.userId}');
-      final callService = material_provider.Provider.of<CallService>(
-        context,
-        listen: false,
-      );
-
-      // Check WebSocket connection status
-      if (!_websocketService.isConnected) {
-        print('[CALL] WebSocket not connected, attempting to reconnect...');
-        await _websocketService.connect();
-        await Future.delayed(const Duration(seconds: 2)); // Wait for connection
-      }
-      print('Initiating call to 3 ${widget.conversation.userId}');
-
-      // Check if already in a call
-      if (callService.hasActiveCall) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Already in a call'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-        return;
-      }
-
-      print('Initiating call to 4 ${widget.conversation.userId}');
-
-      // Initiate the call
-      await callService.initiateCall(
-        widget.conversation.userId,
-        widget.conversation.userName,
-        widget.conversation.userProfilePic,
-      );
-      print('Initiating call to 5 ${widget.conversation.userId}');
-
-      // Navigate to in-call screen
-      if (context.mounted) {
-        Navigator.of(context).pushNamed('/call');
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to start call: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  // ==================== MEDIA CACHING METHODS ====================
-
-  /// Build a cached image widget that loads from local storage when available
-  Widget _buildCachedImage(String imageUrl, String? localPath, int messageId) {
-    // If we have a local path and the file exists, use it
-    if (localPath != null && io.File(localPath).existsSync()) {
-      return Image.file(
-        io.File(localPath),
-        width: 200,
-        height: 200,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) {
-          // If local file fails, fall back to network
-          return _buildNetworkImage(imageUrl, messageId);
-        },
-      );
-    }
-
-    // Otherwise load from network and cache
-    return _buildNetworkImage(imageUrl, messageId);
-  }
-
-  Widget _buildNetworkImage(String imageUrl, int messageId) {
-    return CachedNetworkImage(
-      imageUrl: imageUrl,
-      width: 200,
-      height: 200,
-      fit: BoxFit.cover,
-      placeholder: (context, url) => Container(
-        width: 200,
-        height: 200,
-        color: Colors.grey[200],
-        child: Center(
-          child: CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
-          ),
-        ),
-      ),
-      errorWidget: (context, url, error) => Container(
-        width: 200,
-        height: 200,
-        color: Colors.grey[200],
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.broken_image, size: 30, color: Colors.grey[600]),
-            const SizedBox(height: 4),
-            Text(
-              'Failed to load',
-              style: TextStyle(color: Colors.grey[600], fontSize: 10),
-            ),
-          ],
-        ),
-      ),
-      // Cache the image and save path to database
-      imageBuilder: (context, imageProvider) {
-        // Try to cache the media file
-        _cacheMediaForMessage(imageUrl, messageId);
-        return Image(
-          image: imageProvider,
-          width: 200,
-          height: 200,
-          fit: BoxFit.cover,
-        );
-      },
-    );
-  }
-
-  /// Cache media file for a message
-  Future<void> _cacheMediaForMessage(String url, int messageId) async {
-    try {
-      // Check if already cached in DB
-      if (await _messagesRepo.hasLocalMedia(messageId)) {
-        return;
-      }
-
-      // Download and cache
-      final localPath = await _mediaCacheService.downloadAndCacheMedia(url);
-      if (localPath != null) {
-        // Update database with local path
-        await _messagesRepo.updateLocalMediaPath(messageId, localPath);
-        debugPrint('✅ Cached media for message $messageId');
-      }
-    } catch (e) {
-      debugPrint('❌ Error caching media: $e');
-    }
-  }
-
-  /// Get media file path (local or remote)
-  Future<String> _getMediaPath(String url, String? localPath) async {
-    // Check if local file exists
-    if (localPath != null && io.File(localPath).existsSync()) {
-      return localPath;
-    }
-
-    // Try to get from cache service
-    final cachedPath = await _mediaCacheService.getCachedFilePath(url);
-    if (cachedPath != null) {
-      return cachedPath;
-    }
-
-    // Return remote URL as fallback
-    return url;
-  }
-}
-
-class _VoiceRecordingModal extends StatefulWidget {
-  final VoidCallback onStartRecording;
-  final VoidCallback onStopRecording;
-  final VoidCallback onCancelRecording;
-  final VoidCallback onSendRecording;
-  final bool isRecording;
-  final Duration recordingDuration;
-  final Animation<double> zigzagAnimation;
-  final Animation<double> voiceModalAnimation;
-  final Stream<Duration> timerStream;
-
-  const _VoiceRecordingModal({
-    required this.onStartRecording,
-    required this.onStopRecording,
-    required this.onCancelRecording,
-    required this.onSendRecording,
-    required this.isRecording,
-    required this.recordingDuration,
-    required this.zigzagAnimation,
-    required this.voiceModalAnimation,
-    required this.timerStream,
-  });
-
-  @override
-  State<_VoiceRecordingModal> createState() => _VoiceRecordingModalState();
-}
-
-class _VoiceRecordingModalState extends State<_VoiceRecordingModal> {
-  @override
-  void initState() {
-    super.initState();
-    // Auto-start recording when modal opens
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      widget.onStartRecording();
-    });
-  }
-
-  String _formatDuration(Duration duration) {
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-    final minutes = twoDigits(duration.inMinutes);
-    final seconds = twoDigits(duration.inSeconds % 60);
-    return '$minutes:$seconds';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: widget.voiceModalAnimation,
-      builder: (context, child) {
-        return Transform.scale(
-          scale: widget.voiceModalAnimation.value,
-          child: Container(
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(25),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withAlpha(15),
-                  blurRadius: 20,
-                  spreadRadius: 0,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-              child: Row(
-                children: [
-                  // Microphone icon with pulse animation
-                  AnimatedBuilder(
-                    animation: widget.zigzagAnimation,
-                    builder: (context, child) {
-                      return Container(
-                        width: 45,
-                        height: 45,
-                        decoration: BoxDecoration(
-                          color: widget.isRecording
-                              ? Colors.red
-                              : Colors.grey[300],
-                          shape: BoxShape.circle,
-                          boxShadow: widget.isRecording
-                              ? [
-                                  BoxShadow(
-                                    color: Colors.red.withOpacity(
-                                      0.3 * widget.zigzagAnimation.value,
-                                    ),
-                                    blurRadius:
-                                        20 * widget.zigzagAnimation.value,
-                                    spreadRadius:
-                                        5 * widget.zigzagAnimation.value,
-                                  ),
-                                ]
-                              : null,
-                        ),
-                        child: Icon(
-                          Icons.mic,
-                          color: widget.isRecording
-                              ? Colors.white
-                              : Colors.grey[600],
-                          size: 20,
-                        ),
-                      );
-                    },
-                  ),
-
-                  const SizedBox(width: 15),
-
-                  // Recording info
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          children: [
-                            if (widget.isRecording) ...[
-                              AnimatedBuilder(
-                                animation: widget.zigzagAnimation,
-                                builder: (context, child) {
-                                  return Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(
-                                      color: Colors.red.withOpacity(
-                                        widget.zigzagAnimation.value,
-                                      ),
-                                      shape: BoxShape.circle,
-                                    ),
-                                  );
-                                },
-                              ),
-                              const SizedBox(width: 8),
-                            ],
-                            StreamBuilder<Duration>(
-                              stream: widget.timerStream,
-                              initialData: widget.recordingDuration,
-                              builder: (context, snapshot) {
-                                final currentDuration =
-                                    snapshot.data ?? Duration.zero;
-                                return Text(
-                                  widget.isRecording
-                                      ? 'Still Recording ${_formatDuration(currentDuration)}'
-                                      : _formatDuration(currentDuration),
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w600,
-                                    color: widget.isRecording
-                                        ? Colors.red
-                                        : Colors.teal,
-                                    letterSpacing: 0.5,
-                                  ),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Control buttons
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Delete button
-                      GestureDetector(
-                        onTap: widget.onCancelRecording,
-                        child: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.1),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.delete_outline,
-                            color: Colors.red,
-                            size: 20,
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(width: 12),
-
-                      // Send/Stop button
-                      GestureDetector(
-                        onTap: widget.isRecording
-                            ? widget.onStopRecording
-                            : widget.onSendRecording,
-                        child: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: widget.isRecording
-                                ? Colors.red.withOpacity(0.1)
-                                : Colors.green.withOpacity(0.1),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            widget.isRecording ? Icons.stop : Icons.send,
-                            color: widget.isRecording
-                                ? Colors.red
-                                : Colors.green,
-                            size: 18,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _ForwardMessageModal extends StatefulWidget {
-  final Set<int> messagesToForward;
-  final List<ConversationModel> availableConversations;
-  final bool isLoading;
-  final Function(List<int>) onForward;
-  final int currentConversationId;
-
-  const _ForwardMessageModal({
-    required this.messagesToForward,
-    required this.availableConversations,
-    required this.isLoading,
-    required this.onForward,
-    required this.currentConversationId,
-  });
-
-  @override
-  State<_ForwardMessageModal> createState() => _ForwardMessageModalState();
-}
-
-class _ForwardMessageModalState extends State<_ForwardMessageModal>
-    with TickerProviderStateMixin {
-  late AnimationController _slideController;
-  late AnimationController _fadeController;
-  late Animation<Offset> _slideAnimation;
-  late Animation<double> _fadeAnimation;
-
-  final TextEditingController _searchController = TextEditingController();
-  final Set<int> _selectedConversations = {};
-  List<ConversationModel> _filteredConversations = [];
-  String _searchQuery = '';
-
-  @override
-  void initState() {
-    super.initState();
-
-    // Initialize animations
-    _slideController = AnimationController(
-      duration: const Duration(milliseconds: 400),
-      vsync: this,
-    );
-
-    _fadeController = AnimationController(
-      duration: const Duration(milliseconds: 300),
-      vsync: this,
-    );
-
-    _slideAnimation = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
-        .animate(
-          CurvedAnimation(parent: _slideController, curve: Curves.easeOutCubic),
-        );
-
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(parent: _fadeController, curve: Curves.easeOut));
-
-    // Initialize filtered conversations
-    _filteredConversations = widget.availableConversations;
-
-    // Start animations
-    _slideController.forward();
-    _fadeController.forward();
-  }
-
-  @override
-  void dispose() {
-    _slideController.dispose();
-    _fadeController.dispose();
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  void _filterConversations(String query) {
-    setState(() {
-      _searchQuery = query;
-      if (query.isEmpty) {
-        _filteredConversations = widget.availableConversations;
-      } else {
-        _filteredConversations = widget.availableConversations
-            .where(
-              (conv) =>
-                  conv.displayName.toLowerCase().contains(query.toLowerCase()),
-            )
-            .toList();
-      }
-    });
-  }
-
-  void _toggleConversationSelection(int conversationId) {
-    setState(() {
-      if (_selectedConversations.contains(conversationId)) {
-        _selectedConversations.remove(conversationId);
-      } else {
-        _selectedConversations.add(conversationId);
-      }
-    });
-  }
-
-  Future<void> _handleForward() async {
-    if (_selectedConversations.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select at least one chat to forward to'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    // Close modal with animation
-    await _slideController.reverse();
-    await _fadeController.reverse();
-
-    if (mounted) {
-      Navigator.of(context).pop();
-      widget.onForward(_selectedConversations.toList());
-    }
-  }
-
-  Future<void> _handleCancel() async {
-    await _slideController.reverse();
-    await _fadeController.reverse();
-
-    if (mounted) {
-      Navigator.of(context).pop();
-    }
-  }
-
-  String _getInitials(String name) {
-    final words = name.trim().split(' ');
-    if (words.length >= 2) {
-      return '${words[0][0]}${words[1][0]}'.toUpperCase();
-    } else if (words.isNotEmpty) {
-      return words[0][0].toUpperCase();
-    }
-    return '?';
-  }
-
-  Widget _buildConversationAvatar(ConversationModel conversation) {
-    if (conversation.isGroup) {
-      // Group conversation - show group icon
-      return CircleAvatar(
-        radius: 25,
-        backgroundColor: Colors.orange[100],
-        child: Icon(Icons.group, color: Colors.orange[700], size: 28),
-      );
-    } else {
-      // DM conversation - show user avatar or initials
-      return CircleAvatar(
-        radius: 25,
-        backgroundColor: Colors.teal[100],
-        backgroundImage: conversation.displayAvatar != null
-            ? CachedNetworkImageProvider(conversation.displayAvatar!)
-            : null,
-        child: conversation.displayAvatar == null
-            ? Text(
-                _getInitials(conversation.displayName),
-                style: const TextStyle(
-                  color: Colors.teal,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
-              )
-            : null,
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _fadeAnimation,
-      child: SafeArea(
-        child: Container(
-          color: Colors.black.withOpacity(0.5),
-          child: SlideTransition(
-            position: _slideAnimation,
-            child: DraggableScrollableSheet(
-              initialChildSize: 0.7,
-              minChildSize: 0.5,
-              maxChildSize: 0.9,
-              builder: (context, scrollController) {
-                return Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.only(
-                      topLeft: Radius.circular(25),
-                      topRight: Radius.circular(25),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      // Handle bar
-                      Container(
-                        margin: const EdgeInsets.only(top: 12, bottom: 8),
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Colors.grey[300],
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-
-                      // Header
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 16,
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.forward, color: Colors.teal, size: 28),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Forward Message${widget.messagesToForward.length > 1 ? 's' : ''}',
-                                    style: const TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
-                                  Text(
-                                    '${widget.messagesToForward.length} message${widget.messagesToForward.length > 1 ? 's' : ''} selected',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: _handleCancel,
-                              icon: Icon(Icons.close, color: Colors.grey[600]),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // Search bar
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: TextField(
-                          controller: _searchController,
-                          decoration: InputDecoration(
-                            hintText: 'Search chats...',
-                            prefixIcon: Icon(
-                              Icons.search,
-                              color: Colors.grey[500],
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(25),
-                              borderSide: BorderSide.none,
-                            ),
-                            filled: true,
-                            fillColor: Colors.grey[100],
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 12,
-                            ),
-                          ),
-                          onChanged: _filterConversations,
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Selected count
-                      if (_selectedConversations.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.teal.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(
-                                    color: Colors.teal.withOpacity(0.3),
-                                  ),
-                                ),
-                                child: Text(
-                                  '${_selectedConversations.length} selected',
-                                  style: TextStyle(
-                                    color: Colors.teal[700],
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                      const SizedBox(height: 16),
-
-                      // Conversations list
-                      Expanded(
-                        child: widget.isLoading
-                            ? const Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    CircularProgressIndicator(
-                                      color: Colors.teal,
-                                    ),
-                                    SizedBox(height: 16),
-                                    Text('Loading chats...'),
-                                  ],
-                                ),
-                              )
-                            : _filteredConversations.isEmpty
-                            ? Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.search_off,
-                                      size: 64,
-                                      color: Colors.grey[400],
-                                    ),
-                                    const SizedBox(height: 16),
-                                    Text(
-                                      _searchQuery.isEmpty
-                                          ? 'No chats available'
-                                          : 'No chats found for "$_searchQuery"',
-                                      style: TextStyle(
-                                        color: Colors.grey[600],
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            : ListView.builder(
-                                controller: scrollController,
-                                physics: const ClampingScrollPhysics(),
-                                addAutomaticKeepAlives: false,
-                                addRepaintBoundaries: true,
-                                itemCount: _filteredConversations.length,
-                                itemBuilder: (context, index) {
-                                  final conversation =
-                                      _filteredConversations[index];
-                                  final isSelected = _selectedConversations
-                                      .contains(conversation.conversationId);
-
-                                  return AnimatedContainer(
-                                    duration: const Duration(milliseconds: 200),
-                                    margin: const EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: isSelected
-                                          ? Colors.teal.withOpacity(0.1)
-                                          : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: isSelected
-                                            ? Colors.teal.withOpacity(0.3)
-                                            : Colors.transparent,
-                                        width: 1,
-                                      ),
-                                    ),
-                                    child: ListTile(
-                                      onTap: () => _toggleConversationSelection(
-                                        conversation.conversationId,
-                                      ),
-                                      leading: _buildConversationAvatar(
-                                        conversation,
-                                      ),
-                                      title: Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              conversation.displayName,
-                                              style: TextStyle(
-                                                fontWeight: isSelected
-                                                    ? FontWeight.bold
-                                                    : FontWeight.w500,
-                                                fontSize: 16,
-                                                color: isSelected
-                                                    ? Colors.teal[700]
-                                                    : Colors.black87,
-                                              ),
-                                            ),
-                                          ),
-                                          if (conversation.isGroup)
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 6,
-                                                    vertical: 2,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                color: Colors.orange[100],
-                                                borderRadius:
-                                                    BorderRadius.circular(8),
-                                                border: Border.all(
-                                                  color: Colors.orange[300]!,
-                                                  width: 1,
-                                                ),
-                                              ),
-                                              child: Text(
-                                                'GROUP',
-                                                style: TextStyle(
-                                                  color: Colors.orange[700],
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                              ),
-                                            ),
-                                        ],
-                                      ),
-                                      subtitle:
-                                          conversation
-                                                  .metadata
-                                                  ?.lastMessage
-                                                  .body !=
-                                              null
-                                          ? Text(
-                                              conversation
-                                                  .metadata!
-                                                  .lastMessage
-                                                  .body,
-                                              style: TextStyle(
-                                                color: Colors.grey[600],
-                                                fontSize: 14,
-                                              ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            )
-                                          : null,
-                                      trailing: AnimatedContainer(
-                                        duration: const Duration(
-                                          milliseconds: 200,
-                                        ),
-                                        width: 24,
-                                        height: 24,
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: isSelected
-                                              ? Colors.teal
-                                              : Colors.transparent,
-                                          border: Border.all(
-                                            color: isSelected
-                                                ? Colors.teal
-                                                : Colors.grey[400]!,
-                                            width: 2,
-                                          ),
-                                        ),
-                                        child: isSelected
-                                            ? const Icon(
-                                                Icons.check,
-                                                size: 16,
-                                                color: Colors.white,
-                                              )
-                                            : null,
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                      ),
-
-                      // Forward button
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.grey.withOpacity(0.1),
-                              blurRadius: 10,
-                              offset: const Offset(0, -2),
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: _selectedConversations.isEmpty
-                                    ? null
-                                    : _handleForward,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.teal,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 16,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(25),
-                                  ),
-                                  elevation: 0,
-                                ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    const Icon(Icons.send, size: 20),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      _selectedConversations.isEmpty
-                                          ? 'Select chats to forward'
-                                          : 'Forward to ${_selectedConversations.length} chat${_selectedConversations.length > 1 ? 's' : ''}',
-                                      style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-      ),
+    await ChatHelpers.initiateCall(
+      context: context,
+      websocketService: _websocketService,
+      userId: widget.conversation.userId,
+      userName: widget.conversation.userName,
+      userProfilePic: widget.conversation.userProfilePic,
     );
   }
 }

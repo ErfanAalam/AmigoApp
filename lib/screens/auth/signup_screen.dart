@@ -80,8 +80,6 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
     );
   }
 
-
-
   void _showCountrySelector() {
     material.showDialog(
       context: context,
@@ -184,6 +182,18 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
       // Store user name in shared preferences for later use
       final prefs = await SharedPreferences.getInstance();
       prefs.setString('current_user_name', response['data']['name']);
+
+      final userDetail = {
+        'id': response['data']['id'],
+        'name': response['data']['name'],
+        'phone': response['data']['phone'],
+        'role': response['data']['role'],
+        'profile_pic': null,
+        'created_at': DateTime.now().toIso8601String(),
+        'call_access': false,
+      };
+
+      await UserUtils().saveUserDetails(userDetail);
 
       // Restart the app to ensure all services are properly initialized
       // await AppRestartHelper.restartAppWithDialog(context);

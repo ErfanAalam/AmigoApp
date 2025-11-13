@@ -133,6 +133,8 @@ class MessageModel {
     bool? isDelivered,
     bool? isRead,
     String? localMediaPath,
+    Map<String, dynamic>? metadata,
+    Map<String, dynamic>? attachments,
   }) {
     return MessageModel(
       id: id,
@@ -142,8 +144,8 @@ class MessageModel {
       conversationId: conversationId,
       createdAt: createdAt,
       editedAt: editedAt,
-      metadata: metadata,
-      attachments: attachments,
+      metadata: metadata ?? this.metadata,
+      attachments: attachments ?? this.attachments,
       deleted: deleted,
       senderName: senderName,
       senderProfilePic: senderProfilePic,

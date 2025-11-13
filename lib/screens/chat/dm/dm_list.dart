@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import '../../../models/conversation_model.dart';
 import '../../../api/user.service.dart';
@@ -1126,7 +1127,9 @@ class ChatsPageState extends ConsumerState<ChatsPage>
       final messageIds = message['message_ids'] as List<dynamic>? ?? [];
 
       if (conversationId == null || messageIds.isEmpty) {
-        debugPrint('⚠️ Invalid message delete: missing conversationId or messageIds');
+        debugPrint(
+          '⚠️ Invalid message delete: missing conversationId or messageIds',
+        );
         return;
       }
 
@@ -1138,7 +1141,9 @@ class ChatsPageState extends ConsumerState<ChatsPage>
       );
 
       if (conversationIndex == -1) {
-        debugPrint('⚠️ Conversation not found for message delete: $conversationId');
+        debugPrint(
+          '⚠️ Conversation not found for message delete: $conversationId',
+        );
         return;
       }
 
@@ -1156,8 +1161,9 @@ class ChatsPageState extends ConsumerState<ChatsPage>
           );
 
           if (historyResponse['success'] == true && mounted && _isLoaded) {
-            final messages = historyResponse['data']['messages'] as List<dynamic>? ?? [];
-            
+            final messages =
+                historyResponse['data']['messages'] as List<dynamic>? ?? [];
+
             if (messages.isNotEmpty) {
               final newLastMessageData = messages[0] as Map<String, dynamic>;
               final newLastMessage = LastMessage(
@@ -1165,7 +1171,9 @@ class ChatsPageState extends ConsumerState<ChatsPage>
                 body: newLastMessageData['body'] ?? '',
                 type: newLastMessageData['type'] ?? 'text',
                 senderId: newLastMessageData['sender_id'] ?? 0,
-                createdAt: newLastMessageData['created_at'] ?? DateTime.now().toIso8601String(),
+                createdAt:
+                    newLastMessageData['created_at'] ??
+                    DateTime.now().toIso8601String(),
                 conversationId: conversationId,
               );
 
@@ -1190,7 +1198,9 @@ class ChatsPageState extends ConsumerState<ChatsPage>
               });
 
               // Persist to local DB
-              _conversationsRepo.insertOrUpdateConversation(updatedConversation);
+              _conversationsRepo.insertOrUpdateConversation(
+                updatedConversation,
+              );
 
               if (mounted) {
                 setState(() {
@@ -1216,7 +1226,9 @@ class ChatsPageState extends ConsumerState<ChatsPage>
               });
 
               // Persist to local DB
-              _conversationsRepo.insertOrUpdateConversation(updatedConversation);
+              _conversationsRepo.insertOrUpdateConversation(
+                updatedConversation,
+              );
 
               if (mounted) {
                 setState(() {
@@ -2004,8 +2016,10 @@ class ChatListItem extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
             decoration: BoxDecoration(
-              color: isMuted ? Colors.grey : Colors.teal,
-              borderRadius: BorderRadius.circular(10),
+              color: isMuted
+                  ? Colors.grey
+                  : const Color.fromARGB(255, 9, 117, 103),
+              shape: BoxShape.circle,
             ),
             child: Text(
               conversation.unreadCount.toString(),

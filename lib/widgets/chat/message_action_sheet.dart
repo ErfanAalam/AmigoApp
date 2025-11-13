@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../models/message_model.dart';
 
 /// Reusable message action sheet widget
@@ -10,7 +11,7 @@ class MessageActionSheet extends StatelessWidget {
   final bool isStarred;
   final bool showReadBy;
   final VoidCallback onReply;
-  final VoidCallback onCopy;
+  // final VoidCallback onCopy;
   final VoidCallback onPin;
   final VoidCallback onStar;
   final VoidCallback onForward;
@@ -27,7 +28,7 @@ class MessageActionSheet extends StatelessWidget {
     this.isAdmin = false,
     this.showReadBy = false,
     required this.onReply,
-    required this.onCopy,
+    // required this.onCopy,
     required this.onPin,
     required this.onStar,
     required this.onForward,
@@ -103,9 +104,12 @@ class MessageActionSheet extends StatelessWidget {
                   MessageActionButton(
                     icon: Icons.copy,
                     label: 'Copy',
-                    onTap: () {
+                    onTap: () async {
                       Navigator.pop(context);
-                      onCopy();
+                      // onCopy();
+                      await Clipboard.setData(
+                        ClipboardData(text: message.body),
+                      );
                     },
                   ),
                   MessageActionButton(

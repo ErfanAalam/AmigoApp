@@ -170,40 +170,6 @@ class GroupsService {
     }
   }
 
-  // Get group conversation history
-  Future<Map<String, dynamic>> getGroupConversationHistory({
-    required int conversationId,
-    int page = 1,
-    int limit = 20,
-  }) async {
-    try {
-      final response = await _apiService.authenticatedGet(
-        '/chat/get-conversation-history/$conversationId?page=$page&limit=$limit',
-      );
-
-      return {
-        'success': response.statusCode == 200,
-        'statusCode': response.statusCode,
-        'data': response.data,
-        'message': 'Group conversation history retrieved successfully',
-      };
-    } on DioException catch (e) {
-      return {
-        'success': false,
-        'error': e.message,
-        'type': e.type.toString(),
-        'statusCode': e.response?.statusCode,
-        'message': 'Failed to get group conversation history: ${e.message}',
-      };
-    } catch (e) {
-      return {
-        'success': false,
-        'error': e.toString(),
-        'message': 'Failed to get group conversation history',
-      };
-    }
-  }
-
   // Delete group conversation
   Future<Map<String, dynamic>> deleteGroup(int conversationId) async {
     try {

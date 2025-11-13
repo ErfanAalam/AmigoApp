@@ -558,7 +558,9 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
       final messageIds = message['message_ids'] as List<dynamic>? ?? [];
 
       if (conversationId == null || messageIds.isEmpty) {
-        debugPrint('⚠️ Invalid message delete: missing conversationId or messageIds');
+        debugPrint(
+          '⚠️ Invalid message delete: missing conversationId or messageIds',
+        );
         return;
       }
 
@@ -588,19 +590,24 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
           );
 
           if (historyResponse['success'] == true && mounted && _isLoaded) {
-            final messages = historyResponse['data']['messages'] as List<dynamic>? ?? [];
-            
+            final messages =
+                historyResponse['data']['messages'] as List<dynamic>? ?? [];
+
             if (messages.isNotEmpty) {
               final newLastMessageData = messages[0] as Map<String, dynamic>;
               final messageBody = newLastMessageData['body'] ?? '';
-              
+
               final newLastMessage = GroupLastMessage(
                 id: newLastMessageData['id'] ?? 0,
                 body: messageBody,
-                type: messageBody.isEmpty ? 'attachment' : newLastMessageData['type'] ?? 'text',
+                type: messageBody.isEmpty
+                    ? 'attachment'
+                    : newLastMessageData['type'] ?? 'text',
                 senderId: newLastMessageData['sender_id'] ?? 0,
                 senderName: newLastMessageData['sender_name'] ?? '',
-                createdAt: newLastMessageData['created_at'] ?? DateTime.now().toIso8601String(),
+                createdAt:
+                    newLastMessageData['created_at'] ??
+                    DateTime.now().toIso8601String(),
                 conversationId: conversationId,
                 attachmentData: newLastMessageData['attachments'],
               );
@@ -646,7 +653,9 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
                   _allGroups.sort((a, b) {
                     final aTime = a.lastMessageAt ?? a.joinedAt;
                     final bTime = b.lastMessageAt ?? b.joinedAt;
-                    return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
+                    return DateTime.parse(
+                      bTime,
+                    ).compareTo(DateTime.parse(aTime));
                   });
 
                   // Update filtered items
@@ -696,7 +705,9 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
                   _allGroups.sort((a, b) {
                     final aTime = a.lastMessageAt ?? a.joinedAt;
                     final bTime = b.lastMessageAt ?? b.joinedAt;
-                    return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
+                    return DateTime.parse(
+                      bTime,
+                    ).compareTo(DateTime.parse(aTime));
                   });
 
                   // Update filtered items
@@ -1416,8 +1427,8 @@ class GroupListItem extends ConsumerWidget {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.teal,
-                        borderRadius: BorderRadius.circular(10),
+                        color: const Color.fromARGB(255, 9, 117, 103),
+                        shape: BoxShape.circle,
                       ),
                       child: Text(
                         group.unreadCount.toString(),

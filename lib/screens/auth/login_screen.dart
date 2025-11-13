@@ -127,9 +127,11 @@ class _LoginScreenState extends material.State<LoginScreen> {
         final appVersion = await UserUtils().getAppVersion();
         await _userService.updateUser({'app_version': appVersion});
 
-        // Store user name in shared preferences for later use
+        // // Store user name in shared preferences for later use
         final prefs = await SharedPreferences.getInstance();
         prefs.setString('current_user_name', response['data']['name']);
+
+        await UserUtils().saveUserDetails(response['data']);
 
         // Send FCM token to backend after successful login
         await authService.sendFCMTokenToBackend(3);
