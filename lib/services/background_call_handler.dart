@@ -3,7 +3,7 @@ import 'package:amigo/env.dart';
 import 'package:amigo/services/notification_service.dart';
 import 'package:amigo/db/database_helper.dart';
 import 'package:amigo/models/message_model.dart';
-import 'package:amigo/repositories/messages_repository.dart';
+import 'package:amigo/db/repositories/messages_repository.dart';
 import 'package:dio/dio.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';

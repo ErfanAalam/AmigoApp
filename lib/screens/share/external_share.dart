@@ -7,8 +7,8 @@ import '../../models/conversation_model.dart';
 import '../../api/user.service.dart';
 import '../../api/chats.services.dart';
 import '../../services/socket/websocket_service.dart';
-import '../../repositories/conversations_repository.dart';
-import '../../repositories/groups_repository.dart';
+import '../../db/repositories/conversations_repository.dart';
+import '../../db/repositories/groups_repository.dart';
 
 /// A screen that handles incoming shared media (images and videos)
 /// from the Android share sheet and allows selecting conversations to share to.

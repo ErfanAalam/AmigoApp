@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/chat_preferences_service.dart';
 import '../../api/chats.services.dart';
 import '../../api/user.service.dart';
@@ -26,7 +27,6 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
 
   Future<void> _loadDeletedChats() async {
     try {
-      // final deletedChats = await _chatPreferencesService.getDeletedChats();
       final deletedChats = await _userService.GetChatList('deleted_dm');
 
       if (mounted) {
@@ -63,43 +63,6 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
       debugPrint('❌ Error restoring chat: $e');
       _showSnackBar('Failed to restore chat', Colors.red);
     }
-  }
-
-  Future<void> _permanentlyDeleteChat(Map<String, dynamic> chatData) async {
-    final userName = chatData['userName'] ?? chatData['user_name'] ?? 'Unknown';
-    final shouldDelete = await _showPermanentDeleteConfirmation(userName);
-    if (shouldDelete == true) {
-      setState(() {
-        _deletedChats.removeWhere(
-          (chat) => chat['conversation_id'] == chatData['conversation_id'],
-        );
-      });
-      _showSnackBar('Chat permanently deleted', Colors.red);
-    }
-  }
-
-  Future<bool?> _showPermanentDeleteConfirmation(String userName) async {
-    return await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: Text('Permanently Delete'),
-        content: Text(
-          'Are you sure you want to permanently delete the chat with $userName? This action cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('CANCEL'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: Text('DELETE PERMANENTLY'),
-          ),
-        ],
-      ),
-    );
   }
 
   void _showSnackBar(String message, Color color) {
@@ -147,50 +110,91 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: Text(
+        title: const Text(
           'Deleted Chats',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
         ),
         backgroundColor: Colors.teal,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: Colors.white),
+          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: Container(
-        color: Colors.grey[50],
-        child: _isLoading
-            ? Center(child: CircularProgressIndicator())
-            : _deletedChats.isEmpty
-            ? _buildEmptyState()
-            : _buildDeletedChatsList(),
+      body: _isLoading
+          ? _buildLoadingState()
+          : _deletedChats.isEmpty
+          ? _buildEmptyState()
+          : _buildDeletedChatsList(),
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.teal[400]!),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Loading deleted chats...',
+            style: TextStyle(color: Colors.grey[600], fontSize: 14),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildEmptyState() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.delete_outline, size: 64, color: Colors.grey[400]),
-          SizedBox(height: 16),
-          Text(
-            'No deleted chats',
-            style: TextStyle(
-              color: Colors.grey[600],
-              fontSize: 18,
-              fontWeight: FontWeight.w500,
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.delete_outline_rounded,
+                size: 64,
+                color: Colors.grey[400],
+              ),
             ),
-          ),
-          SizedBox(height: 8),
-          Text(
-            'Deleted chats will appear here',
-            style: TextStyle(color: Colors.grey[500], fontSize: 14),
-          ),
-        ],
+            const SizedBox(height: 24),
+            Text(
+              'No Deleted Chats',
+              style: TextStyle(
+                color: Colors.grey[800],
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Chats you delete will appear here',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey[600], fontSize: 15),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'You can restore them anytime',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey[500], fontSize: 13),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -198,7 +202,9 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
   Widget _buildDeletedChatsList() {
     return RefreshIndicator(
       onRefresh: _loadDeletedChats,
+      color: Colors.teal,
       child: ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         itemCount: _deletedChats.length,
         itemBuilder: (context, index) {
           final chatData = _deletedChats[index];
@@ -209,9 +215,6 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
   }
 
   Widget _buildDeletedChatItem(Map<String, dynamic> chatData) {
-    // Debug logging to understand the data structure
-    debugPrint('🔍 Deleted chat data: $chatData');
-
     final userName =
         chatData['userName'] ?? chatData['user_name'] ?? 'Unknown User';
     final userProfilePic =
@@ -219,148 +222,214 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
     final deletedAt = chatData['deleted_at'] ?? '';
     final lastMessage = chatData['metadata']?['last_message'];
     final lastMessageText = lastMessage?['body'] ?? 'No messages';
+    final lastMessageType = lastMessage?['type'] ?? 'text';
+
+    // Format last message based on type
+    String displayMessage = lastMessageText;
+    if (lastMessageText.isEmpty || lastMessageText == 'No messages') {
+      switch (lastMessageType) {
+        case 'image':
+          displayMessage = '📷 Photo';
+          break;
+        case 'video':
+          displayMessage = '📹 Video';
+          break;
+        case 'audio':
+        case 'audios':
+          displayMessage = '🎵 Audio';
+          break;
+        case 'document':
+          displayMessage = '📎 Document';
+          break;
+        default:
+          displayMessage = 'No messages';
+      }
+    }
 
     return Container(
-      margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey[200]!, width: 1),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 1,
-            blurRadius: 3,
-            offset: Offset(0, 1),
+            color: Colors.black.withOpacity(0.04),
+            spreadRadius: 0,
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
-      child: ListTile(
-        contentPadding: EdgeInsets.all(16),
-        leading: CircleAvatar(
-          radius: 25,
-          backgroundColor: Colors.grey[200],
-          backgroundImage: userProfilePic != null
-              ? NetworkImage(userProfilePic)
-              : null,
-          child: userProfilePic == null
-              ? Text(
-                  _getInitials(userName),
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => _showRestoreDialog(chatData),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                // Avatar with deleted indicator
+                Stack(
+                  children: [
+                    CircleAvatar(
+                      radius: 28,
+                      backgroundColor: Colors.teal[100],
+                      backgroundImage: userProfilePic != null
+                          ? CachedNetworkImageProvider(userProfilePic)
+                          : null,
+                      child: userProfilePic == null
+                          ? Text(
+                              _getInitials(userName),
+                              style: TextStyle(
+                                color: Colors.teal[700],
+                                fontWeight: FontWeight.bold,
+                                fontSize: 20,
+                              ),
+                            )
+                          : null,
+                    ),
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        width: 18,
+                        height: 18,
+                        decoration: BoxDecoration(
+                          color: Colors.red[500],
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                        child: const Icon(
+                          Icons.delete_outline,
+                          size: 10,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 16),
+                // Content
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              userName,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: Colors.black87,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.red[50],
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'Deleted',
+                              style: TextStyle(
+                                color: Colors.red[600],
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        displayMessage,
+                        style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
-                )
-              : null,
-        ),
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(
-                userName,
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 16,
-                  color: Colors.grey[800],
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            Icon(Icons.delete, size: 16, color: Colors.red[300]),
-          ],
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(height: 4),
-            Text(
-              lastMessageText,
-              style: TextStyle(color: Colors.grey[600], fontSize: 14),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            SizedBox(height: 4),
-            Text(
-              'Deleted ${_formatDate(deletedAt)}',
-              style: TextStyle(
-                color: Colors.red[400],
-                fontSize: 12,
-                fontStyle: FontStyle.italic,
-              ),
-            ),
-          ],
-        ),
-        trailing: PopupMenuButton<String>(
-          icon: Icon(Icons.more_vert, color: Colors.grey[600]),
-          onSelected: (action) {
-            if (action == 'restore') {
-              _restoreChat(chatData);
-            } else if (action == 'delete_permanently') {
-              _permanentlyDeleteChat(chatData);
-            }
-          },
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          itemBuilder: (context) => [
-            PopupMenuItem(
-              value: 'restore',
-              child: Row(
-                children: [
-                  Icon(Icons.restore, color: Colors.green, size: 20),
-                  SizedBox(width: 12),
-                  Text('Restore Chat'),
-                ],
-              ),
-            ),
-            // PopupMenuDivider(),
-            // PopupMenuItem(
-            //   value: 'delete_permanently',
-            //   child: Row(
-            //     children: [
-            //       Icon(Icons.delete_forever, color: Colors.red, size: 20),
-            //       SizedBox(width: 12),
-            //       Text(
-            //         'Delete Permanently',
-            //         style: TextStyle(color: Colors.red),
-            //       ),
-            //     ],
-            //   ),
-            // ),
-          ],
-        ),
-        onTap: () {
-          // Show restore dialog
-          final displayUserName =
-              chatData['userName'] ?? chatData['user_name'] ?? 'Unknown User';
-          showDialog(
-            context: context,
-            builder: (context) => AlertDialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              title: Text('Restore Chat'),
-              content: Text(
-                'Would you like to restore the chat with $displayUserName?',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text('CANCEL'),
-                ),
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _restoreChat(chatData);
-                  },
-                  style: TextButton.styleFrom(foregroundColor: Colors.green),
-                  child: Text('RESTORE'),
+                // Restore button
+                IconButton(
+                  icon: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.teal[50],
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.restore_rounded,
+                      color: Colors.teal[700],
+                      size: 20,
+                    ),
+                  ),
+                  onPressed: () => _showRestoreDialog(chatData),
+                  tooltip: 'Restore chat',
                 ),
               ],
             ),
-          );
-        },
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showRestoreDialog(Map<String, dynamic> chatData) {
+    final displayUserName =
+        chatData['userName'] ?? chatData['user_name'] ?? 'Unknown User';
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.restore_rounded, color: Colors.teal, size: 24),
+            SizedBox(width: 12),
+            Text(
+              'Restore Chat',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: Text(
+          'Would you like to restore the chat with $displayUserName?',
+          style: const TextStyle(fontSize: 15),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(fontSize: 15)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _restoreChat(chatData);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.teal,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+            child: const Text(
+              'Restore',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
       ),
     );
   }

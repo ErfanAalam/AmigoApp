@@ -110,7 +110,6 @@ class WebSocketMessageHandler {
     );
 
     _isInitialized = true;
-    debugPrint('✅ WebSocketMessageHandler initialized');
   }
 
   /// Handle incoming WebSocket messages and route them to appropriate streams
@@ -125,6 +124,11 @@ class WebSocketMessageHandler {
 
       // Route messages to appropriate streams
       switch (messageType) {
+        case 'conversation:new':
+          _conversationAddedController.add(message);
+
+          break;
+
         case 'message':
           await ChatStorageService().storeMessageSqlite(
             message['conversation_id'],
@@ -179,10 +183,6 @@ class WebSocketMessageHandler {
 
         case 'user_offline':
           _userStatusService.handleUserOfflineMessage(message);
-          break;
-
-        case 'conversation_added':
-          _conversationAddedController.add(message);
           break;
 
         case 'message_delete':
@@ -289,7 +289,9 @@ class WebSocketMessageHandler {
   }
 
   /// Get a filtered stream for conversation added events in a specific conversation
-  Stream<Map<String, dynamic>> conversationAddedForConversation(int conversationId) {
+  Stream<Map<String, dynamic>> conversationAddedForConversation(
+    int conversationId,
+  ) {
     return conversationAddedStream.where((message) {
       final msgConversationId =
           message['conversation_id'] ?? message['data']?['conversation_id'];
@@ -298,7 +300,9 @@ class WebSocketMessageHandler {
   }
 
   /// Get a filtered stream for message delete events in a specific conversation
-  Stream<Map<String, dynamic>> messageDeletesForConversation(int conversationId) {
+  Stream<Map<String, dynamic>> messageDeletesForConversation(
+    int conversationId,
+  ) {
     return messageDeleteStream.where((message) {
       final msgConversationId =
           message['conversation_id'] ?? message['data']?['conversation_id'];
@@ -315,7 +319,9 @@ class WebSocketMessageHandler {
     // Get the navigator context
     final context = NavigationHelper.navigatorKey.currentContext;
     if (context == null) {
-      debugPrint('⚠️ Cannot show health check dialog: Navigator context is null');
+      debugPrint(
+        '⚠️ Cannot show health check dialog: Navigator context is null',
+      );
       return;
     }
 
@@ -345,10 +351,7 @@ class WebSocketMessageHandler {
               ],
               Text(
                 'Time: $time',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                ),
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
             ],
           ),

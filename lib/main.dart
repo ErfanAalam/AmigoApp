@@ -31,10 +31,10 @@ import 'utils/navigation_helper.dart';
 import 'utils/ringing_tone.dart';
 import 'models/conversation_model.dart';
 import 'models/group_model.dart';
-import 'repositories/conversations_repository.dart';
-import 'repositories/groups_repository.dart';
+import 'db/repositories/conversations_repository.dart';
+import 'db/repositories/groups_repository.dart';
 import 'api/user.service.dart';
-import 'repositories/user_repository.dart';
+import 'db/repositories/user_repository.dart';
 import 'widgets/loading_dots_animation.dart';
 
 void main() async {

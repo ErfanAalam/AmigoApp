@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../models/community_model.dart';
 import '../../../models/group_model.dart';
 import '../../../api/user.service.dart';
-import '../../../repositories/groups_repository.dart';
+import '../../../db/repositories/groups_repository.dart';
 import 'messaging.dart';
 
 class CommunityInnerGroupsPage extends StatefulWidget {

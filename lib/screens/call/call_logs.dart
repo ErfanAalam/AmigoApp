@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:amigo/repositories/call_repository.dart';
+import 'package:amigo/db/repositories/call_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/call_model.dart';
@@ -147,7 +147,6 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
           });
         }
       } else {
-        // Server returned error but we already have local data, so just log it
         if (mounted && _callHistory.isEmpty) {
           setState(() {
             _error = data['message'] ?? 'Failed to load call history';

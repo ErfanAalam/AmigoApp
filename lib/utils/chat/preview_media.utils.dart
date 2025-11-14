@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../models/message_model.dart';
-import '../../repositories/messages_repository.dart';
+import '../../db/repositories/messages_repository.dart';
 import '../../services/media_cache_service.dart';
 import '../../utils/chat/chat_helpers.dart';
 import '../../widgets/media_preview_widgets.dart';

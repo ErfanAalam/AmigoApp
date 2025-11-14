@@ -262,14 +262,6 @@ class GroupsService {
       );
 
       return response.data;
-    } on DioException catch (e) {
-      return {
-        'success': false,
-        'error': e.message,
-        'type': e.type.toString(),
-        'statusCode': e.response?.statusCode,
-        'message': 'Failed to get group info: ${e.message}',
-      };
     } catch (e) {
       return {
         'success': false,

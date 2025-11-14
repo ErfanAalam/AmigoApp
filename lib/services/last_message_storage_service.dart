@@ -75,11 +75,8 @@ class LastMessageStorageService {
       };
 
       await prefs.setString(_groupLastMessagesKey, json.encode(lastMessages));
-      print(
-        '✅ Stored group last message for conversation $conversationId: ${messageData['body']}',
-      );
     } catch (e) {
-      print('❌ Error storing group last message: $e');
+      debugPrint('❌ Error storing group last message: $e');
     }
   }
 

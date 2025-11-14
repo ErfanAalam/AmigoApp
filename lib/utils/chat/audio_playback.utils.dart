@@ -6,7 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../models/message_model.dart';
 import '../../services/media_cache_service.dart';
-import '../../repositories/messages_repository.dart';
+import '../../db/repositories/messages_repository.dart';
 import 'chat_helpers.dart';
 
 /// Audio playback manager for chat messages

@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../repositories/conversations_repository.dart';
-import '../repositories/groups_repository.dart';
-import '../repositories/call_repository.dart';
+import '../db/repositories/conversations_repository.dart';
+import '../db/repositories/groups_repository.dart';
+import '../db/repositories/call_repository.dart';
 import '../models/call_model.dart';
 import '../services/call_seen_service.dart';
 

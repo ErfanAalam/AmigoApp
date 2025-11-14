@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../models/message_model.dart';
-import '../../repositories/messages_repository.dart';
+import '../../db/repositories/messages_repository.dart';
 import '../../api/chats.services.dart';
 import '../../services/socket/websocket_service.dart';
 import '../../services/message_storage_service.dart';

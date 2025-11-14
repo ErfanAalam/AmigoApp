@@ -1,17 +1,11 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../models/group_model.dart';
 import '../../../models/community_model.dart';
-import '../../../api/user.service.dart';
-import '../../../repositories/groups_repository.dart';
-import '../../../repositories/communities_repository.dart';
 import '../../../services/socket/websocket_service.dart';
-import '../../../services/socket/websocket_message_handler.dart';
-import '../../../services/last_message_storage_service.dart';
 import '../../../widgets/chat/searchable_list_widget.dart';
-import '../../../api/chats.services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../providers/draft_provider.dart';
+import '../../../providers/group_list_provider.dart';
 import 'messaging.dart';
 import 'create_group.dart';
 import 'community_group_list.dart';
@@ -24,928 +18,50 @@ class GroupsPage extends ConsumerStatefulWidget {
 }
 
 class _GroupsPageState extends ConsumerState<GroupsPage> {
-  final UserService _userService = UserService();
-  final GroupsRepository _groupsRepo = GroupsRepository();
-  final CommunitiesRepository _communitiesRepo = CommunitiesRepository();
   final WebSocketService _websocketService = WebSocketService();
-  final WebSocketMessageHandler _messageHandler = WebSocketMessageHandler();
-  final LastMessageStorageService _lastMessageStorage =
-      LastMessageStorageService.instance;
-  final ChatsServices _chatsServices = ChatsServices();
   final TextEditingController _searchController = TextEditingController();
-
-  // Real-time state management
-  List<GroupModel> _allGroups = [];
-  List<CommunityModel> _allCommunities = [];
-  List<dynamic> _filteredItems = []; // Can contain both groups and communities
-  bool _isLoaded = false;
-
-  // Track which group user is currently viewing
-  int? _activeConversationId;
-
-  // Typing state management
-  final Map<int, bool> _typingUsers = {}; // conversationId -> isTyping
-  final Map<int, Timer?> _typingTimers = {}; // conversationId -> timer
-  final Map<int, Set<String>> _typingUserNames =
-      {}; // conversationId -> Set of userNames
-
-  StreamSubscription<Map<String, dynamic>>? _typingSubscription;
-  StreamSubscription<Map<String, dynamic>>? _messageSubscription;
-  StreamSubscription<Map<String, dynamic>>? _mediaSubscription;
-  StreamSubscription<Map<String, dynamic>>? _messageDeleteSubscription;
-  StreamSubscription<Map<String, dynamic>>? _conversationAddedSubscription;
 
   @override
   void initState() {
     super.initState();
-    _loadFromLocal();
-    _loadGroupsAndCommunities();
     _searchController.addListener(_onSearchChanged);
-    _setupWebSocketListener();
-    _setupConversationAddedListener();
   }
 
   @override
   void dispose() {
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
-    _typingSubscription?.cancel();
-    _messageSubscription?.cancel();
-    _mediaSubscription?.cancel();
-    _messageDeleteSubscription?.cancel();
-    _conversationAddedSubscription?.cancel();
-    // Cancel all typing timers
-    for (final timer in _typingTimers.values) {
-      timer?.cancel();
-    }
-    _typingTimers.clear();
     // Clear active conversation
-    _activeConversationId = null;
+    ref.read(groupListProvider.notifier).setActiveConversation(null);
     super.dispose();
   }
 
-  /// Load groups and communities from local DB first
-  Future<void> _loadFromLocal() async {
-    try {
-      final localGroups = await _groupsRepo.getAllGroups();
-      final localCommunities = await _communitiesRepo.getAllCommunities();
-
-      if (mounted) {
-        // Update groups with stored last messages
-        final updatedGroups = await _updateGroupsWithStoredLastMessages(
-          localGroups,
-        );
-
-        setState(() {
-          _allGroups = updatedGroups;
-          _allCommunities = localCommunities;
-
-          // Sort groups by last message time (most recent first)
-          _allGroups.sort((a, b) {
-            final aTime = a.lastMessageAt ?? a.joinedAt;
-            final bTime = b.lastMessageAt ?? b.joinedAt;
-            return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
-          });
-
-          _isLoaded = true;
-          _onSearchChanged();
-        });
-
-        if (updatedGroups.isNotEmpty || localCommunities.isNotEmpty) {
-        } else {
-          debugPrint('ℹ️ No cached groups or communities found in local DB');
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ Error loading from local DB: $e');
-      // Even on error, set isLoaded to allow showing empty state
-      if (mounted) {
-        setState(() {
-          _isLoaded = true;
-          _allGroups = [];
-          _allCommunities = [];
-          _filteredItems = [];
-        });
-      }
-    }
-  }
-
-  /// Update groups with stored last messages
-  Future<List<GroupModel>> _updateGroupsWithStoredLastMessages(
-    List<GroupModel> groups,
-  ) async {
-    try {
-      final storedLastMessages = await _lastMessageStorage
-          .getAllGroupLastMessages();
-      final updatedGroups = <GroupModel>[];
-
-      for (final group in groups) {
-        final storedMessage = storedLastMessages[group.conversationId];
-
-        if (storedMessage != null) {
-          // Create GroupLastMessage from stored data
-          final lastMessage = GroupLastMessage(
-            id: storedMessage['id'] ?? 0,
-            body: storedMessage['body'] ?? '',
-            type: storedMessage['type'] ?? 'text',
-            senderId: storedMessage['sender_id'] ?? 0,
-            senderName: storedMessage['sender_name'] ?? '',
-            createdAt:
-                storedMessage['created_at'] ?? DateTime.now().toIso8601String(),
-            conversationId: group.conversationId,
-          );
-
-          // Create updated metadata with stored last message
-          final updatedMetadata = GroupMetadata(
-            lastMessage: lastMessage,
-            totalMessages: group.metadata?.totalMessages ?? 0,
-            createdAt: group.metadata?.createdAt,
-            createdBy: group.metadata?.createdBy ?? 0,
-          );
-
-          // Create updated group
-          final updatedGroup = GroupModel(
-            conversationId: group.conversationId,
-            title: group.title,
-            type: group.type,
-            members: group.members,
-            metadata: updatedMetadata,
-            lastMessageAt: lastMessage.createdAt,
-            role: group.role,
-            unreadCount: group.unreadCount,
-            joinedAt: group.joinedAt,
-          );
-
-          updatedGroups.add(updatedGroup);
-        } else {
-          // No stored last message, use original group
-          updatedGroups.add(group);
-        }
-      }
-
-      return updatedGroups;
-    } catch (e) {
-      debugPrint('❌ Error updating groups with stored last messages: $e');
-      return groups; // Return original groups on error
-    }
-  }
-
-  /// Set up conversation added listener
-  void _setupConversationAddedListener() {
-    _conversationAddedSubscription = _messageHandler.conversationAddedStream
-        .listen(
-          (message) {
-            _handleConversationAdded(message);
-          },
-          onError: (error) {
-            debugPrint(
-              '❌ Conversation added stream error in GroupsPage: $error',
-            );
-          },
-        );
-  }
-
-  /// Handle conversation added message
-  Future<void> _handleConversationAdded(Map<String, dynamic> message) async {
-    try {
-      final conversationId = message['conversation_id'] as int?;
-      final data = message['data'] as Map<String, dynamic>?;
-
-      if (conversationId == null || data == null) {
-        debugPrint(
-          '⚠️ Invalid conversation_added message: missing conversation_id or data',
-        );
-        return;
-      }
-
-      // Only handle groups in the group list screen
-      final conversationType = data['type'] as String?;
-      if (conversationType != 'group' &&
-          conversationType != 'community_group') {
-        return; // Ignore DMs, they'll be handled in dm_list.dart
-      }
-
-      // Check if group already exists in the list
-      final existingIndex = _allGroups.indexWhere(
-        (group) => group.conversationId == conversationId,
-      );
-
-      if (existingIndex != -1) {
-        debugPrint('ℹ️ Group $conversationId already exists in list, skipping');
-        return;
-      }
-
-      // Convert the data to GroupModel
-      try {
-        final group = _convertToGroupModel(data);
-
-        // Update with stored last message if available
-        final updatedGroups = await _updateGroupsWithStoredLastMessages([
-          group,
-        ]);
-
-        if (updatedGroups.isNotEmpty && mounted && _isLoaded) {
-          setState(() {
-            // Add the new group to the list
-            _allGroups.add(updatedGroups[0]);
-
-            // Sort groups by last message time (most recent first)
-            _allGroups.sort((a, b) {
-              final aTime = a.lastMessageAt ?? a.joinedAt;
-              final bTime = b.lastMessageAt ?? b.joinedAt;
-              return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
-            });
-
-            // Persist to local DB
-            _groupsRepo.insertOrUpdateGroup(updatedGroups[0]);
-
-            // Update filtered items
-            _onSearchChanged();
-          });
-
-          debugPrint('✅ Added new group $conversationId to list');
-        }
-      } catch (e) {
-        debugPrint('❌ Error converting group data: $e');
-      }
-    } catch (e) {
-      debugPrint('❌ Error handling conversation_added message: $e');
-    }
-  }
-
-  /// Set up WebSocket listener for real-time updates using centralized handler
-  void _setupWebSocketListener() {
-    // Listen to typing events for all groups
-    _typingSubscription = _messageHandler.typingStream.listen(
-      (message) {
-        _handleTypingMessage(message);
-      },
-      onError: (error) {
-        debugPrint('❌ Typing stream error in GroupsPage: $error');
-      },
-    );
-
-    // Listen to new messages for all groups
-    _messageSubscription = _messageHandler.messageStream.listen(
-      (message) {
-        _handleNewGroupMessage(message);
-      },
-      onError: (error) {
-        debugPrint('❌ Message stream error in GroupsPage: $error');
-      },
-    );
-
-    // Listen to media messages for all groups
-    _mediaSubscription = _messageHandler.mediaStream.listen(
-      (message) {
-        _handleNewGroupMessage(message);
-      },
-      onError: (error) {
-        debugPrint('❌ Media stream error in GroupsPage: $error');
-      },
-    );
-
-    // Listen to message delete events for all groups
-    _messageDeleteSubscription = _messageHandler.messageDeleteStream.listen(
-      (message) {
-        _handleMessageDelete(message);
-      },
-      onError: (error) {
-        debugPrint('❌ Message delete stream error in GroupsPage: $error');
-      },
-    );
-  }
-
-  /// Handle typing message from WebSocket
-  void _handleTypingMessage(Map<String, dynamic> message) {
-    try {
-      final data = message['data'] as Map<String, dynamic>? ?? {};
-      final conversationId = message['conversation_id'] as int?;
-      final isTyping = data['is_typing'] as bool? ?? false;
-      final userId = data['user_id'] as int?;
-      final userName = data['user_name'] as String? ?? '';
-
-      if (conversationId == null || userId == null) {
-        debugPrint(
-          '⚠️ Invalid typing message: missing conversationId or userId',
-        );
-        return;
-      }
-
-      // Find the group to get user name
-      final groupIndex = _allGroups.indexWhere(
-        (group) => group.conversationId == conversationId,
-      );
-
-      if (groupIndex == -1) {
-        debugPrint('⚠️ Group not found for typing indicator: $conversationId');
-        return;
-      }
-
-      final group = _allGroups[groupIndex];
-      // Get user name from group members or use provided name
-      // delay of 1 second before showing the typing indicator
-
-      final typingUserName = userName.isNotEmpty
-          ? userName
-          : group.members
-                .firstWhere(
-                  (member) => member.userId == userId,
-                  orElse: () => GroupMember(
-                    userId: userId,
-                    name: userName,
-                    role: 'member',
-                  ),
-                )
-                .name;
-
-      if (mounted) {
-        setState(() {
-          if (isTyping) {
-            // Add user to typing set
-            _typingUserNames.putIfAbsent(conversationId, () => <String>{});
-            _typingUserNames[conversationId]!.add(typingUserName);
-
-            _typingUsers[conversationId] = true;
-
-            // Cancel existing timer
-            _typingTimers[conversationId]?.cancel();
-
-            // Set timer to hide typing indicator after 2 seconds
-            _typingTimers[conversationId] = Timer(
-              const Duration(seconds: 2),
-              () {
-                if (mounted) {
-                  setState(() {
-                    // Clear typing indicator after timeout
-                    _typingUsers[conversationId] = false;
-                    _typingUserNames.remove(conversationId);
-                  });
-                }
-                _typingTimers[conversationId] = null;
-              },
-            );
-          } else {
-            // Remove user from typing set
-            _typingUserNames[conversationId]?.remove(typingUserName);
-
-            // If no more users typing, clear the indicator
-            if (_typingUserNames[conversationId]?.isEmpty ?? true) {
-              _typingUsers[conversationId] = false;
-              _typingUserNames.remove(conversationId);
-              _typingTimers[conversationId]?.cancel();
-              _typingTimers[conversationId] = null;
-            }
-          }
-        });
-      }
-    } catch (e) {
-      debugPrint('❌ Error handling typing message: $e');
-    }
-  }
-
-  /// Clear unread count for a specific group
-  void _clearUnreadCount(int conversationId) {
-    if (!mounted) return;
-
-    final groupIndex = _allGroups.indexWhere(
-      (group) => group.conversationId == conversationId,
-    );
-
-    if (groupIndex != -1) {
-      final group = _allGroups[groupIndex];
-      if (group.unreadCount > 0) {
-        setState(() {
-          final updatedGroup = GroupModel(
-            conversationId: group.conversationId,
-            title: group.title,
-            type: group.type,
-            members: group.members,
-            metadata: group.metadata,
-            lastMessageAt: group.lastMessageAt,
-            role: group.role,
-            unreadCount: 0,
-            joinedAt: group.joinedAt,
-          );
-          _allGroups[groupIndex] = updatedGroup;
-          // Persist to local DB
-          _groupsRepo.insertOrUpdateGroup(updatedGroup);
-          // Update filtered items
-          _onSearchChanged();
-        });
-      } else {
-        debugPrint('ℹ️ Group $conversationId already has 0 unread count');
-      }
-    } else {
-      debugPrint(
-        '⚠️ Group $conversationId not found when trying to clear unread count',
-      );
-    }
-  }
-
-  /// Set the currently active group (when user enters inner group chat)
-  void _setActiveConversation(int? conversationId) {
-    _activeConversationId = conversationId;
-    if (conversationId != null) {
-      _clearUnreadCount(conversationId);
-    }
-  }
-
-  /// Handle new message for groups
-  Future<void> _handleNewGroupMessage(Map<String, dynamic> message) async {
-    try {
-      final conversationId = message['conversation_id'] as int?;
-      if (conversationId == null) return;
-
-      final groupIndex = _allGroups.indexWhere(
-        (group) => group.conversationId == conversationId,
-      );
-
-      if (groupIndex == -1) return;
-
-      final data = message['data'] as Map<String, dynamic>? ?? {};
-
-      if (mounted && _isLoaded) {
-        final group = _allGroups[groupIndex];
-
-        // Create new last message with better media handling
-        String messageBody = data['body'] ?? '';
-
-        // If body is empty and it's a media message, extract from nested data
-        if (messageBody.isEmpty && data['data'] != null) {
-          final nestedData = data['data'] as Map<String, dynamic>;
-          messageBody =
-              nestedData['message_type'] ?? nestedData['file_name'] ?? '';
-        }
-
-        final lastMessage = GroupLastMessage(
-          id: data['id'] ?? data['media_message_id'] ?? 0,
-          body: messageBody,
-          type: messageBody.isEmpty
-              ? 'attachment'
-              : data['type'] ?? message['type'] ?? 'text',
-          senderId: data['sender_id'] ?? data['user_id'] ?? 0,
-          senderName: data['sender_name'] ?? '',
-          createdAt: data['created_at'] ?? DateTime.now().toIso8601String(),
-          conversationId: conversationId,
-          attachmentData: data['attachments'],
-        );
-
-        // Store the last message in local storage
-        await _lastMessageStorage.storeGroupLastMessage(conversationId, {
-          'id': data['id'] ?? data['media_message_id'] ?? 0,
-          'body': messageBody,
-          'type': data['type'] ?? message['type'] ?? 'text',
-          'sender_id': data['sender_id'] ?? data['user_id'] ?? 0,
-          'sender_name': data['sender_name'] ?? '',
-          'created_at': data['created_at'] ?? DateTime.now().toIso8601String(),
-          'conversation_id': conversationId,
-        });
-
-        final updatedMetadata = GroupMetadata(
-          lastMessage: lastMessage,
-          totalMessages: (group.metadata?.totalMessages ?? 0) + 1,
-          createdAt: group.metadata?.createdAt,
-          createdBy: group.metadata?.createdBy ?? 0,
-        );
-
-        setState(() {
-          // Only increment unread count if this is not the currently active group
-          final newUnreadCount = _activeConversationId == conversationId
-              ? group
-                    .unreadCount // Don't increment if user is viewing this group
-              : group.unreadCount +
-                    1; // Increment if user is not viewing this group
-
-          // Create updated group
-          final updatedGroup = GroupModel(
-            conversationId: group.conversationId,
-            title: group.title,
-            type: group.type,
-            members: group.members,
-            metadata: updatedMetadata,
-            unreadCount: newUnreadCount,
-            lastMessageAt: lastMessage.createdAt,
-            role: group.role,
-            joinedAt: group.joinedAt,
-          );
-
-          _allGroups[groupIndex] = updatedGroup;
-
-          // Persist to local DB
-          _groupsRepo.insertOrUpdateGroup(updatedGroup);
-
-          // Sort groups by last message time (most recent first)
-          _allGroups.sort((a, b) {
-            final aTime = a.lastMessageAt ?? a.joinedAt;
-            final bTime = b.lastMessageAt ?? b.joinedAt;
-            return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
-          });
-
-          // Update filtered items
-          _onSearchChanged();
-        });
-      }
-    } catch (e) {
-      debugPrint('❌ Error handling new group message: $e');
-    }
-  }
-
-  /// Handle message delete event to update last_message if needed
-  Future<void> _handleMessageDelete(Map<String, dynamic> message) async {
-    try {
-      final conversationId = message['conversation_id'] as int?;
-      final messageIds = message['message_ids'] as List<dynamic>? ?? [];
-
-      if (conversationId == null || messageIds.isEmpty) {
-        debugPrint(
-          '⚠️ Invalid message delete: missing conversationId or messageIds',
-        );
-        return;
-      }
-
-      final deletedMessageIds = messageIds.map((id) => id as int).toList();
-
-      // Find the group
-      final groupIndex = _allGroups.indexWhere(
-        (group) => group.conversationId == conversationId,
-      );
-
-      if (groupIndex == -1) {
-        debugPrint('⚠️ Group not found for message delete: $conversationId');
-        return;
-      }
-
-      final group = _allGroups[groupIndex];
-      final lastMessage = group.metadata?.lastMessage;
-
-      // Check if the deleted message was the last_message
-      if (lastMessage != null && deletedMessageIds.contains(lastMessage.id)) {
-        // Fetch the new last message from the server
-        try {
-          final historyResponse = await _chatsServices.getConversationHistory(
-            conversationId: conversationId,
-            page: 1,
-            limit: 1,
-          );
-
-          if (historyResponse['success'] == true && mounted && _isLoaded) {
-            final messages =
-                historyResponse['data']['messages'] as List<dynamic>? ?? [];
-
-            if (messages.isNotEmpty) {
-              final newLastMessageData = messages[0] as Map<String, dynamic>;
-              final messageBody = newLastMessageData['body'] ?? '';
-
-              final newLastMessage = GroupLastMessage(
-                id: newLastMessageData['id'] ?? 0,
-                body: messageBody,
-                type: messageBody.isEmpty
-                    ? 'attachment'
-                    : newLastMessageData['type'] ?? 'text',
-                senderId: newLastMessageData['sender_id'] ?? 0,
-                senderName: newLastMessageData['sender_name'] ?? '',
-                createdAt:
-                    newLastMessageData['created_at'] ??
-                    DateTime.now().toIso8601String(),
-                conversationId: conversationId,
-                attachmentData: newLastMessageData['attachments'],
-              );
-
-              final updatedMetadata = GroupMetadata(
-                lastMessage: newLastMessage,
-                totalMessages: group.metadata?.totalMessages ?? 0,
-                createdAt: group.metadata?.createdAt,
-                createdBy: group.metadata?.createdBy ?? 0,
-              );
-
-              final updatedGroup = GroupModel(
-                conversationId: group.conversationId,
-                title: group.title,
-                type: group.type,
-                members: group.members,
-                metadata: updatedMetadata,
-                unreadCount: group.unreadCount,
-                lastMessageAt: newLastMessage.createdAt,
-                role: group.role,
-                joinedAt: group.joinedAt,
-              );
-
-              // Update local storage
-              await _lastMessageStorage.storeGroupLastMessage(conversationId, {
-                'id': newLastMessage.id,
-                'body': newLastMessage.body,
-                'type': newLastMessage.type,
-                'sender_id': newLastMessage.senderId,
-                'sender_name': newLastMessage.senderName,
-                'created_at': newLastMessage.createdAt,
-                'conversation_id': conversationId,
-              });
-
-              // Persist to local DB
-              _groupsRepo.insertOrUpdateGroup(updatedGroup);
-
-              if (mounted) {
-                setState(() {
-                  _allGroups[groupIndex] = updatedGroup;
-
-                  // Sort groups by last message time
-                  _allGroups.sort((a, b) {
-                    final aTime = a.lastMessageAt ?? a.joinedAt;
-                    final bTime = b.lastMessageAt ?? b.joinedAt;
-                    return DateTime.parse(
-                      bTime,
-                    ).compareTo(DateTime.parse(aTime));
-                  });
-
-                  // Update filtered items
-                  _onSearchChanged();
-                });
-              }
-            } else {
-              // No messages left, clear last_message
-              final updatedMetadata = GroupMetadata(
-                lastMessage: null,
-                totalMessages: group.metadata?.totalMessages ?? 0,
-                createdAt: group.metadata?.createdAt,
-                createdBy: group.metadata?.createdBy ?? 0,
-              );
-
-              final updatedGroup = GroupModel(
-                conversationId: group.conversationId,
-                title: group.title,
-                type: group.type,
-                members: group.members,
-                metadata: updatedMetadata,
-                unreadCount: group.unreadCount,
-                lastMessageAt: null,
-                role: group.role,
-                joinedAt: group.joinedAt,
-              );
-
-              // Remove from local storage - clear the stored last message
-              await _lastMessageStorage.storeGroupLastMessage(conversationId, {
-                'id': 0,
-                'body': '',
-                'type': 'text',
-                'sender_id': 0,
-                'sender_name': '',
-                'created_at': DateTime.now().toIso8601String(),
-                'conversation_id': conversationId,
-              });
-
-              // Persist to local DB
-              _groupsRepo.insertOrUpdateGroup(updatedGroup);
-
-              if (mounted) {
-                setState(() {
-                  _allGroups[groupIndex] = updatedGroup;
-
-                  // Sort groups by last message time
-                  _allGroups.sort((a, b) {
-                    final aTime = a.lastMessageAt ?? a.joinedAt;
-                    final bTime = b.lastMessageAt ?? b.joinedAt;
-                    return DateTime.parse(
-                      bTime,
-                    ).compareTo(DateTime.parse(aTime));
-                  });
-
-                  // Update filtered items
-                  _onSearchChanged();
-                });
-              }
-            }
-          }
-        } catch (e) {
-          debugPrint('❌ Error fetching new last message after delete: $e');
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ Error handling message delete: $e');
-    }
-  }
-
+  /// Handle search text changes
   void _onSearchChanged() {
-    final query = _searchController.text.toLowerCase();
-    setState(() {
-      if (query.isEmpty) {
-        _filteredItems = [..._allGroups, ..._allCommunities];
-      } else {
-        final filteredGroups = _allGroups.where((group) {
-          return group.title.toLowerCase().contains(query) ||
-              group.members.any(
-                (member) => member.name.toLowerCase().contains(query),
-              );
-        }).toList();
-
-        final filteredCommunities = _allCommunities.where((community) {
-          return community.name.toLowerCase().contains(query);
-        }).toList();
-
-        _filteredItems = [...filteredGroups, ...filteredCommunities];
-      }
-    });
-  }
-
-  Future<Map<String, dynamic>> _loadGroupsAndCommunities() async {
-    // First, get current local data
-    List<GroupModel> localGroups = [];
-    List<CommunityModel> localCommunities = [];
-
-    try {
-      localGroups = await _groupsRepo.getAllGroups();
-      localCommunities = await _communitiesRepo.getAllCommunities();
-    } catch (e) {
-      debugPrint('⚠️ Error reading local DB: $e');
-    }
-
-    try {
-      // Load groups
-      final groupResponse = await _userService.GetChatList('group');
-
-      // Load communities
-      final communityResponse = await _userService.GetCommunityChatList();
-
-      List<GroupModel> groups = [];
-      List<CommunityModel> communities = [];
-      bool hasServerData = false;
-
-      // Process groups
-      if (groupResponse['success']) {
-        final dynamic responseData = groupResponse['data'];
-        debugPrint('🔍 Group response data: ${responseData.toString()}');
-        List<dynamic> conversationsList = [];
-
-        if (responseData is List) {
-          conversationsList = responseData;
-        } else if (responseData is Map<String, dynamic>) {
-          if (responseData.containsKey('data') &&
-              responseData['data'] is List) {
-            conversationsList = responseData['data'] as List<dynamic>;
-          } else {
-            for (var key in responseData.keys) {
-              if (responseData[key] is List) {
-                conversationsList = responseData[key] as List<dynamic>;
-                break;
-              }
-            }
-          }
-        }
-
-        // Filter only group conversations and convert to GroupModel
-        groups = conversationsList
-            .where((json) => json['type'] == 'group')
-            .map((json) => _convertToGroupModel(json))
-            .toList();
-
-        if (groups.isNotEmpty) {
-          hasServerData = true;
-
-          // Store the server's last messages to local storage for offline use
-          for (final group in groups) {
-            if (group.metadata?.lastMessage != null) {
-              final lastMsg = group.metadata!.lastMessage!;
-              await _lastMessageStorage
-                  .storeGroupLastMessage(group.conversationId, {
-                    'id': lastMsg.id,
-                    'body': lastMsg.body,
-                    'type': lastMsg.type,
-                    'sender_id': lastMsg.senderId,
-                    'sender_name': lastMsg.senderName,
-                    'created_at': lastMsg.createdAt,
-                    'conversation_id': group.conversationId,
-                  });
-            }
-          }
-
-          // Only persist if we got data from server
-          await _groupsRepo.insertOrUpdateGroups(groups);
-        } else {
-          debugPrint('⚠️ Server returned 0 groups - keeping local cache');
-        }
-      }
-
-      // Process communities
-      if (communityResponse['success'] && communityResponse['data'] != null) {
-        final List<dynamic> communityList =
-            communityResponse['data'] as List<dynamic>;
-        communities = communityList
-            .map(
-              (json) => CommunityModel.fromJson(json as Map<String, dynamic>),
-            )
-            .toList();
-
-        if (communities.isNotEmpty) {
-          hasServerData = true;
-          // Only persist if we got data from server
-          await _communitiesRepo.insertOrUpdateCommunities(communities);
-        } else {
-          debugPrint('⚠️ Server returned 0 communities - keeping local cache');
-        }
-      }
-
-      // If server returned empty but we have local data, use local data
-      if (!hasServerData &&
-          (localGroups.isNotEmpty || localCommunities.isNotEmpty)) {
-        groups = localGroups;
-        communities = localCommunities;
-      }
-
-      if (mounted) {
-        // Use server data if available, otherwise use local data
-        final finalGroups = groups.isNotEmpty ? groups : localGroups;
-
-        // If we have server data, use it directly
-        // If we're using local data (because server had no data), update with stored messages
-        final updatedGroups = groups.isNotEmpty
-            ? finalGroups
-            : await _updateGroupsWithStoredLastMessages(finalGroups);
-
-        setState(() {
-          _allGroups = updatedGroups;
-          _allCommunities = communities.isNotEmpty
-              ? communities
-              : localCommunities;
-
-          // Sort groups by last message time (most recent first)
-          _allGroups.sort((a, b) {
-            final aTime = a.lastMessageAt ?? a.joinedAt;
-            final bTime = b.lastMessageAt ?? b.joinedAt;
-            return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
-          });
-
-          _filteredItems = [..._allGroups, ..._allCommunities];
-          _isLoaded = true;
-        });
-      }
-
-      return {'groups': _allGroups, 'communities': _allCommunities};
-    } catch (e) {
-      debugPrint(
-        '❌ Error loading from server \n 📦 Using local DB data as fallback...',
-      );
-
-      // Use local data on error
-      if (mounted) {
-        // Update groups with stored last messages
-        final updatedGroups = await _updateGroupsWithStoredLastMessages(
-          localGroups,
-        );
-
-        setState(() {
-          _allGroups = updatedGroups;
-          _allCommunities = localCommunities;
-
-          // Sort groups by last message time (most recent first)
-          _allGroups.sort((a, b) {
-            final aTime = a.lastMessageAt ?? a.joinedAt;
-            final bTime = b.lastMessageAt ?? b.joinedAt;
-            return DateTime.parse(bTime).compareTo(DateTime.parse(aTime));
-          });
-
-          _filteredItems = [...updatedGroups, ...localCommunities];
-          _isLoaded = true;
-        });
-      }
-
-      return {'groups': localGroups, 'communities': localCommunities};
-    }
-  }
-
-  GroupModel _convertToGroupModel(Map<String, dynamic> json) {
-    // Convert conversation data to group model
-    // This assumes the backend returns group members and metadata
-    return GroupModel(
-      conversationId: json['conversationId'] ?? 0,
-      title: json['title'] ?? 'Unnamed Group',
-      type: json['type'] ?? 'group',
-      members: _parseMembers(json['members']),
-      metadata: json['metadata'] != null
-          ? GroupMetadata.fromJson(json['metadata'])
-          : null,
-      lastMessageAt: json['lastMessageAt'],
-      role: json['role'],
-      unreadCount: json['unreadCount'] ?? 0,
-      joinedAt: json['joinedAt'] ?? DateTime.now().toIso8601String(),
-    );
-  }
-
-  List<GroupMember> _parseMembers(dynamic membersData) {
-    if (membersData == null) return [];
-
-    if (membersData is List) {
-      return membersData.map((member) => GroupMember.fromJson(member)).toList();
-    }
-
-    return [];
+    final query = _searchController.text;
+    ref.read(groupListProvider.notifier).updateSearchQuery(query);
   }
 
   void _refreshData() {
-    setState(() {
-      _isLoaded = false; // Reset to show loading state
-    });
-    _loadGroupsAndCommunities();
+    ref.read(groupListProvider.notifier).loadGroupsAndCommunities();
   }
+
+  // All state management and WebSocket handling is now done by groupListProvider
+
+  // Removed: _loadFromLocal - now handled by provider
+  // Removed: _updateGroupsWithStoredLastMessages - now handled by provider
+  // Removed: _setupConversationAddedListener - now handled by provider
+  // Removed: _handleConversationAdded - now handled by provider
+  // Removed: _setupWebSocketListener - now handled by provider
+  // Removed: _handleTypingMessage - now handled by provider
+  // Removed: _clearUnreadCount - now handled by provider
+  // Removed: _setActiveConversation - now handled by provider
+  // Removed: _handleNewGroupMessage - now handled by provider
+  // Removed: _handleMessageDelete - now handled by provider
+  // Removed: _onSearchChanged - now handled by provider
+  // Removed: _loadGroupsAndCommunities - now handled by provider
+  // Removed: _convertToGroupModel - now handled by provider
+  // Removed: _parseMembers - now handled by provider
 
   @override
   Widget build(BuildContext context) {
@@ -996,7 +112,7 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
                     size: 20,
                   ),
                 ),
-                onPressed: () => _loadGroupsAndCommunities(),
+                onPressed: () => _refreshData(),
               ),
             ),
           ],
@@ -1030,18 +146,23 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
   }
 
   Widget _buildContent() {
+    final groupState = ref.watch(groupListProvider);
+
     // Show loading skeleton while loading
-    if (!_isLoaded) {
+    if (groupState.isLoading) {
       return _buildSkeletonLoader();
     }
 
+    // Get filtered items from provider
+    final filteredItems = groupState.filteredItems;
+
     // Show empty state if no items
-    if (_filteredItems.isEmpty) {
+    if (filteredItems.isEmpty) {
       return _buildEmptyState();
     }
 
     // Show the items list
-    return _buildItemsList();
+    return _buildItemsList(filteredItems);
   }
 
   Widget _buildSkeletonLoader() {
@@ -1141,20 +262,23 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
     );
   }
 
-  Widget _buildItemsList() {
+  Widget _buildItemsList(List<dynamic> filteredItems) {
+    final groupState = ref.watch(groupListProvider);
+
     return RefreshIndicator(
       onRefresh: () async => _refreshData(),
       child: ListView.builder(
-        itemCount: _filteredItems.length,
+        itemCount: filteredItems.length,
         itemExtent: 80, // Fixed height for better performance
         cacheExtent: 500, // Cache more items for smoother scrolling
         itemBuilder: (context, index) {
-          final item = _filteredItems[index];
+          final item = filteredItems[index];
 
           if (item is GroupModel) {
-            final isTyping = _typingUsers[item.conversationId] ?? false;
+            final isTyping =
+                groupState.typingUsers[item.conversationId] ?? false;
             final typingUsers =
-                _typingUserNames[item.conversationId] ?? <String>{};
+                groupState.typingUserNames[item.conversationId] ?? <String>{};
             final typingUsersCount = typingUsers.length;
 
             return GroupListItem(
@@ -1165,7 +289,9 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
               conversationId: item.conversationId,
               onTap: () async {
                 // Set this group as active and clear unread count
-                _setActiveConversation(item.conversationId);
+                ref
+                    .read(groupListProvider.notifier)
+                    .setActiveConversation(item.conversationId);
 
                 // Navigate to inner group chat page
                 final result = await Navigator.push(
@@ -1183,8 +309,9 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
                 }
 
                 // Clear unread count again when returning from inner chat
-                // This ensures the count is cleared even if it was updated while in the chat
-                _clearUnreadCount(item.conversationId);
+                ref
+                    .read(groupListProvider.notifier)
+                    .clearUnreadCount(item.conversationId);
 
                 // Send inactive message before clearing active conversation
                 try {
@@ -1197,7 +324,9 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
                 }
 
                 // Clear active conversation when returning from inner chat
-                _setActiveConversation(null);
+                ref
+                    .read(groupListProvider.notifier)
+                    .setActiveConversation(null);
               },
             );
           } else if (item is CommunityModel) {

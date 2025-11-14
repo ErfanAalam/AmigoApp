@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../repositories/messages_repository.dart';
+import '../db/repositories/messages_repository.dart';
 import '../models/message_model.dart';
 
 class MessageStorageHelpers {
