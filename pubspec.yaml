@@ -81,6 +81,7 @@ dependencies:
   package_info_plus: ^9.0.0
   drift: ^2.29.0
   drift_flutter: ^0.2.7
+  drift_db_viewer: ^2.1.0
 
 dev_dependencies:
   flutter_test:

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'api_service.dart';
@@ -10,15 +11,10 @@ class ChatsServices {
       final response = await _apiService.authenticatedPost(
         '/chat/create-chat/$receiverId',
       );
+      if (response.data is String) {
+        return jsonDecode(response.data as String);
+      }
       return response.data;
-    } on DioException catch (e) {
-      return {
-        'success': false,
-        'error': e.message,
-        'type': e.type.toString(),
-        'statusCode': e.response?.statusCode,
-        'message': 'Failed to create chat: ${e.message}',
-      };
     } catch (e) {
       return {
         'success': false,

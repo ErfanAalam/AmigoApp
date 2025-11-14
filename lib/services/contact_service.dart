@@ -60,7 +60,6 @@ class ContactService {
         withProperties: true,
         withPhoto: false,
       );
-      print('Fetched ${contacts.length} contacts from device');
       // Convert to our model
       _contacts = contacts
           .where((contact) => contact.displayName.isNotEmpty)

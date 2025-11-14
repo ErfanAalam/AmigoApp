@@ -13,6 +13,8 @@ import 'deleted_dms.dart';
 import '../../api/api_service.dart';
 import '../../services/chat_preferences_service.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:drift_db_viewer/drift_db_viewer.dart';
+import '../../db/sqlite.db.dart';
 // import 'package:cached_network_image/cached_network_image.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -746,6 +748,21 @@ class _ProfilePageState extends State<ProfilePage> {
                               ? 'v$appVersion'
                               : 'Loading...',
                           valueColor: Colors.grey[700],
+                        ),
+                        ProfileOption(
+                          icon: Icons.storage,
+                          title: 'Database Viewer',
+                          subtitle: 'View and inspect database contents',
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => DriftDbViewer(
+                                  SqliteDatabase.instance.database,
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       ],
                     ),

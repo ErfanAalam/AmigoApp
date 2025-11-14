@@ -1,4 +1,5 @@
 // import 'dart:convert';
+import 'package:amigo/db/repositories/contacts_repository.dart';
 import 'package:amigo/screens/chat/dm/messaging.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -7,7 +8,6 @@ import 'package:flutter_contacts/flutter_contacts.dart';
 import '../../models/contact_model.dart';
 import '../../models/conversation_model.dart';
 import '../../models/user_model.dart';
-import '../../repositories/contacts_repository.dart';
 import '../../services/contact_service.dart';
 import '../../api/user.service.dart';
 import '../../api/chats.services.dart';
@@ -85,7 +85,7 @@ class _ContactsPageState extends State<ContactsPage>
             .toList();
 
         // Replace local contacts DB to mirror backend
-        // await _contactsRepository.replaceAllContacts(users);
+        await _contactsRepository.replaceAllContacts(users);
 
         if (mounted) {
           setState(() {
@@ -93,8 +93,6 @@ class _ContactsPageState extends State<ContactsPage>
             _filteredUsers = users;
           });
         }
-
-        // no SharedPreferences storage; SQLite is the single source of truth
       }
     } catch (_) {
       // Ignore errors; UI may still show local users
@@ -210,35 +208,6 @@ class _ContactsPageState extends State<ContactsPage>
     }
   }
 
-  // Removed SharedPreferences caching in favor of SQLite-only persistence
-
-  /// Send contacts to backend for filtering
-  Future<void> syncContactsWithBackend() async {
-    if (_contacts.isEmpty) {
-      _showErrorSnackBar('No contacts to sync');
-      return;
-    }
-
-    try {
-      setState(() {
-        _isLoading = true;
-      });
-
-      await _loadAvailableUsers();
-
-      setState(() {
-        _isLoading = false;
-      });
-
-      _showErrorSnackBar('Contacts synced with backend successfully!');
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      _showErrorSnackBar('Failed to sync contacts: $e');
-    }
-  }
-
   /// Show find user dialog
   void _showFindUserDialog() {
     showDialog(
@@ -332,17 +301,9 @@ class _ContactsPageState extends State<ContactsPage>
       try {
         // Create ConversationModel from the response
         final conversationData = response['data'];
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print("conversationData -> ${conversationData}");
-        print(
-          "--------------------------------------------------------------------------------",
-        );
         final conversation = ConversationModel(
-          conversationId:
-              conversationData['id'] ?? conversationData['conversationId'] ?? 0,
-          type: 'direct',
+          conversationId: conversationData['id'],
+          type: 'dm',
           unreadCount: 0,
           joinedAt: DateTime.now().toIso8601String(),
           userId: user.id,
@@ -408,9 +369,8 @@ class _ContactsPageState extends State<ContactsPage>
         // Create ConversationModel from the response
         final conversationData = response['data'];
         final conversation = ConversationModel(
-          conversationId:
-              conversationData['id'] ?? conversationData['conversationId'] ?? 0,
-          type: 'direct',
+          conversationId: conversationData['id'],
+          type: 'dm',
           unreadCount: 0,
           joinedAt: DateTime.now().toIso8601String(),
           userId: userInfo.id,
@@ -500,16 +460,6 @@ class _ContactsPageState extends State<ContactsPage>
                       letterSpacing: 0.5,
                     ),
                   ),
-                  // Text(
-                  //   _isLoading
-                  //       ? 'Loading...'
-                  //       : '${_availableUsers.length} contacts',
-                  //   style: TextStyle(
-                  //     color: Colors.white.withOpacity(0.9),
-                  //     fontSize: 14,
-                  //     fontWeight: FontWeight.w500,
-                  //   ),
-                  // ),
                 ],
               ),
               actions: [
