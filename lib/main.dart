@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
+// import 'package:flutter/widgets.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
@@ -111,9 +111,11 @@ class _MyAppState extends material.State<MyApp> {
   }
 
   Future<void> _getCurrentUser() async {
-    final userInfo = await _userRepo.getFirstUser();
-    final prefs = await SharedPreferences.getInstance();
-    prefs.setString('current_user_name', userInfo?.name ?? '');
+    final userInfo = await UserUtils().getUserDetails();
+    if (userInfo != null) {
+      final prefs = await SharedPreferences.getInstance();
+      prefs.setString('current_user_name', userInfo.name);
+    }
   }
 
   /// Process initial notification from terminated state
@@ -328,7 +330,7 @@ class _MyAppState extends material.State<MyApp> {
         ),
       );
     } else {
-      print('❌ Navigator context is null, cannot navigate');
+      debugPrint('❌ Navigator context is null, cannot navigate');
     }
   }
 
@@ -341,7 +343,7 @@ class _MyAppState extends material.State<MyApp> {
         ),
       );
     } else {
-      print('❌ Navigator context is null, cannot navigate');
+      debugPrint('❌ Navigator context is null, cannot navigate');
     }
   }
 

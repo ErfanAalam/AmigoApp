@@ -1,4 +1,5 @@
 import 'package:amigo/api/user.service.dart';
+import 'package:amigo/models/user_model.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/services.dart';
@@ -170,7 +171,7 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
 
       final appVersion = await UserUtils().getAppVersion();
       await userService.updateUser({'app_version': appVersion});
-      // Authentication is handled in the API service interceptor
+
       // which automatically stores cookies and updates auth state
       if (!mounted) return;
       material.ScaffoldMessenger.of(context).showSnackBar(
@@ -178,10 +179,6 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
           content: material.Text('Account created successfully'),
         ),
       );
-
-      // Store user name in shared preferences for later use
-      final prefs = await SharedPreferences.getInstance();
-      prefs.setString('current_user_name', response['data']['name']);
 
       final userDetail = {
         'id': response['data']['id'],
@@ -193,10 +190,7 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
         'call_access': false,
       };
 
-      await UserUtils().saveUserDetails(userDetail);
-
-      // Restart the app to ensure all services are properly initialized
-      // await AppRestartHelper.restartAppWithDialog(context);
+      await UserUtils().saveUserDetails(UserModel.fromJson(userDetail));
     } else {
       if (!mounted) return;
       material.ScaffoldMessenger.of(context).showSnackBar(

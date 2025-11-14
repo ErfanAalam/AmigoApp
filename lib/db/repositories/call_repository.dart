@@ -1,7 +1,7 @@
 // lib/repositories/call_repository.dart
 import 'package:sqflite/sqflite.dart';
-import '../db/database_helper.dart';
-import '../models/call_model.dart';
+import '../database_helper.dart';
+import '../../models/call_model.dart';
 
 class CallRepository {
   final dbHelper = DatabaseHelper.instance;

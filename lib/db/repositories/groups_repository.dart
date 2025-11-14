@@ -1,8 +1,8 @@
 // lib/repositories/groups_repository.dart
 import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
-import '../db/database_helper.dart';
-import '../models/group_model.dart';
+import '../database_helper.dart';
+import '../../models/group_model.dart';
 
 class GroupsRepository {
   final dbHelper = DatabaseHelper.instance;

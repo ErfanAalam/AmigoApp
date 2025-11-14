@@ -1,3 +1,5 @@
+import 'package:amigo/models/user_model.dart';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
@@ -125,11 +127,7 @@ class _EditProfileModalState extends State<EditProfileModal>
     try {
       Map<String, dynamic> updateData = {'name': _nameController.text.trim()};
 
-      // Note: Profile picture upload would need to be implemented
-      // based on your backend API requirements
       if (_selectedImage != null) {
-        // You might need to upload the image first and get the URL
-        // updateData['profile_pic'] = imageUrl;
         final response = await _apiService.sendMedia(file: _selectedImage!);
         final imageUrl = response['data']['url'];
         updateData['profile_pic'] = imageUrl;
@@ -145,6 +143,9 @@ class _EditProfileModalState extends State<EditProfileModal>
         }
 
         widget.onProfileUpdated(updatedUserData);
+
+        final updatedUser = UserModel.fromJson(updatedUserData);
+        await UserUtils().updateUserDetails(updatedUser);
 
         _showSuccessSnackBar('Profile updated successfully!');
         Navigator.of(context).pop();

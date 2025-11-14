@@ -1,7 +1,7 @@
 // lib/repositories/user_repository.dart
 import 'package:sqflite/sqflite.dart';
-import '../db/database_helper.dart';
-import '../models/user_model.dart';
+import '../database_helper.dart';
+import '../../models/user_model.dart';
 
 class UserRepository {
   final dbHelper = DatabaseHelper.instance;

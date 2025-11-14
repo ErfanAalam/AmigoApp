@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'api_service.dart';
 
@@ -31,12 +33,11 @@ class UserService {
         '/user/get-available-users',
         data: {'phone_numbers': contacts},
       );
-      return {
-        'success': response.data['success'],
-        'statusCode': response.data['code'],
-        'data': response.data['data'],
-        'message': response.data['message'],
-      };
+
+      if (response.data is String) {
+        return jsonDecode(response.data as String);
+      }
+      return response.data;
     } catch (e) {
       return {
         'success': false,

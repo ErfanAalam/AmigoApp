@@ -1,4 +1,5 @@
 import 'package:amigo/api/user.service.dart';
+import 'package:amigo/models/user_model.dart';
 import 'package:amigo/services/socket/websocket_service.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart' as material;
@@ -127,32 +128,45 @@ class _LoginScreenState extends material.State<LoginScreen> {
         final appVersion = await UserUtils().getAppVersion();
         await _userService.updateUser({'app_version': appVersion});
 
-        // // Store user name in shared preferences for later use
-        final prefs = await SharedPreferences.getInstance();
-        prefs.setString('current_user_name', response['data']['name']);
+        // storing the current user details in shared preferences
+        final userDetail = {
+          'id': response['data']['id'],
+          'name': response['data']['name'],
+          'phone': response['data']['phone'],
+          'role': response['data']['role'],
+          'profile_pic': response['data']['profile_pic'],
+          'created_at': response['data']['created_at'],
+          'call_access': response['data']['call_access'],
+        };
 
-        await UserUtils().saveUserDetails(response['data']);
+        await UserUtils().saveUserDetails(UserModel.fromJson(userDetail));
 
         // Send FCM token to backend after successful login
         await authService.sendFCMTokenToBackend(3);
-        material.Navigator.pushReplacement(
-          context,
-          material.MaterialPageRoute(builder: (context) => const MainScreen()),
-        );
-
-        // Restart the app to ensure all services are properly initialized
-        // await AppRestartHelper.restartAppWithDialog(context);
+        // navigate to the main screen
+        if (mounted) {
+          material.Navigator.pushReplacement(
+            context,
+            material.MaterialPageRoute(
+              builder: (context) => const MainScreen(),
+            ),
+          );
+        }
       } else {
-        material.ScaffoldMessenger.of(context).showSnackBar(
-          const material.SnackBar(
-            content: material.Text('Failed to verify OTP'),
-          ),
-        );
+        if (mounted) {
+          material.ScaffoldMessenger.of(context).showSnackBar(
+            const material.SnackBar(
+              content: material.Text('Failed to verify OTP'),
+            ),
+          );
+        }
       }
     } catch (e) {
-      material.ScaffoldMessenger.of(context).showSnackBar(
-        material.SnackBar(content: material.Text('Error: ${e.toString()}')),
-      );
+      if (mounted) {
+        material.ScaffoldMessenger.of(context).showSnackBar(
+          material.SnackBar(content: material.Text('Error: ${e.toString()}')),
+        );
+      }
     } finally {
       setState(() {
         _isLoading = false;
@@ -163,19 +177,7 @@ class _LoginScreenState extends material.State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    // Check if user is already authenticated
-    // _checkAuthentication();
   }
-
-  // Future<void> _checkAuthentication() async {
-  //   final isAuthenticated = await authService.isAuthenticated();
-  //   if (isAuthenticated) {
-  //     // Restart the app if already authenticated to ensure proper initialization
-  //     material.WidgetsBinding.instance.addPostFrameCallback((_) async {
-  //       await AppRestartHelper.restartAppWithDialog(context);
-  //     });
-  //   }
-  // }
 
   @override
   material.Widget build(material.BuildContext context) {

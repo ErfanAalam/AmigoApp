@@ -1,11 +1,11 @@
 import 'sqlite.schema.dart';
 import 'package:flutter/material.dart';
 
-class DatabaseHelper {
-  static final DatabaseHelper instance = DatabaseHelper._init();
+class SqliteDatabase {
+  static final SqliteDatabase instance = SqliteDatabase._init();
   AppDatabase? _db;
 
-  DatabaseHelper._init();
+  SqliteDatabase._init();
 
   AppDatabase get database {
     _db ??= AppDatabase();

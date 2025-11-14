@@ -97,7 +97,16 @@ class AuthService {
       final fcmToken = notificationService.fcmToken;
 
       if (fcmToken != null && fcmToken.isNotEmpty) {
-        await ApiService().updateFCMToken(fcmToken);
+        final response = await ApiService().updateFCMToken(fcmToken);
+        if (response['success'] == true) {
+          debugPrint('✅ FCM token sent to backend successfully');
+        } else {
+          if (retry == null || retry <= 0) {
+            debugPrint('❌ Failed to get FCM token after multiple attempts');
+            return;
+          }
+          await sendFCMTokenToBackend(retry - 1);
+        }
       } else {
         // Retry getting the token after a short delay
         if (retry == null || retry <= 0) {

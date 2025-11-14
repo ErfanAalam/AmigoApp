@@ -63,9 +63,8 @@ class CookieService {
 
     try {
       await _cookieJar.deleteAll();
-      print('🗑️ All cookies cleared');
     } catch (e) {
-      print('❌ Error clearing cookies: $e');
+      debugPrint('❌ Error clearing cookies: $e');
     }
   }
 
@@ -78,49 +77,20 @@ class CookieService {
       final cookies = await _cookieJar.loadForRequest(baseUrl);
 
       // Look for common access token cookie names
-      final tokenCookieNames = [
-        'access_token',
-        'accessToken',
-        'token',
-        'auth_token',
-        'jwt',
-        'session',
-      ];
+      final tokenCookieNames = 'access_token';
 
       for (final cookie in cookies) {
-        if (tokenCookieNames.any(
-          (name) => cookie.name.toLowerCase().contains(name.toLowerCase()),
+        if (cookie.name.toLowerCase().contains(
+          tokenCookieNames.toLowerCase(),
         )) {
-          print('🔑 Found access token cookie: ${cookie.name}');
+          // debugPrint('🔑🔑🔑🔑 Found access token cookie: ${cookie.name}');
           return cookie.value;
         }
       }
-
-      print('⚠️ No access token found in cookies');
       return null;
     } catch (e) {
-      print('❌ Error extracting access token from cookies: $e');
+      debugPrint('❌ Error extracting access token from cookies: $e');
       return null;
-    }
-  }
-
-  // Debug method to list all cookies (don't use in production)
-  Future<void> debugListCookies() async {
-    if (!_initialized) await init();
-
-    try {
-      final baseUrl = Uri.parse(Environment.baseUrl);
-      final cookies = await _cookieJar.loadForRequest(baseUrl);
-
-      print('🍪 All cookies (${cookies.length}):');
-      for (var cookie in cookies) {
-        // Only print name and domain for security
-        print(
-          '- ${cookie.name} (domain: ${cookie.domain}, httpOnly: ${cookie.httpOnly})',
-        );
-      }
-    } catch (e) {
-      print('❌ Error listing cookies: $e');
     }
   }
 }

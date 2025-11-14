@@ -1,6 +1,6 @@
 // lib/repositories/group_members_repository.dart
 import 'package:sqflite/sqflite.dart';
-import '../db/database_helper.dart';
+import '../database_helper.dart';
 
 class GroupMemberInfo {
   final int userId;
@@ -48,14 +48,10 @@ class GroupMembersRepository {
     GroupMemberInfo member,
   ) async {
     final db = await dbHelper.database;
-    return await db.insert(
-      'group_members',
-      {
-        'conversation_id': conversationId,
-        ...member.toMap(),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    return await db.insert('group_members', {
+      'conversation_id': conversationId,
+      ...member.toMap(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   /// Insert or update multiple group members for a conversation
@@ -66,14 +62,10 @@ class GroupMembersRepository {
     final db = await dbHelper.database;
     final batch = db.batch();
     for (final member in members) {
-      batch.insert(
-        'group_members',
-        {
-          'conversation_id': conversationId,
-          ...member.toMap(),
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      batch.insert('group_members', {
+        'conversation_id': conversationId,
+        ...member.toMap(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
     await batch.commit(noResult: true);
   }
@@ -147,4 +139,3 @@ class GroupMembersRepository {
 
   Future close() async => dbHelper.close();
 }
-

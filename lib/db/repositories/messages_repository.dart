@@ -1,9 +1,9 @@
 // lib/repositories/messages_repository.dart
 import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
-import '../db/database_helper.dart';
-import '../models/message_model.dart';
-import '../services/message_storage_service.dart'
+import '../database_helper.dart';
+import '../../models/message_model.dart';
+import '../../services/message_storage_service.dart'
     show ConversationMeta, CachedConversationData;
 
 class MessagesRepository {

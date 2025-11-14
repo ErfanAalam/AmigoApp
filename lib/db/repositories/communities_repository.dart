@@ -1,8 +1,8 @@
 // lib/repositories/communities_repository.dart
 import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
-import '../db/database_helper.dart';
-import '../models/community_model.dart';
+import '../database_helper.dart';
+import '../../models/community_model.dart';
 
 class CommunitiesRepository {
   final dbHelper = DatabaseHelper.instance;

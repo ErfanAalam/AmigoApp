@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:amigo/models/user_model.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,28 +19,29 @@ class UserUtils {
   }
 
   // save user details to shared preferences
-  Future<void> saveUserDetails(Map<String, dynamic> userDetails) async {
+  Future<void> saveUserDetails(UserModel userDetails) async {
     final prefs = await SharedPreferences.getInstance();
 
-    String userDetailsJson = jsonEncode(userDetails);
-
-    await prefs.setString('current_user_details', userDetailsJson);
+    await prefs.setString(
+      'current_user_details',
+      jsonEncode(userDetails.toJson()),
+    );
   }
 
   // get user details from shared preferences
-  Future<Map<String, dynamic>?> getUserDetails() async {
+  Future<UserModel?> getUserDetails() async {
     final prefs = await SharedPreferences.getInstance();
 
     String? userJson = prefs.getString('current_user_details');
 
     if (userJson == null) return null;
 
-    // Decode JSON string back to Map
-    return jsonDecode(userJson);
+    // Decode JSON string back to UserModel
+    return UserModel.fromJson(jsonDecode(userJson));
   }
 
   // update the user details in shared preferences
-  Future<void> updateUserDetails(String key, dynamic value) async {
+  Future<void> updateUserDetails(UserModel userDetails) async {
     final prefs = await SharedPreferences.getInstance();
 
     // Get the existing user data
@@ -48,13 +50,19 @@ class UserUtils {
     if (userJson == null) return; // No user data saved yet
 
     // Decode existing map
-    Map<String, dynamic> userMap = jsonDecode(userJson);
+    UserModel existingUser = UserModel.fromJson(jsonDecode(userJson));
 
     // Update the specific field
-    userMap[key] = value;
+    final updatedUser = existingUser.copyWith(
+      name: userDetails.name,
+      profilePic: userDetails.profilePic,
+    );
 
     // Save updated map back to SharedPreferences
-    await prefs.setString('current_user_details', jsonEncode(userMap));
+    await prefs.setString(
+      'current_user_details',
+      jsonEncode(updatedUser.toJson()),
+    );
   }
 
   // clear user details from shared preferences

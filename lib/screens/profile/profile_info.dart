@@ -1,6 +1,5 @@
 import 'package:amigo/api/user.service.dart';
 import 'package:amigo/models/user_model.dart';
-import 'package:amigo/repositories/user_repository.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -38,8 +37,6 @@ class _ProfilePageState extends State<ProfilePage> {
   int deletedChatsCount = 0;
   String appVersion = '';
 
-  final UserRepository _userRepo = UserRepository();
-
   @override
   void initState() {
     super.initState();
@@ -76,42 +73,29 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-
   // load user: first local, then remote & sync
   Future<void> _loadUserData() async {
     setState(() => isLoading = true);
 
     try {
-      // 1) Try local cache quickly
-      final local = await _userRepo.getFirstUser();
-      if (local != null && mounted) {
+      final CurrentUser = await UserUtils().getUserDetails();
+
+      debugPrint('CurrentUser: $CurrentUser');
+
+      if (CurrentUser != null) {
         setState(() {
-          userData = local.toJson();
-          isLoading = false; // we already have something to show
-        });
-      }
-
-      // 2) Always try remote to get latest
-      final response = await _userService.getUser();
-      if (response['success'] && mounted) {
-        final remote = response['data'] as Map<String, dynamic>;
-        debugPrint('remote: $remote');
-        final userModel = UserModel.fromJson(remote);
-        debugPrint('userModel: $userModel');
-
-        // save remote to local DB (no need to mark needs_sync)
-        await _userRepo.insertOrUpdateUser(userModel, markNeedsSync: false);
-
-        setState(() {
-          userData = userModel.toJson();
+          userData = CurrentUser.toJson();
           isLoading = false;
         });
       } else {
-        // If remote failed and we had no local
-        if (local == null && mounted) {
+        final response = await _userService.getUser();
+        if (response['success'] == true) {
           setState(() {
+            userData = response['data'];
             isLoading = false;
           });
+        } else {
+          if (mounted) setState(() => isLoading = false);
         }
       }
     } catch (e) {
@@ -195,47 +179,6 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  // Future<void> _updateProfilePicture(File imageFile) async {
-  //   setState(() {
-  //     isUpdatingProfilePic = true;
-  //   });
-
-  //   try {
-  //     // Upload the image first
-  //     final uploadResponse = await _apiService.sendMedia(file: imageFile);
-
-  //     if (uploadResponse['success']) {
-  //       final imageUrl = uploadResponse['data']['url'];
-
-  //       // Update user profile with new image URL
-  //       final updateResponse = await _userService.updateUser({
-  //         'profile_pic': imageUrl,
-  //       });
-
-  //       if (updateResponse['success'] && mounted) {
-  //         setState(() {
-  //           userData = {...userData!, 'profile_pic': imageUrl};
-  //         });
-  //         // _showSuccessSnackBar('Profile picture updated successfully!');
-  //       } else {
-  //         _showErrorSnackBar(
-  //           updateResponse['message'] ?? 'Failed to update profile picture',
-  //         );
-  //       }
-  //     } else {
-  //       _showErrorSnackBar(
-  //         uploadResponse['message'] ?? 'Failed to upload image',
-  //       );
-  //     }
-  //   } catch (e) {
-  //     _showErrorSnackBar('An error occurred: $e');
-  //   } finally {
-  //     setState(() {
-  //       isUpdatingProfilePic = false;
-  //     });
-  //   }
-  // }
-
   Future<void> _updateProfilePicture(File imageFile) async {
     setState(() {
       isUpdatingProfilePic = true;
@@ -255,49 +198,16 @@ class _ProfilePageState extends State<ProfilePage> {
         'profile_pic': imageUrl,
       });
 
-      // 3) Create/Update local user model
-      // Try to get existing local user id or use remote id from updateResponse
-      UserModel? local = await _userRepo.getFirstUser();
-
-      // If updateResponse succeeded, use data from it; else fallback to local info
       if (updateResponse['success'] == true) {
-        final remoteData = updateResponse['data'] as Map<String, dynamic>;
-        final userModel = UserModel.fromJson(remoteData);
-        await _userRepo.insertOrUpdateUser(userModel, markNeedsSync: false);
-        if (mounted) {
-          setState(() {
-            userData = userModel.toJson();
-          });
-        }
+        final updatedUser = UserModel.fromJson(
+          userData ?? {},
+        ).copyWith(profilePic: imageUrl);
+        await UserUtils().updateUserDetails(updatedUser);
+        if (mounted) setState(() => userData = updatedUser.toJson());
       } else {
-        // Remote failed: save local update and mark needs_sync
-        if (local != null) {
-          final updatedLocal = local.copyWith(
-            profilePic: imageUrl,
-            needsSync: true,
-          );
-          await _userRepo.insertOrUpdateUser(updatedLocal, markNeedsSync: true);
-          if (mounted) setState(() => userData = updatedLocal.toJson());
-          _showErrorSnackBar(
-            updateResponse['message'] ??
-                'Failed to update profile on server — changes saved locally and will sync later',
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('Error updating profile pic: $e');
-      // If we have a local user, save the new profile URL locally and mark needs_sync
-      final local = await _userRepo.getFirstUser();
-      if (local != null) {
-        final updatedLocal = local.copyWith(
-          profilePic: imageFile.path,
-          needsSync: true,
+        _showErrorSnackBar(
+          updateResponse['message'] ?? 'Failed to update profile',
         );
-        await _userRepo.insertOrUpdateUser(updatedLocal, markNeedsSync: true);
-        if (mounted) setState(() => userData = updatedLocal.toJson());
-        _showErrorSnackBar('Failed to update profile. Changes saved locally.');
-      } else {
-        _showErrorSnackBar('Failed to update profile: $e');
       }
     } finally {
       if (mounted) setState(() => isUpdatingProfilePic = false);

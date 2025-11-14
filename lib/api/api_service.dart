@@ -302,11 +302,6 @@ class ApiService {
     return await _cookieService.hasAuthCookies();
   }
 
-  // Debug method to list all cookies (don't use in production)
-  Future<void> debugListCookies() async {
-    await _cookieService.debugListCookies();
-  }
-
   // Update user location and IP after authentication
   Future<void> updateUserLocationAndIp() async {
     try {
@@ -338,13 +333,16 @@ class ApiService {
   }
 
   /// Update user FCM token
-  Future<void> updateFCMToken(String fcmToken) async {
+  Future updateFCMToken(String fcmToken) async {
     try {
       final response = await authenticatedPost(
         '/user/update-fcm-token',
         data: {'fcm_token': fcmToken},
       );
 
+      if (response.data is String) {
+        return jsonDecode(response.data as String);
+      }
       return response.data;
     } catch (e) {
       debugPrint('❌ Error updating FCM token');
@@ -678,11 +676,11 @@ class ApiService {
   Future<void> _connectWebSocketAfterLogin() async {
     try {
       print('🔌 Connecting to WebSocket after successful login...');
-      
+
       // CRITICAL: Initialize message handler BEFORE connecting to WebSocket
       // This ensures listeners are set up before any messages arrive
       WebSocketMessageHandler().initialize();
-      
+
       await _websocketService.connect();
       print('✅ WebSocket connected successfully after login');
     } catch (e) {

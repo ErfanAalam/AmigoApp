@@ -1,7 +1,7 @@
 // lib/repositories/conversations_repository.dart
 import 'package:sqflite/sqflite.dart';
-import '../db/database_helper.dart';
-import '../models/conversation_model.dart';
+import '../database_helper.dart';
+import '../../models/conversation_model.dart';
 
 class ConversationsRepository {
   final dbHelper = DatabaseHelper.instance;

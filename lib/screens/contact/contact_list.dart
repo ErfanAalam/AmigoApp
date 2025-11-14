@@ -85,7 +85,7 @@ class _ContactsPageState extends State<ContactsPage>
             .toList();
 
         // Replace local contacts DB to mirror backend
-        await _contactsRepository.replaceAllContacts(users);
+        // await _contactsRepository.replaceAllContacts(users);
 
         if (mounted) {
           setState(() {
@@ -193,11 +193,9 @@ class _ContactsPageState extends State<ContactsPage>
 
       final response = await _userService.getAvailableUsers(contactsData);
 
-      if (response['success'] == true && response['data'] != null) {
+      if (response['success'] == true) {
         // Handle both response structures: direct array or nested data
-        List<dynamic> usersData = response['data'] is List
-            ? response['data']
-            : response['data']['data'] ?? [];
+        List<dynamic> usersData = response['data'];
         List<UserModel> users = usersData
             .map((userJson) => UserModel.fromJson(userJson))
             .toList();
@@ -206,8 +204,6 @@ class _ContactsPageState extends State<ContactsPage>
           _availableUsers = users;
           _filteredUsers = users;
         });
-
-        // SQLite is the source of truth; no SharedPreferences caching
       }
     } catch (e) {
       // Error loading available users

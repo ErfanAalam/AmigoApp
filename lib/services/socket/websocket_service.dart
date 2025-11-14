@@ -35,6 +35,7 @@ class WebSocketService {
   int _reconnectAttempts = 0;
   static const int maxReconnectAttempts = 50;
   static const Duration reconnectInterval = Duration(seconds: 3);
+  bool _isDialogShowing = false;
 
   // Stream controllers for different events
   final StreamController<WebSocketConnectionState> _connectionStateController =
@@ -72,7 +73,7 @@ class WebSocketService {
       _updateConnectionState(WebSocketConnectionState.connecting);
 
       // Get access token from cookies
-      final accessToken = await _getAccessTokenFromCookies();
+      final accessToken = await _cookieService.getAccessToken();
       if (accessToken == null) {
         throw Exception('No access token found in cookies');
       }
@@ -92,25 +93,21 @@ class WebSocketService {
       );
 
       _reconnectAttempts = 0;
+      _isDialogShowing = false; // Reset dialog flag on successful connection
       _updateConnectionState(WebSocketConnectionState.connected);
       debugPrint('✅ WebSocket connected successfully');
 
       // If a conversation ID is provided, send active_in_conversation message
-      if (conversationId != null) {
-        await sendMessage({
-          'type': 'active_in_conversation',
-          'conversation_id': conversationId,
-        });
-      }
+      // if (conversationId != null) {
+      //   await sendMessage({
+      //     'type': 'active_in_conversation',
+      //     'conversation_id': conversationId,
+      //   });
+      // }
     } catch (e) {
       debugPrint('❌ WebSocket connection failed');
       _handleConnectionError(e.toString());
     }
-  }
-
-  /// Extract access token from cookie jar
-  Future<String?> _getAccessTokenFromCookies() async {
-    return await _cookieService.getAccessToken();
   }
 
   /// Build WebSocket URL with access token as query parameter
@@ -198,6 +195,12 @@ class WebSocketService {
   }
 
   void _showInternetIssueDialog() {
+    // Prevent showing multiple dialogs
+    if (_isDialogShowing) {
+      debugPrint('⚠️ Internet issue dialog is already showing');
+      return;
+    }
+
     final context = NavigationHelper.navigatorKey.currentContext;
     if (context == null) {
       debugPrint(
@@ -206,28 +209,38 @@ class WebSocketService {
       return;
     }
 
-    material.showDialog(
-      context: context,
-      builder: (ctx) => material.AlertDialog(
-        title: const material.Text('Connection issue'),
-        content: const material.Text(
-          "We're having trouble connecting to the server. Please check your internet connection.",
-        ),
-        actions: [
-          material.TextButton(
-            onPressed: () {
-              material.Navigator.of(ctx).pop();
-              reconnect();
-            },
-            child: const material.Text('Retry'),
+    _isDialogShowing = true;
+    material
+        .showDialog(
+          context: context,
+          builder: (ctx) => material.AlertDialog(
+            title: const material.Text('Connection issue'),
+            content: const material.Text(
+              "We're having trouble connecting to the server. Please check your internet connection.",
+            ),
+            actions: [
+              material.TextButton(
+                onPressed: () {
+                  _isDialogShowing = false;
+                  material.Navigator.of(ctx).pop();
+                  reconnect();
+                },
+                child: const material.Text('Retry'),
+              ),
+              material.TextButton(
+                onPressed: () {
+                  _isDialogShowing = false;
+                  material.Navigator.of(ctx).pop();
+                },
+                child: const material.Text('OK'),
+              ),
+            ],
           ),
-          material.TextButton(
-            onPressed: () => material.Navigator.of(ctx).pop(),
-            child: const material.Text('OK'),
-          ),
-        ],
-      ),
-    );
+        )
+        .then((_) {
+          // Reset flag if dialog is dismissed by other means (e.g., back button)
+          _isDialogShowing = false;
+        });
   }
 
   /// Update connection state and notify listeners
