@@ -32,7 +32,7 @@ class _DmDetailsScreenState extends State<DmDetailsScreen> {
   Future<void> _loadFavoriteStatus() async {
     final favorites = await _chatPreferencesService.getFavoriteChats();
     setState(() {
-      _isFavorite = favorites.contains(widget.conversation.conversationId);
+      _isFavorite = favorites.contains(widget.conversation.id);
     });
   }
 
@@ -61,13 +61,9 @@ class _DmDetailsScreenState extends State<DmDetailsScreen> {
 
     try {
       if (_isFavorite) {
-        await _chatPreferencesService.unfavoriteChat(
-          widget.conversation.conversationId,
-        );
+        await _chatPreferencesService.unfavoriteChat(widget.conversation.id);
       } else {
-        await _chatPreferencesService.favoriteChat(
-          widget.conversation.conversationId,
-        );
+        await _chatPreferencesService.favoriteChat(widget.conversation.id);
       }
       setState(() {
         _isFavorite = !_isFavorite;
@@ -114,18 +110,14 @@ class _DmDetailsScreenState extends State<DmDetailsScreen> {
 
     if (confirmed == true) {
       try {
-        final response = await _chatsServices.deleteDm(
-          widget.conversation.conversationId,
-        );
+        final response = await _chatsServices.deleteDm(widget.conversation.id);
 
         if (response['success']) {
           await _chatPreferencesService.deleteChat(
-            widget.conversation.conversationId,
+            widget.conversation.id,
             widget.conversation.toJson(),
           );
-          await _conversationsRepo.deleteConversation(
-            widget.conversation.conversationId,
-          );
+          await _conversationsRepo.deleteConversation(widget.conversation.id);
 
           if (mounted) {
             // Return true to indicate chat was deleted
@@ -204,12 +196,12 @@ class _DmDetailsScreenState extends State<DmDetailsScreen> {
           _buildInfoTile(
             icon: Icons.info_outline,
             title: 'Created',
-            subtitle: _formatDate(widget.conversation.joinedAt),
+            subtitle: _formatDate(widget.conversation.createdAt),
           ),
           _buildInfoTile(
             icon: Icons.chat_bubble_outline,
             title: 'Conversation ID',
-            subtitle: '${widget.conversation.conversationId}',
+            subtitle: '${widget.conversation.id}',
           ),
           const Divider(height: 1),
           // Actions section

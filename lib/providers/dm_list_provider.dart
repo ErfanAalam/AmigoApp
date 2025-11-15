@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/conversation_model.dart';
 import '../api/user.service.dart';
-import '../db/repositories/conversations_repository.dart';
 import '../services/socket/websocket_message_handler.dart';
 import '../services/last_message_storage_service.dart';
 import '../services/chat_preferences_service.dart';
@@ -78,7 +77,7 @@ class DmListState {
     }
     final query = searchQuery.toLowerCase();
     return conversations.where((conversation) {
-      final userName = conversation.userName.toLowerCase();
+      final userName = conversation.userName!.toLowerCase();
       final lastMessageBody =
           conversation.metadata?.lastMessage.body.toLowerCase() ?? '';
       return userName.contains(query) || lastMessageBody.contains(query);
@@ -173,7 +172,7 @@ class DmListNotifier extends Notifier<DmListState> {
       final updatedConversations = <ConversationModel>[];
 
       for (final conversation in conversations) {
-        final storedMessage = storedLastMessages[conversation.conversationId];
+        final storedMessage = storedLastMessages[conversation.id];
 
         if (storedMessage != null) {
           final lastMessage = LastMessage(
@@ -181,9 +180,9 @@ class DmListNotifier extends Notifier<DmListState> {
             body: storedMessage['body'] ?? '',
             type: storedMessage['type'] ?? 'text',
             senderId: storedMessage['sender_id'] ?? 0,
-            createdAt:
+            sentAt:
                 storedMessage['created_at'] ?? DateTime.now().toIso8601String(),
-            conversationId: conversation.conversationId,
+            conversationId: conversation.id,
           );
 
           final updatedMetadata = ConversationMetadata(
@@ -193,7 +192,7 @@ class DmListNotifier extends Notifier<DmListState> {
 
           final updatedConversation = conversation.copyWith(
             metadata: updatedMetadata,
-            lastMessageAt: lastMessage.createdAt,
+            lastMessageAt: lastMessage.sentAt,
           );
 
           updatedConversations.add(updatedConversation);
@@ -251,16 +250,15 @@ class DmListNotifier extends Notifier<DmListState> {
           for (final conversation in filteredConversations) {
             if (conversation.metadata?.lastMessage != null) {
               final lastMsg = conversation.metadata!.lastMessage;
-              await _lastMessageStorage
-                  .storeLastMessage(conversation.conversationId, {
-                    'id': lastMsg.id,
-                    'body': lastMsg.body,
-                    'type': lastMsg.type,
-                    'sender_id': lastMsg.senderId,
-                    'created_at': lastMsg.createdAt,
-                    'conversation_id': conversation.conversationId,
-                    'attachments': lastMsg.attachmentData,
-                  });
+              await _lastMessageStorage.storeLastMessage(conversation.id, {
+                'id': lastMsg.id,
+                'body': lastMsg.body,
+                'type': lastMsg.type,
+                'sender_id': lastMsg.senderId,
+                'created_at': lastMsg.sentAt,
+                'conversation_id': conversation.id,
+                'attachments': lastMsg.attachmentData,
+              });
             }
           }
 
@@ -375,12 +373,12 @@ class DmListNotifier extends Notifier<DmListState> {
     List<ConversationModel> conversations,
   ) async {
     final filteredConversations = conversations
-        .where((conv) => !state.deletedChats.contains(conv.conversationId))
+        .where((conv) => !state.deletedChats.contains(conv.id))
         .toList();
 
     filteredConversations.sort((a, b) {
-      final aPinned = state.pinnedChats.contains(a.conversationId);
-      final bPinned = state.pinnedChats.contains(b.conversationId);
+      final aPinned = state.pinnedChats.contains(a.id);
+      final bPinned = state.pinnedChats.contains(b.id);
 
       if (aPinned && !bPinned) return -1;
       if (!aPinned && bPinned) return 1;
@@ -398,7 +396,9 @@ class DmListNotifier extends Notifier<DmListState> {
           b.lastMessageAt!,
         ).compareTo(DateTime.parse(a.lastMessageAt!));
       } else {
-        return DateTime.parse(b.joinedAt).compareTo(DateTime.parse(a.joinedAt));
+        return DateTime.parse(
+          b.createdAt,
+        ).compareTo(DateTime.parse(a.createdAt));
       }
     });
 
@@ -416,7 +416,7 @@ class DmListNotifier extends Notifier<DmListState> {
   /// Clear unread count for a conversation
   void clearUnreadCount(int conversationId) {
     final conversationIndex = state.conversations.indexWhere(
-      (conv) => conv.conversationId == conversationId,
+      (conv) => conv.id == conversationId,
     );
 
     if (conversationIndex != -1) {
@@ -448,73 +448,62 @@ class DmListNotifier extends Notifier<DmListState> {
       switch (action) {
         case 'pin':
           final success = await _chatPreferencesService.pinChat(
-            conversation.conversationId,
+            conversation.id,
           );
           if (success) {
             state = state.copyWith(
-              pinnedChats: {...state.pinnedChats, conversation.conversationId},
+              pinnedChats: {...state.pinnedChats, conversation.id},
             );
           }
           break;
         case 'unpin':
-          await _chatPreferencesService.unpinChat(conversation.conversationId);
+          await _chatPreferencesService.unpinChat(conversation.id);
           final newPinned = Set<int>.from(state.pinnedChats);
-          newPinned.remove(conversation.conversationId);
+          newPinned.remove(conversation.id);
           state = state.copyWith(pinnedChats: newPinned);
           break;
         case 'mute':
-          await _chatPreferencesService.muteChat(conversation.conversationId);
+          await _chatPreferencesService.muteChat(conversation.id);
           state = state.copyWith(
-            mutedChats: {...state.mutedChats, conversation.conversationId},
+            mutedChats: {...state.mutedChats, conversation.id},
           );
           break;
         case 'unmute':
-          await _chatPreferencesService.unmuteChat(conversation.conversationId);
+          await _chatPreferencesService.unmuteChat(conversation.id);
           final newMuted = Set<int>.from(state.mutedChats);
-          newMuted.remove(conversation.conversationId);
+          newMuted.remove(conversation.id);
           state = state.copyWith(mutedChats: newMuted);
           break;
         case 'favorite':
-          await _chatPreferencesService.favoriteChat(
-            conversation.conversationId,
-          );
+          await _chatPreferencesService.favoriteChat(conversation.id);
           state = state.copyWith(
-            favoriteChats: {
-              ...state.favoriteChats,
-              conversation.conversationId,
-            },
+            favoriteChats: {...state.favoriteChats, conversation.id},
           );
           break;
         case 'unfavorite':
-          await _chatPreferencesService.unfavoriteChat(
-            conversation.conversationId,
-          );
+          await _chatPreferencesService.unfavoriteChat(conversation.id);
           final newFavorite = Set<int>.from(state.favoriteChats);
-          newFavorite.remove(conversation.conversationId);
+          newFavorite.remove(conversation.id);
           state = state.copyWith(favoriteChats: newFavorite);
           break;
         case 'delete':
-          final response = await _chatsServices.deleteDm(
-            conversation.conversationId,
-          );
+          final response = await _chatsServices.deleteDm(conversation.id);
           if (response['success']) {
             await _chatPreferencesService.deleteChat(
-              conversation.conversationId,
+              conversation.id,
               conversation.toJson(),
             );
             final newDeleted = Set<int>.from(state.deletedChats);
-            newDeleted.add(conversation.conversationId);
+            newDeleted.add(conversation.id);
             final updatedConversations = state.conversations
-                .where(
-                  (conv) => conv.conversationId != conversation.conversationId,
-                )
+                .where((conv) => conv.id != conversation.id)
                 .toList();
             final newPinned = Set<int>.from(state.pinnedChats);
-            newPinned.remove(conversation.conversationId);
+            newPinned.remove(conversation.id);
             final newMuted = Set<int>.from(state.mutedChats);
-            newMuted.remove(conversation.conversationId);
+            newMuted.remove(conversation.id);
             final newFavorite = Set<int>.from(state.favoriteChats);
-            newFavorite.remove(conversation.conversationId);
+            newFavorite.remove(conversation.id);
 
             state = state.copyWith(
               conversations: updatedConversations,
@@ -523,7 +512,7 @@ class DmListNotifier extends Notifier<DmListState> {
               mutedChats: newMuted,
               favoriteChats: newFavorite,
             );
-            _conversationsRepo.deleteConversation(conversation.conversationId);
+            _conversationsRepo.deleteConversation(conversation.id);
           }
           break;
       }
@@ -599,18 +588,18 @@ class DmListNotifier extends Notifier<DmListState> {
       if (conversationId == null || userId == null) return;
 
       final conversation = state.conversations.firstWhere(
-        (conv) => conv.conversationId == conversationId,
+        (conv) => conv.id == conversationId,
         orElse: () => ConversationModel(
-          conversationId: 0,
+          id: 0,
           type: 'dm',
           unreadCount: 0,
-          joinedAt: DateTime.now().toIso8601String(),
+          createdAt: DateTime.now().toIso8601String(),
           userId: 0,
           userName: '',
         ),
       );
 
-      if (conversation.conversationId == 0) return;
+      if (conversation.id == 0) return;
 
       if (isTyping) {
         final typingUsers = Map<int, bool>.from(state.typingUsers);
@@ -665,7 +654,7 @@ class DmListNotifier extends Notifier<DmListState> {
       if (conversationId == null) return;
 
       final conversationIndex = state.conversations.indexWhere(
-        (conv) => conv.conversationId == conversationId,
+        (conv) => conv.id == conversationId,
       );
 
       if (conversationIndex == -1) return;
@@ -699,7 +688,7 @@ class DmListNotifier extends Notifier<DmListState> {
         body: messageBody,
         type: messageBody.isEmpty ? 'attachment' : messageTypeValue,
         senderId: senderId,
-        createdAt: createdAt,
+        sentAt: createdAt,
         conversationId: conversationId,
         attachmentData: data['attachments'],
       );
@@ -726,7 +715,7 @@ class DmListNotifier extends Notifier<DmListState> {
       final updatedConversation = conversation.copyWith(
         metadata: updatedMetadata,
         unreadCount: newUnreadCount,
-        lastMessageAt: lastMessage.createdAt,
+        lastMessageAt: lastMessage.sentAt,
       );
 
       final updatedConversations = List<ConversationModel>.from(
@@ -759,7 +748,7 @@ class DmListNotifier extends Notifier<DmListState> {
       if (conversationType != 'dm') return;
 
       final existingIndex = state.conversations.indexWhere(
-        (conv) => conv.conversationId == conversationId,
+        (conv) => conv.id == conversationId,
       );
 
       if (existingIndex != -1) return;
@@ -799,7 +788,7 @@ class DmListNotifier extends Notifier<DmListState> {
       final deletedMessageIds = messageIds.map((id) => id as int).toList();
 
       final conversationIndex = state.conversations.indexWhere(
-        (conv) => conv.conversationId == conversationId,
+        (conv) => conv.id == conversationId,
       );
 
       if (conversationIndex == -1) return;
@@ -830,7 +819,7 @@ class DmListNotifier extends Notifier<DmListState> {
                 body: newLastMessageData['body'] ?? '',
                 type: newLastMessageData['type'] ?? 'text',
                 senderId: newLastMessageData['sender_id'] ?? 0,
-                createdAt:
+                sentAt:
                     newLastMessageData['created_at'] ??
                     DateTime.now().toIso8601String(),
                 conversationId: conversationId,
@@ -843,7 +832,7 @@ class DmListNotifier extends Notifier<DmListState> {
 
               final updatedConversation = conversation.copyWith(
                 metadata: updatedMetadata,
-                lastMessageAt: newLastMessage.createdAt,
+                lastMessageAt: newLastMessage.sentAt,
               );
 
               await _lastMessageStorage.storeLastMessage(conversationId, {
@@ -851,7 +840,7 @@ class DmListNotifier extends Notifier<DmListState> {
                 'body': newLastMessage.body,
                 'type': newLastMessage.type,
                 'sender_id': newLastMessage.senderId,
-                'created_at': newLastMessage.createdAt,
+                'created_at': newLastMessage.sentAt,
                 'conversation_id': conversationId,
               });
 

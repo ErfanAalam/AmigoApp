@@ -567,9 +567,7 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
         itemCount: _filteredConversations.length,
         itemBuilder: (context, index) {
           final conversation = _filteredConversations[index];
-          final isSelected = _selectedConversations.contains(
-            conversation.conversationId,
-          );
+          final isSelected = _selectedConversations.contains(conversation.id);
 
           return AnimatedContainer(
             duration: const Duration(milliseconds: 200),
@@ -588,8 +586,7 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
               ),
             ),
             child: ListTile(
-              onTap: () =>
-                  _toggleConversationSelection(conversation.conversationId),
+              onTap: () => _toggleConversationSelection(conversation.id),
               leading: _buildConversationAvatar(conversation),
               title: Row(
                 children: [

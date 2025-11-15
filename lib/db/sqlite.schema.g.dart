@@ -35,15 +35,15 @@ class $UsersTable extends Users with TableInfo<$UsersTable, User> {
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _roleMeta = const VerificationMeta('role');
   @override
-  late final GeneratedColumnWithTypeConverter<UserRole, String> role =
-      GeneratedColumn<String>(
-        'role',
-        aliasedName,
-        false,
-        type: DriftSqlType.string,
-        requiredDuringInsert: true,
-      ).withConverter<UserRole>($UsersTable.$converterrole);
+  late final GeneratedColumn<String> role = GeneratedColumn<String>(
+    'role',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
   static const VerificationMeta _profilePicMeta = const VerificationMeta(
     'profilePic',
   );
@@ -88,6 +88,14 @@ class $UsersTable extends Users with TableInfo<$UsersTable, User> {
     } else if (isInserting) {
       context.missing(_phoneMeta);
     }
+    if (data.containsKey('role')) {
+      context.handle(
+        _roleMeta,
+        role.isAcceptableOrUnknown(data['role']!, _roleMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_roleMeta);
+    }
     if (data.containsKey('profile_pic')) {
       context.handle(
         _profilePicMeta,
@@ -115,12 +123,10 @@ class $UsersTable extends Users with TableInfo<$UsersTable, User> {
         DriftSqlType.string,
         data['${effectivePrefix}phone'],
       )!,
-      role: $UsersTable.$converterrole.fromSql(
-        attachedDatabase.typeMapping.read(
-          DriftSqlType.string,
-          data['${effectivePrefix}role'],
-        )!,
-      ),
+      role: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}role'],
+      )!,
       profilePic: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}profile_pic'],
@@ -132,16 +138,13 @@ class $UsersTable extends Users with TableInfo<$UsersTable, User> {
   $UsersTable createAlias(String alias) {
     return $UsersTable(attachedDatabase, alias);
   }
-
-  static JsonTypeConverter2<UserRole, String, String> $converterrole =
-      const EnumNameConverter(UserRole.values);
 }
 
 class User extends DataClass implements Insertable<User> {
   final int id;
   final String name;
   final String phone;
-  final UserRole role;
+  final String role;
   final String? profilePic;
   const User({
     required this.id,
@@ -156,9 +159,7 @@ class User extends DataClass implements Insertable<User> {
     map['id'] = Variable<int>(id);
     map['name'] = Variable<String>(name);
     map['phone'] = Variable<String>(phone);
-    {
-      map['role'] = Variable<String>($UsersTable.$converterrole.toSql(role));
-    }
+    map['role'] = Variable<String>(role);
     if (!nullToAbsent || profilePic != null) {
       map['profile_pic'] = Variable<String>(profilePic);
     }
@@ -186,9 +187,7 @@ class User extends DataClass implements Insertable<User> {
       id: serializer.fromJson<int>(json['id']),
       name: serializer.fromJson<String>(json['name']),
       phone: serializer.fromJson<String>(json['phone']),
-      role: $UsersTable.$converterrole.fromJson(
-        serializer.fromJson<String>(json['role']),
-      ),
+      role: serializer.fromJson<String>(json['role']),
       profilePic: serializer.fromJson<String?>(json['profilePic']),
     );
   }
@@ -199,9 +198,7 @@ class User extends DataClass implements Insertable<User> {
       'id': serializer.toJson<int>(id),
       'name': serializer.toJson<String>(name),
       'phone': serializer.toJson<String>(phone),
-      'role': serializer.toJson<String>(
-        $UsersTable.$converterrole.toJson(role),
-      ),
+      'role': serializer.toJson<String>(role),
       'profilePic': serializer.toJson<String?>(profilePic),
     };
   }
@@ -210,7 +207,7 @@ class User extends DataClass implements Insertable<User> {
     int? id,
     String? name,
     String? phone,
-    UserRole? role,
+    String? role,
     Value<String?> profilePic = const Value.absent(),
   }) => User(
     id: id ?? this.id,
@@ -260,7 +257,7 @@ class UsersCompanion extends UpdateCompanion<User> {
   final Value<int> id;
   final Value<String> name;
   final Value<String> phone;
-  final Value<UserRole> role;
+  final Value<String> role;
   final Value<String?> profilePic;
   const UsersCompanion({
     this.id = const Value.absent(),
@@ -273,7 +270,7 @@ class UsersCompanion extends UpdateCompanion<User> {
     this.id = const Value.absent(),
     required String name,
     required String phone,
-    required UserRole role,
+    required String role,
     this.profilePic = const Value.absent(),
   }) : name = Value(name),
        phone = Value(phone),
@@ -298,7 +295,7 @@ class UsersCompanion extends UpdateCompanion<User> {
     Value<int>? id,
     Value<String>? name,
     Value<String>? phone,
-    Value<UserRole>? role,
+    Value<String>? role,
     Value<String?>? profilePic,
   }) {
     return UsersCompanion(
@@ -323,9 +320,7 @@ class UsersCompanion extends UpdateCompanion<User> {
       map['phone'] = Variable<String>(phone.value);
     }
     if (role.present) {
-      map['role'] = Variable<String>(
-        $UsersTable.$converterrole.toSql(role.value),
-      );
+      map['role'] = Variable<String>(role.value);
     }
     if (profilePic.present) {
       map['profile_pic'] = Variable<String>(profilePic.value);
@@ -698,24 +693,26 @@ class $CallsTable extends Calls with TableInfo<$CallsTable, Call> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
   @override
-  late final GeneratedColumnWithTypeConverter<CallStatus, String> status =
-      GeneratedColumn<String>(
-        'status',
-        aliasedName,
-        false,
-        type: DriftSqlType.string,
-        requiredDuringInsert: true,
-      ).withConverter<CallStatus>($CallsTable.$converterstatus);
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _callTypeMeta = const VerificationMeta(
+    'callType',
+  );
   @override
-  late final GeneratedColumnWithTypeConverter<CallType, String> callType =
-      GeneratedColumn<String>(
-        'call_type',
-        aliasedName,
-        false,
-        type: DriftSqlType.string,
-        requiredDuringInsert: true,
-      ).withConverter<CallType>($CallsTable.$convertercallType);
+  late final GeneratedColumn<String> callType = GeneratedColumn<String>(
+    'call_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -771,6 +768,22 @@ class $CallsTable extends Calls with TableInfo<$CallsTable, Call> {
         endedAt.isAcceptableOrUnknown(data['ended_at']!, _endedAtMeta),
       );
     }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_statusMeta);
+    }
+    if (data.containsKey('call_type')) {
+      context.handle(
+        _callTypeMeta,
+        callType.isAcceptableOrUnknown(data['call_type']!, _callTypeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_callTypeMeta);
+    }
     return context;
   }
 
@@ -800,18 +813,14 @@ class $CallsTable extends Calls with TableInfo<$CallsTable, Call> {
         DriftSqlType.string,
         data['${effectivePrefix}ended_at'],
       ),
-      status: $CallsTable.$converterstatus.fromSql(
-        attachedDatabase.typeMapping.read(
-          DriftSqlType.string,
-          data['${effectivePrefix}status'],
-        )!,
-      ),
-      callType: $CallsTable.$convertercallType.fromSql(
-        attachedDatabase.typeMapping.read(
-          DriftSqlType.string,
-          data['${effectivePrefix}call_type'],
-        )!,
-      ),
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      callType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}call_type'],
+      )!,
     );
   }
 
@@ -819,11 +828,6 @@ class $CallsTable extends Calls with TableInfo<$CallsTable, Call> {
   $CallsTable createAlias(String alias) {
     return $CallsTable(attachedDatabase, alias);
   }
-
-  static JsonTypeConverter2<CallStatus, String, String> $converterstatus =
-      const EnumNameConverter(CallStatus.values);
-  static JsonTypeConverter2<CallType, String, String> $convertercallType =
-      const EnumNameConverter(CallType.values);
 }
 
 class Call extends DataClass implements Insertable<Call> {
@@ -832,8 +836,8 @@ class Call extends DataClass implements Insertable<Call> {
   final int calleeId;
   final String startedAt;
   final String? endedAt;
-  final CallStatus status;
-  final CallType callType;
+  final String status;
+  final String callType;
   const Call({
     required this.id,
     required this.callerId,
@@ -853,16 +857,8 @@ class Call extends DataClass implements Insertable<Call> {
     if (!nullToAbsent || endedAt != null) {
       map['ended_at'] = Variable<String>(endedAt);
     }
-    {
-      map['status'] = Variable<String>(
-        $CallsTable.$converterstatus.toSql(status),
-      );
-    }
-    {
-      map['call_type'] = Variable<String>(
-        $CallsTable.$convertercallType.toSql(callType),
-      );
-    }
+    map['status'] = Variable<String>(status);
+    map['call_type'] = Variable<String>(callType);
     return map;
   }
 
@@ -891,12 +887,8 @@ class Call extends DataClass implements Insertable<Call> {
       calleeId: serializer.fromJson<int>(json['calleeId']),
       startedAt: serializer.fromJson<String>(json['startedAt']),
       endedAt: serializer.fromJson<String?>(json['endedAt']),
-      status: $CallsTable.$converterstatus.fromJson(
-        serializer.fromJson<String>(json['status']),
-      ),
-      callType: $CallsTable.$convertercallType.fromJson(
-        serializer.fromJson<String>(json['callType']),
-      ),
+      status: serializer.fromJson<String>(json['status']),
+      callType: serializer.fromJson<String>(json['callType']),
     );
   }
   @override
@@ -908,12 +900,8 @@ class Call extends DataClass implements Insertable<Call> {
       'calleeId': serializer.toJson<int>(calleeId),
       'startedAt': serializer.toJson<String>(startedAt),
       'endedAt': serializer.toJson<String?>(endedAt),
-      'status': serializer.toJson<String>(
-        $CallsTable.$converterstatus.toJson(status),
-      ),
-      'callType': serializer.toJson<String>(
-        $CallsTable.$convertercallType.toJson(callType),
-      ),
+      'status': serializer.toJson<String>(status),
+      'callType': serializer.toJson<String>(callType),
     };
   }
 
@@ -923,8 +911,8 @@ class Call extends DataClass implements Insertable<Call> {
     int? calleeId,
     String? startedAt,
     Value<String?> endedAt = const Value.absent(),
-    CallStatus? status,
-    CallType? callType,
+    String? status,
+    String? callType,
   }) => Call(
     id: id ?? this.id,
     callerId: callerId ?? this.callerId,
@@ -982,8 +970,8 @@ class CallsCompanion extends UpdateCompanion<Call> {
   final Value<int> calleeId;
   final Value<String> startedAt;
   final Value<String?> endedAt;
-  final Value<CallStatus> status;
-  final Value<CallType> callType;
+  final Value<String> status;
+  final Value<String> callType;
   const CallsCompanion({
     this.id = const Value.absent(),
     this.callerId = const Value.absent(),
@@ -999,8 +987,8 @@ class CallsCompanion extends UpdateCompanion<Call> {
     required int calleeId,
     required String startedAt,
     this.endedAt = const Value.absent(),
-    required CallStatus status,
-    required CallType callType,
+    required String status,
+    required String callType,
   }) : callerId = Value(callerId),
        calleeId = Value(calleeId),
        startedAt = Value(startedAt),
@@ -1032,8 +1020,8 @@ class CallsCompanion extends UpdateCompanion<Call> {
     Value<int>? calleeId,
     Value<String>? startedAt,
     Value<String?>? endedAt,
-    Value<CallStatus>? status,
-    Value<CallType>? callType,
+    Value<String>? status,
+    Value<String>? callType,
   }) {
     return CallsCompanion(
       id: id ?? this.id,
@@ -1065,14 +1053,10 @@ class CallsCompanion extends UpdateCompanion<Call> {
       map['ended_at'] = Variable<String>(endedAt.value);
     }
     if (status.present) {
-      map['status'] = Variable<String>(
-        $CallsTable.$converterstatus.toSql(status.value),
-      );
+      map['status'] = Variable<String>(status.value);
     }
     if (callType.present) {
-      map['call_type'] = Variable<String>(
-        $CallsTable.$convertercallType.toSql(callType.value),
-      );
+      map['call_type'] = Variable<String>(callType.value);
     }
     return map;
   }
@@ -1107,15 +1091,15 @@ class $ConversationsTable extends Conversations
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _typeMeta = const VerificationMeta('type');
   @override
-  late final GeneratedColumnWithTypeConverter<ConversationType, String> type =
-      GeneratedColumn<String>(
-        'type',
-        aliasedName,
-        false,
-        type: DriftSqlType.string,
-        requiredDuringInsert: true,
-      ).withConverter<ConversationType>($ConversationsTable.$convertertype);
+  late final GeneratedColumn<String> type = GeneratedColumn<String>(
+    'type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -1307,6 +1291,14 @@ class $ConversationsTable extends Conversations
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     }
+    if (data.containsKey('type')) {
+      context.handle(
+        _typeMeta,
+        type.isAcceptableOrUnknown(data['type']!, _typeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_typeMeta);
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -1404,12 +1396,10 @@ class $ConversationsTable extends Conversations
         DriftSqlType.int,
         data['${effectivePrefix}id'],
       )!,
-      type: $ConversationsTable.$convertertype.fromSql(
-        attachedDatabase.typeMapping.read(
-          DriftSqlType.string,
-          data['${effectivePrefix}type'],
-        )!,
-      ),
+      type: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}type'],
+      )!,
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}created_at'],
@@ -1469,14 +1459,11 @@ class $ConversationsTable extends Conversations
   $ConversationsTable createAlias(String alias) {
     return $ConversationsTable(attachedDatabase, alias);
   }
-
-  static JsonTypeConverter2<ConversationType, String, String> $convertertype =
-      const EnumNameConverter(ConversationType.values);
 }
 
 class Conversation extends DataClass implements Insertable<Conversation> {
   final int id;
-  final ConversationType type;
+  final String type;
   final String? createdAt;
   final String? dmKey;
   final int? createrId;
@@ -1511,11 +1498,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
-    {
-      map['type'] = Variable<String>(
-        $ConversationsTable.$convertertype.toSql(type),
-      );
-    }
+    map['type'] = Variable<String>(type);
     if (!nullToAbsent || createdAt != null) {
       map['created_at'] = Variable<String>(createdAt);
     }
@@ -1587,9 +1570,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return Conversation(
       id: serializer.fromJson<int>(json['id']),
-      type: $ConversationsTable.$convertertype.fromJson(
-        serializer.fromJson<String>(json['type']),
-      ),
+      type: serializer.fromJson<String>(json['type']),
       createdAt: serializer.fromJson<String?>(json['createdAt']),
       dmKey: serializer.fromJson<String?>(json['dmKey']),
       createrId: serializer.fromJson<int?>(json['createrId']),
@@ -1610,9 +1591,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<int>(id),
-      'type': serializer.toJson<String>(
-        $ConversationsTable.$convertertype.toJson(type),
-      ),
+      'type': serializer.toJson<String>(type),
       'createdAt': serializer.toJson<String?>(createdAt),
       'dmKey': serializer.toJson<String?>(dmKey),
       'createrId': serializer.toJson<int?>(createrId),
@@ -1631,7 +1610,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
 
   Conversation copyWith({
     int? id,
-    ConversationType? type,
+    String? type,
     Value<String?> createdAt = const Value.absent(),
     Value<String?> dmKey = const Value.absent(),
     Value<int?> createrId = const Value.absent(),
@@ -1753,7 +1732,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
 
 class ConversationsCompanion extends UpdateCompanion<Conversation> {
   final Value<int> id;
-  final Value<ConversationType> type;
+  final Value<String> type;
   final Value<String?> createdAt;
   final Value<String?> dmKey;
   final Value<int?> createrId;
@@ -1786,7 +1765,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
   });
   ConversationsCompanion.insert({
     this.id = const Value.absent(),
-    required ConversationType type,
+    required String type,
     this.createdAt = const Value.absent(),
     this.dmKey = const Value.absent(),
     this.createrId = const Value.absent(),
@@ -1839,7 +1818,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
 
   ConversationsCompanion copyWith({
     Value<int>? id,
-    Value<ConversationType>? type,
+    Value<String>? type,
     Value<String?>? createdAt,
     Value<String?>? dmKey,
     Value<int?>? createrId,
@@ -1880,9 +1859,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
       map['id'] = Variable<int>(id.value);
     }
     if (type.present) {
-      map['type'] = Variable<String>(
-        $ConversationsTable.$convertertype.toSql(type.value),
-      );
+      map['type'] = Variable<String>(type.value);
     }
     if (createdAt.present) {
       map['created_at'] = Variable<String>(createdAt.value);
@@ -1988,15 +1965,15 @@ class $ConversationMembersTable extends ConversationMembers
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _roleMeta = const VerificationMeta('role');
   @override
-  late final GeneratedColumnWithTypeConverter<ChatRole, String> role =
-      GeneratedColumn<String>(
-        'role',
-        aliasedName,
-        false,
-        type: DriftSqlType.string,
-        requiredDuringInsert: true,
-      ).withConverter<ChatRole>($ConversationMembersTable.$converterrole);
+  late final GeneratedColumn<String> role = GeneratedColumn<String>(
+    'role',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
   static const VerificationMeta _unreadCountMeta = const VerificationMeta(
     'unreadCount',
   );
@@ -2114,6 +2091,14 @@ class $ConversationMembersTable extends ConversationMembers
     } else if (isInserting) {
       context.missing(_userIdMeta);
     }
+    if (data.containsKey('role')) {
+      context.handle(
+        _roleMeta,
+        role.isAcceptableOrUnknown(data['role']!, _roleMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_roleMeta);
+    }
     if (data.containsKey('unread_count')) {
       context.handle(
         _unreadCountMeta,
@@ -2180,12 +2165,10 @@ class $ConversationMembersTable extends ConversationMembers
         DriftSqlType.int,
         data['${effectivePrefix}user_id'],
       )!,
-      role: $ConversationMembersTable.$converterrole.fromSql(
-        attachedDatabase.typeMapping.read(
-          DriftSqlType.string,
-          data['${effectivePrefix}role'],
-        )!,
-      ),
+      role: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}role'],
+      )!,
       unreadCount: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}unread_count'],
@@ -2217,9 +2200,6 @@ class $ConversationMembersTable extends ConversationMembers
   $ConversationMembersTable createAlias(String alias) {
     return $ConversationMembersTable(attachedDatabase, alias);
   }
-
-  static JsonTypeConverter2<ChatRole, String, String> $converterrole =
-      const EnumNameConverter(ChatRole.values);
 }
 
 class ConversationMember extends DataClass
@@ -2227,7 +2207,7 @@ class ConversationMember extends DataClass
   final int id;
   final int conversationId;
   final int userId;
-  final ChatRole role;
+  final String role;
   final int unreadCount;
   final String? joinedAt;
   final String? removedAt;
@@ -2252,11 +2232,7 @@ class ConversationMember extends DataClass
     map['id'] = Variable<int>(id);
     map['conversation_id'] = Variable<int>(conversationId);
     map['user_id'] = Variable<int>(userId);
-    {
-      map['role'] = Variable<String>(
-        $ConversationMembersTable.$converterrole.toSql(role),
-      );
-    }
+    map['role'] = Variable<String>(role);
     map['unread_count'] = Variable<int>(unreadCount);
     if (!nullToAbsent || joinedAt != null) {
       map['joined_at'] = Variable<String>(joinedAt);
@@ -2306,9 +2282,7 @@ class ConversationMember extends DataClass
       id: serializer.fromJson<int>(json['id']),
       conversationId: serializer.fromJson<int>(json['conversationId']),
       userId: serializer.fromJson<int>(json['userId']),
-      role: $ConversationMembersTable.$converterrole.fromJson(
-        serializer.fromJson<String>(json['role']),
-      ),
+      role: serializer.fromJson<String>(json['role']),
       unreadCount: serializer.fromJson<int>(json['unreadCount']),
       joinedAt: serializer.fromJson<String?>(json['joinedAt']),
       removedAt: serializer.fromJson<String?>(json['removedAt']),
@@ -2326,9 +2300,7 @@ class ConversationMember extends DataClass
       'id': serializer.toJson<int>(id),
       'conversationId': serializer.toJson<int>(conversationId),
       'userId': serializer.toJson<int>(userId),
-      'role': serializer.toJson<String>(
-        $ConversationMembersTable.$converterrole.toJson(role),
-      ),
+      'role': serializer.toJson<String>(role),
       'unreadCount': serializer.toJson<int>(unreadCount),
       'joinedAt': serializer.toJson<String?>(joinedAt),
       'removedAt': serializer.toJson<String?>(removedAt),
@@ -2342,7 +2314,7 @@ class ConversationMember extends DataClass
     int? id,
     int? conversationId,
     int? userId,
-    ChatRole? role,
+    String? role,
     int? unreadCount,
     Value<String?> joinedAt = const Value.absent(),
     Value<String?> removedAt = const Value.absent(),
@@ -2438,7 +2410,7 @@ class ConversationMembersCompanion extends UpdateCompanion<ConversationMember> {
   final Value<int> id;
   final Value<int> conversationId;
   final Value<int> userId;
-  final Value<ChatRole> role;
+  final Value<String> role;
   final Value<int> unreadCount;
   final Value<String?> joinedAt;
   final Value<String?> removedAt;
@@ -2461,7 +2433,7 @@ class ConversationMembersCompanion extends UpdateCompanion<ConversationMember> {
     this.id = const Value.absent(),
     required int conversationId,
     required int userId,
-    required ChatRole role,
+    required String role,
     this.unreadCount = const Value.absent(),
     this.joinedAt = const Value.absent(),
     this.removedAt = const Value.absent(),
@@ -2502,7 +2474,7 @@ class ConversationMembersCompanion extends UpdateCompanion<ConversationMember> {
     Value<int>? id,
     Value<int>? conversationId,
     Value<int>? userId,
-    Value<ChatRole>? role,
+    Value<String>? role,
     Value<int>? unreadCount,
     Value<String?>? joinedAt,
     Value<String?>? removedAt,
@@ -2538,9 +2510,7 @@ class ConversationMembersCompanion extends UpdateCompanion<ConversationMember> {
       map['user_id'] = Variable<int>(userId.value);
     }
     if (role.present) {
-      map['role'] = Variable<String>(
-        $ConversationMembersTable.$converterrole.toSql(role.value),
-      );
+      map['role'] = Variable<String>(role.value);
     }
     if (unreadCount.present) {
       map['unread_count'] = Variable<int>(unreadCount.value);
@@ -2619,15 +2589,15 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _typeMeta = const VerificationMeta('type');
   @override
-  late final GeneratedColumnWithTypeConverter<MessageType, String> type =
-      GeneratedColumn<String>(
-        'type',
-        aliasedName,
-        false,
-        type: DriftSqlType.string,
-        requiredDuringInsert: true,
-      ).withConverter<MessageType>($MessagesTable.$convertertype);
+  late final GeneratedColumn<String> type = GeneratedColumn<String>(
+    'type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
   static const VerificationMeta _bodyMeta = const VerificationMeta('body');
   @override
   late final GeneratedColumn<String> body = GeneratedColumn<String>(
@@ -2637,15 +2607,15 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
   @override
-  late final GeneratedColumnWithTypeConverter<MessageStatus, String> status =
-      GeneratedColumn<String>(
-        'status',
-        aliasedName,
-        false,
-        type: DriftSqlType.string,
-        requiredDuringInsert: true,
-      ).withConverter<MessageStatus>($MessagesTable.$converterstatus);
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
   @override
   late final GeneratedColumnWithTypeConverter<Map<String, dynamic>?, String>
   attachments = GeneratedColumn<String>(
@@ -2799,11 +2769,27 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     } else if (isInserting) {
       context.missing(_senderIdMeta);
     }
+    if (data.containsKey('type')) {
+      context.handle(
+        _typeMeta,
+        type.isAcceptableOrUnknown(data['type']!, _typeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_typeMeta);
+    }
     if (data.containsKey('body')) {
       context.handle(
         _bodyMeta,
         body.isAcceptableOrUnknown(data['body']!, _bodyMeta),
       );
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_statusMeta);
     }
     if (data.containsKey('is_pinned')) {
       context.handle(
@@ -2867,22 +2853,18 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         DriftSqlType.int,
         data['${effectivePrefix}sender_id'],
       )!,
-      type: $MessagesTable.$convertertype.fromSql(
-        attachedDatabase.typeMapping.read(
-          DriftSqlType.string,
-          data['${effectivePrefix}type'],
-        )!,
-      ),
+      type: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}type'],
+      )!,
       body: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}body'],
       ),
-      status: $MessagesTable.$converterstatus.fromSql(
-        attachedDatabase.typeMapping.read(
-          DriftSqlType.string,
-          data['${effectivePrefix}status'],
-        )!,
-      ),
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
       attachments: $MessagesTable.$converterattachments.fromSql(
         attachedDatabase.typeMapping.read(
           DriftSqlType.string,
@@ -2927,10 +2909,6 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     return $MessagesTable(attachedDatabase, alias);
   }
 
-  static JsonTypeConverter2<MessageType, String, String> $convertertype =
-      const EnumNameConverter(MessageType.values);
-  static JsonTypeConverter2<MessageStatus, String, String> $converterstatus =
-      const EnumNameConverter(MessageStatus.values);
   static TypeConverter<Map<String, dynamic>?, String?> $converterattachments =
       const JsonMapConverter();
   static TypeConverter<Map<String, dynamic>?, String?> $convertermetadata =
@@ -2941,9 +2919,9 @@ class Message extends DataClass implements Insertable<Message> {
   final BigInt id;
   final int conversationId;
   final int senderId;
-  final MessageType type;
+  final String type;
   final String? body;
-  final MessageStatus status;
+  final String status;
   final Map<String, dynamic>? attachments;
   final Map<String, dynamic>? metadata;
   final bool isPinned;
@@ -2974,17 +2952,11 @@ class Message extends DataClass implements Insertable<Message> {
     map['id'] = Variable<BigInt>(id);
     map['conversation_id'] = Variable<int>(conversationId);
     map['sender_id'] = Variable<int>(senderId);
-    {
-      map['type'] = Variable<String>($MessagesTable.$convertertype.toSql(type));
-    }
+    map['type'] = Variable<String>(type);
     if (!nullToAbsent || body != null) {
       map['body'] = Variable<String>(body);
     }
-    {
-      map['status'] = Variable<String>(
-        $MessagesTable.$converterstatus.toSql(status),
-      );
-    }
+    map['status'] = Variable<String>(status);
     if (!nullToAbsent || attachments != null) {
       map['attachments'] = Variable<String>(
         $MessagesTable.$converterattachments.toSql(attachments),
@@ -3036,13 +3008,9 @@ class Message extends DataClass implements Insertable<Message> {
       id: serializer.fromJson<BigInt>(json['id']),
       conversationId: serializer.fromJson<int>(json['conversationId']),
       senderId: serializer.fromJson<int>(json['senderId']),
-      type: $MessagesTable.$convertertype.fromJson(
-        serializer.fromJson<String>(json['type']),
-      ),
+      type: serializer.fromJson<String>(json['type']),
       body: serializer.fromJson<String?>(json['body']),
-      status: $MessagesTable.$converterstatus.fromJson(
-        serializer.fromJson<String>(json['status']),
-      ),
+      status: serializer.fromJson<String>(json['status']),
       attachments: serializer.fromJson<Map<String, dynamic>?>(
         json['attachments'],
       ),
@@ -3062,13 +3030,9 @@ class Message extends DataClass implements Insertable<Message> {
       'id': serializer.toJson<BigInt>(id),
       'conversationId': serializer.toJson<int>(conversationId),
       'senderId': serializer.toJson<int>(senderId),
-      'type': serializer.toJson<String>(
-        $MessagesTable.$convertertype.toJson(type),
-      ),
+      'type': serializer.toJson<String>(type),
       'body': serializer.toJson<String?>(body),
-      'status': serializer.toJson<String>(
-        $MessagesTable.$converterstatus.toJson(status),
-      ),
+      'status': serializer.toJson<String>(status),
       'attachments': serializer.toJson<Map<String, dynamic>?>(attachments),
       'metadata': serializer.toJson<Map<String, dynamic>?>(metadata),
       'isPinned': serializer.toJson<bool>(isPinned),
@@ -3084,9 +3048,9 @@ class Message extends DataClass implements Insertable<Message> {
     BigInt? id,
     int? conversationId,
     int? senderId,
-    MessageType? type,
+    String? type,
     Value<String?> body = const Value.absent(),
-    MessageStatus? status,
+    String? status,
     Value<Map<String, dynamic>?> attachments = const Value.absent(),
     Value<Map<String, dynamic>?> metadata = const Value.absent(),
     bool? isPinned,
@@ -3198,9 +3162,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   final Value<BigInt> id;
   final Value<int> conversationId;
   final Value<int> senderId;
-  final Value<MessageType> type;
+  final Value<String> type;
   final Value<String?> body;
-  final Value<MessageStatus> status;
+  final Value<String> status;
   final Value<Map<String, dynamic>?> attachments;
   final Value<Map<String, dynamic>?> metadata;
   final Value<bool> isPinned;
@@ -3229,9 +3193,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.id = const Value.absent(),
     required int conversationId,
     required int senderId,
-    required MessageType type,
+    required String type,
     this.body = const Value.absent(),
-    required MessageStatus status,
+    required String status,
     this.attachments = const Value.absent(),
     this.metadata = const Value.absent(),
     this.isPinned = const Value.absent(),
@@ -3283,9 +3247,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Value<BigInt>? id,
     Value<int>? conversationId,
     Value<int>? senderId,
-    Value<MessageType>? type,
+    Value<String>? type,
     Value<String?>? body,
-    Value<MessageStatus>? status,
+    Value<String>? status,
     Value<Map<String, dynamic>?>? attachments,
     Value<Map<String, dynamic>?>? metadata,
     Value<bool>? isPinned,
@@ -3326,17 +3290,13 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       map['sender_id'] = Variable<int>(senderId.value);
     }
     if (type.present) {
-      map['type'] = Variable<String>(
-        $MessagesTable.$convertertype.toSql(type.value),
-      );
+      map['type'] = Variable<String>(type.value);
     }
     if (body.present) {
       map['body'] = Variable<String>(body.value);
     }
     if (status.present) {
-      map['status'] = Variable<String>(
-        $MessagesTable.$converterstatus.toSql(status.value),
-      );
+      map['status'] = Variable<String>(status.value);
     }
     if (attachments.present) {
       map['attachments'] = Variable<String>(
@@ -3780,7 +3740,7 @@ typedef $$UsersTableCreateCompanionBuilder =
       Value<int> id,
       required String name,
       required String phone,
-      required UserRole role,
+      required String role,
       Value<String?> profilePic,
     });
 typedef $$UsersTableUpdateCompanionBuilder =
@@ -3788,7 +3748,7 @@ typedef $$UsersTableUpdateCompanionBuilder =
       Value<int> id,
       Value<String> name,
       Value<String> phone,
-      Value<UserRole> role,
+      Value<String> role,
       Value<String?> profilePic,
     });
 
@@ -3815,11 +3775,10 @@ class $$UsersTableFilterComposer extends Composer<_$AppDatabase, $UsersTable> {
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnWithTypeConverterFilters<UserRole, UserRole, String> get role =>
-      $composableBuilder(
-        column: $table.role,
-        builder: (column) => ColumnWithTypeConverterFilters(column),
-      );
+  ColumnFilters<String> get role => $composableBuilder(
+    column: $table.role,
+    builder: (column) => ColumnFilters(column),
+  );
 
   ColumnFilters<String> get profilePic => $composableBuilder(
     column: $table.profilePic,
@@ -3880,7 +3839,7 @@ class $$UsersTableAnnotationComposer
   GeneratedColumn<String> get phone =>
       $composableBuilder(column: $table.phone, builder: (column) => column);
 
-  GeneratedColumnWithTypeConverter<UserRole, String> get role =>
+  GeneratedColumn<String> get role =>
       $composableBuilder(column: $table.role, builder: (column) => column);
 
   GeneratedColumn<String> get profilePic => $composableBuilder(
@@ -3920,7 +3879,7 @@ class $$UsersTableTableManager
                 Value<int> id = const Value.absent(),
                 Value<String> name = const Value.absent(),
                 Value<String> phone = const Value.absent(),
-                Value<UserRole> role = const Value.absent(),
+                Value<String> role = const Value.absent(),
                 Value<String?> profilePic = const Value.absent(),
               }) => UsersCompanion(
                 id: id,
@@ -3934,7 +3893,7 @@ class $$UsersTableTableManager
                 Value<int> id = const Value.absent(),
                 required String name,
                 required String phone,
-                required UserRole role,
+                required String role,
                 Value<String?> profilePic = const Value.absent(),
               }) => UsersCompanion.insert(
                 id: id,
@@ -4143,8 +4102,8 @@ typedef $$CallsTableCreateCompanionBuilder =
       required int calleeId,
       required String startedAt,
       Value<String?> endedAt,
-      required CallStatus status,
-      required CallType callType,
+      required String status,
+      required String callType,
     });
 typedef $$CallsTableUpdateCompanionBuilder =
     CallsCompanion Function({
@@ -4153,8 +4112,8 @@ typedef $$CallsTableUpdateCompanionBuilder =
       Value<int> calleeId,
       Value<String> startedAt,
       Value<String?> endedAt,
-      Value<CallStatus> status,
-      Value<CallType> callType,
+      Value<String> status,
+      Value<String> callType,
     });
 
 class $$CallsTableFilterComposer extends Composer<_$AppDatabase, $CallsTable> {
@@ -4190,17 +4149,15 @@ class $$CallsTableFilterComposer extends Composer<_$AppDatabase, $CallsTable> {
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnWithTypeConverterFilters<CallStatus, CallStatus, String> get status =>
-      $composableBuilder(
-        column: $table.status,
-        builder: (column) => ColumnWithTypeConverterFilters(column),
-      );
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
 
-  ColumnWithTypeConverterFilters<CallType, CallType, String> get callType =>
-      $composableBuilder(
-        column: $table.callType,
-        builder: (column) => ColumnWithTypeConverterFilters(column),
-      );
+  ColumnFilters<String> get callType => $composableBuilder(
+    column: $table.callType,
+    builder: (column) => ColumnFilters(column),
+  );
 }
 
 class $$CallsTableOrderingComposer
@@ -4272,10 +4229,10 @@ class $$CallsTableAnnotationComposer
   GeneratedColumn<String> get endedAt =>
       $composableBuilder(column: $table.endedAt, builder: (column) => column);
 
-  GeneratedColumnWithTypeConverter<CallStatus, String> get status =>
+  GeneratedColumn<String> get status =>
       $composableBuilder(column: $table.status, builder: (column) => column);
 
-  GeneratedColumnWithTypeConverter<CallType, String> get callType =>
+  GeneratedColumn<String> get callType =>
       $composableBuilder(column: $table.callType, builder: (column) => column);
 }
 
@@ -4312,8 +4269,8 @@ class $$CallsTableTableManager
                 Value<int> calleeId = const Value.absent(),
                 Value<String> startedAt = const Value.absent(),
                 Value<String?> endedAt = const Value.absent(),
-                Value<CallStatus> status = const Value.absent(),
-                Value<CallType> callType = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<String> callType = const Value.absent(),
               }) => CallsCompanion(
                 id: id,
                 callerId: callerId,
@@ -4330,8 +4287,8 @@ class $$CallsTableTableManager
                 required int calleeId,
                 required String startedAt,
                 Value<String?> endedAt = const Value.absent(),
-                required CallStatus status,
-                required CallType callType,
+                required String status,
+                required String callType,
               }) => CallsCompanion.insert(
                 id: id,
                 callerId: callerId,
@@ -4366,7 +4323,7 @@ typedef $$CallsTableProcessedTableManager =
 typedef $$ConversationsTableCreateCompanionBuilder =
     ConversationsCompanion Function({
       Value<int> id,
-      required ConversationType type,
+      required String type,
       Value<String?> createdAt,
       Value<String?> dmKey,
       Value<int?> createrId,
@@ -4384,7 +4341,7 @@ typedef $$ConversationsTableCreateCompanionBuilder =
 typedef $$ConversationsTableUpdateCompanionBuilder =
     ConversationsCompanion Function({
       Value<int> id,
-      Value<ConversationType> type,
+      Value<String> type,
       Value<String?> createdAt,
       Value<String?> dmKey,
       Value<int?> createrId,
@@ -4414,10 +4371,9 @@ class $$ConversationsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnWithTypeConverterFilters<ConversationType, ConversationType, String>
-  get type => $composableBuilder(
+  ColumnFilters<String> get type => $composableBuilder(
     column: $table.type,
-    builder: (column) => ColumnWithTypeConverterFilters(column),
+    builder: (column) => ColumnFilters(column),
   );
 
   ColumnFilters<String> get createdAt => $composableBuilder(
@@ -4583,7 +4539,7 @@ class $$ConversationsTableAnnotationComposer
   GeneratedColumn<int> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
 
-  GeneratedColumnWithTypeConverter<ConversationType, String> get type =>
+  GeneratedColumn<String> get type =>
       $composableBuilder(column: $table.type, builder: (column) => column);
 
   GeneratedColumn<String> get createdAt =>
@@ -4664,7 +4620,7 @@ class $$ConversationsTableTableManager
           updateCompanionCallback:
               ({
                 Value<int> id = const Value.absent(),
-                Value<ConversationType> type = const Value.absent(),
+                Value<String> type = const Value.absent(),
                 Value<String?> createdAt = const Value.absent(),
                 Value<String?> dmKey = const Value.absent(),
                 Value<int?> createrId = const Value.absent(),
@@ -4698,7 +4654,7 @@ class $$ConversationsTableTableManager
           createCompanionCallback:
               ({
                 Value<int> id = const Value.absent(),
-                required ConversationType type,
+                required String type,
                 Value<String?> createdAt = const Value.absent(),
                 Value<String?> dmKey = const Value.absent(),
                 Value<int?> createrId = const Value.absent(),
@@ -4759,7 +4715,7 @@ typedef $$ConversationMembersTableCreateCompanionBuilder =
       Value<int> id,
       required int conversationId,
       required int userId,
-      required ChatRole role,
+      required String role,
       Value<int> unreadCount,
       Value<String?> joinedAt,
       Value<String?> removedAt,
@@ -4772,7 +4728,7 @@ typedef $$ConversationMembersTableUpdateCompanionBuilder =
       Value<int> id,
       Value<int> conversationId,
       Value<int> userId,
-      Value<ChatRole> role,
+      Value<String> role,
       Value<int> unreadCount,
       Value<String?> joinedAt,
       Value<String?> removedAt,
@@ -4805,11 +4761,10 @@ class $$ConversationMembersTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnWithTypeConverterFilters<ChatRole, ChatRole, String> get role =>
-      $composableBuilder(
-        column: $table.role,
-        builder: (column) => ColumnWithTypeConverterFilters(column),
-      );
+  ColumnFilters<String> get role => $composableBuilder(
+    column: $table.role,
+    builder: (column) => ColumnFilters(column),
+  );
 
   ColumnFilters<int> get unreadCount => $composableBuilder(
     column: $table.unreadCount,
@@ -4922,7 +4877,7 @@ class $$ConversationMembersTableAnnotationComposer
   GeneratedColumn<int> get userId =>
       $composableBuilder(column: $table.userId, builder: (column) => column);
 
-  GeneratedColumnWithTypeConverter<ChatRole, String> get role =>
+  GeneratedColumn<String> get role =>
       $composableBuilder(column: $table.role, builder: (column) => column);
 
   GeneratedColumn<int> get unreadCount => $composableBuilder(
@@ -4996,7 +4951,7 @@ class $$ConversationMembersTableTableManager
                 Value<int> id = const Value.absent(),
                 Value<int> conversationId = const Value.absent(),
                 Value<int> userId = const Value.absent(),
-                Value<ChatRole> role = const Value.absent(),
+                Value<String> role = const Value.absent(),
                 Value<int> unreadCount = const Value.absent(),
                 Value<String?> joinedAt = const Value.absent(),
                 Value<String?> removedAt = const Value.absent(),
@@ -5020,7 +4975,7 @@ class $$ConversationMembersTableTableManager
                 Value<int> id = const Value.absent(),
                 required int conversationId,
                 required int userId,
-                required ChatRole role,
+                required String role,
                 Value<int> unreadCount = const Value.absent(),
                 Value<String?> joinedAt = const Value.absent(),
                 Value<String?> removedAt = const Value.absent(),
@@ -5073,9 +5028,9 @@ typedef $$MessagesTableCreateCompanionBuilder =
       Value<BigInt> id,
       required int conversationId,
       required int senderId,
-      required MessageType type,
+      required String type,
       Value<String?> body,
-      required MessageStatus status,
+      required String status,
       Value<Map<String, dynamic>?> attachments,
       Value<Map<String, dynamic>?> metadata,
       Value<bool> isPinned,
@@ -5090,9 +5045,9 @@ typedef $$MessagesTableUpdateCompanionBuilder =
       Value<BigInt> id,
       Value<int> conversationId,
       Value<int> senderId,
-      Value<MessageType> type,
+      Value<String> type,
       Value<String?> body,
-      Value<MessageStatus> status,
+      Value<String> status,
       Value<Map<String, dynamic>?> attachments,
       Value<Map<String, dynamic>?> metadata,
       Value<bool> isPinned,
@@ -5127,21 +5082,19 @@ class $$MessagesTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnWithTypeConverterFilters<MessageType, MessageType, String> get type =>
-      $composableBuilder(
-        column: $table.type,
-        builder: (column) => ColumnWithTypeConverterFilters(column),
-      );
+  ColumnFilters<String> get type => $composableBuilder(
+    column: $table.type,
+    builder: (column) => ColumnFilters(column),
+  );
 
   ColumnFilters<String> get body => $composableBuilder(
     column: $table.body,
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnWithTypeConverterFilters<MessageStatus, MessageStatus, String>
-  get status => $composableBuilder(
+  ColumnFilters<String> get status => $composableBuilder(
     column: $table.status,
-    builder: (column) => ColumnWithTypeConverterFilters(column),
+    builder: (column) => ColumnFilters(column),
   );
 
   ColumnWithTypeConverterFilters<
@@ -5295,13 +5248,13 @@ class $$MessagesTableAnnotationComposer
   GeneratedColumn<int> get senderId =>
       $composableBuilder(column: $table.senderId, builder: (column) => column);
 
-  GeneratedColumnWithTypeConverter<MessageType, String> get type =>
+  GeneratedColumn<String> get type =>
       $composableBuilder(column: $table.type, builder: (column) => column);
 
   GeneratedColumn<String> get body =>
       $composableBuilder(column: $table.body, builder: (column) => column);
 
-  GeneratedColumnWithTypeConverter<MessageStatus, String> get status =>
+  GeneratedColumn<String> get status =>
       $composableBuilder(column: $table.status, builder: (column) => column);
 
   GeneratedColumnWithTypeConverter<Map<String, dynamic>?, String>
@@ -5366,9 +5319,9 @@ class $$MessagesTableTableManager
                 Value<BigInt> id = const Value.absent(),
                 Value<int> conversationId = const Value.absent(),
                 Value<int> senderId = const Value.absent(),
-                Value<MessageType> type = const Value.absent(),
+                Value<String> type = const Value.absent(),
                 Value<String?> body = const Value.absent(),
-                Value<MessageStatus> status = const Value.absent(),
+                Value<String> status = const Value.absent(),
                 Value<Map<String, dynamic>?> attachments = const Value.absent(),
                 Value<Map<String, dynamic>?> metadata = const Value.absent(),
                 Value<bool> isPinned = const Value.absent(),
@@ -5398,9 +5351,9 @@ class $$MessagesTableTableManager
                 Value<BigInt> id = const Value.absent(),
                 required int conversationId,
                 required int senderId,
-                required MessageType type,
+                required String type,
                 Value<String?> body = const Value.absent(),
-                required MessageStatus status,
+                required String status,
                 Value<Map<String, dynamic>?> attachments = const Value.absent(),
                 Value<Map<String, dynamic>?> metadata = const Value.absent(),
                 Value<bool> isPinned = const Value.absent(),

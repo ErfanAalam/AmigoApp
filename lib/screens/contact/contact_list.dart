@@ -213,7 +213,7 @@ class _ContactsPageState extends State<ContactsPage>
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return FindUserDialog(onUserSelected: _startConversationFromDialog);
+        return FindUserDialog(onUserSelected: startConversation);
       },
     );
   }
@@ -295,17 +295,17 @@ class _ContactsPageState extends State<ContactsPage>
     }
   }
 
-  void _startConversationFromDialog(UserModel user) async {
+  void startConversation(UserModel user) async {
     final response = await _chatsServices.createChat(user.id.toString());
     if (response['success'] && response['data'] != null) {
       try {
         // Create ConversationModel from the response
         final conversationData = response['data'];
         final conversation = ConversationModel(
-          conversationId: conversationData['id'],
+          id: conversationData['id'],
           type: 'dm',
           unreadCount: 0,
-          joinedAt: DateTime.now().toIso8601String(),
+          createdAt: DateTime.now().toIso8601String(),
           userId: user.id,
           userName: user.name,
           userProfilePic: user.profilePic,
@@ -324,77 +324,6 @@ class _ContactsPageState extends State<ContactsPage>
           'conversation_id': conversationData['id'],
         });
 
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => InnerChatPage(conversation: conversation),
-          ),
-        );
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to start conversation: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Failed to create chat: ${response['message'] ?? 'Unknown error'}',
-          ),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  void startConversation(String userId) async {
-    final response = await _chatsServices.createChat(userId);
-    if (response['success'] && response['data'] != null) {
-      try {
-        // Find the user info for this conversation
-        final userInfo = _availableUsers.firstWhere(
-          (user) => user.id.toString() == userId,
-          orElse: () => UserModel(
-            id: int.tryParse(userId) ?? 0,
-            name: 'Unknown User',
-            role: 'User',
-            phone: '',
-            profilePic: null,
-          ),
-        );
-
-        // Create ConversationModel from the response
-        final conversationData = response['data'];
-        final conversation = ConversationModel(
-          conversationId: conversationData['id'],
-          type: 'dm',
-          unreadCount: 0,
-          joinedAt: DateTime.now().toIso8601String(),
-          userId: userInfo.id,
-          userName: userInfo.name,
-          userProfilePic: userInfo.profilePic,
-        );
-
-        await _websocketService.sendMessage({
-          'type': 'join_conversation',
-          'conversation_id': conversationData['id'],
-          'data': {
-            'recipient_id': [userId],
-          },
-        });
-
-        await _websocketService.sendMessage({
-          'type': 'active_in_conversation',
-          'conversation_id': conversationData['id'],
-        });
-
-        material.Navigator.pushReplacement(
-          context,
-          material.MaterialPageRoute(builder: (context) => const MainScreen()),
-        );
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -704,7 +633,7 @@ class _ContactsPageState extends State<ContactsPage>
                                   child: InkWell(
                                     borderRadius: BorderRadius.circular(16),
                                     onTap: () {
-                                      startConversation(user.id.toString());
+                                      startConversation(user);
                                     },
                                     child: Padding(
                                       padding: EdgeInsets.all(16),

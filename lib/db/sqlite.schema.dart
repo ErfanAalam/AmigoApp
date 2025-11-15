@@ -2,9 +2,6 @@ import 'package:amigo/db/type_converters.dart';
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:amigo/types/call.type.dart';
-import 'package:amigo/types/chat.type.dart';
-import 'package:amigo/types/user.type.dart';
 
 part 'sqlite.schema.g.dart';
 
@@ -13,7 +10,7 @@ class Users extends Table {
   IntColumn get id => integer()();
   TextColumn get name => text()();
   TextColumn get phone => text()();
-  TextColumn get role => text().map(const EnumNameConverter(UserRole.values))();
+  TextColumn get role => text()();
   TextColumn get profilePic => text().nullable()();
 
   @override
@@ -38,10 +35,8 @@ class Calls extends Table {
   IntColumn get calleeId => integer()();
   TextColumn get startedAt => text()();
   TextColumn get endedAt => text().nullable()();
-  TextColumn get status =>
-      text().map(const EnumNameConverter(CallStatus.values))();
-  TextColumn get callType =>
-      text().map(const EnumNameConverter(CallType.values))();
+  TextColumn get status => text()();
+  TextColumn get callType => text()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -50,21 +45,17 @@ class Calls extends Table {
 // Conversations Table
 class Conversations extends Table {
   IntColumn get id => integer()();
-  TextColumn get type =>
-      text().map(const EnumNameConverter(ConversationType.values))();
-  TextColumn get createdAt => text().nullable()();
-  TextColumn get dmKey => text().nullable()();
-  IntColumn get createrId => integer().nullable()();
+  TextColumn get type => text()();
   TextColumn get title => text().nullable()();
-  IntColumn get userId => integer().nullable()();
-  IntColumn get unreadCount => integer().withDefault(const Constant(0))();
+  IntColumn get createrId => integer()();
+  IntColumn get unreadCount =>
+      integer().withDefault(const Constant(0)).nullable()();
   IntColumn get lastMessageId => integer().nullable()();
   BoolColumn get isDeleted => boolean().withDefault(const Constant(false))();
   BoolColumn get isPinned => boolean().withDefault(const Constant(false))();
   BoolColumn get isFavorite => boolean().withDefault(const Constant(false))();
   BoolColumn get isMuted => boolean().withDefault(const Constant(false))();
-  BoolColumn get needsSync => boolean().withDefault(const Constant(false))();
-  TextColumn get updatedAt => text().nullable()();
+  TextColumn get createdAt => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -75,7 +66,7 @@ class ConversationMembers extends Table {
   IntColumn get id => integer().autoIncrement()();
   IntColumn get conversationId => integer()();
   IntColumn get userId => integer()();
-  TextColumn get role => text().map(const EnumNameConverter(ChatRole.values))();
+  TextColumn get role => text()();
   IntColumn get unreadCount => integer().withDefault(const Constant(0))();
   TextColumn get joinedAt => text().nullable()();
   TextColumn get removedAt => text().nullable()();
@@ -89,11 +80,9 @@ class Messages extends Table {
   Int64Column get id => int64()();
   IntColumn get conversationId => integer()();
   IntColumn get senderId => integer()();
-  TextColumn get type =>
-      text().map(const EnumNameConverter(MessageType.values))();
+  TextColumn get type => text()();
   TextColumn get body => text().nullable()();
-  TextColumn get status =>
-      text().map(const EnumNameConverter(MessageStatus.values))();
+  TextColumn get status => text()();
   TextColumn get attachments =>
       text().nullable().map(const JsonMapConverter())();
   TextColumn get metadata => text().nullable().map(const JsonMapConverter())();

@@ -62,14 +62,14 @@ Future<void> loadAvailableConversations(
               json as Map<String, dynamic>,
             );
             // Exclude current conversation
-            if (conversation.conversationId != config.currentConversationId) {
+            if (conversation.id != config.currentConversationId) {
               conversations.add(conversation);
             } else {
               final prefix = config.debugPrefix != null
                   ? '${config.debugPrefix} '
                   : '';
               debugPrint(
-                '🚫 $prefix Forward modal - Excluding current conversation: ${conversation.conversationId}',
+                '🚫 $prefix Forward modal - Excluding current conversation: ${conversation.id}',
               );
             }
           } catch (e) {

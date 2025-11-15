@@ -202,7 +202,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Initialize typing animation
     _initializeTypingAnimation();
 
-    _websocketService.connect(widget.conversation.conversationId);
+    _websocketService.connect(widget.conversation.id);
 
     // Initialize voice recording animations
     _initializeVoiceAnimations();
@@ -227,14 +227,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   Future<void> _loadDraft() async {
     // Load directly from service for immediate access
     final draftService = DraftMessageService();
-    final draft = await draftService.getDraft(
-      widget.conversation.conversationId,
-    );
+    final draft = await draftService.getDraft(widget.conversation.id);
     if (draft != null && draft.isNotEmpty) {
       _messageController.text = draft;
       // Also update the provider state
       final draftNotifier = ref.read(draftMessagesProvider.notifier);
-      draftNotifier.saveDraft(widget.conversation.conversationId, draft);
+      draftNotifier.saveDraft(widget.conversation.id, draft);
     }
   }
 
@@ -248,7 +246,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       if (mounted && !_isDisposed) {
         final draftNotifier = ref.read(draftMessagesProvider.notifier);
         final text = _messageController.text;
-        draftNotifier.saveDraft(widget.conversation.conversationId, text);
+        draftNotifier.saveDraft(widget.conversation.id, text);
       }
     });
   }
@@ -262,7 +260,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   /// Ultra-fast cache check that runs immediately
   void _quickCacheCheck() async {
     try {
-      final conversationId = widget.conversation.conversationId;
+      final conversationId = widget.conversation.id;
 
       // Quick check if we have cached messages in DB
       final count = await _messagesRepo.getMessageCount(conversationId);
@@ -439,7 +437,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       _websocketService
           .sendMessage({
             'type': 'active_in_conversation',
-            'conversation_id': widget.conversation.conversationId,
+            'conversation_id': widget.conversation.id,
           })
           .catchError((e) {
             debugPrint('❌ Error sending active_in_conversation: $e');
@@ -523,7 +521,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   /// Quick cache check and load for instant display
   Future<void> _tryLoadFromCacheFirst() async {
-    final conversationId = widget.conversation.conversationId;
+    final conversationId = widget.conversation.id;
 
     await tryLoadFromCacheFirst(
       TryLoadFromCacheFirstConfig(
@@ -556,7 +554,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   Future<void> _getCurrentUserId() async {
     try {
       // FAST PATH: Try to get from local DB first (instant, offline-friendly)
-      final conversationId = widget.conversation.conversationId;
+      final conversationId = widget.conversation.id;
       final cachedMessages = await _messagesRepo.getMessagesByConversation(
         conversationId,
         limit: 20, // Check more messages to ensure we find one from us
@@ -629,7 +627,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   /// Load pinned message from storage or conversation metadata
   Future<void> _loadPinnedMessageFromStorage() async {
-    final conversationId = widget.conversation.conversationId;
+    final conversationId = widget.conversation.id;
 
     // First check if conversation metadata has pinned message
     if (widget.conversation.metadata?.pinnedMessage != null) {
@@ -658,7 +656,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   /// Load starred messages from storage
   Future<void> _loadStarredMessagesFromStorage() async {
-    final conversationId = widget.conversation.conversationId;
+    final conversationId = widget.conversation.id;
     final starredMessages =
         await MessageStorageHelpers.loadStarredMessagesFromStorage(
           conversationId,
@@ -701,7 +699,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
         // Update storage with cleaned up starred messages
         _messagesRepo.saveStarredMessages(
-          conversationId: widget.conversation.conversationId,
+          conversationId: widget.conversation.id,
           starredMessageIds: _starredMessages,
         );
       }
@@ -748,9 +746,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         }
 
         // Validate storage
-        await _messagesRepo.validateReplyMessageStorage(
-          widget.conversation.conversationId,
-        );
+        await _messagesRepo.validateReplyMessageStorage(widget.conversation.id);
       } catch (e) {
         debugPrint('❌ Error validating reply messages: $e');
       }
@@ -892,7 +888,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     _websocketService
         .sendMessage({
           'type': 'inactive_in_conversation',
-          'conversation_id': widget.conversation.conversationId,
+          'conversation_id': widget.conversation.id,
         })
         .catchError((e) {
           debugPrint(
@@ -929,10 +925,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Save draft before disposing
     if (_messageController.text.isNotEmpty) {
       final draftNotifier = ref.read(draftMessagesProvider.notifier);
-      draftNotifier.saveDraft(
-        widget.conversation.conversationId,
-        _messageController.text,
-      );
+      draftNotifier.saveDraft(widget.conversation.id, _messageController.text);
     }
 
     // Remove listener
@@ -940,12 +933,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     _currentStickyDate.dispose();
     _showStickyDate.dispose();
 
-    _conversationsRepo.updateUnreadCount(widget.conversation.conversationId, 0);
+    _conversationsRepo.updateUnreadCount(widget.conversation.id, 0);
     // Send inactive message when actually disposing (leaving the page)
     _websocketService
         .sendMessage({
           'type': 'inactive_in_conversation',
-          'conversation_id': widget.conversation.conversationId,
+          'conversation_id': widget.conversation.id,
         })
         .catchError((e) {
           debugPrint('❌ Error sending inactive_in_conversation: $e');
@@ -1022,7 +1015,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Future<void> _loadInitialMessages() async {
-    final conversationId = widget.conversation.conversationId;
+    final conversationId = widget.conversation.id;
 
     await loadInitialMessages(
       LoadInitialMessagesConfig(
@@ -1079,7 +1072,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Future<void> _loadMoreMessages() async {
-    final conversationId = widget.conversation.conversationId;
+    final conversationId = widget.conversation.id;
 
     await loadMoreMessages(
       LoadMoreMessagesConfig(
@@ -1136,7 +1129,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   /// Set up WebSocket message listener for real-time messages
   void _setupWebSocketListener() {
-    final conversationId = widget.conversation.conversationId;
+    final conversationId = widget.conversation.id;
 
     // Listen to messages filtered for this conversation
     _messageSubscription = _messageHandler
@@ -1255,7 +1248,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       final optimisticId = data['optimistic_id'];
 
       // Skip if this is not for our conversation
-      if (conversationId != widget.conversation.conversationId) {
+      if (conversationId != widget.conversation.id) {
         return;
       }
 
@@ -1355,7 +1348,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     await handleMessagePin(
       HandleMessagePinConfig(
         message: message,
-        conversationId: widget.conversation.conversationId,
+        conversationId: widget.conversation.id,
         mounted: () => mounted,
         setState: setState,
         getPinnedMessageId: () => _pinnedMessageId,
@@ -1386,7 +1379,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         mounted: () => mounted,
         setState: setState,
         messages: _messages,
-        conversationId: widget.conversation.conversationId,
+        conversationId: widget.conversation.id,
         messagesRepo: _messagesRepo,
       ),
     );
@@ -1518,7 +1511,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         // Update in storage for all messages that the current user sent (batch update)
         if (_currentUserId != null && isDelivered) {
           await _messagesRepo.updateAllMessagesStatus(
-            conversationId: widget.conversation.conversationId,
+            conversationId: widget.conversation.id,
             senderId: _currentUserId!,
             isDelivered: isDelivered,
           );
@@ -1635,7 +1628,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       _websocketService.sendMessage({
         'type': 'read_receipt',
         'message_ids': [messageId],
-        'conversation_id': widget.conversation.conversationId,
+        'conversation_id': widget.conversation.id,
       });
 
       // If this is our own message (sender), update the optimistic message in local storage
@@ -1664,7 +1657,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           body: replyToData['body'] ?? '',
           type: 'text',
           senderId: _parseToInt(replyToData['sender_id']),
-          conversationId: widget.conversation.conversationId,
+          conversationId: widget.conversation.id,
           createdAt: replyToData['created_at'] ?? '',
           deleted: false,
           senderName:
@@ -1699,7 +1692,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         body: messageBody,
         type: data['type'] ?? 'text',
         senderId: senderId,
-        conversationId: widget.conversation.conversationId,
+        conversationId: widget.conversation.id,
         createdAt:
             data['created_at'] ?? nowUTC.toIso8601String(), // Store as UTC
         editedAt: data['edited_at'],
@@ -1875,7 +1868,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
               // Store confirmed message with server ID
               if (_conversationMeta != null) {
                 await _messagesRepo.addMessageToCache(
-                  conversationId: widget.conversation.conversationId,
+                  conversationId: widget.conversation.id,
                   newMessage: confirmedMessage,
                   updatedMeta: _conversationMeta!,
                   insertAtBeginning: false,
@@ -1978,7 +1971,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       await _websocketService.sendMessage({
         'type': 'typing',
         'data': {'user_id': _currentUserId, 'is_typing': isTyping},
-        'conversation_id': widget.conversation.conversationId,
+        'conversation_id': widget.conversation.id,
       });
     }
   }
@@ -2047,7 +2040,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       _websocketService.sendMessage({
         'type': 'read_receipt',
         'message_ids': [messageId],
-        'conversation_id': widget.conversation.conversationId,
+        'conversation_id': widget.conversation.id,
       });
 
       // Get sender info from cache/lookup
@@ -2088,7 +2081,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             body: '', // Empty body for media messages
             type: 'image',
             senderId: senderId,
-            conversationId: widget.conversation.conversationId,
+            conversationId: widget.conversation.id,
             createdAt: data['created_at'] ?? nowUTC.toIso8601String(),
             editedAt: data['edited_at'],
             metadata: data['metadata'],
@@ -2107,7 +2100,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             body: '', // Empty body for media messages
             type: 'video',
             senderId: senderId,
-            conversationId: widget.conversation.conversationId,
+            conversationId: widget.conversation.id,
             createdAt: data['created_at'] ?? nowUTC.toIso8601String(),
             editedAt: data['edited_at'],
             metadata: data['metadata'],
@@ -2127,7 +2120,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             body: '', // Empty body for media messages
             type: 'document',
             senderId: senderId,
-            conversationId: widget.conversation.conversationId,
+            conversationId: widget.conversation.id,
             createdAt: data['created_at'] ?? nowUTC.toIso8601String(),
             editedAt: data['edited_at'],
             metadata: data['metadata'],
@@ -2148,7 +2141,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             body: '', // Empty body for media messages
             type: 'audios', // Use 'audios' to match the UI rendering logic
             senderId: senderId,
-            conversationId: widget.conversation.conversationId,
+            conversationId: widget.conversation.id,
             createdAt: data['created_at'] ?? nowUTC.toIso8601String(),
             editedAt: data['edited_at'],
             metadata: data['metadata'],
@@ -2168,7 +2161,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             body: '', // Empty body for media messages
             type: 'attachment', // Fallback type
             senderId: senderId,
-            conversationId: widget.conversation.conversationId,
+            conversationId: widget.conversation.id,
             createdAt: data['created_at'] ?? nowUTC.toIso8601String(),
             editedAt: data['edited_at'],
             metadata: data['metadata'],
@@ -2218,7 +2211,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     // Clear draft when message is sent
     final draftNotifier = ref.read(draftMessagesProvider.notifier);
-    await draftNotifier.removeDraft(widget.conversation.conversationId);
+    await draftNotifier.removeDraft(widget.conversation.id);
 
     // Create optimistic message for immediate display with current UTC time
     final nowUTC = DateTime.now().toUtc();
@@ -2227,7 +2220,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       body: messageText,
       type: 'text',
       senderId: _currentUserId ?? 0,
-      conversationId: widget.conversation.conversationId,
+      conversationId: widget.conversation.id,
       createdAt: nowUTC
           .toIso8601String(), // Store as UTC, convert to IST when displaying
       deleted: false,
@@ -2265,7 +2258,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             'new_message': messageText,
             'optimistic_id': _optimisticMessageId,
           },
-          'conversation_id': widget.conversation.conversationId,
+          'conversation_id': widget.conversation.id,
           'message_ids': [
             replyMessageId,
           ], // Array of message IDs being replied to
@@ -2281,7 +2274,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         await _websocketService.sendMessage({
           'type': 'message',
           'data': messageData,
-          'conversation_id': widget.conversation.conversationId,
+          'conversation_id': widget.conversation.id,
         });
       }
       _optimisticMessageId--;
@@ -2355,7 +2348,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           .sendMessage({
             'type': 'message',
             'data': {'type': message.type, 'body': message.body},
-            'conversation_id': widget.conversation.conversationId,
+            'conversation_id': widget.conversation.id,
           })
           .catchError((error) {
             _handleMessageSendFailure(messageId, error.toString());
@@ -2370,7 +2363,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       try {
         if (_conversationMeta != null) {
           await _messagesRepo.addMessageToCache(
-            conversationId: widget.conversation.conversationId,
+            conversationId: widget.conversation.id,
             newMessage: message,
             updatedMeta: _conversationMeta!.copyWith(
               totalCount: _conversationMeta!.totalCount + 1,
@@ -2381,7 +2374,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           // Validate reply message storage periodically
           if (message.replyToMessage != null) {
             await _messagesRepo.validateReplyMessageStorage(
-              widget.conversation.conversationId,
+              widget.conversation.id,
             );
           }
         }
@@ -3589,7 +3582,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         availableConversations: _availableConversations,
         isLoading: _isLoadingConversations,
         onForward: _handleForwardToConversations,
-        currentConversationId: widget.conversation.conversationId,
+        currentConversationId: widget.conversation.id,
       ),
     );
   }
@@ -3598,7 +3591,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     await loadAvailableConversations(
       LoadAvailableConversationsConfig(
         userService: _userService,
-        currentConversationId: widget.conversation.conversationId,
+        currentConversationId: widget.conversation.id,
         setIsLoading: (isLoading) {
           setState(() {
             _isLoadingConversations = isLoading;
@@ -3624,7 +3617,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         selectedConversationIds: selectedConversationIds,
         websocketService: _websocketService,
         currentUserId: _currentUserId!,
-        sourceConversationId: widget.conversation.conversationId,
+        sourceConversationId: widget.conversation.id,
         context: context,
         mounted: mounted,
         clearMessagesToForward: (messages) {
@@ -3692,7 +3685,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     await sendImageMessage(
       SendMediaMessageConfig(
         mediaFile: imageFile,
-        conversationId: widget.conversation.conversationId,
+        conversationId: widget.conversation.id,
         currentUserId: _currentUserId,
         optimisticMessageId: _optimisticMessageId,
         replyToMessage: _replyToMessageData,
@@ -3729,7 +3722,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     await sendVideoMessage(
       SendMediaMessageConfig(
         mediaFile: videoFile,
-        conversationId: widget.conversation.conversationId,
+        conversationId: widget.conversation.id,
         currentUserId: _currentUserId,
         optimisticMessageId: _optimisticMessageId,
         replyToMessage: _replyToMessageData,
@@ -3767,7 +3760,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     await sendDocumentMessage(
       SendMediaMessageConfig(
         mediaFile: documentFile,
-        conversationId: widget.conversation.conversationId,
+        conversationId: widget.conversation.id,
         currentUserId: _currentUserId,
         optimisticMessageId: _optimisticMessageId,
         replyToMessage: _replyToMessageData,
@@ -3810,7 +3803,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   void _togglePinMessage(int messageId) async {
     await ChatHelpers.togglePinMessage(
       messageId: messageId,
-      conversationId: widget.conversation.conversationId,
+      conversationId: widget.conversation.id,
       getPinnedMessageId: () => _pinnedMessageId,
       setPinnedMessageId: (value) => _pinnedMessageId = value,
       currentUserId: _currentUserId,
@@ -3823,7 +3816,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   void _toggleStarMessage(int messageId) async {
     await ChatHelpers.toggleStarMessage(
       messageId: messageId,
-      conversationId: widget.conversation.conversationId,
+      conversationId: widget.conversation.id,
       starredMessages: _starredMessages,
       currentUserId: _currentUserId,
       messagesRepo: _messagesRepo,
@@ -3858,7 +3851,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   void _deleteMessage(int messageId) async {
     await ChatHelpers.deleteMessage(
       messageId: messageId,
-      conversationId: widget.conversation.conversationId,
+      conversationId: widget.conversation.id,
       messages: _messages,
       chatsServices: _chatsServices,
       messagesRepo: _messagesRepo,
@@ -3868,7 +3861,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   void _bulkStarMessages() async {
     await ChatHelpers.bulkStarMessages(
-      conversationId: widget.conversation.conversationId,
+      conversationId: widget.conversation.id,
       selectedMessages: _selectedMessages,
       starredMessages: _starredMessages,
       currentUserId: _currentUserId,
@@ -4063,7 +4056,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       await sendRecordedVoice(
         SendMediaMessageConfig(
           mediaFile: voiceFile,
-          conversationId: widget.conversation.conversationId,
+          conversationId: widget.conversation.id,
           currentUserId: _currentUserId,
           optimisticMessageId: _optimisticMessageId,
           replyToMessage: _replyToMessageData,

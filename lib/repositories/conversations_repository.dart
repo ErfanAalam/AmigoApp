@@ -1,7 +1,7 @@
 // lib/repositories/conversations_repository.dart
 import 'package:sqflite/sqflite.dart';
-import '../database_helper.dart';
-import '../../models/conversation_model.dart';
+import '../db/database_helper.dart';
+import '../models/conversation_model.dart';
 
 class ConversationsRepository {
   final dbHelper = DatabaseHelper.instance;
@@ -93,18 +93,18 @@ class ConversationsRepository {
 
   Map<String, dynamic> _conversationToMap(ConversationModel conversation) {
     return {
-      'conversation_id': conversation.conversationId,
+      'conversation_id': conversation.id,
       'type': conversation.type,
       'user_id': conversation.userId,
       'user_name': conversation.userName,
       'user_profile_pic': conversation.userProfilePic,
-      'joined_at': conversation.joinedAt,
+      'joined_at': conversation.createdAt,
       'unread_count': conversation.unreadCount,
       'last_message_id': conversation.metadata?.lastMessage.id,
       'last_message_body': conversation.metadata?.lastMessage.body,
       'last_message_type': conversation.metadata?.lastMessage.type,
       'last_message_sender_id': conversation.metadata?.lastMessage.senderId,
-      'last_message_created_at': conversation.metadata?.lastMessage.createdAt,
+      'last_message_created_at': conversation.metadata?.lastMessage.sentAt,
       'last_message_at': conversation.lastMessageAt,
       'pinned_message_id': conversation.metadata?.pinnedMessage?.messageId,
       'pinned_message_user_id': conversation.metadata?.pinnedMessage?.userId,
@@ -135,7 +135,7 @@ class ConversationsRepository {
           body: map['last_message_body'] as String? ?? '',
           type: map['last_message_type'] as String? ?? 'text',
           senderId: map['last_message_sender_id'] as int? ?? 0,
-          createdAt:
+          sentAt:
               map['last_message_created_at'] as String? ??
               DateTime.now().toIso8601String(),
           conversationId: map['conversation_id'] as int,
@@ -145,12 +145,12 @@ class ConversationsRepository {
     }
 
     return ConversationModel(
-      conversationId: map['conversation_id'] as int,
+      id: map['conversation_id'] as int,
       type: map['type'] as String,
       userId: map['user_id'] as int,
       userName: map['user_name'] as String,
       userProfilePic: map['user_profile_pic'] as String?,
-      joinedAt: map['joined_at'] as String,
+      createdAt: map['joined_at'] as String,
       unreadCount: map['unread_count'] as int? ?? 0,
       metadata: metadata,
       lastMessageAt: map['last_message_at'] as String?,

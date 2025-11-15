@@ -116,9 +116,9 @@ class ChatsPageState extends ConsumerState<ChatsPage>
     final action = await ChatActionBottomSheet.show(
       context: context,
       conversation: conversation,
-      isPinned: dmState.pinnedChats.contains(conversation.conversationId),
-      isMuted: dmState.mutedChats.contains(conversation.conversationId),
-      isFavorite: dmState.favoriteChats.contains(conversation.conversationId),
+      isPinned: dmState.pinnedChats.contains(conversation.id),
+      isMuted: dmState.mutedChats.contains(conversation.id),
+      isFavorite: dmState.favoriteChats.contains(conversation.id),
     );
 
     if (action != null) {
@@ -406,23 +406,19 @@ class ChatsPageState extends ConsumerState<ChatsPage>
             return Container(); // Skip invalid conversations
           }
 
-          final isTyping =
-              dmState.typingUsers[conversation.conversationId] ?? false;
-          final typingUserName =
-              dmState.typingUserNames[conversation.conversationId];
+          final isTyping = dmState.typingUsers[conversation.id] ?? false;
+          final typingUserName = dmState.typingUserNames[conversation.id];
 
           return ChatListItem(
             conversation: conversation,
             isTyping: isTyping,
             typingUserName: typingUserName,
             isOnline: _userStatusService.isUserOnline(conversation.userId),
-            isPinned: dmState.pinnedChats.contains(conversation.conversationId),
-            isMuted: dmState.mutedChats.contains(conversation.conversationId),
-            isFavorite: dmState.favoriteChats.contains(
-              conversation.conversationId,
-            ),
+            isPinned: dmState.pinnedChats.contains(conversation.id),
+            isMuted: dmState.mutedChats.contains(conversation.id),
+            isFavorite: dmState.favoriteChats.contains(conversation.id),
             onLongPress: () => _showChatActions(conversation),
-            conversationId: conversation.conversationId,
+            conversationId: conversation.id,
             onAvatarTap: () async {
               final result = await UserProfileModal.show(
                 context: context,
@@ -438,7 +434,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
               // Set this conversation as active and clear unread count
               ref
                   .read(dmListProvider.notifier)
-                  .setActiveConversation(conversation.conversationId);
+                  .setActiveConversation(conversation.id);
 
               // Navigate to inner chat page
               await Navigator.push(
@@ -452,13 +448,13 @@ class ChatsPageState extends ConsumerState<ChatsPage>
               // Clear unread count again when returning from inner chat
               ref
                   .read(dmListProvider.notifier)
-                  .clearUnreadCount(conversation.conversationId);
+                  .clearUnreadCount(conversation.id);
 
               // Send inactive message before clearing active conversation
               try {
                 await _websocketService.sendMessage({
                   'type': 'inactive_in_conversation',
-                  'conversation_id': conversation.conversationId,
+                  'conversation_id': conversation.id,
                 });
               } catch (e) {
                 debugPrint('❌ Error sending inactive_in_conversation: $e');
@@ -631,9 +627,9 @@ class ChatListItem extends ConsumerWidget {
       lastMessageType,
       attachmentData,
     );
-    final timeText = conversation.metadata?.lastMessage.createdAt != null
-        ? _formatTime(conversation.metadata!.lastMessage.createdAt)
-        : _formatTime(conversation.joinedAt);
+    final timeText = conversation.metadata?.lastMessage.sentAt != null
+        ? _formatTime(conversation.metadata!.lastMessage.sentAt)
+        : _formatTime(conversation.createdAt);
 
     return Container(
       height: 80,

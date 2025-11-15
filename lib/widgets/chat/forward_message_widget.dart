@@ -356,7 +356,7 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                   final conversation =
                                       _filteredConversations[index];
                                   final isSelected = _selectedConversations
-                                      .contains(conversation.conversationId);
+                                      .contains(conversation.id);
 
                                   return AnimatedContainer(
                                     duration: const Duration(milliseconds: 200),
@@ -378,7 +378,7 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                     ),
                                     child: ListTile(
                                       onTap: () => _toggleConversationSelection(
-                                        conversation.conversationId,
+                                        conversation.id,
                                       ),
                                       leading: _buildConversationAvatar(
                                         conversation,
