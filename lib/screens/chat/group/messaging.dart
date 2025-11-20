@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'dart:io';
+import 'package:amigo/models/conversations.model.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -21,6 +22,7 @@ import '../../../db/repositories/groups_repository.dart';
 import '../../../db/repositories/group_members_repository.dart';
 import '../../../services/socket/websocket_service.dart';
 import '../../../services/socket/websocket_message_handler.dart';
+import '../../../types/socket.type.dart';
 import '../../../widgets/loading_dots_animation.dart';
 import '../../../services/media_cache_service.dart';
 import '../../../utils/chat/chat_helpers.dart';
@@ -107,7 +109,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   StreamSubscription<Map<String, dynamic>>? _mediaSubscription;
   StreamSubscription<Map<String, dynamic>>? _messagePinSubscription;
   StreamSubscription<Map<String, dynamic>>? _messageStarSubscription;
-  StreamSubscription<Map<String, dynamic>>? _messageReplySubscription;
+  StreamSubscription<ChatMessagePayload>? _messageReplySubscription;
   StreamSubscription<Map<String, dynamic>>? _messageDeleteSubscription;
   int _optimisticMessageId = -1;
   final Set<int> _optimisticMessageIds = {};
@@ -1759,69 +1761,67 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
   }
 
-  void _handleMessageReply(Map<String, dynamic> message) async {
+  void _handleMessageReply(ChatMessagePayload payload) async {
     try {
-      final data = message['data'] as Map<String, dynamic>? ?? {};
-      final messageBody = data['new_message'] as String? ?? '';
-      final newMessageId = data['new_message_id'];
-      final userId = data['user_id'];
-      final conversationId = message['conversation_id'];
-      final messageIds = message['message_ids'] as List<dynamic>? ?? [];
-      final timestamp = message['timestamp'] as String?;
-      final optimisticId = data['optimistic_id'];
-      final senderName = data['sender_name'] as String? ?? 'Unknown User';
+      debugPrint('📨 Received group message_reply: $payload');
 
       // Skip if this is not for our group conversation
-      if (conversationId != widget.group.conversationId) {
+      if (payload.convId != widget.group.conversationId) {
         return;
       }
 
+      // Skip if this is not actually a reply message
+      if (payload.replyToMessageId == null) {
+        return;
+      }
+
+      final canonicalId = payload.canonicalId;
+      final optimisticId = payload.optimisticId;
+
       // Check if this is our own optimistic message being confirmed
       if (_optimisticMessageIds.contains(optimisticId)) {
-        _replaceOptimisticMessage(optimisticId, message);
+        _replaceOptimisticMessage(optimisticId, payload.toJson());
         return;
       }
 
       // If this is our own message (sender), update the optimistic message in local storage
-      if (_currentUserId != null && userId == _currentUserId) {
+      if (_currentUserId != null && payload.senderId == _currentUserId) {
         await _updateOptimisticMessageInStorage(
           optimisticId,
-          newMessageId,
-          message,
+          canonicalId,
+          payload.toJson(),
         );
         return;
       }
 
       // Check for duplicate message before processing
-      if (newMessageId != null &&
-          _messages.any((msg) => msg.id == newMessageId)) {
+      if (canonicalId != null &&
+          _messages.any((msg) => msg.id == canonicalId)) {
         debugPrint(
-          '⚠️ Duplicate reply message detected (ID: $newMessageId), skipping',
+          '⚠️ Duplicate reply message detected (ID: $canonicalId), skipping',
         );
         return;
       }
 
       // Try to get profile pic from cache if available
       String? senderProfilePic;
-      final cachedInfo = _getUserInfo(userId);
+      final cachedInfo = _getUserInfo(payload.senderId);
       senderProfilePic = cachedInfo['profile_pic'];
+      final senderName = payload.senderName ?? cachedInfo['name'] ?? 'Unknown User';
 
       // Find the original message being replied to
       MessageModel? replyToMessage;
-      int? replyToMessageId;
+      final replyToMessageId = payload.replyToMessageId;
 
-      if (messageIds.isNotEmpty) {
-        final originalMessageId = _parseToInt(messageIds.first);
-        replyToMessageId = originalMessageId;
-
+      if (replyToMessageId != null) {
         // Try to find the original message in our local messages
         try {
           replyToMessage = _messages.firstWhere(
-            (msg) => msg.id == originalMessageId,
+            (msg) => msg.id == replyToMessageId,
           );
         } catch (e) {
           debugPrint(
-            '⚠️ Original message not found in local group messages: $originalMessageId',
+            '⚠️ Original message not found in local group messages: $replyToMessageId',
           );
           // Create a placeholder if we don't have the original message
           replyToMessage = null;
@@ -1830,17 +1830,19 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
       // Create the reply message
       final replyMessage = MessageModel(
-        id: newMessageId ?? DateTime.now().millisecondsSinceEpoch,
-        body: messageBody,
-        type: 'text',
-        senderId: userId ?? 0,
-        conversationId: conversationId,
-        createdAt: timestamp ?? DateTime.now().toUtc().toIso8601String(),
+        id: canonicalId ?? DateTime.now().millisecondsSinceEpoch,
+        body: payload.body,
+        type: payload.msgType.value,
+        senderId: payload.senderId,
+        conversationId: payload.convId,
+        createdAt: payload.sentAt.toUtc().toIso8601String(),
         deleted: false,
         senderName: senderName,
         senderProfilePic: senderProfilePic,
         replyToMessage: replyToMessage,
         replyToMessageId: replyToMessageId,
+        attachments: payload.attachments,
+        metadata: payload.metadata,
       );
 
       // Add message to UI immediately with animation
@@ -3095,15 +3097,42 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
 
     // Fallback to original type-based handling
-    switch (message.type) {
+    switch (message.type.toLowerCase()) {
       case 'image':
         return _buildImageMessage(message, isMyMessage);
       case 'video':
         return _buildVideoMessage(message, isMyMessage);
+      case 'audio':
+        return _buildAudioMessage(message, isMyMessage);
+      case 'document':
+        return _buildDocumentMessage(message, isMyMessage);
+      case 'reply':
+        // Reply messages show the reply UI with quoted message
+        return Text(
+          message.body,
+          style: TextStyle(
+            color: isMyMessage ? Colors.white : Colors.black87,
+            fontSize: 16,
+            height: 1.4,
+            fontWeight: FontWeight.w500,
+          ),
+        );
+      case 'forwarded':
+        // Forwarded messages show forwarded indicator
+        return Text(
+          message.body,
+          style: TextStyle(
+            color: isMyMessage ? Colors.white : Colors.black87,
+            fontSize: 16,
+            height: 1.4,
+            fontWeight: FontWeight.w500,
+          ),
+        );
+      // Backward compatibility for old types
       case 'docs':
         return _buildDocumentMessage(message, isMyMessage);
       case 'attachment':
-        // Server sends attachments with type="attachment"
+        // Server sends attachments with type="attachment" (backward compatibility)
         return _buildImageMessage(message, isMyMessage);
       case 'text':
       default:

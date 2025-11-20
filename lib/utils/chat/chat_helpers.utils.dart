@@ -1,13 +1,47 @@
 import 'dart:io' as io;
+import 'package:amigo/models/message.model.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart' as material_provider;
 import '../animations.utils.dart';
 import '../../services/call_service.dart';
-import '../../models/message_model.dart';
 
 class ChatHelpers {
+  // Check if a message is a media message (image, video, audio, document)
+  bool isMediaMessage(MessageModel message) {
+    // Check type first - new message types
+    final type = message.type.value;
+    if (type == 'image' ||
+        type == 'video' ||
+        type == 'audio' ||
+        type == 'document') {
+      return true;
+    }
+
+    // Backward compatibility for old types
+    if (type == 'attachment' ||
+        type == 'docs' ||
+        type == 'audios' ||
+        type == 'media') {
+      return true;
+    }
+
+    // Also check attachments category as fallback
+    if (message.attachments != null) {
+      final attachmentData = message.attachments as Map<String, dynamic>;
+      final category = attachmentData['category'] as String?;
+      if (category != null) {
+        final categoryLower = category.toLowerCase();
+        return categoryLower == 'images' ||
+            categoryLower == 'videos' ||
+            categoryLower == 'docs' ||
+            categoryLower == 'audios';
+      }
+    }
+
+    return false;
+  }
+
   /// Scroll to bottom of message list
   ///
   /// Handles scrolling to the bottom of a reversed ListView (where 0 is the bottom).

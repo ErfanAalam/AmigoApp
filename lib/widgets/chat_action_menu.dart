@@ -1,24 +1,34 @@
+import 'package:amigo/models/conversations.model.dart';
+import 'package:amigo/models/group_model.dart';
 import 'package:flutter/material.dart';
-import '../models/conversation_model.dart';
 
 class ChatActionMenu extends StatelessWidget {
-  final ConversationModel conversation;
+  final DmModel? dm;
+  final GroupModel? group;
   final Function(String action) onActionSelected;
   final bool isPinned;
   final bool isMuted;
   final bool isFavorite;
 
   const ChatActionMenu({
-    Key? key,
-    required this.conversation,
+    super.key,
+    this.dm,
+    this.group,
     required this.onActionSelected,
     this.isPinned = false,
     this.isMuted = false,
     this.isFavorite = false,
-  }) : super(key: key);
+  }) : assert(dm != null || group != null, 'Either dm or group must be provided');
 
   @override
   Widget build(BuildContext context) {
+    final isDm = dm != null;
+    final displayName = isDm ? dm!.recipientName : group!.title;
+    final displayPic = isDm ? dm!.recipientProfilePic : null;
+    final lastMessage = isDm
+        ? dm!.lastMessageBody
+        : (group!.metadata?.lastMessage?.body ?? group!.lastMessageBody);
+
     return Container(
       padding: EdgeInsets.only(bottom: 27),
       decoration: BoxDecoration(
@@ -50,19 +60,30 @@ class ChatActionMenu extends StatelessWidget {
                 CircleAvatar(
                   radius: 20,
                   backgroundColor: Colors.teal[100],
-                  backgroundImage: conversation.userProfilePic != null
-                      ? NetworkImage(conversation.userProfilePic!)
+                  backgroundImage: isDm && displayPic != null
+                      ? NetworkImage(displayPic)
                       : null,
-                  child: conversation.userProfilePic == null
+                  child: isDm && displayPic == null
                       ? Text(
-                          _getInitials(conversation.userName),
+                          _getInitials(displayName),
                           style: TextStyle(
                             color: Colors.teal,
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
                           ),
                         )
-                      : null,
+                      : (!isDm
+                          ? Text(
+                              displayName.isNotEmpty
+                                  ? displayName[0].toUpperCase()
+                                  : 'G',
+                              style: TextStyle(
+                                color: Colors.teal,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            )
+                          : null),
                 ),
                 SizedBox(width: 12),
                 Expanded(
@@ -70,7 +91,7 @@ class ChatActionMenu extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        conversation.userName,
+                        displayName,
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
@@ -78,9 +99,9 @@ class ChatActionMenu extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      if (conversation.metadata?.lastMessage.body != null)
+                      if (lastMessage != null && lastMessage.isNotEmpty)
                         Text(
-                          conversation.metadata!.lastMessage.body,
+                          lastMessage,
                           style: TextStyle(
                             color: Colors.grey[600],
                             fontSize: 12,
@@ -127,16 +148,18 @@ class ChatActionMenu extends StatelessWidget {
                 onActionSelected(isFavorite ? 'unfavorite' : 'favorite'),
           ),
 
-          _buildDivider(),
-
-          _buildActionItem(
-            icon: Icons.delete_outline,
-            title: 'Delete Chat',
-            subtitle: 'Move to deleted chats',
-            color: Colors.red,
-            onTap: () => onActionSelected('delete'),
-            isDestructive: true,
-          ),
+          // Only show delete action for DMs, not for groups
+          if (isDm) ...[
+            _buildDivider(),
+            _buildActionItem(
+              icon: Icons.delete_outline,
+              title: 'Delete Chat',
+              subtitle: 'Move to deleted chats',
+              color: Colors.red,
+              onTap: () => onActionSelected('delete'),
+              isDestructive: true,
+            ),
+          ],
         ],
       ),
     );
@@ -223,7 +246,8 @@ class ChatActionMenu extends StatelessWidget {
 class ChatActionBottomSheet {
   static Future<String?> show({
     required BuildContext context,
-    required ConversationModel conversation,
+    DmModel? dm,
+    GroupModel? group,
     required bool isPinned,
     required bool isMuted,
     required bool isFavorite,
@@ -237,7 +261,8 @@ class ChatActionBottomSheet {
         bottom: true,
         // minimum: EdgeInsets.only(left: 0, right: 0, top: 16, bottom: 40),
         child: ChatActionMenu(
-          conversation: conversation,
+          dm: dm,
+          group: group,
           isPinned: isPinned,
           isMuted: isMuted,
           isFavorite: isFavorite,
@@ -252,23 +277,27 @@ class ChatActionBottomSheet {
 
 // Alternative Popup Menu for three-dot menu
 class ChatActionPopupMenu extends StatelessWidget {
-  final ConversationModel conversation;
+  final DmModel? dm;
+  final GroupModel? group;
   final Function(String action) onActionSelected;
   final bool isPinned;
   final bool isMuted;
   final bool isFavorite;
 
   const ChatActionPopupMenu({
-    Key? key,
-    required this.conversation,
+    super.key,
+    this.dm,
+    this.group,
     required this.onActionSelected,
     this.isPinned = false,
     this.isMuted = false,
     this.isFavorite = false,
-  }) : super(key: key);
+  }) : assert(dm != null || group != null, 'Either dm or group must be provided');
 
   @override
   Widget build(BuildContext context) {
+    final isDm = dm != null;
+    
     return PopupMenuButton<String>(
       icon: Icon(Icons.more_vert, color: Colors.grey[600]),
       onSelected: onActionSelected,
@@ -317,17 +346,20 @@ class ChatActionPopupMenu extends StatelessWidget {
             ],
           ),
         ),
-        PopupMenuDivider(),
-        PopupMenuItem(
-          value: 'delete',
-          child: Row(
-            children: [
-              Icon(Icons.delete_outline, color: Colors.red, size: 20),
-              SizedBox(width: 12),
-              Text('Delete Chat', style: TextStyle(color: Colors.red)),
-            ],
+        // Only show delete action for DMs, not for groups
+        if (isDm) ...[
+          PopupMenuDivider(),
+          PopupMenuItem(
+            value: 'delete',
+            child: Row(
+              children: [
+                Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                SizedBox(width: 12),
+                Text('Delete Chat', style: TextStyle(color: Colors.red)),
+              ],
+            ),
           ),
-        ),
+        ],
       ],
     );
   }

@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../models/message_model.dart';
 
 class MessageStorageService {
   static const String _messagesPrefix = 'messages_';

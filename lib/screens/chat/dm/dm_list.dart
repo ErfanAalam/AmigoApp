@@ -1,5 +1,5 @@
+import 'package:amigo/models/conversations.model.dart';
 import 'package:flutter/material.dart';
-import '../../../models/conversation_model.dart';
 import '../../../services/socket/websocket_service.dart';
 import '../../../services/user_status_service.dart';
 import '../../../widgets/chat_action_menu.dart';
@@ -7,7 +7,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../widgets/chat/searchable_list_widget.dart';
 import '../../../providers/draft_provider.dart';
-import '../../../providers/dm_list_provider.dart';
+import '../../../providers/chat_provider.dart';
+import '../../../types/socket.type.dart';
 import '../../../widgets/chat/user_profile_modal.dart';
 import 'messaging.dart';
 
@@ -34,31 +35,30 @@ class ChatsPageState extends ConsumerState<ChatsPage>
   /// Handle search text changes
   void _onSearchChanged() {
     final query = _searchController.text;
-    ref.read(dmListProvider.notifier).updateSearchQuery(query);
+    ref.read(chatProvider.notifier).updateSearchQuery(query);
   }
 
   /// Clear search query
   void _clearSearch() {
     _searchController.clear();
-    ref.read(dmListProvider.notifier).updateSearchQuery('');
+    ref.read(chatProvider.notifier).updateSearchQuery('');
   }
 
   /// Handle chat action (pin, mute, favorite, delete)
-  Future<void> _handleChatAction(
-    String action,
-    ConversationModel conversation,
-  ) async {
+  Future<void> _handleChatAction(String action, DmModel conversation) async {
     // Show delete confirmation if needed
     if (action == 'delete') {
-      final shouldDelete = await _showDeleteConfirmation(conversation.userName);
+      final shouldDelete = await _showDeleteConfirmation(
+        conversation.recipientName,
+      );
       if (shouldDelete != true) {
         return;
       }
     }
 
     await ref
-        .read(dmListProvider.notifier)
-        .handleChatAction(action, conversation);
+        .read(chatProvider.notifier)
+        .handleChatAction(action, conversation.conversationId, ChatType.dm);
     // Show snackbar feedback
     switch (action) {
       case 'pin':
@@ -111,14 +111,14 @@ class ChatsPageState extends ConsumerState<ChatsPage>
   }
 
   /// Show chat actions bottom sheet
-  Future<void> _showChatActions(ConversationModel conversation) async {
-    final dmState = ref.read(dmListProvider);
+  Future<void> _showChatActions(DmModel conversation) async {
+    final chatState = ref.read(chatProvider);
     final action = await ChatActionBottomSheet.show(
       context: context,
-      conversation: conversation,
-      isPinned: dmState.pinnedChats.contains(conversation.id),
-      isMuted: dmState.mutedChats.contains(conversation.id),
-      isFavorite: dmState.favoriteChats.contains(conversation.id),
+      dm: conversation,
+      isPinned: chatState.pinnedChats.contains(conversation.conversationId),
+      isMuted: chatState.mutedChats.contains(conversation.conversationId),
+      isFavorite: chatState.favoriteChats.contains(conversation.conversationId),
     );
 
     if (action != null) {
@@ -139,7 +139,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
   }
 
   void _refreshConversations() {
-    ref.read(dmListProvider.notifier).loadConversations();
+    ref.read(chatProvider.notifier).loadConvsFromServer();
   }
 
   // All state management and WebSocket handling is now done by dmListProvider
@@ -149,7 +149,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
     WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
     // Clear active conversation
-    ref.read(dmListProvider.notifier).setActiveConversation(null);
+    ref.read(chatProvider.notifier).setActiveConversation(null, null);
     super.dispose();
   }
 
@@ -159,14 +159,14 @@ class ChatsPageState extends ConsumerState<ChatsPage>
 
     // When app comes back to foreground, clear active conversation
     if (state == AppLifecycleState.resumed) {
-      ref.read(dmListProvider.notifier).setActiveConversation(null);
+      ref.read(chatProvider.notifier).setActiveConversation(null, null);
     }
   }
 
   /// Called when the page becomes visible (when user navigates to Chats tab)
   void onPageVisible() {
     // Silently refresh conversations without showing loading state
-    ref.read(dmListProvider.notifier).loadConversations(silent: true);
+    ref.read(chatProvider.notifier).loadConvsFromServer(silent: true);
   }
 
   @override
@@ -232,7 +232,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
       body: SearchableListLayout(
         searchBar: SearchableListBar(
           controller: _searchController,
-          hintText: 'Search chats...',
+          hintText: 'Search chats',
           onChanged: (value) => _onSearchChanged(),
           onClear: _clearSearch,
         ),
@@ -358,19 +358,19 @@ class ChatsPageState extends ConsumerState<ChatsPage>
   }
 
   Widget _buildChatsContent() {
-    final dmState = ref.watch(dmListProvider);
+    final chatState = ref.watch(chatProvider);
 
     // Show loading skeleton while loading
-    if (dmState.isLoading) {
+    if (chatState.isLoading) {
       return _buildSkeletonLoader();
     }
 
     // Get filtered conversations from provider
-    final conversationsToShow = dmState.filteredConversations;
+    final conversationsToShow = chatState.filteredConversations;
 
     // Show empty state if no conversations
     if (conversationsToShow.isEmpty) {
-      return dmState.searchQuery.isNotEmpty
+      return chatState.searchQuery.isNotEmpty
           ? _buildSearchEmptyState()
           : _buildEmptyState();
     }
@@ -379,8 +379,8 @@ class ChatsPageState extends ConsumerState<ChatsPage>
     return _buildChatsList(conversationsToShow);
   }
 
-  Widget _buildChatsList(List<ConversationModel> conversations) {
-    final dmState = ref.watch(dmListProvider);
+  Widget _buildChatsList(List<DmModel> conversations) {
+    final chatState = ref.watch(chatProvider);
 
     // Add safety check for empty conversations
     if (conversations.isEmpty) {
@@ -402,28 +402,40 @@ class ChatsPageState extends ConsumerState<ChatsPage>
           final conversation = conversations[index];
 
           // Add null safety check for conversation
-          if (conversation.userName.isEmpty) {
+          if (conversation.recipientName.isEmpty) {
             return Container(); // Skip invalid conversations
           }
 
-          final isTyping = dmState.typingUsers[conversation.id] ?? false;
-          final typingUserName = dmState.typingUserNames[conversation.id];
+          final typingUserIds =
+              chatState.typingConvUsers[conversation.conversationId] ?? [];
+          final isTyping = typingUserIds.isNotEmpty;
 
           return ChatListItem(
             conversation: conversation,
             isTyping: isTyping,
-            typingUserName: typingUserName,
-            isOnline: _userStatusService.isUserOnline(conversation.userId),
-            isPinned: dmState.pinnedChats.contains(conversation.id),
-            isMuted: dmState.mutedChats.contains(conversation.id),
-            isFavorite: dmState.favoriteChats.contains(conversation.id),
+            isOnline: _userStatusService.isUserOnline(conversation.recipientId),
+            isPinned: chatState.pinnedChats.contains(
+              conversation.conversationId,
+            ),
+            isMuted: chatState.mutedChats.contains(conversation.conversationId),
+            isFavorite: chatState.favoriteChats.contains(
+              conversation.conversationId,
+            ),
             onLongPress: () => _showChatActions(conversation),
-            conversationId: conversation.id,
+            conversationId: conversation.conversationId,
             onAvatarTap: () async {
               final result = await UserProfileModal.show(
                 context: context,
-                conversation: conversation,
-                isOnline: _userStatusService.isUserOnline(conversation.userId),
+                conversation: ConversationModel(
+                  id: conversation.conversationId,
+                  type: 'dm',
+                  createrId: conversation.recipientId,
+                  pinnedMessageId: null,
+                  createdAt: conversation.createdAt,
+                ),
+                isOnline: _userStatusService.isUserOnline(
+                  conversation.recipientId,
+                ),
               );
               // If chat was deleted, refresh the list
               if (result == true && mounted) {
@@ -433,35 +445,37 @@ class ChatsPageState extends ConsumerState<ChatsPage>
             onTap: () async {
               // Set this conversation as active and clear unread count
               ref
-                  .read(dmListProvider.notifier)
-                  .setActiveConversation(conversation.id);
+                  .read(chatProvider.notifier)
+                  .setActiveConversation(
+                    conversation.conversationId,
+                    ChatType.dm,
+                  );
 
               // Navigate to inner chat page
               await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) =>
-                      InnerChatPage(conversation: conversation),
+                  builder: (context) => InnerChatPage(dm: conversation),
                 ),
               );
 
               // Clear unread count again when returning from inner chat
               ref
-                  .read(dmListProvider.notifier)
-                  .clearUnreadCount(conversation.id);
+                  .read(chatProvider.notifier)
+                  .clearUnreadCount(conversation.conversationId, ChatType.dm);
 
               // Send inactive message before clearing active conversation
               try {
                 await _websocketService.sendMessage({
                   'type': 'inactive_in_conversation',
-                  'conversation_id': conversation.id,
+                  'conversation_id': conversation.conversationId,
                 });
               } catch (e) {
                 debugPrint('❌ Error sending inactive_in_conversation: $e');
               }
 
               // Clear active conversation when returning from inner chat
-              ref.read(dmListProvider.notifier).setActiveConversation(null);
+              ref.read(chatProvider.notifier).setActiveConversation(null, null);
             },
           );
         },
@@ -471,7 +485,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
 }
 
 class ChatListItem extends ConsumerWidget {
-  final ConversationModel conversation;
+  final DmModel conversation;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
   final VoidCallback? onAvatarTap;
@@ -564,6 +578,19 @@ class ChatListItem extends ConsumerWidget {
     // Handle media messages based on type or body
     final type = (messageType ?? lastMessageBody).toLowerCase();
     switch (type) {
+      case 'image':
+        return '📷 Photo';
+      case 'video':
+        return '📹 Video';
+      case 'audio':
+        return '🎵 Audio';
+      case 'document':
+        return '📎 Document';
+      case 'reply':
+        return '↩️ Reply';
+      case 'forwarded':
+        return '↪️ Forwarded message';
+      // Backward compatibility for old 'attachment' type
       case 'attachment':
         if (attachmentData != null && attachmentData.containsKey('category')) {
           final attachmentType = attachmentData['category'].toLowerCase();
@@ -603,7 +630,7 @@ class ChatListItem extends ConsumerWidget {
     final drafts = ref.watch(draftMessagesProvider);
     final draft = drafts[conversationId];
 
-    final hasUnreadMessages = conversation.unreadCount > 0 && !isMuted;
+    final hasUnreadMessages = (conversation.unreadCount ?? 0) > 0 && !isMuted;
 
     // Use draft if available, otherwise use last message
     String lastMessageBody;
@@ -616,10 +643,9 @@ class ChatListItem extends ConsumerWidget {
       lastMessageType = 'text';
       attachmentData = null;
     } else {
-      lastMessageBody =
-          conversation.metadata?.lastMessage.body ?? 'No messages yet';
-      lastMessageType = conversation.metadata?.lastMessage.type;
-      attachmentData = conversation.metadata?.lastMessage.attachmentData;
+      lastMessageBody = conversation.lastMessageBody ?? 'No messages yet';
+      lastMessageType = conversation.lastMessageType;
+      attachmentData = null; // DmModel doesn't have attachmentData in metadata
     }
 
     final lastMessageText = _formatLastMessageText(
@@ -627,8 +653,8 @@ class ChatListItem extends ConsumerWidget {
       lastMessageType,
       attachmentData,
     );
-    final timeText = conversation.metadata?.lastMessage.sentAt != null
-        ? _formatTime(conversation.metadata!.lastMessage.sentAt)
+    final timeText = conversation.lastMessageAt != null
+        ? _formatTime(conversation.lastMessageAt!)
         : _formatTime(conversation.createdAt);
 
     return Container(
@@ -660,7 +686,7 @@ class ChatListItem extends ConsumerWidget {
             ],
             Expanded(
               child: Text(
-                conversation.userName,
+                conversation.recipientName,
                 style: TextStyle(
                   fontWeight: hasUnreadMessages
                       ? FontWeight.bold
@@ -707,12 +733,12 @@ class ChatListItem extends ConsumerWidget {
         CircleAvatar(
           radius: 25,
           backgroundColor: Colors.teal[100],
-          backgroundImage: conversation.userProfilePic != null
-              ? CachedNetworkImageProvider(conversation.userProfilePic!)
+          backgroundImage: conversation.recipientProfilePic != null
+              ? CachedNetworkImageProvider(conversation.recipientProfilePic!)
               : null,
-          child: conversation.userProfilePic == null
+          child: conversation.recipientProfilePic == null
               ? Text(
-                  _getInitials(conversation.userName),
+                  _getInitials(conversation.recipientName),
                   style: const TextStyle(
                     color: Colors.teal,
                     fontWeight: FontWeight.bold,
@@ -722,7 +748,7 @@ class ChatListItem extends ConsumerWidget {
               : null,
         ),
         // Online status indicator - only show for DM conversations
-        if (conversation.isDM && isOnline)
+        if (isOnline)
           Positioned(
             right: 0,
             bottom: 0,
@@ -790,7 +816,7 @@ class ChatListItem extends ConsumerWidget {
               shape: BoxShape.circle,
             ),
             child: Text(
-              conversation.unreadCount.toString(),
+              (conversation.unreadCount ?? 0).toString(),
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 12,

@@ -203,9 +203,9 @@ class GroupListNotifier extends Notifier<GroupListState> {
 
     try {
       // Load groups
-      final groupResponse = await _userService.GetChatList('group');
+      final groupResponse = await _userService.getChatList('group');
       // Load communities
-      final communityResponse = await _userService.GetCommunityChatList();
+      final communityResponse = await _userService.getCommunityChatList();
 
       List<GroupModel> groups = [];
       List<CommunityModel> communities = [];

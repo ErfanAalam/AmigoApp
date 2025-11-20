@@ -10,8 +10,10 @@ class Users extends Table {
   IntColumn get id => integer()();
   TextColumn get name => text()();
   TextColumn get phone => text()();
-  TextColumn get role => text()();
+  TextColumn get role => text().nullable()();
+  BoolColumn get isOnline => boolean()();
   TextColumn get profilePic => text().nullable()();
+  BoolColumn get callAccess => boolean().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -45,17 +47,20 @@ class Calls extends Table {
 // Conversations Table
 class Conversations extends Table {
   IntColumn get id => integer()();
-  TextColumn get type => text()();
+  TextColumn get type => text()(); // 'dm' or 'group' or 'community_group'
   TextColumn get title => text().nullable()();
   IntColumn get createrId => integer()();
   IntColumn get unreadCount =>
       integer().withDefault(const Constant(0)).nullable()();
   IntColumn get lastMessageId => integer().nullable()();
+  IntColumn get pinnedMessageId => integer().nullable()();
   BoolColumn get isDeleted => boolean().withDefault(const Constant(false))();
   BoolColumn get isPinned => boolean().withDefault(const Constant(false))();
   BoolColumn get isFavorite => boolean().withDefault(const Constant(false))();
   BoolColumn get isMuted => boolean().withDefault(const Constant(false))();
   TextColumn get createdAt => text().nullable()();
+  TextColumn get updatedAt => text().nullable()();
+  BoolColumn get needSync => boolean().withDefault(const Constant(true))();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -70,7 +75,6 @@ class ConversationMembers extends Table {
   IntColumn get unreadCount => integer().withDefault(const Constant(0))();
   TextColumn get joinedAt => text().nullable()();
   TextColumn get removedAt => text().nullable()();
-  BoolColumn get deleted => boolean().withDefault(const Constant(false))();
   IntColumn get lastReadMessageId => integer().nullable()();
   IntColumn get lastDeliveredMessageId => integer().nullable()();
 }
@@ -90,8 +94,8 @@ class Messages extends Table {
   BoolColumn get isStarred => boolean().withDefault(const Constant(false))();
   BoolColumn get isReplied => boolean().withDefault(const Constant(false))();
   BoolColumn get isForwarded => boolean().withDefault(const Constant(false))();
-  TextColumn get sentAt => text()();
   BoolColumn get isDeleted => boolean().withDefault(const Constant(false))();
+  TextColumn get sentAt => text()();
 
   @override
   Set<Column> get primaryKey => {id};

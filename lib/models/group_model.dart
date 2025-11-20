@@ -1,60 +1,85 @@
 class GroupModel {
   final int conversationId;
   final String title;
-  final String type; // 'group'
-  final List<GroupMember> members;
+  final List<GroupMember>? members;
   final GroupMetadata? metadata;
+  final int? lastMessageId;
+  final String? lastMessageType;
+  final String? lastMessageBody;
   final String? lastMessageAt;
+  final int? pinnedMessageId;
   final String? role; // user's role in the group (admin/member)
   final int unreadCount;
+  final bool? isPinned;
+  final bool? isMuted;
+  final bool? isFavorite;
   final String joinedAt;
 
   GroupModel({
     required this.conversationId,
     required this.title,
-    required this.type,
-    required this.members,
+    this.members,
     this.metadata,
+    this.lastMessageId,
+    this.lastMessageType,
+    this.lastMessageBody,
     this.lastMessageAt,
     this.role,
-    required this.unreadCount,
+    this.unreadCount = 0,
+    this.isPinned,
+    this.isMuted,
+    this.isFavorite,
     required this.joinedAt,
+    this.pinnedMessageId,
   });
 
   factory GroupModel.fromJson(Map<String, dynamic> json) {
     return GroupModel(
       conversationId: json['conversationId'] ?? json['conversation_id'] ?? 0,
       title: json['title'] ?? '',
-      type: json['type'] ?? 'group',
-      members:
-          (json['members'] as List<dynamic>?)
-              ?.map((member) => GroupMember.fromJson(member))
-              .toList() ??
-          [],
+      members: (json['members'] as List<dynamic>?)
+          ?.map((member) => GroupMember.fromJson(member))
+          .toList(),
       metadata: json['metadata'] != null
           ? GroupMetadata.fromJson(json['metadata'])
           : null,
+      lastMessageId: json['lastMessageId'] ?? json['last_message_id'],
+      lastMessageType: json['lastMessageType'] ?? json['last_message_type'],
+      lastMessageBody: json['lastMessageBody'] ?? json['last_message_body'],
       lastMessageAt: json['lastMessageAt'] ?? json['last_message_at'],
-      role: json['role'],
-      unreadCount: json['unreadCount'] ?? json['unread_count'] ?? 0,
+      role: json['role'] ?? json['userRole'],
+      unreadCount:
+          json['unreadCount'] ??
+          json['unread_count'] ??
+          json['userUnreadCount'] ??
+          0,
+      isPinned: json['isPinned'] ?? json['is_pinned'],
+      isMuted: json['isMuted'] ?? json['is_muted'],
+      isFavorite: json['isFavorite'] ?? json['is_favorite'],
       joinedAt:
           json['joinedAt'] ??
           json['joined_at'] ??
+          json['userJoinedAt'] ??
           DateTime.now().toIso8601String(),
+      pinnedMessageId: json['pinnedMessageId'] ?? json['pinned_message_id'],
     );
   }
 
   // Helper to get member count
-  int get memberCount => members.length;
+  int get memberCount => members?.length ?? 0;
 
   // Helper to get display members (excluding current user for display)
   List<GroupMember> getDisplayMembers(int currentUserId) {
-    return members.where((member) => member.userId != currentUserId).toList();
+    return members
+            ?.where((member) => member.userId != currentUserId)
+            .toList() ??
+        [];
   }
 
   // Helper to check if user is admin
   bool isUserAdmin(int userId) {
-    final member = members.firstWhere(
+    if (members == null) return false;
+    final member = members!.firstWhere(
       (member) => member.userId == userId,
       orElse: () => GroupMember(userId: 0, name: '', role: 'member'),
     );
@@ -65,14 +90,56 @@ class GroupModel {
     return {
       'conversationId': conversationId,
       'title': title,
-      'type': type,
-      'members': members.map((member) => member.toJson()).toList(),
+      'members': members?.map((member) => member.toJson()).toList(),
       'metadata': metadata?.toJson(),
+      'lastMessageId': lastMessageId,
+      'lastMessageType': lastMessageType,
+      'lastMessageBody': lastMessageBody,
       'lastMessageAt': lastMessageAt,
       'role': role,
       'unreadCount': unreadCount,
+      'isPinned': isPinned,
+      'isMuted': isMuted,
+      'isFavorite': isFavorite,
       'joinedAt': joinedAt,
+      'pinnedMessageId': pinnedMessageId,
     };
+  }
+
+  GroupModel copyWith({
+    int? conversationId,
+    String? title,
+    List<GroupMember>? members,
+    GroupMetadata? metadata,
+    int? lastMessageId,
+    String? lastMessageType,
+    String? lastMessageBody,
+    String? lastMessageAt,
+    String? role,
+    int? unreadCount,
+    bool? isPinned,
+    bool? isMuted,
+    bool? isFavorite,
+    String? joinedAt,
+    int? pinnedMessageId,
+  }) {
+    return GroupModel(
+      conversationId: conversationId ?? this.conversationId,
+      title: title ?? this.title,
+      members: members ?? this.members,
+      metadata: metadata ?? this.metadata,
+      lastMessageId: lastMessageId ?? this.lastMessageId,
+      lastMessageType: lastMessageType ?? this.lastMessageType,
+      lastMessageBody: lastMessageBody ?? this.lastMessageBody,
+      lastMessageAt: lastMessageAt ?? this.lastMessageAt,
+      role: role ?? this.role,
+      unreadCount: unreadCount ?? this.unreadCount,
+      isPinned: isPinned ?? this.isPinned,
+      isMuted: isMuted ?? this.isMuted,
+      isFavorite: isFavorite ?? this.isFavorite,
+      joinedAt: joinedAt ?? this.joinedAt,
+      pinnedMessageId: pinnedMessageId ?? this.pinnedMessageId,
+    );
   }
 }
 
@@ -109,6 +176,22 @@ class GroupMember {
       'role': role,
       'joinedAt': joinedAt,
     };
+  }
+
+  GroupMember copyWith({
+    int? userId,
+    String? name,
+    String? profilePic,
+    String? role,
+    String? joinedAt,
+  }) {
+    return GroupMember(
+      userId: userId ?? this.userId,
+      name: name ?? this.name,
+      profilePic: profilePic ?? this.profilePic,
+      role: role ?? this.role,
+      joinedAt: joinedAt ?? this.joinedAt,
+    );
   }
 }
 
@@ -149,6 +232,22 @@ class GroupMetadata {
       'created_by': createdBy,
       'pinned_message': pinnedMessage?.toJson(),
     };
+  }
+
+  GroupMetadata copyWith({
+    GroupLastMessage? lastMessage,
+    int? totalMessages,
+    String? createdAt,
+    int? createdBy,
+    GroupPinnedMessage? pinnedMessage,
+  }) {
+    return GroupMetadata(
+      lastMessage: lastMessage ?? this.lastMessage,
+      totalMessages: totalMessages ?? this.totalMessages,
+      createdAt: createdAt ?? this.createdAt,
+      createdBy: createdBy ?? this.createdBy,
+      pinnedMessage: pinnedMessage ?? this.pinnedMessage,
+    );
   }
 }
 
@@ -198,6 +297,28 @@ class GroupLastMessage {
       'attachments': attachmentData,
     };
   }
+
+  GroupLastMessage copyWith({
+    int? id,
+    String? body,
+    String? type,
+    int? senderId,
+    String? senderName,
+    String? createdAt,
+    int? conversationId,
+    Map<String, dynamic>? attachmentData,
+  }) {
+    return GroupLastMessage(
+      id: id ?? this.id,
+      body: body ?? this.body,
+      type: type ?? this.type,
+      senderId: senderId ?? this.senderId,
+      senderName: senderName ?? this.senderName,
+      createdAt: createdAt ?? this.createdAt,
+      conversationId: conversationId ?? this.conversationId,
+      attachmentData: attachmentData ?? this.attachmentData,
+    );
+  }
 }
 
 // Helper class for group creation
@@ -209,6 +330,13 @@ class CreateGroupRequest {
 
   Map<String, dynamic> toJson() {
     return {'title': title, 'member_ids': memberIds};
+  }
+
+  CreateGroupRequest copyWith({String? title, List<int>? memberIds}) {
+    return CreateGroupRequest(
+      title: title ?? this.title,
+      memberIds: memberIds ?? this.memberIds,
+    );
   }
 }
 
@@ -230,6 +358,14 @@ class GroupMemberAction {
       'user_id': userId,
       if (role != null) 'role': role,
     };
+  }
+
+  GroupMemberAction copyWith({int? conversationId, int? userId, String? role}) {
+    return GroupMemberAction(
+      conversationId: conversationId ?? this.conversationId,
+      userId: userId ?? this.userId,
+      role: role ?? this.role,
+    );
   }
 }
 
@@ -254,6 +390,14 @@ class GroupPinnedMessage {
 
   Map<String, dynamic> toJson() {
     return {'user_id': userId, 'message_id': messageId, 'pinned_at': pinnedAt};
+  }
+
+  GroupPinnedMessage copyWith({int? userId, int? messageId, String? pinnedAt}) {
+    return GroupPinnedMessage(
+      userId: userId ?? this.userId,
+      messageId: messageId ?? this.messageId,
+      pinnedAt: pinnedAt ?? this.pinnedAt,
+    );
   }
 
   static int _parseToInt(dynamic value) {

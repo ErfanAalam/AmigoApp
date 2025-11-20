@@ -1,39 +1,96 @@
+import 'package:amigo/db/repositories/conversation_member.repo.dart';
+import 'package:amigo/db/repositories/user.repo.dart';
+import 'package:amigo/models/conversations.model.dart';
+import 'package:amigo/models/user_model.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../../../models/conversation_model.dart';
-import '../../../services/chat_preferences_service.dart';
-import '../../../api/chats.services.dart';
-import '../../../db/repositories/conversations_repository.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../providers/chat_provider.dart';
+import '../../../types/socket.type.dart';
+import '../../../utils/user.utils.dart';
 
-class DmDetailsScreen extends StatefulWidget {
+class DmDetailsScreen extends ConsumerStatefulWidget {
   final ConversationModel conversation;
 
   const DmDetailsScreen({super.key, required this.conversation});
 
   @override
-  State<DmDetailsScreen> createState() => _DmDetailsScreenState();
+  ConsumerState<DmDetailsScreen> createState() => _DmDetailsScreenState();
 }
 
-class _DmDetailsScreenState extends State<DmDetailsScreen> {
-  final ChatPreferencesService _chatPreferencesService =
-      ChatPreferencesService();
-  final ChatsServices _chatsServices = ChatsServices();
-  final ConversationsRepository _conversationsRepo = ConversationsRepository();
+class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
+  final ConversationMemberRepository _conversationMemberRepo =
+      ConversationMemberRepository();
+  final UserRepository _userRepo = UserRepository();
 
-  bool _isFavorite = false;
   bool _isLoading = false;
+  UserModel? _recipientUser;
 
   @override
   void initState() {
     super.initState();
-    _loadFavoriteStatus();
+    _loadRecipientInfo();
   }
 
-  Future<void> _loadFavoriteStatus() async {
-    final favorites = await _chatPreferencesService.getFavoriteChats();
-    setState(() {
-      _isFavorite = favorites.contains(widget.conversation.id);
-    });
+  Future<void> _loadRecipientInfo() async {
+    try {
+      // Try to get from chatProvider first (fastest)
+      final chatState = ref.read(chatProvider);
+      try {
+        final dm = chatState.dmList.firstWhere(
+          (dm) => dm.conversationId == widget.conversation.id,
+        );
+
+        // Use recipient info from DM model
+        final user = UserModel(
+          id: dm.recipientId,
+          name: dm.recipientName,
+          phone: dm.recipientPhone,
+          profilePic: dm.recipientProfilePic,
+          isOnline: dm.isRecipientOnline,
+        );
+        setState(() {
+          _recipientUser = user;
+        });
+        return;
+      } catch (e) {
+        // DM not found in provider, continue to fallback
+      }
+
+      // Fallback: Get conversation members to find recipient user
+      final currentUser = await UserUtils().getUserDetails();
+      final currentUserId = currentUser?.id;
+
+      final members = await _conversationMemberRepo
+          .getActiveMembersByConversationId(widget.conversation.id);
+
+      if (members.isNotEmpty && currentUserId != null) {
+        // Find the recipient user (the one that's not the current user)
+        for (final member in members) {
+          if (member.userId != currentUserId) {
+            final user = await _userRepo.getUserById(member.userId);
+            if (user != null) {
+              setState(() {
+                _recipientUser = user;
+              });
+              return;
+            }
+          }
+        }
+      }
+
+      // If still not found, use first member as fallback
+      if (members.isNotEmpty && _recipientUser == null) {
+        final user = await _userRepo.getUserById(members.first.userId);
+        if (user != null) {
+          setState(() {
+            _recipientUser = user;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading recipient info: $e');
+    }
   }
 
   String _formatDate(String dateString) {
@@ -54,26 +111,96 @@ class _DmDetailsScreenState extends State<DmDetailsScreen> {
     return words[0][0].toUpperCase();
   }
 
+  Future<void> _togglePin() async {
+    if (_isLoading) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final chatState = ref.read(chatProvider);
+      final isPinned = chatState.pinnedChats.contains(widget.conversation.id);
+      final action = isPinned ? 'unpin' : 'pin';
+
+      await ref.read(chatProvider.notifier).handleChatAction(
+            action,
+            widget.conversation.id,
+            ChatType.dm,
+          );
+
+      setState(() => _isLoading = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isPinned ? 'Chat unpinned' : 'Chat pinned to top',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to update pin status')),
+      );
+    }
+  }
+
+  Future<void> _toggleMute() async {
+    if (_isLoading) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final chatState = ref.read(chatProvider);
+      final isMuted = chatState.mutedChats.contains(widget.conversation.id);
+      final action = isMuted ? 'unmute' : 'mute';
+
+      await ref.read(chatProvider.notifier).handleChatAction(
+            action,
+            widget.conversation.id,
+            ChatType.dm,
+          );
+
+      setState(() => _isLoading = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isMuted ? 'Chat unmuted' : 'Chat muted',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to update mute status')),
+      );
+    }
+  }
+
   Future<void> _toggleFavorite() async {
     if (_isLoading) return;
 
     setState(() => _isLoading = true);
 
     try {
-      if (_isFavorite) {
-        await _chatPreferencesService.unfavoriteChat(widget.conversation.id);
-      } else {
-        await _chatPreferencesService.favoriteChat(widget.conversation.id);
-      }
-      setState(() {
-        _isFavorite = !_isFavorite;
-        _isLoading = false;
-      });
+      final chatState = ref.read(chatProvider);
+      final isFavorite = chatState.favoriteChats.contains(widget.conversation.id);
+      final action = isFavorite ? 'unfavorite' : 'favorite';
+
+      await ref.read(chatProvider.notifier).handleChatAction(
+            action,
+            widget.conversation.id,
+            ChatType.dm,
+          );
+
+      setState(() => _isLoading = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            _isFavorite ? 'Added to favorites' : 'Removed from favorites',
+            isFavorite ? 'Removed from favorites' : 'Added to favorites',
           ),
           duration: const Duration(seconds: 2),
         ),
@@ -87,12 +214,13 @@ class _DmDetailsScreenState extends State<DmDetailsScreen> {
   }
 
   Future<void> _deleteChat() async {
+    final recipientName = _recipientUser?.name ?? 'this user';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Chat'),
         content: Text(
-          'Are you sure you want to delete the chat with ${widget.conversation.userName}?',
+          'Are you sure you want to delete the chat with $recipientName?',
         ),
         actions: [
           TextButton(
@@ -110,19 +238,15 @@ class _DmDetailsScreenState extends State<DmDetailsScreen> {
 
     if (confirmed == true) {
       try {
-        final response = await _chatsServices.deleteDm(widget.conversation.id);
+        await ref.read(chatProvider.notifier).handleChatAction(
+              'delete',
+              widget.conversation.id,
+              ChatType.dm,
+            );
 
-        if (response['success']) {
-          await _chatPreferencesService.deleteChat(
-            widget.conversation.id,
-            widget.conversation.toJson(),
-          );
-          await _conversationsRepo.deleteConversation(widget.conversation.id);
-
-          if (mounted) {
-            // Return true to indicate chat was deleted
-            Navigator.pop(context, true);
-          }
+        if (mounted) {
+          // Return true to indicate chat was deleted
+          Navigator.pop(context, true);
         }
       } catch (e) {
         if (mounted) {
@@ -143,6 +267,15 @@ class _DmDetailsScreenState extends State<DmDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final chatState = ref.watch(chatProvider);
+    final isPinned = chatState.pinnedChats.contains(widget.conversation.id);
+    final isMuted = chatState.mutedChats.contains(widget.conversation.id);
+    final isFavorite = chatState.favoriteChats.contains(widget.conversation.id);
+
+    final recipientName = _recipientUser?.name ?? 'Unknown';
+    final recipientProfilePic = _recipientUser?.profilePic;
+    final isOnline = _recipientUser?.isOnline ?? false;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Chat Details'),
@@ -159,14 +292,12 @@ class _DmDetailsScreenState extends State<DmDetailsScreen> {
                 CircleAvatar(
                   radius: 50,
                   backgroundColor: Colors.teal[100],
-                  backgroundImage: widget.conversation.userProfilePic != null
-                      ? CachedNetworkImageProvider(
-                          widget.conversation.userProfilePic!,
-                        )
+                  backgroundImage: recipientProfilePic != null
+                      ? CachedNetworkImageProvider(recipientProfilePic)
                       : null,
-                  child: widget.conversation.userProfilePic == null
+                  child: recipientProfilePic == null
                       ? Text(
-                          _getInitials(widget.conversation.userName),
+                          _getInitials(recipientName),
                           style: TextStyle(
                             color: Colors.teal[700],
                             fontSize: 32,
@@ -177,7 +308,7 @@ class _DmDetailsScreenState extends State<DmDetailsScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  widget.conversation.userName,
+                  recipientName,
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
@@ -185,7 +316,7 @@ class _DmDetailsScreenState extends State<DmDetailsScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  widget.conversation.isOnline == true ? 'Online' : 'Offline',
+                  isOnline ? 'Online' : 'Offline',
                   style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                 ),
               ],
@@ -211,8 +342,20 @@ class _DmDetailsScreenState extends State<DmDetailsScreen> {
             onTap: _navigateToMedia,
           ),
           _buildActionTile(
-            icon: _isFavorite ? Icons.star : Icons.star_border,
-            title: _isFavorite ? 'Remove from favorites' : 'Add to favorites',
+            icon: isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+            title: isPinned ? 'Unpin chat' : 'Pin chat',
+            onTap: _togglePin,
+            isLoading: _isLoading,
+          ),
+          _buildActionTile(
+            icon: isMuted ? Icons.volume_off : Icons.volume_up_outlined,
+            title: isMuted ? 'Unmute chat' : 'Mute chat',
+            onTap: _toggleMute,
+            isLoading: _isLoading,
+          ),
+          _buildActionTile(
+            icon: isFavorite ? Icons.star : Icons.star_border,
+            title: isFavorite ? 'Remove from favorites' : 'Add to favorites',
             onTap: _toggleFavorite,
             isLoading: _isLoading,
           ),

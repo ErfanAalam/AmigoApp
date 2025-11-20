@@ -603,7 +603,7 @@ class CallService extends ChangeNotifier {
   }
 
   /// Handle WebSocket messages
-  void handleWebSocketMessage(Map<String, dynamic> message) async {
+  void handleWebSocketMessage(message) async {
     final type = message['type'] as String?;
     if (type == null) {
       return;

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:amigo/types/socket.type.dart';
 import 'package:flutter/widgets.dart';
 
 import '../cookie_service.dart';
@@ -41,8 +42,8 @@ class WebSocketService {
   final StreamController<WebSocketConnectionState> _connectionStateController =
       StreamController<WebSocketConnectionState>.broadcast();
 
-  final StreamController<Map<String, dynamic>> _messageController =
-      StreamController<Map<String, dynamic>>.broadcast();
+  final StreamController<WSMessage> _messageController =
+      StreamController<WSMessage>.broadcast();
 
   final StreamController<String> _errorController =
       StreamController<String>.broadcast();
@@ -53,7 +54,7 @@ class WebSocketService {
   Stream<WebSocketConnectionState> get connectionStateStream =>
       _connectionStateController.stream;
 
-  Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
+  Stream<WSMessage> get messageStream => _messageController.stream;
 
   Stream<String> get errorStream => _errorController.stream;
 
@@ -134,16 +135,12 @@ class WebSocketService {
   /// Handle incoming WebSocket messages
   void _handleMessage(dynamic message) {
     try {
-      final Map<String, dynamic> data;
+      final WSMessage data;
 
-      if (message is String) {
-        data = json.decode(message);
-      } else if (message is Map<String, dynamic>) {
-        data = message;
+      if (message is Map<String, dynamic>) {
+        data = WSMessage.fromJson(message);
       } else {
-        debugPrint(
-          '⚠️ Received unexpected message type: ${message.runtimeType}',
-        );
+        debugPrint('⚠️ Received unexpected websocket message: $message');
         return;
       }
 

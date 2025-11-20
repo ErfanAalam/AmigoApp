@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import '../db/repositories/messages_repository.dart';
-import '../models/message_model.dart';
 
 class MessageStorageHelpers {
   static final MessagesRepository _messagesRepo = MessagesRepository();

@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:amigo/db/repositories/message.repo.dart';
+import 'package:amigo/models/message.model.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import '../../models/message_model.dart';
 import '../../services/media_cache_service.dart';
-import '../../db/repositories/messages_repository.dart';
 import 'chat_helpers.dart';
 
 /// Audio playback manager for chat messages
@@ -39,7 +39,7 @@ class AudioPlaybackManager {
   final VoidCallback _setState;
   final Function(String)? _showErrorDialog;
   final MediaCacheService? _mediaCacheService;
-  final MessagesRepository? _messagesRepo;
+  final MessageRepository? _messagesRepo;
   final List<MessageModel>? _messages;
 
   // Callbacks
@@ -52,7 +52,7 @@ class AudioPlaybackManager {
     required VoidCallback setState,
     Function(String)? showErrorDialog,
     MediaCacheService? mediaCacheService,
-    MessagesRepository? messagesRepo,
+    MessageRepository? messagesRepo,
     List<MessageModel>? messages,
     void Function(String audioKey, Duration duration, Duration position)?
     onProgressUpdate,
@@ -501,7 +501,7 @@ class VoiceRecordingManager {
       // Get temporary directory for recording
       final Directory tempDir = await getTemporaryDirectory();
       final String recordingPath =
-          '${tempDir.path}/${_filePrefix}${DateTime.now().millisecondsSinceEpoch}.m4a';
+          '${tempDir.path}/$_filePrefix${DateTime.now().millisecondsSinceEpoch}.m4a';
 
       // Start recording with AAC MP4 format (most widely supported)
       await _recorder.startRecorder(

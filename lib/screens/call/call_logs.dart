@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'package:amigo/db/repositories/call_repository.dart';
+import 'package:amigo/db/repositories/call.repo.dart';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/call_model.dart';
@@ -101,10 +102,13 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
 
   Future<void> _loadCallHistory({bool showLoading = true}) async {
     final callRepo = CallRepository();
+    final currentUser = await UserUtils().getUserDetails();
 
     // Step 1: Load from local DB immediately (no loading spinner)
     try {
-      final List<CallModel> localCalls = await callRepo.getAllCalls();
+      final List<CallModel> localCalls = await callRepo.getAllCalls(
+        currentUser?.id ?? 0,
+      );
       if (mounted) {
         setState(() {
           _callHistory = localCalls.map(_mapCallModelToHistoryItem).toList();
@@ -136,7 +140,7 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
             .toList();
 
         // Save to local DB
-        await callRepo.insertOrUpdateCallList(calls);
+        await callRepo.insertCalls(calls);
 
         // Update UI with fresh data from server
         if (mounted) {

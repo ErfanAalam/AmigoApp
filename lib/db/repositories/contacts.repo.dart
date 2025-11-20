@@ -34,8 +34,8 @@ class ContactsRepository {
         phone: contact.phone,
         role: 'User', // Default role since Contacts table doesn't have role
         profilePic: contact.profilePic,
-        callAccess:
-            false, // Default since Contacts table doesn't have callAccess
+        isOnline: false,
+        callAccess: false,
       );
     }).toList();
   }

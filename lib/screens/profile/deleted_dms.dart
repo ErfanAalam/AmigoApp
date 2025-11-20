@@ -1,6 +1,6 @@
+import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../../services/chat_preferences_service.dart';
 import '../../api/chats.services.dart';
 import '../../api/user.service.dart';
 
@@ -12,8 +12,7 @@ class DeletedChatsPage extends StatefulWidget {
 }
 
 class _DeletedChatsPageState extends State<DeletedChatsPage> {
-  final ChatPreferencesService _chatPreferencesService =
-      ChatPreferencesService();
+  final ConversationRepository _conversationRepo = ConversationRepository();
   final ChatsServices _chatsServices = ChatsServices();
   final UserService _userService = UserService();
   List<dynamic> _deletedChats = [];
@@ -27,7 +26,7 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
 
   Future<void> _loadDeletedChats() async {
     try {
-      final deletedChats = await _userService.GetChatList('deleted_dm');
+      final deletedChats = await _userService.getChatList('deleted_dm');
 
       if (mounted) {
         setState(() {
@@ -47,9 +46,8 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
 
   Future<void> _restoreChat(Map<String, dynamic> chatData) async {
     try {
-      print('conversationId: $chatData');
       final conversationId = chatData['conversationId'] as int;
-      await _chatPreferencesService.restoreChat(conversationId);
+      await _conversationRepo.markAsDeleted(conversationId, false);
       await _chatsServices.reviveChat(conversationId);
 
       setState(() {

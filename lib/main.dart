@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:amigo/db/repositories/conversations.repo.dart';
+import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/material.dart';
@@ -29,12 +31,8 @@ import 'widgets/call_manager.dart';
 import 'api/api_service.dart';
 import 'utils/navigation_helper.dart';
 import 'utils/ringing_tone.dart';
-import 'models/conversation_model.dart';
 import 'models/group_model.dart';
-import 'db/repositories/conversations_repository.dart';
-import 'db/repositories/groups_repository.dart';
 import 'api/user.service.dart';
-import 'db/repositories/user_repository.dart';
 import 'widgets/loading_dots_animation.dart';
 
 void main() async {
@@ -86,7 +84,6 @@ class _MyAppState extends material.State<MyApp> {
   final NotificationService _notificationService = NotificationService();
   final ApiService _apiService = ApiService();
   final UserService _userService = UserService();
-  final UserRepository _userRepo = UserRepository();
   bool _isLoading = true;
   bool _isAuthenticated = false;
   StreamSubscription? _intentDataStreamSubscription;
@@ -298,23 +295,26 @@ class _MyAppState extends material.State<MyApp> {
   ) async {
     try {
       // First, try to get it as a DM conversation
-      final conversationsRepo = ConversationsRepository();
-      final conversation = await conversationsRepo.getConversationById(
+      final conversationsRepo = ConversationRepository();
+      final convType = await conversationsRepo.getConversationTypeById(
         conversationId,
       );
-
-      if (conversation != null) {
-        _navigateToDM(conversation);
-        return;
-      }
-
-      // If not found as DM, try to get it as a group
-      final groupsRepo = GroupsRepository();
-      final group = await groupsRepo.getGroupById(conversationId);
-
-      if (group != null) {
-        _navigateToGroup(group);
-        return;
+      if (convType != null && convType == 'dm') {
+        final dm = await conversationsRepo.getDmByConversationId(
+          conversationId,
+        );
+        if (dm != null) {
+          _navigateToDM(dm);
+          return;
+        }
+      } else if (convType != null && convType == 'group') {
+        final group = await conversationsRepo.getGroupWithMembersByConvId(
+          conversationId,
+        );
+        if (group != null) {
+          _navigateToGroup(group);
+          return;
+        }
       }
     } catch (e) {
       debugPrint('❌ Error fetching conversation');
@@ -322,13 +322,11 @@ class _MyAppState extends material.State<MyApp> {
   }
 
   /// Navigate to DM conversation
-  void _navigateToDM(ConversationModel conversation) {
+  void _navigateToDM(DmModel dm) {
     if (NavigationHelper.navigatorKey.currentContext != null) {
-      material.Navigator.of(NavigationHelper.navigatorKey.currentContext!).push(
-        material.MaterialPageRoute(
-          builder: (_) => InnerChatPage(conversation: conversation),
-        ),
-      );
+      material.Navigator.of(
+        NavigationHelper.navigatorKey.currentContext!,
+      ).push(material.MaterialPageRoute(builder: (_) => InnerChatPage(dm: dm)));
     } else {
       debugPrint('❌ Navigator context is null, cannot navigate');
     }

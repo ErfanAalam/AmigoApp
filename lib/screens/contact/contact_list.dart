@@ -1,18 +1,19 @@
 // import 'dart:convert';
-import 'package:amigo/db/repositories/contacts_repository.dart';
+import 'package:amigo/db/repositories/contacts.repo.dart';
+import 'package:amigo/db/repositories/conversation_member.repo.dart';
+import 'package:amigo/db/repositories/conversations.repo.dart';
+import 'package:amigo/db/repositories/user.repo.dart';
+import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/screens/chat/dm/messaging.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/material.dart' as material;
 import 'package:flutter_contacts/flutter_contacts.dart';
 import '../../models/contact_model.dart';
-import '../../models/conversation_model.dart';
 import '../../models/user_model.dart';
 import '../../services/contact_service.dart';
 import '../../api/user.service.dart';
 import '../../api/chats.services.dart';
 import '../../services/socket/websocket_service.dart';
-import '../home_layout.dart';
 
 class ContactsPage extends StatefulWidget {
   const ContactsPage({super.key});
@@ -25,7 +26,12 @@ class _ContactsPageState extends State<ContactsPage>
     with AutomaticKeepAliveClientMixin, TickerProviderStateMixin {
   final ContactService _contactService = ContactService();
   final WebSocketService _websocketService = WebSocketService();
+  final UserRepository _userRepository = UserRepository();
   final ContactsRepository _contactsRepository = ContactsRepository();
+  final ConversationRepository _conversationRepository =
+      ConversationRepository();
+  final ConversationMemberRepository _conversationMemberRepository =
+      ConversationMemberRepository();
   List<ContactModel> _contacts = [];
   List<UserModel> _availableUsers = [];
   List<UserModel> _filteredUsers = [];
@@ -299,36 +305,62 @@ class _ContactsPageState extends State<ContactsPage>
     final response = await _chatsServices.createChat(user.id.toString());
     if (response['success'] && response['data'] != null) {
       try {
+        // store the recipient info in the user table
+        await _userRepository.insertUser(user);
+
         // Create ConversationModel from the response
         final conversationData = response['data'];
+        final dm = DmModel(
+          conversationId: conversationData['id'],
+          recipientId: user.id,
+          recipientName: user.name,
+          recipientPhone: user.phone,
+          recipientProfilePic: user.profilePic,
+          unreadCount: 0,
+          isRecipientOnline: user.isOnline,
+          createdAt: conversationData['created_at'],
+        );
+
         final conversation = ConversationModel(
           id: conversationData['id'],
           type: 'dm',
           unreadCount: 0,
-          createdAt: DateTime.now().toIso8601String(),
-          userId: user.id,
-          userName: user.name,
-          userProfilePic: user.profilePic,
+          pinnedMessageId: null,
+          createrId: conversationData['creater_id'],
+          createdAt: conversationData['created_at'],
         );
 
-        await _websocketService.sendMessage({
-          'type': 'join_conversation',
-          'conversation_id': conversationData['id'],
-          'data': {
-            'recipient_id': [user.id],
-          },
-        });
+        // store the conversation in local db
+        await _conversationRepository.insertConversations([conversation]);
 
-        await _websocketService.sendMessage({
-          'type': 'active_in_conversation',
-          'conversation_id': conversationData['id'],
-        });
+        final receiverMember = ConversationMemberModel(
+          conversationId: conversationData['id'],
+          userId: user.id,
+          role: 'member',
+          joinedAt: conversationData['created_at'],
+        );
+
+        // Store both conversation members in SQLite
+        await _conversationMemberRepository.insertConversationMembers([
+          // currentUserMember,
+          receiverMember,
+        ]);
+
+        final userToSave = UserModel(
+          id: user.id,
+          name: user.name,
+          phone: user.phone,
+          role: user.role,
+          profilePic: user.profilePic,
+          isOnline: user.isOnline,
+          callAccess: user.callAccess,
+        );
+
+        await _userRepository.insertUser(userToSave);
 
         Navigator.push(
           context,
-          MaterialPageRoute(
-            builder: (context) => InnerChatPage(conversation: conversation),
-          ),
+          MaterialPageRoute(builder: (context) => InnerChatPage(dm: dm)),
         );
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(

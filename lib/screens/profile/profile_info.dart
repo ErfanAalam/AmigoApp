@@ -1,4 +1,5 @@
 import 'package:amigo/api/user.service.dart';
+import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/models/user_model.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -11,7 +12,6 @@ import '../auth/login_screen.dart';
 import 'edit_profile.dart';
 import 'deleted_dms.dart';
 import '../../api/api_service.dart';
-import '../../services/chat_preferences_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:drift_db_viewer/drift_db_viewer.dart';
 import '../../db/sqlite.db.dart';
@@ -28,10 +28,9 @@ class _ProfilePageState extends State<ProfilePage> {
   final AuthService _authService = AuthService();
   // final CookieService _cookieService = CookieService();
   final UserService _userService = UserService();
+  final ConversationRepository _conversationRepo = ConversationRepository();
   final ImagePicker _picker = ImagePicker();
   final ApiService _apiService = ApiService();
-  final ChatPreferencesService _chatPreferencesService =
-      ChatPreferencesService();
 
   Map<String, dynamic>? userData;
   bool isLoading = true;
@@ -51,7 +50,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> _loadDeletedChatsCount() async {
     try {
-      final deletedChats = await _chatPreferencesService.getDeletedChats();
+      final deletedChats = await _conversationRepo.getAllDeletedDms();
       if (mounted) {
         setState(() {
           deletedChatsCount = deletedChats.length;

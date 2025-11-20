@@ -159,7 +159,7 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
     }
 
     try {
-      final response = await _userService.GetChatList('community_group');
+      final response = await _userService.getChatList('community_group');
 
       if (response['success']) {
         final dynamic responseData = response['data'];

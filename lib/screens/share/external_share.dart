@@ -126,7 +126,7 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
         debugPrint('⚠️ Error loading from local DB: $localError');
       }
 
-      final response = await _userService.GetChatList('all');
+      final response = await _userService.getChatList('all');
 
       if (response['success'] == true && response['data'] != null) {
         final dynamic responseData = response['data'];

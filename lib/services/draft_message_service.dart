@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class DraftMessageService {
@@ -35,7 +36,7 @@ class DraftMessageService {
 
       await _prefs!.setString(_draftMessagesKey, json.encode(drafts));
     } catch (e) {
-      print('❌ Error saving draft: $e');
+      debugPrint('❌ Error saving draft');
     }
   }
 
@@ -49,7 +50,7 @@ class DraftMessageService {
       final drafts = Map<String, String>.from(json.decode(data));
       return drafts[conversationId.toString()];
     } catch (e) {
-      print('❌ Error getting draft: $e');
+      debugPrint('❌ Error getting draft');
       return null;
     }
   }
@@ -66,7 +67,7 @@ class DraftMessageService {
 
       await _prefs!.setString(_draftMessagesKey, json.encode(drafts));
     } catch (e) {
-      print('❌ Error removing draft: $e');
+      debugPrint('❌ Error removing draft');
     }
   }
 
@@ -80,9 +81,8 @@ class DraftMessageService {
       final draftsMap = Map<String, String>.from(json.decode(data));
       return draftsMap.map((key, value) => MapEntry(int.parse(key), value));
     } catch (e) {
-      print('❌ Error getting all drafts: $e');
+      debugPrint('❌ Error getting all drafts');
       return {};
     }
   }
 }
-

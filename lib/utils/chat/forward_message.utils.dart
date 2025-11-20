@@ -31,7 +31,7 @@ Future<void> loadAvailableConversations(
   config.setIsLoading(true);
 
   try {
-    final response = await config.userService.GetChatList('all');
+    final response = await config.userService.getChatList('all');
 
     if (response['success'] == true && response['data'] != null) {
       final dynamic responseData = response['data'];

@@ -47,11 +47,15 @@ class UserService {
     }
   }
 
-  Future<Map<String, dynamic>> GetChatList(String type) async {
+  Future<Map<String, dynamic>> getChatList(String type) async {
     try {
       final response = await _apiService.authenticatedGet(
         '/chat/get-chat-list/$type',
       );
+
+      if (response.data is String) {
+        return jsonDecode(response.data as String);
+      }
       return response.data;
     } catch (e) {
       return {
@@ -62,7 +66,7 @@ class UserService {
     }
   }
 
-  Future<Map<String, dynamic>> GetCommunityChatList() async {
+  Future<Map<String, dynamic>> getCommunityChatList() async {
     try {
       final response = await _apiService.authenticatedGet(
         '/community/list-connected-communities',
