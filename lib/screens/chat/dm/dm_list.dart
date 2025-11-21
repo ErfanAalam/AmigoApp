@@ -426,12 +426,16 @@ class ChatsPageState extends ConsumerState<ChatsPage>
             onAvatarTap: () async {
               final result = await UserProfileModal.show(
                 context: context,
-                conversation: ConversationModel(
-                  id: conversation.conversationId,
-                  type: 'dm',
-                  createrId: conversation.recipientId,
-                  pinnedMessageId: null,
+                dm: DmModel(
+                  conversationId: conversation.conversationId,
+                  recipientId: conversation.recipientId,
+                  recipientName: conversation.recipientName,
+                  recipientPhone: conversation.recipientPhone,
+                  recipientProfilePic: conversation.recipientProfilePic,
+                  isRecipientOnline: conversation.isRecipientOnline,
                   createdAt: conversation.createdAt,
+                  lastMessageAt: conversation.lastMessageAt,
+                  lastMessageBody: conversation.lastMessageBody,
                 ),
                 isOnline: _userStatusService.isUserOnline(
                   conversation.recipientId,
@@ -463,17 +467,6 @@ class ChatsPageState extends ConsumerState<ChatsPage>
               ref
                   .read(chatProvider.notifier)
                   .clearUnreadCount(conversation.conversationId, ChatType.dm);
-
-              // Send inactive message before clearing active conversation
-              try {
-                await _websocketService.sendMessage({
-                  'type': 'inactive_in_conversation',
-                  'conversation_id': conversation.conversationId,
-                });
-              } catch (e) {
-                debugPrint('❌ Error sending inactive_in_conversation: $e');
-              }
-
               // Clear active conversation when returning from inner chat
               ref.read(chatProvider.notifier).setActiveConversation(null, null);
             },

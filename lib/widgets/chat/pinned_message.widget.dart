@@ -1,14 +1,12 @@
+import 'package:amigo/models/message.model.dart';
+import 'package:amigo/utils/chat/chat_helpers.utils.dart';
 import 'package:flutter/material.dart';
-import '../../models/message_model.dart';
-import '../../utils/chat/chat_helpers.dart';
 
 /// Pinned Message Section Widget for both DM and group chats
 /// Displays a pinned message with ability to scroll to it or unpin it
 class PinnedMessageSection extends StatelessWidget {
-  final MessageModel pinnedMessage;
+  final MessageModel? pinnedMessage;
   final int? currentUserId;
-  final int? conversationUserId; // For DM fallback logic
-  final bool isGroupChat;
   final VoidCallback onTap;
   final VoidCallback onUnpin;
 
@@ -16,28 +14,20 @@ class PinnedMessageSection extends StatelessWidget {
     super.key,
     required this.pinnedMessage,
     required this.currentUserId,
-    this.conversationUserId,
-    required this.isGroupChat,
     required this.onTap,
     required this.onUnpin,
   });
 
   /// Determine if pinned message is from current user
   bool get _isMyMessage {
-    if (isGroupChat) {
-      // Group chat: simple check
-      return currentUserId != null && pinnedMessage.senderId == currentUserId;
-    } else {
-      // DM chat: more complex logic with fallback
-      return currentUserId != null
-          ? pinnedMessage.senderId == currentUserId
-          : pinnedMessage.senderId != conversationUserId;
-    }
+    return currentUserId != null && pinnedMessage?.senderId == currentUserId;
   }
 
   @override
   Widget build(BuildContext context) {
-    final messageTime = ChatHelpers.formatMessageTime(pinnedMessage.createdAt);
+    final messageTime = ChatHelpers.formatMessageTime(
+      pinnedMessage?.sentAt ?? '',
+    );
 
     return GestureDetector(
       onTap: onTap,
@@ -76,7 +66,7 @@ class PinnedMessageSection extends StatelessWidget {
                   Row(
                     children: [
                       Text(
-                        _isMyMessage ? 'You' : pinnedMessage.senderName,
+                        _isMyMessage ? 'You' : pinnedMessage?.senderName ?? '',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           color: Colors.blue[800],
@@ -94,7 +84,7 @@ class PinnedMessageSection extends StatelessWidget {
 
                   // Message text
                   Text(
-                    pinnedMessage.body,
+                    pinnedMessage?.body ?? '',
                     style: TextStyle(
                       color: Colors.grey[800],
                       fontSize: 14,

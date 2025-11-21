@@ -390,21 +390,20 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
 
                 // Navigate to inner group chat page
                 // Convert GroupModel to ConversationModel for InnerGroupChatPage
-                final conversationModel = ConversationModel(
-                  id: item.conversationId,
-                  type: 'group',
-                  title: item.title,
-                  createrId: (item.members?.isNotEmpty ?? false)
-                      ? item.members![0].userId
-                      : 0,
-                  pinnedMessageId: null,
-                  createdAt: item.joinedAt,
-                );
+                // final conversationModel = ConversationModel(
+                //   id: item.conversationId,
+                //   type: 'group',
+                //   title: item.title,
+                //   createrId: (item.members?.isNotEmpty ?? false)
+                //       ? item.members![0].userId
+                //       : 0,
+                //   pinnedMessageId: null,
+                //   createdAt: item.joinedAt,
+                // );
                 final result = await Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) =>
-                        InnerGroupChatPage(group: conversationModel),
+                    builder: (context) => InnerGroupChatPage(group: item),
                   ),
                 );
 
@@ -419,16 +418,6 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
                 ref
                     .read(chatProvider.notifier)
                     .clearUnreadCount(item.conversationId, ChatType.group);
-
-                // Send inactive message before clearing active conversation
-                try {
-                  await _websocketService.sendMessage({
-                    'type': 'inactive_in_conversation',
-                    'conversation_id': item.conversationId,
-                  });
-                } catch (e) {
-                  debugPrint('❌ Error sending inactive_in_conversation: $e');
-                }
 
                 // Clear active conversation when returning from inner chat
                 ref

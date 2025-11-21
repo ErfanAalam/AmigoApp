@@ -1,21 +1,17 @@
+import 'package:amigo/models/conversations.model.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../../models/conversation_model.dart';
 import '../../screens/chat/dm/dm_details.dart';
 
 class UserProfileModal extends StatelessWidget {
-  final ConversationModel conversation;
+  final DmModel dm;
   final bool? isOnline;
 
-  const UserProfileModal({
-    super.key,
-    required this.conversation,
-    this.isOnline,
-  });
+  const UserProfileModal({super.key, required this.dm, this.isOnline});
 
   static Future<bool?> show({
     required BuildContext context,
-    required ConversationModel conversation,
+    required DmModel dm,
     bool? isOnline,
   }) {
     return showDialog<bool>(
@@ -24,7 +20,7 @@ class UserProfileModal extends StatelessWidget {
       builder: (context) => Dialog(
         backgroundColor: Colors.transparent,
         insetPadding: const EdgeInsets.symmetric(horizontal: 20),
-        child: UserProfileModal(conversation: conversation, isOnline: isOnline),
+        child: UserProfileModal(dm: dm, isOnline: isOnline),
       ),
     );
   }
@@ -69,8 +65,7 @@ class UserProfileModal extends StatelessWidget {
                     final result = await Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) =>
-                            DmDetailsScreen(conversation: conversation),
+                        builder: (context) => DmDetailsScreen(dm: dm),
                       ),
                     );
                     // If chat was deleted, close modal and return true
@@ -90,12 +85,12 @@ class UserProfileModal extends StatelessWidget {
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(20),
-                  child: conversation.userProfilePic != null
+                  child: dm.recipientProfilePic != null
                       ? InteractiveViewer(
                           minScale: 0.5,
                           maxScale: 4.0,
                           child: CachedNetworkImage(
-                            imageUrl: conversation.userProfilePic!,
+                            imageUrl: dm.recipientProfilePic!,
                             width: 350,
                             height: 350,
                             fit: BoxFit.cover,
@@ -113,7 +108,7 @@ class UserProfileModal extends StatelessWidget {
                               color: Colors.teal[100],
                               child: Center(
                                 child: Text(
-                                  _getInitials(conversation.userName),
+                                  _getInitials(dm.recipientName!),
                                   style: TextStyle(
                                     color: Colors.teal[700],
                                     fontSize: 64,
@@ -133,7 +128,7 @@ class UserProfileModal extends StatelessWidget {
                           ),
                           child: Center(
                             child: Text(
-                              _getInitials(conversation.userName),
+                              _getInitials(dm.recipientName!),
                               style: TextStyle(
                                 color: Colors.teal[700],
                                 fontSize: 64,
@@ -166,7 +161,7 @@ class UserProfileModal extends StatelessWidget {
             child: Column(
               children: [
                 Text(
-                  conversation.userName,
+                  dm.recipientName!,
                   style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,

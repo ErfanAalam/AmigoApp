@@ -155,11 +155,6 @@ class _MyAppState extends material.State<MyApp> {
         // Connect to WebSocket and wait for connection
         await _websocketService.connect();
 
-        // // Send FCM token to backend
-        // final userId = await _authService.getCurrentUserId();
-        // if (userId != null) {
-        // await _notificationService.sendTokenToBackend(userId.toString());
-        // }
         final appVersion = await UserUtils().getAppVersion();
         await _userService.updateUser({'app_version': appVersion});
 

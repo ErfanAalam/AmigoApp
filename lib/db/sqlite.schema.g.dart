@@ -3395,6 +3395,17 @@ class $MessageStatusModelTable extends MessageStatusModel
       'PRIMARY KEY AUTOINCREMENT',
     ),
   );
+  static const VerificationMeta _conversationIdMeta = const VerificationMeta(
+    'conversationId',
+  );
+  @override
+  late final GeneratedColumn<int> conversationId = GeneratedColumn<int>(
+    'conversation_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
   static const VerificationMeta _messageIdMeta = const VerificationMeta(
     'messageId',
   );
@@ -3438,6 +3449,7 @@ class $MessageStatusModelTable extends MessageStatusModel
   @override
   List<GeneratedColumn> get $columns => [
     id,
+    conversationId,
     messageId,
     userId,
     deliveredAt,
@@ -3457,6 +3469,17 @@ class $MessageStatusModelTable extends MessageStatusModel
     final data = instance.toColumns(true);
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('conversation_id')) {
+      context.handle(
+        _conversationIdMeta,
+        conversationId.isAcceptableOrUnknown(
+          data['conversation_id']!,
+          _conversationIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_conversationIdMeta);
     }
     if (data.containsKey('message_id')) {
       context.handle(
@@ -3502,6 +3525,10 @@ class $MessageStatusModelTable extends MessageStatusModel
         DriftSqlType.bigInt,
         data['${effectivePrefix}id'],
       )!,
+      conversationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}conversation_id'],
+      )!,
       messageId: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}message_id'],
@@ -3530,12 +3557,14 @@ class $MessageStatusModelTable extends MessageStatusModel
 class MessageStatusModelData extends DataClass
     implements Insertable<MessageStatusModelData> {
   final BigInt id;
+  final int conversationId;
   final int messageId;
   final int userId;
   final String? deliveredAt;
   final String? readAt;
   const MessageStatusModelData({
     required this.id,
+    required this.conversationId,
     required this.messageId,
     required this.userId,
     this.deliveredAt,
@@ -3545,6 +3574,7 @@ class MessageStatusModelData extends DataClass
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<BigInt>(id);
+    map['conversation_id'] = Variable<int>(conversationId);
     map['message_id'] = Variable<int>(messageId);
     map['user_id'] = Variable<int>(userId);
     if (!nullToAbsent || deliveredAt != null) {
@@ -3559,6 +3589,7 @@ class MessageStatusModelData extends DataClass
   MessageStatusModelCompanion toCompanion(bool nullToAbsent) {
     return MessageStatusModelCompanion(
       id: Value(id),
+      conversationId: Value(conversationId),
       messageId: Value(messageId),
       userId: Value(userId),
       deliveredAt: deliveredAt == null && nullToAbsent
@@ -3577,6 +3608,7 @@ class MessageStatusModelData extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return MessageStatusModelData(
       id: serializer.fromJson<BigInt>(json['id']),
+      conversationId: serializer.fromJson<int>(json['conversationId']),
       messageId: serializer.fromJson<int>(json['messageId']),
       userId: serializer.fromJson<int>(json['userId']),
       deliveredAt: serializer.fromJson<String?>(json['deliveredAt']),
@@ -3588,6 +3620,7 @@ class MessageStatusModelData extends DataClass
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<BigInt>(id),
+      'conversationId': serializer.toJson<int>(conversationId),
       'messageId': serializer.toJson<int>(messageId),
       'userId': serializer.toJson<int>(userId),
       'deliveredAt': serializer.toJson<String?>(deliveredAt),
@@ -3597,12 +3630,14 @@ class MessageStatusModelData extends DataClass
 
   MessageStatusModelData copyWith({
     BigInt? id,
+    int? conversationId,
     int? messageId,
     int? userId,
     Value<String?> deliveredAt = const Value.absent(),
     Value<String?> readAt = const Value.absent(),
   }) => MessageStatusModelData(
     id: id ?? this.id,
+    conversationId: conversationId ?? this.conversationId,
     messageId: messageId ?? this.messageId,
     userId: userId ?? this.userId,
     deliveredAt: deliveredAt.present ? deliveredAt.value : this.deliveredAt,
@@ -3611,6 +3646,9 @@ class MessageStatusModelData extends DataClass
   MessageStatusModelData copyWithCompanion(MessageStatusModelCompanion data) {
     return MessageStatusModelData(
       id: data.id.present ? data.id.value : this.id,
+      conversationId: data.conversationId.present
+          ? data.conversationId.value
+          : this.conversationId,
       messageId: data.messageId.present ? data.messageId.value : this.messageId,
       userId: data.userId.present ? data.userId.value : this.userId,
       deliveredAt: data.deliveredAt.present
@@ -3624,6 +3662,7 @@ class MessageStatusModelData extends DataClass
   String toString() {
     return (StringBuffer('MessageStatusModelData(')
           ..write('id: $id, ')
+          ..write('conversationId: $conversationId, ')
           ..write('messageId: $messageId, ')
           ..write('userId: $userId, ')
           ..write('deliveredAt: $deliveredAt, ')
@@ -3633,12 +3672,14 @@ class MessageStatusModelData extends DataClass
   }
 
   @override
-  int get hashCode => Object.hash(id, messageId, userId, deliveredAt, readAt);
+  int get hashCode =>
+      Object.hash(id, conversationId, messageId, userId, deliveredAt, readAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is MessageStatusModelData &&
           other.id == this.id &&
+          other.conversationId == this.conversationId &&
           other.messageId == this.messageId &&
           other.userId == this.userId &&
           other.deliveredAt == this.deliveredAt &&
@@ -3648,12 +3689,14 @@ class MessageStatusModelData extends DataClass
 class MessageStatusModelCompanion
     extends UpdateCompanion<MessageStatusModelData> {
   final Value<BigInt> id;
+  final Value<int> conversationId;
   final Value<int> messageId;
   final Value<int> userId;
   final Value<String?> deliveredAt;
   final Value<String?> readAt;
   const MessageStatusModelCompanion({
     this.id = const Value.absent(),
+    this.conversationId = const Value.absent(),
     this.messageId = const Value.absent(),
     this.userId = const Value.absent(),
     this.deliveredAt = const Value.absent(),
@@ -3661,14 +3704,17 @@ class MessageStatusModelCompanion
   });
   MessageStatusModelCompanion.insert({
     this.id = const Value.absent(),
+    required int conversationId,
     required int messageId,
     required int userId,
     this.deliveredAt = const Value.absent(),
     this.readAt = const Value.absent(),
-  }) : messageId = Value(messageId),
+  }) : conversationId = Value(conversationId),
+       messageId = Value(messageId),
        userId = Value(userId);
   static Insertable<MessageStatusModelData> custom({
     Expression<BigInt>? id,
+    Expression<int>? conversationId,
     Expression<int>? messageId,
     Expression<int>? userId,
     Expression<String>? deliveredAt,
@@ -3676,6 +3722,7 @@ class MessageStatusModelCompanion
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
+      if (conversationId != null) 'conversation_id': conversationId,
       if (messageId != null) 'message_id': messageId,
       if (userId != null) 'user_id': userId,
       if (deliveredAt != null) 'delivered_at': deliveredAt,
@@ -3685,6 +3732,7 @@ class MessageStatusModelCompanion
 
   MessageStatusModelCompanion copyWith({
     Value<BigInt>? id,
+    Value<int>? conversationId,
     Value<int>? messageId,
     Value<int>? userId,
     Value<String?>? deliveredAt,
@@ -3692,6 +3740,7 @@ class MessageStatusModelCompanion
   }) {
     return MessageStatusModelCompanion(
       id: id ?? this.id,
+      conversationId: conversationId ?? this.conversationId,
       messageId: messageId ?? this.messageId,
       userId: userId ?? this.userId,
       deliveredAt: deliveredAt ?? this.deliveredAt,
@@ -3704,6 +3753,9 @@ class MessageStatusModelCompanion
     final map = <String, Expression>{};
     if (id.present) {
       map['id'] = Variable<BigInt>(id.value);
+    }
+    if (conversationId.present) {
+      map['conversation_id'] = Variable<int>(conversationId.value);
     }
     if (messageId.present) {
       map['message_id'] = Variable<int>(messageId.value);
@@ -3724,6 +3776,7 @@ class MessageStatusModelCompanion
   String toString() {
     return (StringBuffer('MessageStatusModelCompanion(')
           ..write('id: $id, ')
+          ..write('conversationId: $conversationId, ')
           ..write('messageId: $messageId, ')
           ..write('userId: $userId, ')
           ..write('deliveredAt: $deliveredAt, ')
@@ -5432,6 +5485,7 @@ typedef $$MessagesTableProcessedTableManager =
 typedef $$MessageStatusModelTableCreateCompanionBuilder =
     MessageStatusModelCompanion Function({
       Value<BigInt> id,
+      required int conversationId,
       required int messageId,
       required int userId,
       Value<String?> deliveredAt,
@@ -5440,6 +5494,7 @@ typedef $$MessageStatusModelTableCreateCompanionBuilder =
 typedef $$MessageStatusModelTableUpdateCompanionBuilder =
     MessageStatusModelCompanion Function({
       Value<BigInt> id,
+      Value<int> conversationId,
       Value<int> messageId,
       Value<int> userId,
       Value<String?> deliveredAt,
@@ -5457,6 +5512,11 @@ class $$MessageStatusModelTableFilterComposer
   });
   ColumnFilters<BigInt> get id => $composableBuilder(
     column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get conversationId => $composableBuilder(
+    column: $table.conversationId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5495,6 +5555,11 @@ class $$MessageStatusModelTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get messageId => $composableBuilder(
     column: $table.messageId,
     builder: (column) => ColumnOrderings(column),
@@ -5527,6 +5592,11 @@ class $$MessageStatusModelTableAnnotationComposer
   });
   GeneratedColumn<BigInt> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<int> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<int> get messageId =>
       $composableBuilder(column: $table.messageId, builder: (column) => column);
@@ -5584,12 +5654,14 @@ class $$MessageStatusModelTableTableManager
           updateCompanionCallback:
               ({
                 Value<BigInt> id = const Value.absent(),
+                Value<int> conversationId = const Value.absent(),
                 Value<int> messageId = const Value.absent(),
                 Value<int> userId = const Value.absent(),
                 Value<String?> deliveredAt = const Value.absent(),
                 Value<String?> readAt = const Value.absent(),
               }) => MessageStatusModelCompanion(
                 id: id,
+                conversationId: conversationId,
                 messageId: messageId,
                 userId: userId,
                 deliveredAt: deliveredAt,
@@ -5598,12 +5670,14 @@ class $$MessageStatusModelTableTableManager
           createCompanionCallback:
               ({
                 Value<BigInt> id = const Value.absent(),
+                required int conversationId,
                 required int messageId,
                 required int userId,
                 Value<String?> deliveredAt = const Value.absent(),
                 Value<String?> readAt = const Value.absent(),
               }) => MessageStatusModelCompanion.insert(
                 id: id,
+                conversationId: conversationId,
                 messageId: messageId,
                 userId: userId,
                 deliveredAt: deliveredAt,

@@ -1,14 +1,62 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:amigo/db/repositories/conversations.repo.dart';
+import 'package:amigo/models/conversations.model.dart';
+import 'package:amigo/models/group_model.dart';
 import 'package:flutter/material.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../../models/conversation_model.dart';
-import '../../api/user.service.dart';
 import '../../api/chats.services.dart';
 import '../../services/socket/websocket_service.dart';
-import '../../db/repositories/conversations_repository.dart';
-import '../../db/repositories/groups_repository.dart';
+
+/// Unified model for displaying conversations (both DMs and Groups)
+class ShareableConversation {
+  final int id;
+  final String displayName;
+  final String? displayAvatar;
+  final bool isGroup;
+  final String? lastMessageBody;
+  final String? lastMessageType;
+  final String? lastMessageAt;
+  final int? unreadCount;
+
+  ShareableConversation({
+    required this.id,
+    required this.displayName,
+    this.displayAvatar,
+    required this.isGroup,
+    this.lastMessageBody,
+    this.lastMessageType,
+    this.lastMessageAt,
+    this.unreadCount,
+  });
+
+  factory ShareableConversation.fromDm(DmModel dm) {
+    return ShareableConversation(
+      id: dm.conversationId,
+      displayName: dm.recipientName,
+      displayAvatar: dm.recipientProfilePic,
+      isGroup: false,
+      lastMessageBody: dm.lastMessageBody,
+      lastMessageType: dm.lastMessageType,
+      lastMessageAt: dm.lastMessageAt,
+      unreadCount: dm.unreadCount,
+    );
+  }
+
+  factory ShareableConversation.fromGroup(GroupModel group) {
+    return ShareableConversation(
+      id: group.conversationId,
+      displayName: group.title,
+      displayAvatar: null, // Groups don't have avatars in this model
+      isGroup: true,
+      lastMessageBody: group.lastMessageBody,
+      lastMessageType: group.lastMessageType,
+      lastMessageAt: group.lastMessageAt,
+      unreadCount: group.unreadCount,
+    );
+  }
+}
 
 /// A screen that handles incoming shared media (images and videos)
 /// from the Android share sheet and allows selecting conversations to share to.
@@ -21,17 +69,23 @@ class ShareHandlerScreen extends StatefulWidget {
   State<ShareHandlerScreen> createState() => _ShareHandlerScreenState();
 }
 
-class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
+class _ShareHandlerScreenState extends State<ShareHandlerScreen>
+    with SingleTickerProviderStateMixin {
   // List to store shared media files
   List<SharedMediaFile> _sharedFiles = [];
 
   // Subscriptions for receiving shared intents
   StreamSubscription? _intentDataStreamSubscription;
 
-  // Conversations list
-  List<ConversationModel> _availableConversations = [];
-  List<ConversationModel> _filteredConversations = [];
+  // Conversations lists - separate for DMs and Groups
+  List<ShareableConversation> _availableDms = [];
+  List<ShareableConversation> _availableGroups = [];
+  List<ShareableConversation> _filteredDms = [];
+  List<ShareableConversation> _filteredGroups = [];
   bool _isLoadingConversations = false;
+
+  // Tab controller
+  late TabController _tabController;
 
   // Selected conversations to send media to
   final Set<int> _selectedConversations = {};
@@ -41,14 +95,12 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
   String _searchQuery = '';
 
   // Services
-  final UserService _userService = UserService();
   final ChatsServices _chatsServices = ChatsServices();
   final WebSocketService _websocketService = WebSocketService();
-  final ConversationsRepository _conversationsRepo = ConversationsRepository();
-  final GroupsRepository _groupsRepo = GroupsRepository();
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _initializeSharing();
     _loadAvailableConversations();
     _searchController.addListener(_onSearchChanged);
@@ -99,87 +151,35 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
     });
 
     try {
-      // FIRST: Try to load from local database for instant display
+      // Load from local database for instant display
       try {
-        final chatConversations = await _conversationsRepo
-            .getAllConversations();
+        final dmList = await ConversationRepository()
+            .getAllDmsWithRecipientInfo();
+        final groupList = await ConversationRepository()
+            .getGroupListWithoutMembers();
 
-        final groupConversations = await _groupsRepo.getAllGroups();
+        final localDms = dmList
+            .map((dm) => ShareableConversation.fromDm(dm))
+            .toList();
+        final localGroups = groupList
+            .map((group) => ShareableConversation.fromGroup(group))
+            .toList();
 
-        final localConversations = [
-          ...chatConversations,
-          ...groupConversations,
-        ];
-
-        if (localConversations.isNotEmpty) {
-          if (mounted) {
-            setState(() {
-              _availableConversations =
-                  localConversations as List<ConversationModel>;
-              _filteredConversations = localConversations;
-            });
-          }
-        } else {
-          debugPrint('ℹ️ Share Handler - No conversations in local DB');
+        if (mounted) {
+          setState(() {
+            _availableDms = localDms;
+            _availableGroups = localGroups;
+            _filterDms();
+            _filterGroups();
+          });
         }
       } catch (localError) {
         debugPrint('⚠️ Error loading from local DB: $localError');
       }
-
-      final response = await _userService.getChatList('all');
-
-      if (response['success'] == true && response['data'] != null) {
-        final dynamic responseData = response['data'];
-
-        List<dynamic> conversationsList = [];
-
-        if (responseData is List) {
-          conversationsList = responseData;
-        } else if (responseData is Map<String, dynamic>) {
-          if (responseData.containsKey('data') &&
-              responseData['data'] is List) {
-            conversationsList = responseData['data'] as List<dynamic>;
-          } else {
-            for (var key in responseData.keys) {
-              if (responseData[key] is List) {
-                conversationsList = responseData[key] as List<dynamic>;
-                break;
-              }
-            }
-          }
-        }
-
-        if (conversationsList.isNotEmpty) {
-          final conversations = <ConversationModel>[];
-
-          for (int i = 0; i < conversationsList.length; i++) {
-            final json = conversationsList[i];
-            try {
-              final conversation = ConversationModel.fromJson(
-                json as Map<String, dynamic>,
-              );
-              conversations.add(conversation);
-            } catch (e) {
-              debugPrint('⚠️ Error parsing conversation $i: $e');
-              continue;
-            }
-          }
-
-          if (mounted) {
-            setState(() {
-              _availableConversations = conversations;
-              _filteredConversations = conversations;
-            });
-          }
-        } else {
-          debugPrint('⚠️ Share Handler - API returned empty conversation list');
-        }
-      } else {
-        debugPrint('❌ Share Handler - API call not successful');
-      }
     } catch (e) {
+      debugPrint('❌ Error loading conversations: $e');
       // If API fails and we don't have local conversations, show helpful message
-      if (mounted && _availableConversations.isEmpty) {
+      if (mounted && _availableDms.isEmpty && _availableGroups.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -210,17 +210,29 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
     if (query != _searchQuery) {
       setState(() {
         _searchQuery = query;
-        _filterConversations();
+        _filterDms();
+        _filterGroups();
       });
     }
   }
 
-  /// Filter conversations based on search query
-  void _filterConversations() {
+  /// Filter DMs based on search query
+  void _filterDms() {
     if (_searchQuery.isEmpty) {
-      _filteredConversations = List.from(_availableConversations);
+      _filteredDms = List.from(_availableDms);
     } else {
-      _filteredConversations = _availableConversations.where((conversation) {
+      _filteredDms = _availableDms.where((conversation) {
+        return conversation.displayName.toLowerCase().contains(_searchQuery);
+      }).toList();
+    }
+  }
+
+  /// Filter Groups based on search query
+  void _filterGroups() {
+    if (_searchQuery.isEmpty) {
+      _filteredGroups = List.from(_availableGroups);
+    } else {
+      _filteredGroups = _availableGroups.where((conversation) {
         return conversation.displayName.toLowerCase().contains(_searchQuery);
       }).toList();
     }
@@ -369,6 +381,7 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
   void dispose() {
     _intentDataStreamSubscription?.cancel();
     _searchController.dispose();
+    _tabController.dispose();
     super.dispose();
   }
 
@@ -380,6 +393,17 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
         backgroundColor: Colors.teal,
         foregroundColor: Colors.white,
         elevation: 0,
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: Colors.white,
+          indicatorWeight: 3,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white70,
+          tabs: const [
+            Tab(icon: Icon(Icons.person), text: 'DMs'),
+            Tab(icon: Icon(Icons.group), text: 'Groups'),
+          ],
+        ),
       ),
       body: Column(
         children: [
@@ -389,8 +413,16 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
           // Search Bar
           _buildSearchBar(),
 
-          // Conversations List
-          Expanded(child: _buildConversationsList()),
+          // Conversations List with Tabs
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildConversationsList(isDm: true),
+                _buildConversationsList(isDm: false),
+              ],
+            ),
+          ),
 
           // Send Button
           _buildSendButton(),
@@ -517,7 +549,9 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
     );
   }
 
-  Widget _buildConversationsList() {
+  Widget _buildConversationsList({required bool isDm}) {
+    final conversations = isDm ? _filteredDms : _filteredGroups;
+
     if (_isLoadingConversations) {
       return Container(
         color: Colors.white,
@@ -534,7 +568,7 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
       );
     }
 
-    if (_filteredConversations.isEmpty) {
+    if (conversations.isEmpty) {
       return Container(
         color: Colors.white,
         child: Center(
@@ -543,7 +577,7 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
             children: [
               Icon(
                 _searchQuery.isEmpty
-                    ? Icons.chat_bubble_outline
+                    ? (isDm ? Icons.person_outline : Icons.group_outlined)
                     : Icons.search_off,
                 size: 64,
                 color: Colors.grey[400],
@@ -551,8 +585,8 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
               const SizedBox(height: 16),
               Text(
                 _searchQuery.isEmpty
-                    ? 'No chats available'
-                    : 'No chats found for "$_searchQuery"',
+                    ? (isDm ? 'No DMs available' : 'No groups available')
+                    : 'No ${isDm ? 'DMs' : 'groups'} found for "$_searchQuery"',
                 style: TextStyle(color: Colors.grey[600], fontSize: 16),
               ),
             ],
@@ -564,15 +598,14 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
     return Container(
       color: Colors.white,
       child: ListView.builder(
-        itemCount: _filteredConversations.length,
+        itemCount: conversations.length,
         itemBuilder: (context, index) {
-          final conversation = _filteredConversations[index];
+          final conversation = conversations[index];
           final isSelected = _selectedConversations.contains(conversation.id);
 
           return AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            // color: Colors.white,
             decoration: BoxDecoration(
               color: isSelected
                   ? Colors.teal.withOpacity(0.1)
@@ -602,7 +635,7 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
                       ),
                     ),
                   ),
-                  if (conversation.isGroup)
+                  if (!isDm && conversation.isGroup)
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 6,
@@ -627,9 +660,9 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
                     ),
                 ],
               ),
-              subtitle: conversation.metadata?.lastMessage.body != null
+              subtitle: conversation.lastMessageBody != null
                   ? Text(
-                      conversation.metadata!.lastMessage.body,
+                      conversation.lastMessageBody!,
                       style: TextStyle(color: Colors.grey[600], fontSize: 14),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -658,7 +691,7 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen> {
     );
   }
 
-  Widget _buildConversationAvatar(ConversationModel conversation) {
+  Widget _buildConversationAvatar(ShareableConversation conversation) {
     if (conversation.isGroup) {
       // Group conversation - show group icon
       return CircleAvatar(

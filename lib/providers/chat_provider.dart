@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:amigo/db/repositories/conversation_member.repo.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
+import 'package:amigo/db/repositories/messageStatus.repo.dart';
 import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/group_model.dart';
@@ -146,6 +147,8 @@ class ChatNotifier extends Notifier<ChatState> {
   final UserStatusService _userStatusService = UserStatusService();
   final ChatsServices _chatsServices = ChatsServices();
 
+  final MessageStatusRepository _messageStatusRepo = MessageStatusRepository();
+
   StreamSubscription<OnlineStatusPayload>? _onlineStatusSubscription;
   StreamSubscription<TypingPayload>? _typingSubscription;
   StreamSubscription<ChatMessagePayload>? _messageSubscription;
@@ -153,6 +156,7 @@ class ChatNotifier extends Notifier<ChatState> {
   StreamSubscription<MessagePinPayload>? _pinSubscription;
   StreamSubscription<NewConversationPayload>? _conversationAddedSubscription;
   StreamSubscription<DeleteMessagePayload>? _messageDeleteSubscription;
+  StreamSubscription<JoinLeavePayload>? _joinLeaveSubscription;
 
   final Map<int, Timer?> _typingTimers = {};
 
@@ -461,7 +465,7 @@ class ChatNotifier extends Notifier<ChatState> {
                   lastMessageAt: json['lastMessageAt'],
                   unreadCount: json['unreadCount'],
                   isRecipientOnline: json['onlineStatus'],
-                  createdAt: json['createdAt'],
+                  createdAt: json['joinedAt'],
                 );
               }
               return null;
@@ -521,7 +525,7 @@ class ChatNotifier extends Notifier<ChatState> {
                   isPinned: json['isPinned'],
                   isFavorite: json['isFavorite'],
                   isMuted: json['isMuted'],
-                  createdAt: json['createdAt'],
+                  createdAt: json['joinedAt'],
                 );
               }
               return null;
@@ -809,6 +813,13 @@ class ChatNotifier extends Notifier<ChatState> {
         debugPrint('❌ User status stream error: $error');
       },
     );
+
+    _joinLeaveSubscription = _messageHandler.joinLeaveConversationStream.listen(
+      _handleConversationJoinLeave,
+      onError: (error) {
+        debugPrint('❌ Conversation join/leave stream error: $error');
+      },
+    );
   }
 
   /// Handle typing message
@@ -986,8 +997,73 @@ class ChatNotifier extends Notifier<ChatState> {
       // Use msgStatus from payload if available, otherwise default to delivered
       final status = payload.msgStatus ?? MessageStatusType.delivered;
       await _messageRepo.updateMessageStatus(payload.canonicalId, status);
+
+      await _conversationsRepo.updateLastMessageId(
+        payload.convId,
+        payload.canonicalId,
+      );
+
+      // update the sended message in the status table with deliveredAt timestamp
+      await _messageStatusRepo.updateDeliveredAt(
+        messageId: payload.canonicalId,
+        deliveredAt: DateTime.now().toIso8601String(),
+      );
     } catch (e) {
       debugPrint('❌ Error handling ack message: $e');
+    }
+  }
+
+  // updateLast messge on sending own message from messaging page
+  void updateLastMessageOnSendingOwnMessage(
+    int conversationId,
+    MessageModel lastMessage,
+  ) async {
+    try {
+      await _conversationsRepo.updateLastMessage(
+        conversationId,
+        lastMessage.id,
+      );
+
+      final convType = await _conversationsRepo.getConversationTypeById(
+        conversationId,
+      );
+
+      if (convType == ChatType.dm.value) {
+        final convIndex = state.dmList.indexWhere(
+          (conv) => conv.conversationId == conversationId,
+        );
+        if (convIndex != -1) {
+          final dm = state.dmList[convIndex];
+          final updatedDm = dm.copyWith(
+            lastMessageId: lastMessage.id,
+            lastMessageType: lastMessage.type.value,
+            lastMessageBody: lastMessage.body,
+            lastMessageAt: lastMessage.sentAt,
+          );
+          final updatedDmList = List<DmModel>.from(state.dmList);
+          updatedDmList[convIndex] = updatedDm;
+          state = state.copyWith(dmList: updatedDmList);
+        }
+      } else if (convType == ChatType.group.value) {
+        final convIndex = state.groupList.indexWhere(
+          (group) => group.conversationId == conversationId,
+        );
+        if (convIndex != -1) {
+          final group = state.groupList[convIndex];
+          final updatedGroup = group.copyWith(
+            lastMessageId: lastMessage.id,
+            lastMessageType: lastMessage.type.value,
+            lastMessageBody: lastMessage.body,
+            lastMessageAt: lastMessage.sentAt,
+          );
+
+          final updatedGroups = List<GroupModel>.from(state.groupList);
+          updatedGroups[convIndex] = updatedGroup;
+          state = state.copyWith(groupList: updatedGroups);
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error updating last message on sending own message: $e');
     }
   }
 
@@ -1246,6 +1322,18 @@ class ChatNotifier extends Notifier<ChatState> {
       }
     } catch (e) {
       debugPrint('❌ Error handling message delete: $e');
+    }
+  }
+
+  /// Handle conversation join/leave events
+  Future<void> _handleConversationJoinLeave(JoinLeavePayload payload) async {
+    try {
+      await _messageStatusRepo.markAllAsReadByConversationAndUser(
+        conversationId: payload.convId,
+        userId: payload.userId,
+      );
+    } catch (e) {
+      debugPrint('❌ Error handling conversation join/leave event: $e');
     }
   }
 

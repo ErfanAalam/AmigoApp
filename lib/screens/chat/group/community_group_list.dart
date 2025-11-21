@@ -1,8 +1,10 @@
+import 'package:amigo/db/repositories/conversations.repo.dart';
+import 'package:amigo/types/socket.type.dart';
 import 'package:flutter/material.dart';
 import '../../../models/community_model.dart';
 import '../../../models/group_model.dart';
 import '../../../api/user.service.dart';
-import '../../../db/repositories/groups_repository.dart';
+// import '../../../db/repositories/groups_repository.dart';
 import 'messaging.dart';
 
 class CommunityInnerGroupsPage extends StatefulWidget {
@@ -18,7 +20,9 @@ class CommunityInnerGroupsPage extends StatefulWidget {
 
 class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
   final UserService _userService = UserService();
-  final GroupsRepository _groupsRepo = GroupsRepository();
+  // final GroupsRepository _groupsRepo = GroupsRepository();
+  final ConversationRepository _conversationRepository =
+      ConversationRepository();
   late Future<List<CommunityGroupModel>> _innerGroupsFuture;
   final TextEditingController _searchController = TextEditingController();
   List<CommunityGroupModel> _allInnerGroups = [];
@@ -60,7 +64,9 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
   Future<void> _loadFromLocal() async {
     try {
       debugPrint('📦 Loading community inner groups from local DB...');
-      final localGroups = await _groupsRepo.getAllCommunityInnerGroups();
+      final localGroups = [];
+      // await _conversationRepository
+      //     .getAllCommunityInnerGroups();
 
       // Filter groups that belong to this community
       final communityGroups = localGroups.where((group) {
@@ -131,8 +137,8 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
     return CommunityGroupModel(
       conversationId: group.conversationId,
       title: group.title,
-      type: group.type,
-      members: group.members,
+      type: ChatType.communityGroup.value,
+      members: group.members ?? [],
       metadata: metadata,
       lastMessageAt: group.lastMessageAt,
       role: group.role,
@@ -145,7 +151,8 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
     List<CommunityGroupModel> localInnerGroups = [];
 
     try {
-      final localGroups = await _groupsRepo.getAllCommunityInnerGroups();
+      final localGroups = [];
+      // await _groupsRepo.getAllCommunityInnerGroups();
       localInnerGroups = localGroups
           .where(
             (group) =>
@@ -196,7 +203,7 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
           final groupModels = innerGroups
               .map((cg) => _convertCommunityGroupModelToGroupModel(cg))
               .toList();
-          await _groupsRepo.insertOrUpdateGroups(groupModels);
+          // await _groupsRepo.insertOrUpdateGroups(groupModels);
         } else {
           debugPrint(
             '⚠️ Server returned 0 community inner groups - keeping local cache',
@@ -249,7 +256,6 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
     return GroupModel(
       conversationId: cg.conversationId,
       title: cg.title,
-      type: cg.type,
       members: cg.members,
       metadata: metadata,
       lastMessageAt: cg.lastMessageAt,
@@ -498,7 +504,7 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
               final groupModel = GroupModel(
                 conversationId: innerGroup.conversationId,
                 title: innerGroup.title,
-                type: innerGroup.type,
+                // type: ChatType.communityGroup.value,
                 members: innerGroup.members,
                 metadata: innerGroup.metadata != null
                     ? GroupMetadata(

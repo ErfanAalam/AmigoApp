@@ -72,7 +72,6 @@ class _LoginScreenState extends material.State<LoginScreen> {
     }
 
     final response = await apiService.send_login_otp(_completePhoneNumber);
-    // print('this is the response: $response');
 
     if (response['success']) {
       material.ScaffoldMessenger.of(context).showSnackBar(

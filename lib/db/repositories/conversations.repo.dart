@@ -81,6 +81,8 @@ class ConversationRepository {
     }
   }
 
+  // Get All members by conversation id with thier details from users table
+
   /// Get all conversations
   /// Joins with Users table to get userName and userProfilePic when userId is present
   Future<List<ConversationModel>> getAllConversations() async {
@@ -313,6 +315,17 @@ class ConversationRepository {
         updatedAt: Value(DateTime.now().toIso8601String()),
       ),
     );
+  }
+
+  // update last message id only
+  Future<void> updateLastMessageId(
+    int conversationId,
+    int lastMessageId,
+  ) async {
+    final db = sqliteDatabase.database;
+    await (db.update(db.conversations)
+          ..where((t) => t.id.equals(conversationId)))
+        .write(ConversationsCompanion(lastMessageId: Value(lastMessageId)));
   }
 
   /// Mark conversation as deleted (soft delete)

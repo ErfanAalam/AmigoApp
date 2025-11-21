@@ -618,6 +618,48 @@ class MessageForwardPayload {
   }
 }
 
+/// Media response type from the server
+
+class MediaResponse {
+  final String url;
+  final String key;
+  final String category;
+  final String fileName;
+  final int fileSize;
+  final String mimeType;
+
+  MediaResponse({
+    required this.url,
+    required this.key,
+    required this.category,
+    required this.fileName,
+    required this.fileSize,
+    required this.mimeType,
+  });
+
+  factory MediaResponse.fromJson(Map<String, dynamic> json) {
+    return MediaResponse(
+      url: json['url'] as String,
+      key: json['key'] as String,
+      category: json['category'] as String,
+      fileName: json['file_name'] as String,
+      fileSize: json['file_size'] as int,
+      mimeType: json['mime_type'] as String,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'url': url,
+      'key': key,
+      'category': category,
+      'file_name': fileName,
+      'file_size': fileSize,
+      'mime_type': mimeType,
+    };
+  }
+}
+
 /// WebSocket message wrapper
 class WSMessage {
   final WSMessageType type;

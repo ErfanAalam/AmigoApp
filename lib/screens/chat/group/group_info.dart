@@ -1,5 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:amigo/db/repositories/conversation_member.repo.dart';
+import 'package:amigo/db/repositories/conversations.repo.dart';
+import 'package:amigo/models/conversations.model.dart';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../models/group_model.dart';
@@ -7,9 +11,6 @@ import '../../../models/user_model.dart';
 import '../../../api/groups.services.dart';
 import '../../../api/user.service.dart';
 import '../../../services/contact_service.dart';
-import '../../../db/repositories/groups_repository.dart';
-import '../../../db/repositories/user_repository.dart';
-import '../../../db/repositories/group_members_repository.dart';
 
 class GroupInfoPage extends StatefulWidget {
   final GroupModel group;
@@ -25,9 +26,13 @@ class _GroupInfoPageState extends State<GroupInfoPage>
   final GroupsService _groupsService = GroupsService();
   final UserService _userService = UserService();
   final ContactService _contactService = ContactService();
-  final GroupsRepository _groupsRepo = GroupsRepository();
-  final UserRepository _userRepo = UserRepository();
-  final GroupMembersRepository _groupMembersRepo = GroupMembersRepository();
+
+  final ConversationRepository _conversationRepository =
+      ConversationRepository();
+  final ConversationMemberRepository _conversationMemberRepository =
+      ConversationMemberRepository();
+
+  final UserUtils _userUtils = UserUtils();
 
   Map<String, dynamic>? _groupInfo;
   List<UserModel> _availableUsers = [];
@@ -36,7 +41,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
   bool _isUpdatingTitle = false;
   bool _isRefreshingContacts = false;
   String? _errorMessage;
-  int? _currentUserId;
+  UserModel? _currentUserDetails;
   String _searchQuery = '';
   String _memberSearchQuery = '';
 
@@ -100,8 +105,9 @@ class _GroupInfoPageState extends State<GroupInfoPage>
           ),
         );
 
-    _loadGroupInfo();
     _loadCurrentUser();
+
+    _loadGroupInfoFromLocal();
   }
 
   @override
@@ -111,315 +117,30 @@ class _GroupInfoPageState extends State<GroupInfoPage>
   }
 
   Future<void> _loadCurrentUser() async {
-    try {
-      // Try local DB first if we know the current user from group members
-      // (we can infer from cached users table)
-
-      // Fallback: Fetch from API
-      final response = await _userService.getUser().timeout(
-        Duration(seconds: 3),
-        onTimeout: () {
-          debugPrint('⏰ getUser timed out');
-          return {'success': false};
-        },
-      );
-
-      if (response['success'] == true && response['data'] != null) {
-        setState(() {
-          _currentUserId = response['data']['id'];
-        });
-      }
-    } catch (e) {
-      debugPrint('Error loading current user: $e');
-    }
-  }
-
-  Future<void> _loadGroupInfo() async {
-    // PRIORITY 1: Load from local DB first for instant display
-    await _loadGroupInfoFromLocal();
-
-    // PRIORITY 2: Load from server in background
-    try {
-      final response = await _groupsService.getGroupInfo(
-        widget.group.conversationId,
-      );
-
-      debugPrint('Group info response: $response');
-
-      if (response['success'] != false) {
-        final serverGroupInfo = response['data'];
-
-        // Cache group members to local DB
-        if (serverGroupInfo != null && serverGroupInfo['members'] != null) {
-          await _cacheGroupMembers(serverGroupInfo['members']);
-        }
-
-        // Cache creator info if available (to group_members table)
-        if (serverGroupInfo != null &&
-            serverGroupInfo['group'] != null &&
-            serverGroupInfo['group']['createrName'] != null &&
-            serverGroupInfo['group']['createrId'] != null) {
-          try {
-            final creatorInfo = GroupMemberInfo(
-              userId: serverGroupInfo['group']['createrId'],
-              userName: serverGroupInfo['group']['createrName'],
-              profilePic: serverGroupInfo['group']['createrProfilePic'],
-              role: 'admin', // Creator is typically an admin
-              joinedAt: serverGroupInfo['group']['createdAt'],
-            );
-            await _groupMembersRepo.insertOrUpdateGroupMember(
-              widget.group.conversationId,
-              creatorInfo,
-            );
-            debugPrint('✅ Cached creator info: ${creatorInfo.userName}');
-          } catch (e) {
-            debugPrint('❌ Error caching creator info: $e');
-          }
-        }
-
-        // Parse metadata for group
-        GroupMetadata? metadata;
-        if (serverGroupInfo?['group'] != null) {
-          final groupData = serverGroupInfo['group'];
-          metadata = GroupMetadata(
-            lastMessage: null,
-            totalMessages: groupData['totalMessages'] ?? 0,
-            createdAt: groupData['createdAt'],
-            createdBy: groupData['createrId'] ?? 0,
-          );
-        }
-
-        // Update group in local DB with complete info
-        final updatedGroup = GroupModel(
-          conversationId: widget.group.conversationId,
-          title:
-              serverGroupInfo?['title'] ??
-              serverGroupInfo?['group']?['title'] ??
-              widget.group.title,
-          type: widget.group.type,
-          members: _parseMembers(serverGroupInfo?['members']),
-          metadata: metadata ?? widget.group.metadata,
-          lastMessageAt: widget.group.lastMessageAt,
-          role: serverGroupInfo?['role'] ?? widget.group.role,
-          unreadCount: widget.group.unreadCount,
-          joinedAt: widget.group.joinedAt,
-        );
-        await _groupsRepo.insertOrUpdateGroup(updatedGroup);
-
-        setState(() {
-          _groupInfo = serverGroupInfo;
-          _isLoading = false;
-        });
-        _animationController.forward();
-      } else {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      // Network error, but we have local data from _loadGroupInfoFromLocal
-      debugPrint('❌ Error loading group info from server: $e');
+    final currentUser = await _userUtils.getUserDetails();
+    if (currentUser != null) {
       setState(() {
-        _isLoading = false;
+        _currentUserDetails = currentUser;
       });
     }
   }
 
   /// Load group info from local DB first for instant display
   Future<void> _loadGroupInfoFromLocal() async {
-    try {
-      debugPrint('📦 Loading group info from local DB...');
-
-      // Load group from local DB
-      final localGroup = await _groupsRepo.getGroupById(
-        widget.group.conversationId,
-      );
-
-      if (localGroup != null) {
-        // Convert to _groupInfo format expected by the UI
-        // UI expects 'userName' but DB stores 'name', so we need to convert
-        final members = localGroup.members.map((m) {
-          return {
-            'userId': m.userId,
-            'userName':
-                m.name, // Convert 'name' to 'userName' for UI compatibility
-            'name': m.name, // Keep 'name' as well for compatibility
-            'profilePic': m.profilePic,
-            'role': m.role,
-            'joinedAt': m.joinedAt,
-          };
-        }).toList();
-
-        // Find creator name from members list based on created_by ID
-        String? creatorName;
-        if (localGroup.metadata?.createdBy != null) {
-          try {
-            // Find creator in members list
-            final creator = localGroup.members.firstWhere(
-              (m) => m.userId == localGroup.metadata!.createdBy,
-            );
-            creatorName = creator.name;
-          } catch (e) {
-            try {
-              final creatorMember = await _groupMembersRepo.getGroupMember(
-                localGroup.conversationId,
-                localGroup.metadata!.createdBy,
-              );
-              creatorName = creatorMember?.userName;
-              debugPrint(
-                '✅ Found creator in group_members table: $creatorName',
-              );
-            } catch (dbError) {
-              debugPrint('⚠️ Creator not found in group_members table either');
-              creatorName = null;
-            }
-          }
-        }
-
-        final groupInfo = {
-          'conversation_id': localGroup.conversationId,
-          'title': localGroup.title,
-          'type': localGroup.type,
-          'role': localGroup.role,
-          'members': members,
-          'group': {
-            'title': localGroup.title,
-            'createdAt': localGroup.metadata?.createdAt,
-            'createrName': creatorName ?? 'Unknown', // Use actual creator name
-          },
-          'created_at': localGroup.metadata?.createdAt,
-          'created_by': localGroup.metadata?.createdBy,
-        };
-
-        setState(() {
-          _groupInfo = groupInfo;
-          _isLoading = false;
-        });
-        _animationController.forward();
-
-        debugPrint(
-          '✅ Loaded group info from local DB with ${localGroup.members.length} members',
-        );
-      } else {
-        debugPrint('ℹ️ No cached group info found in local DB');
-      }
-    } catch (e) {
-      debugPrint('❌ Error loading group info from local DB: $e');
-    }
-  }
-
-  /// Cache group members to local DB
-  Future<void> _cacheGroupMembers(dynamic membersData) async {
-    if (membersData == null) return;
-
-    try {
-      final members = _parseMembers(membersData);
-
-      // Cache to group_members table (not users table)
-      final memberInfoList = members
-          .map(
-            (m) => GroupMemberInfo(
-              userId: m.userId,
-              userName: m.name,
-              profilePic: m.profilePic,
-              role: m.role,
-              joinedAt: m.joinedAt,
-            ),
-          )
-          .toList();
-
-      await _groupMembersRepo.insertOrUpdateGroupMembers(
-        widget.group.conversationId,
-        memberInfoList,
-      );
-
-      debugPrint('✅ Cached ${members.length} group members to local DB');
-    } catch (e) {
-      debugPrint('❌ Error caching group members: $e');
-    }
-  }
-
-  /// Parse members from API response
-  List<GroupMember> _parseMembers(dynamic membersData) {
-    if (membersData == null) return [];
-
-    if (membersData is List) {
-      return membersData.map((m) {
-        final memberMap = m as Map<String, dynamic>;
-        // Handle both 'name' and 'userName' field names from server
-        final name = memberMap['userName'] ?? memberMap['name'] ?? '';
-
-        return GroupMember(
-          userId: memberMap['userId'] ?? memberMap['user_id'] ?? 0,
-          name: name,
-          profilePic: memberMap['profilePic'] ?? memberMap['profile_pic'],
-          role: memberMap['role'] ?? 'member',
-          joinedAt: memberMap['joinedAt'] ?? memberMap['joined_at'],
-        );
-      }).toList();
-    }
-
-    return [];
-  }
-
-  // Local Storage Methods (using same key as contacts page)
-  static const String _availableUsersStorageKey = 'available_users_contacts';
-
-  Future<List<UserModel>> _getAvailableUsersFromLocalStorage() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final List<String>? userJsonList = prefs.getStringList(
-        _availableUsersStorageKey,
-      );
-
-      if (userJsonList != null) {
-        final List<UserModel> users = userJsonList
-            .map((userJson) => UserModel.fromJson(jsonDecode(userJson)))
-            .toList();
-        debugPrint(
-          'Retrieved ${users.length} available users from local storage',
-        );
-        return users;
-      }
-    } catch (e) {
-      debugPrint('Error retrieving available users from local storage: $e');
-    }
-    return [];
-  }
-
-  Future<void> _storeAvailableUsersInLocalStorage(List<UserModel> users) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final List<String> userJsonList = users
-          .map((user) => jsonEncode(user.toJson()))
-          .toList();
-      await prefs.setStringList(_availableUsersStorageKey, userJsonList);
-      debugPrint('Stored ${users.length} available users in local storage');
-    } catch (e) {
-      debugPrint('Error storing available users in local storage: $e');
+    final groupInfo = await _conversationRepository.getGroupWithMembersByConvId(
+      widget.group.conversationId,
+    );
+    if (groupInfo != null) {
+      setState(() {
+        _groupInfo = groupInfo.toJson();
+        _isLoading = false;
+      });
     }
   }
 
   Future<void> _loadAvailableUsers({bool forceRefresh = false}) async {
     try {
-      // if (!forceRefresh) {
-      //   // First try to get from local storage
-      //   final storedUsers = await _getAvailableUsersFromLocalStorage();
-      //   if (storedUsers.isNotEmpty) {
-      //     // Filter out users who are already members of this group
-      //     final filteredUsers = storedUsers
-      //         .where((user) => !_isUserAlreadyMember(user.id))
-      //         .toList();
-      //     _availableUsers = filteredUsers;
-      //     debugPrint(
-      //       'Using ${filteredUsers.length} contacts from local storage',
-      //     );
-      //     return;
-      //   }
-      // }
-
       // If no stored data or force refresh, fetch from backend
-      debugPrint('Fetching contacts from backend...');
       final contacts = await _contactService.fetchContacts();
       if (contacts.isEmpty) {
         return;
@@ -443,9 +164,6 @@ class _GroupInfoPageState extends State<GroupInfoPage>
             .map((userJson) => UserModel.fromJson(userJson))
             .toList();
 
-        // Store in local storage for future use
-        await _storeAvailableUsersInLocalStorage(users);
-
         // Filter out users who are already members of this group
         final filteredUsers = users
             .where((user) => !_isUserAlreadyMember(user.id))
@@ -468,11 +186,12 @@ class _GroupInfoPageState extends State<GroupInfoPage>
   }
 
   bool _isCurrentUserAdmin() {
-    if (_groupInfo?['members'] == null || _currentUserId == null) return false;
+    if (_groupInfo?['members'] == null || _currentUserDetails?.id == null)
+      return false;
     final List<dynamic> members = _groupInfo!['members'];
     try {
       final currentUserMember = members.firstWhere(
-        (member) => member['userId'] == _currentUserId,
+        (member) => member['userId'] == _currentUserDetails?.id,
       );
       return currentUserMember['role'] == 'admin';
     } catch (e) {
@@ -1312,9 +1031,6 @@ class _GroupInfoPageState extends State<GroupInfoPage>
         widget.group.conversationId,
         userIds,
       );
-
-      print('member added succesfully: $response');
-
       // Close loading dialog
       Navigator.pop(context);
 
@@ -1323,6 +1039,20 @@ class _GroupInfoPageState extends State<GroupInfoPage>
         _showSnackBar(
           '${userIds.length} member${userIds.length > 1 ? 's' : ''} added successfully',
         );
+        final members = userIds
+            .map(
+              (userId) => ConversationMemberModel(
+                conversationId: widget.group.conversationId,
+                userId: userId,
+                role: 'member',
+                joinedAt: DateTime.now().toIso8601String(),
+                unreadCount: 0,
+                lastReadMessageId: 0,
+                lastDeliveredMessageId: null,
+              ),
+            )
+            .toList();
+        await _conversationMemberRepository.insertConversationMembers(members);
       } else {
         _showSnackBar(
           response['message'] ?? 'Failed to add members',
@@ -1331,7 +1061,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
       }
 
       // Refresh group info
-      await _loadGroupInfo();
+      await _loadGroupInfoFromLocal();
     } catch (e) {
       // Close loading dialog if still open
       if (Navigator.canPop(context)) {
@@ -1354,7 +1084,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
       return;
     }
 
-    if (userId == _currentUserId) {
+    if (userId == _currentUserDetails?.id) {
       _showSnackBar('You are already an admin', isError: true);
       return;
     }
@@ -1393,7 +1123,13 @@ class _GroupInfoPageState extends State<GroupInfoPage>
 
         if (response['success'] == true) {
           _showSnackBar('$userName is now an admin');
-          await _loadGroupInfo(); // Refresh group info
+
+          await _conversationMemberRepository.updateMemberRole(
+            widget.group.conversationId,
+            userId,
+            'admin',
+          );
+          await _loadGroupInfoFromLocal(); // Refresh group info
         } else {
           _showSnackBar(
             response['message'] ?? 'Failed to promote member',
@@ -1421,7 +1157,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
       return;
     }
 
-    if (userId == _currentUserId) {
+    if (userId == _currentUserDetails?.id) {
       _showSnackBar('You cannot demote yourself', isError: true);
       return;
     }
@@ -1460,7 +1196,12 @@ class _GroupInfoPageState extends State<GroupInfoPage>
 
         if (response['success'] == true) {
           _showSnackBar('$userName is now a member');
-          await _loadGroupInfo(); // Refresh group info
+          await _conversationMemberRepository.updateMemberRole(
+            widget.group.conversationId,
+            userId,
+            'member',
+          );
+          await _loadGroupInfoFromLocal(); // Refresh group info
         } else {
           _showSnackBar(
             response['message'] ?? 'Failed to demote member',
@@ -1867,7 +1608,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
       return;
     }
 
-    if (userId == _currentUserId) {
+    if (userId == _currentUserDetails?.id) {
       _showSnackBar('You cannot remove yourself from the group', isError: true);
       return;
     }
@@ -1906,7 +1647,14 @@ class _GroupInfoPageState extends State<GroupInfoPage>
 
         if (response['success'] == true) {
           _showSnackBar('$userName removed from group');
-          await _loadGroupInfo(); // Refresh group info
+
+          await _conversationMemberRepository
+              .deleteMemberByConversationAndUserId(
+                widget.group.conversationId,
+                userId,
+              );
+
+          await _loadGroupInfoFromLocal(); // Refresh group info
         } else {
           _showSnackBar(
             response['message'] ?? 'Failed to remove member',
@@ -2148,7 +1896,9 @@ class _GroupInfoPageState extends State<GroupInfoPage>
 
       if (response['success'] == true) {
         // Delete from local database
-        await _groupsRepo.deleteGroup(widget.group.conversationId);
+        await _conversationRepository.deleteConversation(
+          widget.group.conversationId,
+        );
 
         _showSnackBar('Group deleted successfully');
 
@@ -2214,7 +1964,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                   ),
                   const SizedBox(height: 16),
                   ElevatedButton(
-                    onPressed: _loadGroupInfo,
+                    onPressed: _loadGroupInfoFromLocal,
                     child: const Text('Retry'),
                   ),
                 ],
@@ -2433,7 +2183,8 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                   ...(_filteredMembers.map((member) {
                                     final isAdmin = member['role'] == 'admin';
                                     final isCurrentUser =
-                                        member['userId'] == _currentUserId;
+                                        member['userId'] ==
+                                        _currentUserDetails?.id;
 
                                     return Container(
                                       margin: const EdgeInsets.only(bottom: 12),

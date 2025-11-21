@@ -2,12 +2,12 @@ import 'dart:async';
 import 'dart:io';
 import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/models/message.model.dart';
+import 'package:amigo/utils/chat/chat_helpers.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../services/media_cache_service.dart';
-import 'chat_helpers.dart';
 
 /// Audio playback manager for chat messages
 ///
@@ -188,10 +188,9 @@ class AudioPlaybackManager {
 
               // If using remote URL and not cached yet, cache it in background
               if (playbackUrl == audioUrl && message.localMediaPath == null) {
-                ChatHelpers.cacheMediaForMessage(
+                await ChatHelpers.cacheMediaForMessage(
                   url: audioUrl,
                   messageId: messageId,
-                  messagesRepo: _messagesRepo,
                   mediaCacheService: _mediaCacheService,
                 );
               }

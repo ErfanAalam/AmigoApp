@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'package:amigo/models/message.model.dart';
 import 'package:flutter/material.dart';
-import '../../models/message_model.dart';
 import '../../utils/chat/preview_media.utils.dart';
+import '../../db/repositories/message.repo.dart';
+import '../../db/repositories/user.repo.dart';
 
 /// Configuration for MessageBubble widget
 class MessageBubbleConfig {
@@ -39,6 +41,10 @@ class MessageBubbleConfig {
   final bool useIntrinsicWidth; // true for DM, false for group
   final bool useStackContainer; // true for DM, false for group
 
+  // Repositories for fetching reply data
+  final MessageRepository? messagesRepo;
+  final UserRepository? userRepo;
+
   MessageBubbleConfig({
     required this.message,
     required this.isMyMessage,
@@ -62,6 +68,8 @@ class MessageBubbleConfig {
     this.currentUserId,
     this.conversationUserId,
     this.onReplyTap,
+    this.messagesRepo,
+    this.userRepo,
   });
 }
 
@@ -148,7 +156,7 @@ class MessageBubble extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Reply message preview (if this is a reply)
-                  if (config.message.replyToMessage != null)
+                  if (config.message.isReply)
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,
@@ -165,10 +173,7 @@ class MessageBubble extends StatelessWidget {
                           bottomRight: const Radius.circular(4),
                         ),
                       ),
-                      child: _buildReplyPreviewWidget(
-                        config.message.replyToMessage!,
-                        config.isMyMessage,
-                      ),
+                      child: _buildReplyPreviewWithFetch(),
                     ),
                   // Media content without outer padding
                   config.buildMessageContent(
@@ -209,11 +214,8 @@ class MessageBubble extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             // Reply message preview (if this is a reply)
-                            if (config.message.replyToMessage != null)
-                              _buildReplyPreviewWidget(
-                                config.message.replyToMessage!,
-                                config.isMyMessage,
-                              ),
+                            if (config.message.isReply)
+                              _buildReplyPreviewWithFetch(),
 
                             // Message content (text, image, or video)
                             config.buildMessageContent(
@@ -235,11 +237,8 @@ class MessageBubble extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // Reply message preview (if this is a reply)
-                          if (config.message.replyToMessage != null)
-                            _buildReplyPreviewWidget(
-                              config.message.replyToMessage!,
-                              config.isMyMessage,
-                            ),
+                          if (config.message.isReply)
+                            _buildReplyPreviewWithFetch(),
 
                           // Message content (text, image, or video)
                           config.buildMessageContent(
@@ -278,8 +277,8 @@ class MessageBubble extends StatelessWidget {
                         bottom: 4,
                       ),
                       child: Text(
-                        config.message.senderName.isNotEmpty
-                            ? config.message.senderName
+                        config.message.senderName?.isNotEmpty ?? false
+                            ? config.message.senderName ?? ''
                             : 'Unknown User',
                         style: TextStyle(
                           color: Colors.teal[700],
@@ -290,7 +289,7 @@ class MessageBubble extends StatelessWidget {
                     ),
                   ],
                   // Reply message preview (if this is a reply)
-                  if (config.message.replyToMessage != null)
+                  if (config.message.isReply)
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,
@@ -307,10 +306,7 @@ class MessageBubble extends StatelessWidget {
                           bottomRight: const Radius.circular(4),
                         ),
                       ),
-                      child: _buildReplyPreviewWidget(
-                        config.message.replyToMessage!,
-                        config.isMyMessage,
-                      ),
+                      child: _buildReplyPreviewWithFetch(),
                     ),
                   // Media content without outer padding
                   config.buildMessageContent(
@@ -352,8 +348,8 @@ class MessageBubble extends StatelessWidget {
                       Padding(
                         padding: const EdgeInsets.only(top: 4, bottom: 2),
                         child: Text(
-                          config.message.senderName.isNotEmpty
-                              ? config.message.senderName
+                          config.message.senderName?.isNotEmpty ?? false
+                              ? config.message.senderName ?? ''
                               : 'Unknown User',
                           style: TextStyle(
                             color: Colors.teal[700],
@@ -364,11 +360,7 @@ class MessageBubble extends StatelessWidget {
                       ),
                     ],
                     // Reply message preview (if this is a reply)
-                    if (config.message.replyToMessage != null)
-                      _buildReplyPreviewWidget(
-                        config.message.replyToMessage!,
-                        config.isMyMessage,
-                      ),
+                    if (config.message.isReply) _buildReplyPreviewWithFetch(),
 
                     // Message content (text, image, or video)
                     config.buildMessageContent(
@@ -424,6 +416,60 @@ class MessageBubble extends StatelessWidget {
     ];
   }
 
+  /// Fetch reply message and sender details from repositories
+  Future<Map<String, dynamic>?> _fetchReplyData() async {
+    if (!config.message.isReply || config.message.metadata == null) {
+      return null;
+    }
+
+    final replyTo = config.message.metadata!['reply_to'];
+    if (replyTo == null || replyTo is! Map<String, dynamic>) {
+      return null;
+    }
+
+    final replyMessageId = replyTo['message_id'];
+    final replySenderId = replyTo['sender_id'];
+
+    if (replyMessageId == null || config.messagesRepo == null) {
+      return null;
+    }
+
+    try {
+      // Fetch the replied message
+      final replyMessage = await config.messagesRepo!.getMessageById(
+        replyMessageId is int
+            ? replyMessageId
+            : int.tryParse(replyMessageId.toString()) ?? 0,
+      );
+
+      if (replyMessage == null) {
+        return null;
+      }
+
+      // Fetch sender name if sender_id is available
+      String? senderName;
+      if (replySenderId != null && config.userRepo != null) {
+        final senderId = replySenderId is int
+            ? replySenderId
+            : int.tryParse(replySenderId.toString());
+        if (senderId != null) {
+          final user = await config.userRepo!.getUserById(senderId);
+          senderName = user?.name;
+        }
+      }
+
+      // Use sender name from reply_to metadata if available, otherwise use fetched name
+      senderName = replyTo['sender_name'] as String? ?? senderName;
+
+      return {
+        'message': replyMessage,
+        'senderName': senderName ?? 'Unknown User',
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
   /// Build reply preview widget using either callback or shared widget
   Widget _buildReplyPreviewWidget(MessageModel replyMessage, bool isMyMessage) {
     // Use custom callback if provided
@@ -461,6 +507,45 @@ class MessageBubble extends StatelessWidget {
 
     // Fallback if no callback provided
     return const SizedBox.shrink();
+  }
+
+  /// Build reply preview widget with async data fetching
+  Widget _buildReplyPreviewWithFetch() {
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: _fetchReplyData(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          // Show loading indicator while fetching
+          return Container(
+            padding: const EdgeInsets.all(8),
+            child: const SizedBox(
+              height: 16,
+              width: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          );
+        }
+
+        if (snapshot.hasError || !snapshot.hasData || snapshot.data == null) {
+          // Show error or empty state
+          return const SizedBox.shrink();
+        }
+
+        final replyData = snapshot.data!;
+        final replyMessage = replyData['message'] as MessageModel;
+        final senderName = replyData['senderName'] as String?;
+
+        // Create a copy of replyMessage with sender name
+        final replyMessageWithSender = replyMessage.copyWith(
+          senderName: senderName,
+        );
+
+        return _buildReplyPreviewWidget(
+          replyMessageWithSender,
+          config.isMyMessage,
+        );
+      },
+    );
   }
 }
 
@@ -615,7 +700,9 @@ class ReplyPreview extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              isRepliedMessageMine ? 'You' : config.replyMessage.senderName,
+              isRepliedMessageMine
+                  ? 'You'
+                  : config.replyMessage.senderName ?? '',
               style: TextStyle(
                 color: config.isMyMessage ? Colors.white : Colors.teal,
                 fontSize: 12,
@@ -623,11 +710,11 @@ class ReplyPreview extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 2),
-            if (config.replyMessage.body.isNotEmpty) ...[
+            if (config.replyMessage.body?.isNotEmpty ?? false) ...[
               Text(
-                config.replyMessage.body.length > 50
-                    ? '${config.replyMessage.body.substring(0, 50)}...'
-                    : config.replyMessage.body,
+                (config.replyMessage.body?.length ?? 0) > 50
+                    ? '${config.replyMessage.body?.substring(0, 50)}...'
+                    : config.replyMessage.body ?? '',
                 style: TextStyle(
                   color: config.isMyMessage
                       ? config.myMessageTextColor

@@ -39,6 +39,9 @@ class WebSocketMessageHandler {
   final StreamController<DeleteMessagePayload> _messageDeleteController =
       StreamController<DeleteMessagePayload>.broadcast();
 
+  final StreamController<JoinLeavePayload> _joinLeaveConversationController =
+      StreamController<JoinLeavePayload>.broadcast();
+
   bool _isInitialized = false;
 
   /// Get stream for online status (type: 'user:online_status')
@@ -67,6 +70,10 @@ class WebSocketMessageHandler {
   /// Get stream for message delete events (type: 'message:delete')
   Stream<DeleteMessagePayload> get messageDeleteStream =>
       _messageDeleteController.stream;
+
+  /// Get stream for conversation join/leave events (type: 'conversation:join')
+  Stream<JoinLeavePayload> get joinLeaveConversationStream =>
+      _joinLeaveConversationController.stream;
 
   /// Initialize the handler - call this once when app starts
   void initialize() {
@@ -147,6 +154,13 @@ class WebSocketMessageHandler {
           }
           break;
 
+        case WSMessageType.conversationJoin:
+          final payload = message.joinLeavePayload;
+          if (payload != null) {
+            _joinLeaveConversationController.add(payload);
+          }
+          break;
+
         case WSMessageType.socketHealthCheck:
           final payload = message.miscPayload;
           if (payload != null) {
@@ -215,13 +229,10 @@ class WebSocketMessageHandler {
   }
 
   /// Get a filtered stream for message replies in a specific conversation
-  Stream<ChatMessagePayload> messageRepliesForConversation(
-    int conversationId,
-  ) {
+  Stream<ChatMessagePayload> messageRepliesForConversation(int conversationId) {
     return messageNewStream.where(
       (payload) =>
-          payload.convId == conversationId &&
-          payload.replyToMessageId != null,
+          payload.convId == conversationId && payload.replyToMessageId != null,
     );
   }
 
@@ -230,6 +241,13 @@ class WebSocketMessageHandler {
     int conversationId,
   ) {
     return messageDeleteStream.where(
+      (payload) => payload.convId == conversationId,
+    );
+  }
+
+  /// Get a filtered stream for conversation join/leave events in a specific conversation
+  Stream<JoinLeavePayload> joinLeaveForConversation(int conversationId) {
+    return joinLeaveConversationStream.where(
       (payload) => payload.convId == conversationId,
     );
   }

@@ -1,6 +1,6 @@
+import 'package:amigo/models/message.model.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../models/message_model.dart';
 
 /// Reusable message action sheet widget
 class MessageActionSheet extends StatelessWidget {
@@ -81,9 +81,9 @@ class MessageActionSheet extends StatelessWidget {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        message.body.length > 50
-                            ? '${message.body.substring(0, 50)}...'
-                            : message.body,
+                        message.body != null && message.body!.length > 50
+                            ? '${message.body!.substring(0, 50)}...'
+                            : message.body!,
                         style: TextStyle(color: Colors.grey[700], fontSize: 14),
                       ),
                     ),
@@ -108,7 +108,7 @@ class MessageActionSheet extends StatelessWidget {
                       Navigator.pop(context);
                       // onCopy();
                       await Clipboard.setData(
-                        ClipboardData(text: message.body),
+                        ClipboardData(text: message.body!),
                       );
                     },
                   ),

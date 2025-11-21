@@ -1,5 +1,5 @@
+import 'package:amigo/utils/chat/chat_helpers.utils.dart';
 import 'package:flutter/material.dart';
-import '../../utils/chat/chat_helpers.dart';
 
 /// Common date separator widget for chat messages
 /// Displays a formatted date (Today, Yesterday, or formatted date) with decorative lines

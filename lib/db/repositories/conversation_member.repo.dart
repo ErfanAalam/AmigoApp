@@ -1,4 +1,7 @@
+import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
+import 'package:amigo/models/group_model.dart';
+import 'package:amigo/models/user_model.dart';
 import 'package:drift/drift.dart';
 import '../sqlite.db.dart';
 import '../sqlite.schema.dart';
@@ -125,6 +128,78 @@ class ConversationMemberRepository {
     return members.map((member) => _conversationMemberToModel(member)).toList();
   }
 
+  // get all members of conversations with user details
+  Future<List<UserModel>> getMembersWithUserDetailsByConversationId(
+    int conversationId,
+  ) async {
+    final members = await getMembersByConversationId(conversationId);
+    final userIds = members.map((member) => member.userId).toList();
+    final users = await UserRepository()
+        .getUsersByIds(userIds)
+        .then(
+          (users) =>
+              users.map((user) => UserModel.fromJson(user.toJson())).toList(),
+        );
+    return users;
+  }
+
+  // update member role
+  Future<void> updateMemberRole(
+    int conversationId,
+    int userId,
+    String role,
+  ) async {
+    final db = sqliteDatabase.database;
+    await (db.update(db.conversationMembers)..where(
+          (t) =>
+              t.userId.equals(userId) & t.conversationId.equals(conversationId),
+        ))
+        .write(ConversationMembersCompanion(role: Value(role)));
+  }
+
+  /// Get group members with their details and role using SQL JOIN
+  /// Joins ConversationMembers with Users table to get complete member information
+  Future<List<GroupMember>> getGroupMembersWithDetails(
+    int conversationId,
+  ) async {
+    final db = sqliteDatabase.database;
+
+    // Create query with LEFT JOIN to Users table
+    final query =
+        db.select(db.conversationMembers).join([
+            leftOuterJoin(
+              db.users,
+              db.users.id.equalsExp(db.conversationMembers.userId),
+            ),
+          ])
+          ..where(db.conversationMembers.conversationId.equals(conversationId))
+          ..where(
+            db.conversationMembers.removedAt.isNull(),
+          ) // Only active members
+          ..orderBy([
+            OrderingTerm(
+              expression: db.conversationMembers.joinedAt,
+              mode: OrderingMode.asc,
+            ),
+          ]);
+
+    // Execute query and map results
+    final results = await query.get();
+
+    return results.map((row) {
+      final member = row.readTable(db.conversationMembers);
+      final user = row.readTableOrNull(db.users);
+
+      return GroupMember(
+        userId: member.userId,
+        name: user?.name ?? '',
+        profilePic: user?.profilePic,
+        role: member.role,
+        joinedAt: member.joinedAt,
+      );
+    }).toList();
+  }
+
   /// Get all conversations a user is a member of
   Future<List<ConversationMemberModel>> getMembersByUserId(int userId) async {
     final db = sqliteDatabase.database;
@@ -243,11 +318,16 @@ class ConversationMemberRepository {
     )..where((t) => t.conversationId.equals(conversationId))).go();
   }
 
-  /// Delete all memberships of a user
-  Future<void> deleteMembersByUserId(int userId) async {
+  /// Delete a member by conversation ID and user ID
+  Future<void> deleteMemberByConversationAndUserId(
+    int conversationId,
+    int userId,
+  ) async {
     final db = sqliteDatabase.database;
-    await (db.delete(
-      db.conversationMembers,
-    )..where((t) => t.userId.equals(userId))).go();
+    await (db.delete(db.conversationMembers)..where(
+          (t) =>
+              t.userId.equals(userId) & t.conversationId.equals(conversationId),
+        ))
+        .go();
   }
 }

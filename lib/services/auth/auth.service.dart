@@ -1,23 +1,17 @@
 import 'package:amigo/api/api_service.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import '../cookie_service.dart';
 import '../socket/websocket_service.dart';
-import '../message_storage_service.dart';
-import '../chat_preferences_service.dart';
 import '../notification_service.dart';
 import '../contact_service.dart';
 import '../user_status_service.dart';
-import '../last_message_storage_service.dart';
-import 'package:amigo/api/user.service.dart' as user_service;
 import 'package:amigo/utils/navigation_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:amigo/screens/auth/login_screen.dart';
-import 'package:amigo/db/database_helper.dart';
 import '../media_cache_service.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
@@ -147,55 +141,38 @@ class AuthService {
       // 4. Clear cookies using the cookie service
       await _cookieService.clearAllCookies();
 
-      // 5. Clear message storage cache
-      final messageStorage = MessageStorageService();
-      await messageStorage.clearAllCache();
-
-      // 6. Clear media cache
+      // 5. Clear media cache
       final mediaCacheService = MediaCacheService();
       await mediaCacheService.clearAllCache();
 
-      // 7. Clear CachedNetworkImage cache
+      // 6. Clear CachedNetworkImage cache
       await _clearCachedNetworkImages();
 
-      // 8. Clear chat preferences
-      final chatPreferences = ChatPreferencesService();
-      await chatPreferences.clearAllPreferences();
-
-      // 9. Clear notification data
+      // 7. Clear notification data
       final notificationService = NotificationService();
       await notificationService.clearNotificationData();
 
-      // 10. Clear user status data
+      // 8. Clear user status data
       final userStatusService = UserStatusService();
       userStatusService.clearAllStatus();
 
-      // 11. Clear contact cache
+      // 9. Clear contact cache
       final contactService = ContactService();
       contactService.clearCache();
 
-      // 12. Clear last message storage
-      final lastMessageStorage = LastMessageStorageService.instance;
-      await lastMessageStorage.clearAllLastMessages();
-
-      // 13. Clear local database
-      final databaseHelper = DatabaseHelper.instance;
-      await databaseHelper.clearAllData();
-      await databaseHelper.resetInstance();
-
-      // 14. Clear app cache directories
+      // 10. Clear app cache directories
       await _clearAppCacheDirectories();
 
-      // 15. Clear temporary files
+      // 11. Clear temporary files
       await _clearTemporaryFiles();
 
-      // 16. Clear user details from shared preferences
+      // 12. Clear user details from shared preferences
       await UserUtils().clearUserDetails();
 
-      // 17. Clear current_user_name
+      // 13. Clear current_user_name
       await prefs.remove('current_user_name');
 
-      // 18. Restart the app
+      // 14. Restart the app
       if (NavigationHelper.navigatorKey.currentContext != null) {
         Navigator.pushAndRemoveUntil(
           NavigationHelper.navigatorKey.currentContext!,
@@ -282,31 +259,6 @@ class AuthService {
       }
     } catch (e) {
       debugPrint('❌ Error clearing directory contents');
-    }
-  }
-
-  // Get current user ID
-  Future<int?> getCurrentUserId() async {
-    try {
-      final userServiceInstance = user_service.UserService();
-      final response = await userServiceInstance.getUser();
-
-      if (response['success'] == true && response['data'] != null) {
-        final userData = response['data'];
-        final id = userData['id'];
-
-        if (id is int) {
-          return id;
-        } else if (id is String) {
-          return int.tryParse(id);
-        } else {
-          return int.tryParse(id.toString());
-        }
-      }
-      return null;
-    } catch (e) {
-      debugPrint('❌ Error getting current user ID');
-      return null;
     }
   }
 }

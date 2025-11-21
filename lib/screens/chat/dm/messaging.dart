@@ -5,8 +5,10 @@ import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/message.model.dart';
+import 'package:amigo/providers/chat_provider.dart';
 import 'package:amigo/types/socket.type.dart';
 import 'package:amigo/utils/chat/chat_helpers.utils.dart';
+import 'package:amigo/utils/snowflake.util.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -32,7 +34,6 @@ import '../../../utils/chat/forward_message.utils.dart';
 import '../../../utils/chat/attachments.utils.dart';
 import '../../../utils/chat/preview_media.utils.dart';
 import '../../../utils/chat/audio_playback.utils.dart';
-import '../../../utils/chat/sendMediaMessage.utils.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../services/user_status_service.dart';
 import '../../../services/media_cache_service.dart';
@@ -52,7 +53,7 @@ class InnerChatPage extends ConsumerStatefulWidget {
 class _InnerChatPageState extends ConsumerState<InnerChatPage>
     with TickerProviderStateMixin {
   final ChatsServices _chatsServices = ChatsServices();
-  final UserService _userService = UserService();
+  // final UserService _userService = UserService();
   final MessageRepository _messagesRepo = MessageRepository();
   final UserRepository _userRepo = UserRepository();
   final ScrollController _scrollController = ScrollController();
@@ -70,7 +71,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   StreamSubscription<ChatMessagePayload>? _messageSubscription;
   StreamSubscription<ChatMessageAckPayload>? _messageAckSubscription;
   StreamSubscription<MessagePinPayload>? _messagePinSubscription;
-  StreamSubscription<ChatMessagePayload>? _messageReplySubscription;
   StreamSubscription<DeleteMessagePayload>? _messageDeleteSubscription;
 
   // State variables
@@ -123,7 +123,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // Scroll to bottom button state
   bool _isAtBottom = true;
   // int _unreadCountWhileScrolled = 0;
-  // double _lastScrollPosition = 0.0;
+  double _lastScrollPosition = 0.0;
   // int _previousMessageCount = 0;
 
   // int _optimisticMessageId = -1; // Negative IDs for optimistic messages
@@ -140,23 +140,18 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // Message selection and actions
   final Set<int> _selectedMessages = {};
   // int? _pinnedMessageId; // Only one message can be pinned
-  // final Set<int> _starredMessages = {};
+  final Set<int> _starredMessages = {};
 
   // Forward message state
-  // final Set<int> _messagesToForward = {};
-  // List<ConversationModel> _availableConversations = [];
-  // bool _isLoadingConversations = false;
+  final Set<int> _messagesToForward = {};
+  final bool _isLoadingConversations = false;
 
   // Reply message state
-  // MessageModel? _replyToMessageData;
-  // bool _isReplying = false;
+  MessageModel? _replyToMessageData;
 
   // Highlighted message state (for scroll-to effect)
-  // int? _highlightedMessageId;
-  // Timer? _highlightTimer;
-
-  // GlobalKey map for message widgets to enable precise scrolling
-  // final Map<int, GlobalKey> _messageKeys = {};
+  int? _highlightedMessageId;
+  Timer? _highlightTimer;
 
   // Sticky date separator state - using ValueNotifier to avoid setState during scroll
   final ValueNotifier<String?> _currentStickyDate = ValueNotifier<String?>(
@@ -196,8 +191,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   //
   // // Video thumbnail cache
-  // final Map<String, String?> _videoThumbnailCache = {};
-  // final Map<String, Future<String?>> _videoThumbnailFutures = {};
+  final Map<String, String?> _videoThumbnailCache = {};
+  final Map<String, Future<String?>> _videoThumbnailFutures = {};
 
   @override
   void initState() {
@@ -364,6 +359,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     setState(() {
       _messages = messaagesFromLocal;
       _sortMessagesBySentAt();
+      _isLoading = false;
     });
 
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -386,6 +382,20 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     // start silent message sync (from server to local DB)
     _syncMessagesFromServer();
+  }
+
+  Future<void> _loadMoreMessages() async {
+    // Implement loading more messages from server to local DB
+    final moreMessages = await _messagesRepo.getMessagesByConversation(
+      widget.dm.conversationId,
+      limit: 100,
+      offset: _messages.length,
+    );
+
+    setState(() {
+      _messages.addAll(moreMessages);
+      _sortMessagesBySentAt();
+    });
   }
 
   /// Sync all messages from server to local DB
@@ -510,11 +520,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
       // Reload messages from local DB after sync
       if (mounted && !_isDisposed) {
-        final syncedMessages = await _messagesRepo.getMessagesByConversation(
-          widget.dm.conversationId,
-          limit: 100,
-          offset: 0,
-        );
+        final syncedMessages = await _messagesRepo
+            .getMessagesByConversationWithSenderDetails(
+              widget.dm.conversationId,
+              limit: 100,
+              offset: 0,
+            );
 
         setState(() {
           _messages = syncedMessages;
@@ -591,7 +602,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
   }
 
-  void _onScroll() {
+  void _onScroll() async {
     // Ensure we have a valid scroll position and the widget is still mounted
     if (!mounted || !_scrollController.hasClients) return;
 
@@ -623,23 +634,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     final maxScrollExtent = _scrollController.position.maxScrollExtent;
     final distanceFromTop = maxScrollExtent - scrollPosition;
 
-    // if (distanceFromTop <= 200) {
-    //   _loadMoreMessages();
-    // }
+    if (distanceFromTop <= 200) {
+      await _loadMoreMessages();
+    }
   }
-
-  /// Handle incoming message star from WebSocket
-  // void _handleMessageStar(Map<String, dynamic> message) async {
-  //   await handleMessageStar(
-  //     HandleMessageStarConfig(
-  //       message: message,
-  //       mounted: () => mounted,
-  //       setState: setState,
-  //       starredMessages: _starredMessages,
-  //       messagesRepo: _messagesRepo,
-  //     ),
-  //   );
-  // }
 
   /// Handle message delete event from WebSocket
   // void _handleMessageDelete(DeleteMessagePayload payload) async {
@@ -657,186 +655,14 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   /// Build message status ticks (single/double) based on delivery and read status
   Widget _buildMessageStatusTicks(MessageModel message) {
-    bool hasActiveUsers = _onlineUsers
-        .where((userId) => userId != _currentUserId)
-        .isNotEmpty;
-    // Get the last read message id of the other user (not the current user)
-    int userReadMsgId = -1;
-    if (userLastReadMessageIds.isNotEmpty) {
-      try {
-        // Find the first user id that is not the current user
-        final otherUserId = userLastReadMessageIds.keys.firstWhere(
-          (id) => id != _currentUserId,
-        );
-        userReadMsgId = userLastReadMessageIds[otherUserId] ?? -1;
-      } catch (e) {
-        // If no other user found or any error occurs, keep userReadMsgId as -1
-        userReadMsgId = -1;
-      }
-    }
-
-    // if ((message.id <= userReadMsgId || hasActiveUsers) && message.id > 0) {
-    if (((message.id <= userReadMsgId || hasActiveUsers) && message.id > 0) &&
-        userReadMsgId > 0) {
+    if (((message.status == MessageStatusType.read) && message.id > 0)) {
       // Message is already marked as read - always show blue tick
       return Icon(Icons.done_all, size: 16, color: Colors.blue);
-    } else if (hasActiveUsers) {
+    } else if (message.status == MessageStatusType.delivered) {
       // User is active - show blue tick for delivered messages
-      if (message.isDelivered) {
-        // Double blue tick - user is active and message is delivered
-        return Icon(Icons.done_all, size: 16, color: Colors.blue);
-      } else {
-        // Single grey tick - message is sent but not delivered
-        return Icon(Icons.done, size: 16, color: Colors.white70);
-      }
+      return Icon(Icons.done_all, size: 16, color: Colors.grey[800]);
     } else {
-      // No users active - show grey tick for delivered messages
-      if (message.isDelivered) {
-        // Double grey tick - message is delivered but no users active
-        return Icon(Icons.done_all, size: 16, color: Colors.white70);
-      } else {
-        // Single grey tick - message is sent but not delivered
-        return Icon(Icons.done, size: 16, color: Colors.white70);
-      }
-    }
-  }
-
-  /// Handle message delivery receipt from WebSocket
-  void _handleMessageDeliveryReceipt(Map<String, dynamic> messageData) async {
-    try {
-      debugPrint('📨 Received message_delivery_receipt: $messageData');
-
-      final data = messageData['data'] as Map<String, dynamic>? ?? {};
-      final messageId = data['message_id'];
-      final optimisticId = data['optimistic_id'];
-      final deliveredCount = data['delivered_count'] ?? 0;
-      final readCount = data['read_count'] ?? 0;
-      final readBy = data['read_by'] as List<dynamic>? ?? [];
-
-      if (messageId == null && optimisticId == null) return;
-
-      // Find the message in our list and update its status
-      // Check both message_id and optimistic_id
-      int messageIndex = -1;
-
-      if (messageId != null) {
-        messageIndex = _messages.indexWhere((msg) => msg.id == messageId);
-      }
-
-      // If not found by message_id, try optimistic_id
-      if (messageIndex == -1 && optimisticId != null) {
-        messageIndex = _messages.indexWhere((msg) {
-          // Check if optimistic_id in metadata matches
-          final msgOptimisticId = msg.metadata?['optimistic_id'];
-          if (msgOptimisticId != null) {
-            return msgOptimisticId.toString() == optimisticId.toString();
-          }
-          // Also check if message id matches optimistic_id (for cases where optimistic_id is the same as message_id)
-          return msg.id.toString() == optimisticId.toString();
-        });
-      }
-      if (messageIndex != -1) {
-        final currentMessage = _messages[messageIndex];
-        final actualMessageId = currentMessage.id;
-
-        // Update delivery and read status
-        final isDelivered = deliveredCount > 0;
-
-        // Message is read ONLY if:
-        // 1. read_count > 0 (server says it's read), OR
-        // 2. read_by array contains any user IDs (real read receipts from server)
-        final isRead = readCount > 0 || readBy.isNotEmpty;
-
-        if (mounted) {
-          setState(() {
-            // Update the current message
-            _messages[messageIndex] = currentMessage.copyWith(
-              isDelivered: isDelivered,
-              isRead: isRead,
-            );
-
-            // Update all other messages that the current user sent to also have read receipts
-            for (int i = 0; i < _messages.length; i++) {
-              if (i != messageIndex &&
-                  _messages[i].senderId == _currentUserId) {
-                final originalMessage = _messages[i];
-                _messages[i] = originalMessage.copyWith(
-                  isDelivered: isDelivered || originalMessage.isDelivered,
-                  // isRead: isRead || originalMessage.isRead,
-                );
-              }
-            }
-
-            _sortMessagesBySentAt();
-
-            // Update userLastReadMessageIds for all users using readBy and unreadBy
-            if (readBy.isNotEmpty) {
-              for (final userId in readBy) {
-                if (userId != null && messageId != null) {
-                  userLastReadMessageIds[userId] = messageId;
-                }
-              }
-            }
-          });
-        }
-
-        // Update in storage for all messages that the current user sent (batch update)
-        if (_currentUserId != null && isDelivered) {
-          await _messagesRepo.updateAllMessagesStatus(
-            conversationId: widget.dm.id,
-            senderId: _currentUserId!,
-            isDelivered: isDelivered,
-          );
-        }
-      } else {
-        debugPrint(
-          '⚠️ Message not found for delivery receipt - messageId: $messageId, optimisticId: $optimisticId',
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ Error handling delivery receipt: $e');
-    }
-  }
-
-  /// Handle read receipt from WebSocket (for active/inactive conversation status)
-  void _handleReadReceipt(Map<String, dynamic> messageData) async {
-    try {
-      final data = messageData['data'] as Map<String, dynamic>? ?? {};
-      final userId = data['user_id'];
-      final readAll = data['read_all'] ?? false;
-      final userActive = data['user_active'] ?? false;
-      final lastReadMessageId = data['message_id'];
-      // Skip if this is our own read receipt
-      if (_currentUserId != null && userId == _currentUserId) {
-        return;
-      }
-
-      // Update the active user state
-      _activeUsers[userId] = userActive;
-      if (mounted) {
-        setState(() {
-          // Update userLastReadMessageIds when we receive a read receipt
-          if (lastReadMessageId != null && userId != null) {
-            userLastReadMessageIds[userId] = lastReadMessageId;
-          }
-
-          // If user became active, mark delivered messages as read
-          if (userActive && readAll) {
-            for (int i = 0; i < _messages.length; i++) {
-              final message = _messages[i];
-
-              // Only update messages sent by the current user
-              if (message.senderId == _currentUserId && message.isDelivered
-              // && !message.isRead
-              ) {
-                _messages[i] = message.copyWith(isRead: true);
-              }
-            }
-          }
-        });
-      }
-    } catch (e) {
-      debugPrint('❌ Error handling read receipt: $e');
+      return Icon(Icons.done, size: 16, color: Colors.grey[800]);
     }
   }
 
@@ -862,12 +688,16 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       final message = MessageModel(
         canonicalId: payload.canonicalId,
         conversationId: payload.convId,
+        attachments: payload.attachments,
+        metadata: payload.metadata,
+        body: payload.body,
         senderId: payload.senderId,
         isReplied: payload.replyToMessageId != null,
         type: payload.msgType,
         status: MessageStatusType.read,
         sentAt: payload.sentAt.toIso8601String(),
       );
+
       // Add message to UI immediately with animation
       if (mounted) {
         setState(() {
@@ -880,8 +710,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         // );
         // _showStickyDate.value = true;
 
-        if (message.id != null) {
-          _animateNewMessage(message.id!);
+        if (message.id > 0) {
+          _animateNewMessage(message.id);
           // if (!_isAtBottom) {
           //   _trackNewMessage();
           // }
@@ -967,13 +797,13 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       ).toJson();
 
       final wsmsg = WSMessage(
-        type: WSMessageType.conversationLeave,
+        type: WSMessageType.conversationTyping,
         payload: typingPayload,
         wsTimestamp: DateTime.now(),
       ).toJson();
 
       await _webSocket.sendMessage(wsmsg).catchError((e) {
-        debugPrint('❌ Error sending conversation:leave in deactivate: $e');
+        debugPrint('Error sending conversation:leave in deactivate');
       });
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     }
@@ -997,142 +827,88 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   /// Send message with immediate display (optimistic UI)
-  void _sendMessage() async {
-    final messageText = _messageController.text.trim();
-    if (messageText.isEmpty) return;
+  void _sendMessage(
+    MessageType messageType, {
+    MediaResponse? mediaResponse,
+  }) async {
+    String messageText = '';
+    if (messageType == MessageType.text) {
+      messageText = _messageController.text.trim();
+      if (messageText.isEmpty) return;
+    }
 
-    // Store reply message reference
-    final replyMessage = _replyToMessageData;
-    final replyMessageId = _replyToMessageData?.id;
+    final optimisticMessageId = Snowflake.generateNegative();
+
+    // Clear draft when message is sent
+    final draftNotifier = ref.read(draftMessagesProvider.notifier);
+    await draftNotifier.removeDraft(widget.dm.conversationId);
+
+    // Create optimistic message for immediate display with current UTC time
+    final nowUTC = DateTime.now().toUtc();
+    final newMsg = MessageModel(
+      optimisticId: optimisticMessageId,
+      conversationId: widget.dm.conversationId,
+      senderId: _currentUserDetails!.id,
+      senderName: _currentUserDetails!.name,
+      senderProfilePic: _currentUserDetails!.profilePic,
+      attachments: mediaResponse?.toJson(),
+      type: messageType,
+      body: messageText,
+      isReplied: _replyToMessageData != null,
+      status: MessageStatusType.sent,
+      sentAt: nowUTC.toIso8601String(),
+    );
 
     // Clear input and reply state immediately for better UX
     _messageController.clear();
     _cancelReply();
 
-    // Clear draft when message is sent
-    final draftNotifier = ref.read(draftMessagesProvider.notifier);
-    await draftNotifier.removeDraft(widget.dm.id);
-
-    // Create optimistic message for immediate display with current UTC time
-    final nowUTC = DateTime.now().toUtc();
-    final optimisticMessage = MessageModel(
-      id: _optimisticMessageId, // Use negative ID for optimistic messages
-      body: messageText,
-      type: 'text',
-      senderId: _currentUserId ?? 0,
-      conversationId: widget.dm.id,
-      createdAt: nowUTC
-          .toIso8601String(), // Store as UTC, convert to IST when displaying
-      deleted: false,
-      senderName: 'You', // Current user name
-      senderProfilePic: null,
-      replyToMessage: replyMessage,
-      replyToMessageId: replyMessageId,
-      metadata: {
-        'optimistic_id': _optimisticMessageId,
-      }, // Store optimistic_id in metadata
-    );
-
-    // Track this as an optimistic message
-    _optimisticMessageIds.add(_optimisticMessageId);
     // Add message to UI immediately with animation
     if (mounted) {
       setState(() {
-        _messages.add(optimisticMessage);
+        _messages.add(newMsg);
         _sortMessagesBySentAt();
       });
 
-      _animateNewMessage(optimisticMessage.id);
+      _animateNewMessage(newMsg.optimisticId!);
       _scrollToBottom();
     }
 
-    // Store message immediately in cache (optimistic storage)
-    _storeMessageAsync(optimisticMessage);
-
     try {
-      // Check if this is a reply message
-      if (replyMessageId != null) {
-        // Send reply message via WebSocket
-        await _websocketService.sendMessage({
-          'type': 'message_reply',
-          'data': {
-            'new_message': messageText,
-            'optimistic_id': _optimisticMessageId,
-          },
-          'conversation_id': widget.dm.id,
-          'message_ids': [
-            replyMessageId,
-          ], // Array of message IDs being replied to
-        });
-      } else {
-        // Send regular message
-        final messageData = {
-          'type': 'text',
-          'body': messageText,
-          'optimistic_id': _optimisticMessageId,
-        };
+      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-        await _websocketService.sendMessage({
-          'type': 'message',
-          'data': messageData,
-          'conversation_id': widget.dm.id,
-        });
-      }
-      _optimisticMessageId--;
-    } catch (e) {
-      debugPrint('❌ Error sending message: $e');
-
-      // Handle send failure - mark message as failed
-      _handleMessageSendFailure(optimisticMessage.id, e.toString());
-    }
-  }
-
-  /// Handle message send failure
-  void _handleMessageSendFailure(int messageId, String error) {
-    if (!mounted) return;
-
-    // Find and update the failed message
-    final index = _messages.indexWhere((msg) => msg.id == messageId);
-    if (index != -1) {
-      // You could add a "failed" status to MessageModel or show an error indicator
-      // For now, we'll show a snackbar
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to send message, please check your internet!'),
-          backgroundColor: Colors.teal,
-          action: SnackBarAction(
-            label: 'Retry',
-            textColor: Colors.white,
-            onPressed: () => _retryMessage(messageId),
-          ),
-        ),
+      final messagePayload = ChatMessagePayload(
+        optimisticId: optimisticMessageId,
+        convId: widget.dm.conversationId,
+        senderId: _currentUserDetails!.id,
+        senderName: _currentUserDetails!.name,
+        convType: ChatType.dm,
+        msgType: MessageType.text,
+        body: messageText,
+        replyToMessageId: _replyToMessageData?.id,
+        sentAt: nowUTC,
       );
-    }
-  }
 
-  /// Handle media upload failure - update only metadata to mark as failed
-  void _handleMediaUploadFailure(MessageModel loadingMessage, String error) {
-    if (!mounted) return;
+      final wsmsg = WSMessage(
+        type: WSMessageType.messageNew,
+        payload: messagePayload,
+        wsTimestamp: DateTime.now(),
+      ).toJson();
 
-    // Find the message and update only metadata
-    final index = _messages.indexWhere((msg) => msg.id == loadingMessage.id);
-    if (index != -1) {
-      final failedMessage = _messages[index];
-      final updatedMetadata = Map<String, dynamic>.from(
-        failedMessage.metadata ?? {},
-      );
-      updatedMetadata['is_uploading'] = false;
-      updatedMetadata['upload_failed'] = true;
-
-      setState(() {
-        // Use copyWith to update only metadata, explicitly preserve attachments
-        _messages[index] = failedMessage.copyWith(
-          metadata: updatedMetadata,
-          attachments:
-              failedMessage.attachments, // Explicitly preserve attachments
-        );
-        _sortMessagesBySentAt();
+      await _webSocket.sendMessage(wsmsg).catchError((e) {
+        debugPrint('Error sending message');
       });
+
+      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+      ref
+          .read(chatProvider.notifier)
+          .updateLastMessageOnSendingOwnMessage(
+            widget.dm.conversationId,
+            newMsg,
+          );
+    } catch (e) {
+      debugPrint('Error sending message');
     }
   }
 
@@ -1156,9 +932,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   void _handleScrollToBottomTap() {
     _scrollToBottom();
     // Clear unread count
-    setState(() {
-      _unreadCountWhileScrolled = 0;
-    });
+    // setState(() {
+    //   _unreadCountWhileScrolled = 0;
+    // });
   }
 
   /// Update scroll to bottom button state
@@ -1176,10 +952,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     if (isAtBottomNow) {
       // User is at bottom - clear unread count
-      if (mounted && (!_isAtBottom || _unreadCountWhileScrolled > 0)) {
+      if (mounted && (!_isAtBottom)) {
         setState(() {
           _isAtBottom = true;
-          _unreadCountWhileScrolled = 0;
         });
       }
     } else if (scrolledUp || scrollPosition > 100) {
@@ -1222,9 +997,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       int attempts = 0;
       const maxAttempts = 20; // Prevent infinite loops
 
-      while (!messageFound && _hasMoreMessages && attempts < maxAttempts) {
+      while (!messageFound && attempts < maxAttempts) {
         // Load more messages
-        await _loadMoreMessages();
+        // await _loadMoreMessages();
 
         // Check if we found the message
         messageFound = _messages.any((msg) => msg.id == messageId);
@@ -1256,11 +1031,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Now the message should be in our list
     if (!mounted) return;
 
-    // Ensure we have a key for this message
-    if (!_messageKeys.containsKey(messageId)) {
-      _messageKeys[messageId] = GlobalKey();
-    }
-
     // PHASE 1: Scroll approximately to the message area so it gets built
     final updatedMessageIndex = _messages.indexWhere(
       (msg) => msg.id == messageId,
@@ -1291,64 +1061,33 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       }
     }
 
-    // PHASE 2: Use GlobalKey for precise scrolling
-    final messageKey = _messageKeys[messageId];
-    if (messageKey?.currentContext != null) {
-      try {
-        // Use Scrollable.ensureVisible for precise scrolling
-        await Scrollable.ensureVisible(
-          messageKey!.currentContext!,
-          duration: const Duration(milliseconds: 400),
-          curve: Curves.easeInOut,
-          alignment: 0.5, // Center the message in the viewport
-        );
+    // PHASE 2: Use message ID to find and highlight the message
+    // After approximate scroll, highlight the message
+    if (mounted) {
+      setState(() {
+        _highlightedMessageId = messageId;
+      });
 
-        // Highlight the message after scrolling
+      // Cancel any existing timer
+      _highlightTimer?.cancel();
+
+      // Remove highlight after 2 seconds
+      _highlightTimer = Timer(const Duration(milliseconds: 2000), () {
         if (mounted) {
           setState(() {
-            _highlightedMessageId = messageId;
-          });
-
-          // Cancel any existing timer
-          _highlightTimer?.cancel();
-
-          // Remove highlight after 2 seconds
-          _highlightTimer = Timer(const Duration(milliseconds: 2000), () {
-            if (mounted) {
-              setState(() {
-                _highlightedMessageId = null;
-              });
-            }
+            _highlightedMessageId = null;
           });
         }
-      } catch (e) {
-        debugPrint('❌ Error in precise scroll: $e');
-      }
-    } else {
-      // Only retry if we haven't exceeded max retries
-      if (retryCount < maxRetries - 1 && mounted) {
+      });
+
+      // If we couldn't find the message initially, retry
+      if (updatedMessageIndex == -1 && retryCount < maxRetries - 1) {
         // Force a rebuild and wait a bit longer
         setState(() {});
 
         // Try again after a longer delay
         await Future.delayed(const Duration(milliseconds: 300));
         _scrollToMessage(messageId, retryCount: retryCount + 1);
-      } else {
-        // Still highlight the message even if we can't scroll precisely
-        if (mounted) {
-          setState(() {
-            _highlightedMessageId = messageId;
-          });
-
-          _highlightTimer?.cancel();
-          _highlightTimer = Timer(const Duration(milliseconds: 2000), () {
-            if (mounted) {
-              setState(() {
-                _highlightedMessageId = null;
-              });
-            }
-          });
-        }
       }
     }
   }
@@ -1412,7 +1151,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                 icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
                 onPressed: () => Navigator.pop(context),
               ),
-        title: _isSelectionMode
+        title: _selectedMessages.isNotEmpty
             ? Text(
                 '${_selectedMessages.length} selected',
                 style: const TextStyle(
@@ -1426,13 +1165,15 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                   CircleAvatar(
                     radius: 18,
                     backgroundColor: Colors.white,
-                    backgroundImage: widget.dm.userProfilePic != null
-                        ? CachedNetworkImageProvider(widget.dm.userProfilePic!)
+                    backgroundImage: widget.dm.recipientProfilePic != null
+                        ? CachedNetworkImageProvider(
+                            widget.dm.recipientProfilePic!,
+                          )
                         : null,
-                    child: widget.dm.userProfilePic == null
+                    child: widget.dm.recipientProfilePic == null
                         ? Text(
-                            widget.dm.userName.isNotEmpty
-                                ? widget.dm.userName[0].toUpperCase()
+                            widget.dm.recipientName.isNotEmpty
+                                ? widget.dm.recipientName[0].toUpperCase()
                                 : '?',
                             style: const TextStyle(
                               color: Colors.teal,
@@ -1448,7 +1189,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          widget.dm.userName,
+                          widget.dm.recipientName,
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
@@ -1462,7 +1203,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                               initialData: UserStatusService().onlineStatus,
                               builder: (context, snapshot) {
                                 final isOnline =
-                                    snapshot.data?[widget.dm.userId] ?? false;
+                                    snapshot.data?[widget.dm.recipientId] ??
+                                    false;
                                 return Text(
                                   isOnline ? 'Online' : 'Offline',
                                   style: TextStyle(
@@ -1474,7 +1216,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                                 );
                               },
                             ),
-                            if (_isLoadingFromCache) ...[
+                            if (_isSyncingMessages) ...[
                               const SizedBox(width: 8),
                               Container(
                                 padding: const EdgeInsets.symmetric(
@@ -1486,7 +1228,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: const Text(
-                                  'Cache ⚡',
+                                  'Syncing messages... ⚡',
                                   style: TextStyle(
                                     color: Colors.white,
                                     fontSize: 10,
@@ -1504,7 +1246,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
               ),
         backgroundColor: Colors.teal,
         elevation: 0,
-        actions: _isSelectionMode
+        actions: _selectedMessages.isNotEmpty
             ? [
                 IconButton(
                   icon: const Icon(Icons.star_border, color: Colors.white),
@@ -1519,7 +1261,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
               ]
             : [
                 // Only show call button if user has call access
-                if (_hasCallAccess)
+                if (_currentUserDetails?.callAccess == true)
                   IconButton(
                     icon: const Icon(Icons.call, color: Colors.white),
                     onPressed: () => _initiateCall(context),
@@ -1545,16 +1287,15 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             Column(
               children: [
                 // Pinned Message Section
-                if (_pinnedMessageId != null)
+                if (_pinnedMessage != null)
                   PinnedMessageSection(
                     pinnedMessage: _messages.firstWhere(
-                      (message) => message.id == _pinnedMessageId,
+                      (message) => message.id == _pinnedMessage?.canonicalId,
                     ),
-                    currentUserId: _currentUserId,
-                    conversationUserId: widget.dm.userId,
-                    isGroupChat: false,
-                    onTap: () => _scrollToMessage(_pinnedMessageId!),
-                    onUnpin: () => _togglePinMessage(_pinnedMessageId!),
+                    currentUserId: _currentUserDetails?.id,
+                    onTap: () =>
+                        _scrollToMessage(_pinnedMessage?.canonicalId ?? 0),
+                    onUnpin: () => _togglePinMessage(_pinnedMessage!),
                   ),
 
                 // Messages List
@@ -1582,16 +1323,16 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             // Scroll to Bottom Button - positioned at right bottom
             Positioned(
               right: 16,
-              bottom: _isReplying
+              bottom: _replyToMessageData != null
                   ? 150.0
                   : 80.0, // Position above message input
               child: ScrollToBottomButton(
                 scrollController: _scrollController,
                 onTap: _handleScrollToBottomTap,
                 isAtBottom: _isAtBottom,
-                unreadCount: _unreadCountWhileScrolled > 0
-                    ? _unreadCountWhileScrolled
-                    : null,
+                // unreadCount: _unreadCountWhileScrolled > 0
+                //     ? _unreadCountWhileScrolled
+                //     : null,
                 bottomPadding:
                     0.0, // Not used anymore, positioning handled by parent
               ),
@@ -1668,22 +1409,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Widget _buildMessagesList() {
-    // Show cache loader while checking cache (prevent black screen)
-    if (_isCheckingCache && _messages.isEmpty) {
-      return Center(child: LoadingDotsAnimation(color: Colors.blue[400]));
-    }
-
-    // Show appropriate loader based on state
-    if (_isLoadingFromCache) {
-      return Center(child: LoadingDotsAnimation(color: Colors.orange[400]));
-    }
-
-    // Only show loading if we haven't initialized and don't have messages
-    if (_isLoading && !_isInitialized && _messages.isEmpty) {
-      return Center(child: LoadingDotsAnimation(color: Colors.blue[400]));
-    }
-
-    if (_errorMessage != null && _messages.isEmpty) {
+    if (_messages.isEmpty && !_isLoading) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1696,45 +1422,42 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _loadInitialMessages,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.grey[100],
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 10,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                elevation: 0,
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.refresh_rounded, size: 16, color: Colors.black),
-                  SizedBox(width: 6),
-                  Text(
-                    'Refresh',
-                    style: TextStyle(
-                      color: Colors.black,
-                      fontSize: 12,
-                      fontWeight: FontWeight.normal,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            // ElevatedButton(
+            //   onPressed: null,
+            //   style: ElevatedButton.styleFrom(
+            //     backgroundColor: Colors.grey[100],
+            //     padding: const EdgeInsets.symmetric(
+            //       horizontal: 20,
+            //       vertical: 10,
+            //     ),
+            //     shape: RoundedRectangleBorder(
+            //       borderRadius: BorderRadius.circular(10),
+            //     ),
+            //     elevation: 0,
+            //   ),
+            //   child: const Row(
+            //     mainAxisSize: MainAxisSize.min,
+            //     children: [
+            //       Icon(Icons.refresh_rounded, size: 16, color: Colors.black),
+            //       SizedBox(width: 6),
+            //       Text(
+            //         'Refresh',
+            //         style: TextStyle(
+            //           color: Colors.black,
+            //           fontSize: 12,
+            //           fontWeight: FontWeight.normal,
+            //         ),
+            //       ),
+            //     ],
+            //   ),
+            // ),
           ],
         ),
       );
     }
 
     // Only show "No messages yet" if we've fully initialized and confirmed no messages
-    if (_messages.isEmpty &&
-        _isInitialized &&
-        !_isLoading &&
-        !_isLoadingFromCache) {
+    if (_messages.isEmpty && !_isLoading) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1761,63 +1484,63 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       physics:
           const ClampingScrollPhysics(), // Better performance than bouncing
-      cacheExtent: 100, // Reduce cache extent to save memory
+      cacheExtent: 200, // Reduce cache extent to save memory
       addAutomaticKeepAlives: false, // Don't keep all items alive
       addRepaintBoundaries:
           true, // Add repaint boundaries for better performance
-      itemCount: _messages.length + (_isLoadingMore ? 1 : 0),
+      // itemCount: _messages.length + (_isLoadingMore ? 1 : 0),
       // (_isLoadingMore ? 1 : 0) +
       // (!_hasMoreMessages && _messages.isNotEmpty ? 1 : 0),
       itemBuilder: (context, index) {
         // Show loading indicator at the top when loading older messages
-        if (index == 0 && _isLoadingMore) {
-          return Container(
-            padding: const EdgeInsets.all(16),
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.grey[50],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey[200]!),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      Colors.teal[400]!,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'Loading older messages...',
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
+        // if (index == 0 && _isLoadingMore) {
+        //   return Container(
+        //     padding: const EdgeInsets.all(16),
+        //     margin: const EdgeInsets.symmetric(vertical: 8),
+        //     decoration: BoxDecoration(
+        //       color: Colors.grey[50],
+        //       borderRadius: BorderRadius.circular(12),
+        //       border: Border.all(color: Colors.grey[200]!),
+        //     ),
+        //     child: Row(
+        //       mainAxisAlignment: MainAxisAlignment.center,
+        //       children: [
+        //         SizedBox(
+        //           width: 20,
+        //           height: 20,
+        //           child: CircularProgressIndicator(
+        //             strokeWidth: 2,
+        //             valueColor: AlwaysStoppedAnimation<Color>(
+        //               Colors.teal[400]!,
+        //             ),
+        //           ),
+        //         ),
+        //         const SizedBox(width: 12),
+        //         Text(
+        //           'Loading older messages...',
+        //           style: TextStyle(
+        //             color: Colors.grey[600],
+        //             fontSize: 14,
+        //             fontWeight: FontWeight.w500,
+        //           ),
+        //         ),
+        //       ],
+        //     ),
+        //   );
+        // }
 
         // Calculate the actual message index, accounting for indicators
         int messageIndex = index;
 
-        // Subtract 1 if there's a "no more messages" indicator at index 0
-        if (!_hasMoreMessages && _messages.isNotEmpty && !_isLoadingMore) {
-          messageIndex = index - 1;
-        }
+        // // Subtract 1 if there's a "no more messages" indicator at index 0
+        // if (!_hasMoreMessages && _messages.isNotEmpty && !_isLoadingMore) {
+        //   messageIndex = index - 1;
+        // }
 
-        // Subtract 1 if there's a loading indicator at index 0
-        if (_isLoadingMore) {
-          messageIndex = index - 1;
-        }
+        // // Subtract 1 if there's a loading indicator at index 0
+        // if (_isLoadingMore) {
+        //   messageIndex = index - 1;
+        // }
 
         // Bounds check to prevent index out of bounds errors
         if (messageIndex < 0 || messageIndex >= _messages.length) {
@@ -1833,23 +1556,16 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         // Determine if message is from current user
         // If _currentUserId is known, use it
         // If not, infer: in a DM, any message NOT from conversation.userId is from us
-        final isMyMessage = _currentUserId != null
-            ? message.senderId == _currentUserId
-            : message.senderId != widget.dm.userId;
-
-        // Ensure we have a GlobalKey for this message for precise scrolling
-        if (!_messageKeys.containsKey(message.id)) {
-          _messageKeys[message.id] = GlobalKey();
-        }
+        final isMyMessage = message.senderId == _currentUserDetails?.id;
 
         // Wrap the message with a container that has a key for scrolling
         return Container(
-          key: _messageKeys[message.id],
+          key: ValueKey(message.id),
           child: Column(
             children: [
               // Date separator - show the date for the group of messages that starts here
               if (ChatHelpers.shouldShowDateSeparator(_messages, messageIndex))
-                DateSeparator(dateTimeString: message.createdAt),
+                DateSeparator(dateTimeString: message.sentAt),
               // Message bubble with long press
               _buildMessageWithActions(message, isMyMessage),
             ],
@@ -1878,7 +1594,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             // Find a message with the current date to get the formatted date string
             final messageWithCurrentDate = _messages.firstWhere(
               (message) =>
-                  ChatHelpers.getMessageDateString(message.createdAt) ==
+                  ChatHelpers.getMessageDateString(message.sentAt) ==
                   currentDate,
               orElse: () => _messages.first,
             );
@@ -1895,11 +1611,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                 ),
                 // show a loading indicator when  _isLoadingMore is true else day
                 child: Text(
-                  _isLoadingMore
-                      ? "Loading more chats..."
-                      : ChatHelpers.formatDateSeparator(
-                          messageWithCurrentDate.createdAt,
-                        ),
+                  ChatHelpers.formatDateSeparator(
+                    messageWithCurrentDate.sentAt,
+                  ),
                   style: const TextStyle(
                     color: Colors.black,
                     fontSize: 11,
@@ -1915,17 +1629,17 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Widget _buildMessageWithActions(MessageModel message, bool isMyMessage) {
-    final isSelected = _selectedMessages.contains(message.id);
-    final isPinned = _pinnedMessageId == message.id;
-    final isStarred = _starredMessages.contains(message.id);
+    final isSelected = _selectedMessages.contains(message.canonicalId!);
+    final isPinned = _pinnedMessage?.canonicalId == message.canonicalId!;
+    final isStarred = _starredMessages.contains(message.canonicalId!);
 
     // Wrap in RepaintBoundary to isolate repaints and improve scroll performance
     return RepaintBoundary(
       key: ValueKey(message.id), // Add key for better widget identification
       child: GestureDetector(
         onLongPress: () => _showMessageActions(message, isMyMessage),
-        onTap: _isSelectionMode
-            ? () => _toggleMessageSelection(message.id)
+        onTap: _selectedMessages.isNotEmpty
+            ? () => _toggleMessageSelection(message.canonicalId!)
             : null,
         onPanStart: (details) => _onSwipeStart(message, details),
         onPanUpdate: (details) => _onSwipeUpdate(message, details, isMyMessage),
@@ -1940,7 +1654,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                 isPinned,
                 isStarred,
               ),
-              if (_isSelectionMode)
+              if (_selectedMessages.isNotEmpty)
                 Positioned(
                   left: isMyMessage ? 8 : null,
                   right: isMyMessage ? null : 8,
@@ -1971,13 +1685,13 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // Swipe gesture handling methods
   void _onSwipeStart(MessageModel message, DragStartDetails details) {
     // Initialize swipe animation controller if not exists
-    if (!_swipeAnimationControllers.containsKey(message.id)) {
+    if (!_swipeAnimationControllers.containsKey(message.canonicalId!)) {
       final controller = AnimationController(
         duration: const Duration(milliseconds: 200),
         vsync: this,
       );
-      _swipeAnimationControllers[message.id] = controller;
-      _swipeAnimations[message.id] = Tween<double>(
+      _swipeAnimationControllers[message.canonicalId!] = controller;
+      _swipeAnimations[message.canonicalId!] = Tween<double>(
         begin: 0.0,
         end: 1.0,
       ).animate(CurvedAnimation(parent: controller, curve: Curves.easeOut));
@@ -1994,7 +1708,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     DragUpdateDetails details,
     bool isMyMessage,
   ) {
-    if (_isSelectionMode || _swipeStartPosition == null || _isScrolling) return;
+    if (_selectedMessages.isNotEmpty ||
+        _swipeStartPosition == null ||
+        _isScrolling)
+      return;
 
     // Calculate total distance moved from start position
     final currentPosition = details.globalPosition;
@@ -2019,7 +1736,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     // Only proceed if this is confirmed as a horizontal swipe
     if (_isSwipeGesture && horizontalDistance > 0) {
-      final controller = _swipeAnimationControllers[message.id];
+      final controller = _swipeAnimationControllers[message.canonicalId!];
       if (controller != null) {
         // Calculate swipe progress (0 to 1) based on total distance
         final progress = (_swipeTotalDistance / 100).clamp(0.0, 1.0);
@@ -2033,7 +1750,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     DragEndDetails details,
     bool isMyMessage,
   ) {
-    final controller = _swipeAnimationControllers[message.id];
+    final controller = _swipeAnimationControllers[message.canonicalId!];
     if (controller != null) {
       // Only trigger reply if this was confirmed as a horizontal swipe gesture
       if (_isSwipeGesture &&
@@ -2064,7 +1781,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     bool isPinned,
     bool isStarred,
   ) {
-    final swipeAnimation = _swipeAnimations[message.id];
+    final swipeAnimation = _swipeAnimations[message.canonicalId!];
 
     if (swipeAnimation != null) {
       return AnimatedBuilder(
@@ -2124,7 +1841,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     bool isStarred,
   ) {
     // Pre-calculate values for better performance
-    final messageTime = ChatHelpers.formatMessageTime(message.createdAt);
+    final messageTime = ChatHelpers.formatMessageTime(message.sentAt);
 
     // Check if this message should be animated
     final shouldAnimate = _messageAnimationControllers.containsKey(message.id);
@@ -2154,16 +1871,18 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         nonMyMessageBackgroundColor: Colors.white,
         useIntrinsicWidth: true,
         useStackContainer: true,
-        currentUserId: _currentUserId,
-        conversationUserId: widget.dm.userId,
+        currentUserId: _currentUserDetails?.id ?? 0,
+        conversationUserId: widget.dm.recipientId,
         onReplyTap: _scrollToMessage,
+        messagesRepo: _messagesRepo,
+        userRepo: _userRepo,
       ),
     );
   }
   // Helper methods for file attachments
 
   bool _isMediaMessage(MessageModel message) {
-    return isMediaMessage(message);
+    return ChatHelpers.isMediaMessage(message);
   }
 
   Widget _buildMessageContent(MessageModel message, bool isMyMessage) {
@@ -2188,7 +1907,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
 
     // Fallback to original type-based handling
-    switch (message.type.toLowerCase()) {
+    switch (message.type.value.toLowerCase()) {
       case 'image':
         return _buildImageMessage(message, isMyMessage);
       case 'video':
@@ -2200,7 +1919,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       case 'reply':
         // Reply messages show the reply UI with quoted message
         return Text(
-          message.body,
+          message.body!,
           style: TextStyle(
             color: isMyMessage ? Colors.white : Colors.black87,
             fontSize: 16,
@@ -2211,7 +1930,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       case 'forwarded':
         // Forwarded messages show forwarded indicator
         return Text(
-          message.body,
+          message.body!,
           style: TextStyle(
             color: isMyMessage ? Colors.white : Colors.black87,
             fontSize: 16,
@@ -2228,7 +1947,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       case 'text':
       default:
         return Text(
-          message.body,
+          message.body!,
           style: TextStyle(
             color: isMyMessage ? Colors.white : Colors.black87,
             fontSize: 16,
@@ -2237,10 +1956,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           ),
         );
     }
-  }
-
-  Widget _buildImageMessage(MessageModel message, bool isMyMessage) {
-    return buildImageMessage(_buildMediaMessageConfig(message, isMyMessage));
   }
 
   MediaMessageConfig _buildMediaMessageConfig(
@@ -2257,34 +1972,31 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       buildMessageStatusTicks: _buildMessageStatusTicks,
       onImagePreview: (url, caption) => _openImagePreview(url, caption),
       onRetryImage: (file, source, {MessageModel? failedMessage}) =>
-          _sendImageMessage(file, source, failedMessage: failedMessage),
+          _sendMediaMessageToServer(file, MessageType.image),
       onCacheImage: (url, id) {
         ChatHelpers.cacheMediaForMessage(
           url: url,
           messageId: id,
-          messagesRepo: _messagesRepo,
           mediaCacheService: _mediaCacheService,
         );
       },
       onVideoPreview: (url, caption, fileName) =>
           _openVideoPreview(url, caption, fileName),
       onRetryVideo: (file, source, {MessageModel? failedMessage}) =>
-          _sendVideoMessage(file, source, failedMessage: failedMessage),
+          _sendMediaMessageToServer(file, MessageType.video),
       videoThumbnailCache: _videoThumbnailCache,
       videoThumbnailFutures: _videoThumbnailFutures,
       onDocumentPreview: (url, fileName, caption, fileSize) =>
           _openDocumentPreview(url, fileName, caption, fileSize),
       onRetryDocument:
           (file, fileName, extension, {MessageModel? failedMessage}) =>
-              _sendDocumentMessage(
-                file,
-                fileName,
-                extension,
-                failedMessage: failedMessage,
-              ),
+              _sendMediaMessageToServer(file, MessageType.document),
       audioPlaybackManager: _audioPlaybackManager,
       onRetryAudio: ({MessageModel? failedMessage}) =>
-          _sendRecordedVoice(failedMessage: failedMessage),
+          _sendMediaMessageToServer(
+            File(failedMessage?.attachments?['url'] ?? ''),
+            MessageType.audio,
+          ),
     );
   }
 
@@ -2300,25 +2012,29 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     return buildVideoMessage(_buildMediaMessageConfig(message, isMyMessage));
   }
 
+  Widget _buildImageMessage(MessageModel message, bool isMyMessage) {
+    return buildImageMessage(_buildMediaMessageConfig(message, isMyMessage));
+  }
+
   // Message action methods
   void _toggleMessageSelection(int messageId) {
-    ChatHelpers.toggleMessageSelection(
-      messageId: messageId,
-      selectedMessages: _selectedMessages,
-      setIsSelectionMode: (value) => _isSelectionMode = value,
-      setState: setState,
-    );
+    setState(() {
+      if (_selectedMessages.contains(messageId)) {
+        _selectedMessages.remove(messageId);
+      } else {
+        _selectedMessages.add(messageId);
+      }
+    });
   }
 
   void _exitSelectionMode() {
     setState(() {
       _selectedMessages.clear();
-      _isSelectionMode = false;
     });
   }
 
   void _showMessageActions(MessageModel message, bool isMyMessage) {
-    final isPinned = _pinnedMessageId == message.id;
+    final isPinned = _pinnedMessage?.canonicalId == message.canonicalId;
     final isStarred = _starredMessages.contains(message.id);
 
     showModalBottomSheet(
@@ -2331,10 +2047,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         isStarred: isStarred,
         showReadBy: false,
         onReply: () => _replyToMessage(message),
-        onPin: () => _togglePinMessage(message.id),
-        onStar: () => _toggleStarMessage(message.id),
+        onPin: () => _togglePinMessage(message),
+        onStar: () => _toggleStarMessage(message.canonicalId!),
         onForward: () => _forwardMessage(message),
-        onSelect: () => _enterSelectionMode(message.id),
+        onSelect: () => _enterSelectionMode(message.canonicalId!),
         onDelete: isMyMessage ? () => _deleteMessage(message.id) : null,
       ),
     );
@@ -2358,7 +2074,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       imagePicker: _imagePicker,
       context: context,
       onImageSelected: (imageFile, source) {
-        _sendImageMessage(imageFile, source);
+        _sendMediaMessageToServer(imageFile, MessageType.image);
       },
       onError: (message) {
         _showErrorDialog(message);
@@ -2373,10 +2089,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     await handleGalleryAttachment(
       context: context,
       onImageSelected: (imageFile, source) {
-        _sendImageMessage(imageFile, source);
+        _sendMediaMessageToServer(imageFile, MessageType.image);
       },
       onVideoSelected: (videoFile, source) {
-        _sendVideoMessage(videoFile, source);
+        _sendMediaMessageToServer(videoFile, MessageType.video);
       },
       onError: (message) {
         _showErrorDialog(message);
@@ -2388,7 +2104,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     await handleDocumentAttachment(
       context: context,
       onDocumentSelected: (documentFile, fileName, extension) {
-        _sendDocumentMessage(documentFile, fileName, extension);
+        _sendMediaMessageToServer(documentFile, MessageType.document);
       },
       onError: (message) {
         _showErrorDialog(message);
@@ -2415,7 +2131,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Future<void> _showForwardModal() async {
-    await _loadAvailableConversations();
+    final dmList = await ConversationRepository().getAllDmsWithRecipientInfo();
+    final groupList = await ConversationRepository()
+        .getGroupListWithoutMembers();
 
     if (!mounted) return;
 
@@ -2426,31 +2144,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       enableDrag: true,
       builder: (context) => ForwardMessageModal(
         messagesToForward: _messagesToForward,
-        availableConversations: _availableConversations,
+        dmList: dmList,
+        groupList: groupList,
         isLoading: _isLoadingConversations,
         onForward: _handleForwardToConversations,
-        currentConversationId: widget.dm.id,
-      ),
-    );
-  }
-
-  Future<void> _loadAvailableConversations() async {
-    await loadAvailableConversations(
-      LoadAvailableConversationsConfig(
-        userService: _userService,
-        currentConversationId: widget.dm.id,
-        setIsLoading: (isLoading) {
-          setState(() {
-            _isLoadingConversations = isLoading;
-          });
-        },
-        setAvailableConversations: (conversations) {
-          setState(() {
-            _availableConversations = conversations;
-          });
-        },
-        mounted: mounted,
-        showErrorDialog: _showErrorDialog,
+        currentConversationId: widget.dm.conversationId,
       ),
     );
   }
@@ -2462,9 +2160,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       HandleForwardToConversationsConfig(
         messagesToForward: _messagesToForward,
         selectedConversationIds: selectedConversationIds,
-        websocketService: _websocketService,
-        currentUserId: _currentUserId!,
-        sourceConversationId: widget.dm.id,
+        currentUserId: _currentUserDetails?.id ?? 0,
+        sourceConversationId: widget.dm.conversationId,
         context: context,
         mounted: mounted,
         clearMessagesToForward: (messages) {
@@ -2490,138 +2187,150 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
   }
 
-  void _sendImageMessage(
-    File imageFile,
-    String source, {
-    MessageModel? failedMessage,
-  }) async {
-    await sendImageMessage(
-      SendMediaMessageConfig(
-        mediaFile: imageFile,
-        conversationId: widget.dm.id,
-        currentUserId: _currentUserId,
-        optimisticMessageId: _optimisticMessageId,
-        replyToMessage: _replyToMessageData,
-        replyToMessageId: _replyToMessageData?.id,
-        failedMessage: failedMessage,
-        messageType: 'image',
-        messages: _messages,
-        optimisticMessageIds: _optimisticMessageIds,
-        conversationMeta: _conversationMeta,
-        messagesRepo: _messagesRepo,
-        chatsServices: _chatsServices,
-        websocketService: _websocketService,
-        mounted: () => mounted,
-        setState: setState,
-        handleMediaUploadFailure: _handleMediaUploadFailure,
-        animateNewMessage: _animateNewMessage,
-        scrollToBottom: _scrollToBottom,
-        cancelReply: _cancelReply,
-        isReplying: _isReplying,
-      ),
-    );
+  // void _sendImageMessage(
+  //   File imageFile,
+  //   String source, {
+  //   MessageModel? failedMessage,
+  // }) async {
+  //   // await sendImageMessage(
+  //   //   SendMediaMessageConfig(
+  //   //     mediaFile: imageFile,
+  //   //     conversationId: widget.dm.id,
+  //   //     currentUserId: _currentUserId,
+  //   //     optimisticMessageId: _optimisticMessageId,
+  //   //     replyToMessage: _replyToMessageData,
+  //   //     replyToMessageId: _replyToMessageData?.id,
+  //   //     failedMessage: failedMessage,
+  //   //     messageType: 'image',
+  //   //     messages: _messages,
+  //   //     optimisticMessageIds: _optimisticMessageIds,
+  //   //     conversationMeta: _conversationMeta,
+  //   //     messagesRepo: _messagesRepo,
+  //   //     chatsServices: _chatsServices,
+  //   //     websocketService: _websocketService,
+  //   //     mounted: () => mounted,
+  //   //     setState: setState,
+  //   //     handleMediaUploadFailure: _handleMediaUploadFailure,
+  //   //     animateNewMessage: _animateNewMessage,
+  //   //     scrollToBottom: _scrollToBottom,
+  //   //     cancelReply: _cancelReply,
+  //   //     isReplying: _replyToMessageData != null,
+  //   //   ),
+  //   // );
 
-    // Only decrement optimistic ID if this was a new message (not a retry)
-    if (failedMessage == null) {
-      _optimisticMessageId--;
+  //   // // Only decrement optimistic ID if this was a new message (not a retry)
+  //   // if (failedMessage == null) {
+  //   //   _optimisticMessageId--;
+  //   // }
+  // }
+
+  Future<void> _sendMediaMessageToServer(
+    File mediaFile,
+    MessageType messageType,
+  ) async {
+    final response = await _chatsServices.sendMediaMessage(mediaFile);
+    if (response['success'] == true && response['data'] != null) {
+      final mediaData = MediaResponse.fromJson(response['data']);
+      // return mediaData;
+
+      _sendMessage(messageType, mediaResponse: mediaData);
+
+      debugPrint('Media data: $mediaData, messageType: $messageType');
+    } else {
+      throw Exception('Failed to send media message');
     }
   }
 
-  void _sendVideoMessage(
-    File videoFile,
-    String source, {
-    MessageModel? failedMessage,
-  }) async {
-    await sendVideoMessage(
-      SendMediaMessageConfig(
-        mediaFile: videoFile,
-        conversationId: widget.dm.id,
-        currentUserId: _currentUserId,
-        optimisticMessageId: _optimisticMessageId,
-        replyToMessage: _replyToMessageData,
-        replyToMessageId: _replyToMessageData?.id,
-        failedMessage: failedMessage,
-        messageType: 'video',
-        messages: _messages,
-        optimisticMessageIds: _optimisticMessageIds,
-        conversationMeta: _conversationMeta,
-        messagesRepo: _messagesRepo,
-        chatsServices: _chatsServices,
-        websocketService: _websocketService,
-        mounted: () => mounted,
-        setState: setState,
-        handleMediaUploadFailure: _handleMediaUploadFailure,
-        animateNewMessage: _animateNewMessage,
-        scrollToBottom: _scrollToBottom,
-        cancelReply: _cancelReply,
-        isReplying: _isReplying,
-      ),
-    );
+  // void _sendVideoMessage(
+  //   File videoFile,
+  //   String source, {
+  //   MessageModel? failedMessage,
+  // }) async {
+  //   await sendVideoMessage(
+  //     SendMediaMessageConfig(
+  //       mediaFile: videoFile,
+  //       conversationId: widget.dm.id,
+  //       currentUserId: _currentUserId,
+  //       optimisticMessageId: _optimisticMessageId,
+  //       replyToMessage: _replyToMessageData,
+  //       replyToMessageId: _replyToMessageData?.id,
+  //       failedMessage: failedMessage,
+  //       messageType: 'video',
+  //       messages: _messages,
+  //       optimisticMessageIds: _optimisticMessageIds,
+  //       conversationMeta: _conversationMeta,
+  //       messagesRepo: _messagesRepo,
+  //       chatsServices: _chatsServices,
+  //       websocketService: _websocketService,
+  //       mounted: () => mounted,
+  //       setState: setState,
+  //       handleMediaUploadFailure: _handleMediaUploadFailure,
+  //       animateNewMessage: _animateNewMessage,
+  //       scrollToBottom: _scrollToBottom,
+  //       cancelReply: _cancelReply,
+  //       isReplying: _replyToMessageData != null,
+  //     ),
+  //   );
 
-    // Only decrement optimistic ID if this was a new message (not a retry)
-    if (failedMessage == null) {
-      _optimisticMessageId--;
-    }
-  }
+  //   // Only decrement optimistic ID if this was a new message (not a retry)
+  //   if (failedMessage == null) {
+  //     _optimisticMessageId--;
+  //   }
+  // }
 
-  void _sendDocumentMessage(
-    File documentFile,
-    String fileName,
-    String extension, {
-    MessageModel? failedMessage,
-  }) async {
-    await sendDocumentMessage(
-      SendMediaMessageConfig(
-        mediaFile: documentFile,
-        conversationId: widget.dm.id,
-        currentUserId: _currentUserId,
-        optimisticMessageId: _optimisticMessageId,
-        replyToMessage: _replyToMessageData,
-        replyToMessageId: _replyToMessageData?.id,
-        failedMessage: failedMessage,
-        messageType: 'document',
-        fileName: fileName,
-        extension: extension,
-        messages: _messages,
-        optimisticMessageIds: _optimisticMessageIds,
-        conversationMeta: _conversationMeta,
-        messagesRepo: _messagesRepo,
-        chatsServices: _chatsServices,
-        websocketService: _websocketService,
-        mounted: () => mounted,
-        setState: setState,
-        handleMediaUploadFailure: _handleMediaUploadFailure,
-        animateNewMessage: _animateNewMessage,
-        scrollToBottom: _scrollToBottom,
-        cancelReply: _cancelReply,
-        isReplying: _isReplying,
-      ),
-    );
+  // void _sendDocumentMessage(
+  //   File documentFile,
+  //   String fileName,
+  //   String extension, {
+  //   MessageModel? failedMessage,
+  // }) async {
+  //   await sendDocumentMessage(
+  //     SendMediaMessageConfig(
+  //       mediaFile: documentFile,
+  //       conversationId: widget.dm.id,
+  //       currentUserId: _currentUserId,
+  //       optimisticMessageId: _optimisticMessageId,
+  //       replyToMessage: _replyToMessageData,
+  //       replyToMessageId: _replyToMessageData?.id,
+  //       failedMessage: failedMessage,
+  //       messageType: 'document',
+  //       fileName: fileName,
+  //       extension: extension,
+  //       messages: _messages,
+  //       optimisticMessageIds: _optimisticMessageIds,
+  //       conversationMeta: _conversationMeta,
+  //       messagesRepo: _messagesRepo,
+  //       chatsServices: _chatsServices,
+  //       websocketService: _websocketService,
+  //       mounted: () => mounted,
+  //       setState: setState,
+  //       handleMediaUploadFailure: _handleMediaUploadFailure,
+  //       animateNewMessage: _animateNewMessage,
+  //       scrollToBottom: _scrollToBottom,
+  //       cancelReply: _cancelReply,
+  //       isReplying: _replyToMessageData != null,
+  //     ),
+  //   );
 
-    // Only decrement optimistic ID if this was a new message (not a retry)
-    if (failedMessage == null) {
-      _optimisticMessageId--;
-    }
-  }
+  //   // Only decrement optimistic ID if this was a new message (not a retry)
+  //   if (failedMessage == null) {
+  //     _optimisticMessageId--;
+  //   }
+  // }
 
   void _enterSelectionMode(int messageId) {
-    ChatHelpers.enterSelectionMode(
-      messageId: messageId,
-      selectedMessages: _selectedMessages,
-      setIsSelectionMode: (value) => _isSelectionMode = value,
-      setState: setState,
-    );
+    setState(() {
+      _selectedMessages.add(messageId);
+    });
   }
 
-  void _togglePinMessage(int messageId) async {
+  void _togglePinMessage(MessageModel message) async {
     await ChatHelpers.togglePinMessage(
-      messageId: messageId,
-      conversationId: widget.dm.id,
-      getPinnedMessageId: () => _pinnedMessageId,
-      setPinnedMessageId: (value) => _pinnedMessageId = value,
-      currentUserId: _currentUserId,
-      messagesRepo: _messagesRepo,
-      websocketService: _websocketService,
+      message: message,
+      conversationId: widget.dm.conversationId,
+      currentPinnedMessageId: _pinnedMessage?.canonicalId,
+      setPinnedMessageId: (value) => _pinnedMessage = value,
+      currentUserId: _currentUserDetails?.id,
       setState: setState,
     );
   }
@@ -2629,11 +2338,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   void _toggleStarMessage(int messageId) async {
     await ChatHelpers.toggleStarMessage(
       messageId: messageId,
-      conversationId: widget.dm.id,
+      conversationId: widget.dm.conversationId,
       starredMessages: _starredMessages,
-      currentUserId: _currentUserId,
-      messagesRepo: _messagesRepo,
-      websocketService: _websocketService,
+      currentUserId: _currentUserDetails?.id,
       setState: setState,
     );
   }
@@ -2641,30 +2348,27 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   void _replyToMessage(MessageModel message) async {
     setState(() {
       _replyToMessageData = message;
-      _isReplying = true;
     });
   }
 
   void _cancelReply() {
     setState(() {
       _replyToMessageData = null;
-      _isReplying = false;
     });
   }
 
-  void _forwardMessage(MessageModel message) async {
-    await ChatHelpers.forwardMessage(
-      messageId: message.id,
-      messagesToForward: _messagesToForward,
-      setState: setState,
-      showForwardModal: _showForwardModal,
-    );
+  Future<void> _forwardMessage(MessageModel message) async {
+    setState(() {
+      _messagesToForward.clear();
+      _messagesToForward.add(message.canonicalId!);
+    });
+    await _showForwardModal();
   }
 
   void _deleteMessage(int messageId) async {
     await ChatHelpers.deleteMessage(
       messageId: messageId,
-      conversationId: widget.dm.id,
+      conversationId: widget.dm.conversationId,
       messages: _messages,
       chatsServices: _chatsServices,
       messagesRepo: _messagesRepo,
@@ -2674,12 +2378,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   void _bulkStarMessages() async {
     await ChatHelpers.bulkStarMessages(
-      conversationId: widget.dm.id,
+      conversationId: widget.dm.conversationId,
       selectedMessages: _selectedMessages,
       starredMessages: _starredMessages,
-      currentUserId: _currentUserId,
-      messagesRepo: _messagesRepo,
-      websocketService: _websocketService,
+      currentUserId: _currentUserDetails?.id,
       setState: setState,
       exitSelectionMode: _exitSelectionMode,
     );
@@ -2700,15 +2402,15 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       messageController: _messageController,
       isOtherTypingNotifier: _isOtherTypingNotifier,
       typingIndicator: _buildTypingIndicator(),
-      isReplying: _isReplying,
+      isReplying: _replyToMessageData != null,
       replyToMessageData: _replyToMessageData,
-      currentUserId: _currentUserId,
-      onSendMessage: _sendMessage,
+      currentUserId: _currentUserDetails?.id,
+      onSendMessage: (messageType) => _sendMessage(messageType),
       onSendVoiceNote: _sendVoiceNote,
       onAttachmentTap: _showAttachmentModal,
       onTyping: _handleTyping,
       onCancelReply: _cancelReply,
-      conversation: widget.dm,
+      dm: widget.dm,
     );
   }
 
@@ -2716,8 +2418,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     return ChatHelpers.buildTypingIndicator(
       typingDotAnimations: _typingDotAnimations,
       isGroupChat: false,
-      userProfilePic: widget.dm.userProfilePic,
-      userName: widget.dm.userName,
+      userProfilePic: widget.dm.recipientProfilePic,
+      userName: widget.dm.recipientName,
     );
   }
 
@@ -2866,36 +2568,38 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         duration = _voiceRecordingManager.recordingDuration.inSeconds;
       }
 
-      await sendRecordedVoice(
-        SendMediaMessageConfig(
-          mediaFile: voiceFile,
-          conversationId: widget.dm.id,
-          currentUserId: _currentUserId,
-          optimisticMessageId: _optimisticMessageId,
-          replyToMessage: _replyToMessageData,
-          replyToMessageId: _replyToMessageData?.id,
-          failedMessage: failedMessage,
-          messageType: 'audio',
-          duration: duration,
-          messages: _messages,
-          optimisticMessageIds: _optimisticMessageIds,
-          conversationMeta: _conversationMeta,
-          messagesRepo: _messagesRepo,
-          chatsServices: _chatsServices,
-          websocketService: _websocketService,
-          mounted: () => mounted,
-          setState: setState,
-          handleMediaUploadFailure: _handleMediaUploadFailure,
-          animateNewMessage: _animateNewMessage,
-          scrollToBottom: _scrollToBottom,
-          cancelReply: _cancelReply,
-          isReplying: _isReplying,
-          context: context,
-          closeModal: failedMessage == null
-              ? () => Navigator.of(context).pop()
-              : null,
-        ),
-      );
+      await _sendMediaMessageToServer(voiceFile, MessageType.audio);
+
+      // await sendRecordedVoice(
+      //   SendMediaMessageConfig(
+      //     mediaFile: voiceFile,
+      //     conversationId: widget.dm.id,
+      //     currentUserId: _currentUserId,
+      //     optimisticMessageId: _optimisticMessageId,
+      //     replyToMessage: _replyToMessageData,
+      //     replyToMessageId: _replyToMessageData?.id,
+      //     failedMessage: failedMessage,
+      //     messageType: 'audio',
+      //     duration: duration,
+      //     messages: _messages,
+      //     optimisticMessageIds: _optimisticMessageIds,
+      //     conversationMeta: _conversationMeta,
+      //     messagesRepo: _messagesRepo,
+      //     chatsServices: _chatsServices,
+      //     websocketService: _websocketService,
+      //     mounted: () => mounted,
+      //     setState: setState,
+      //     handleMediaUploadFailure: _handleMediaUploadFailure,
+      //     animateNewMessage: _animateNewMessage,
+      //     scrollToBottom: _scrollToBottom,
+      //     cancelReply: _cancelReply,
+      //     isReplying: _replyToMessageData != null,
+      //     context: context,
+      //     closeModal: failedMessage == null
+      //         ? () => Navigator.of(context).pop()
+      //         : null,
+      //   ),
+      // );
 
       // Only decrement optimistic ID if this was a new message (not a retry)
       // if (failedMessage == null) {
@@ -2907,15 +2611,15 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   /// Initiate audio call
-  // Future<void> _initiateCall(BuildContext context) async {
-  //   await ChatHelpers.initiateCall(
-  //     context: context,
-  //     websocketService: _websocketService,
-  //     userId: widget.dm.userId,
-  //     userName: widget.dm.userName,
-  //     userProfilePic: widget.dm.userProfilePic,
-  //   );
-  // }
+  Future<void> _initiateCall(BuildContext context) async {
+    await ChatHelpers.initiateCall(
+      context: context,
+      websocketService: _webSocket,
+      userId: widget.dm.recipientId,
+      userName: widget.dm.recipientName,
+      userProfilePic: widget.dm.recipientProfilePic,
+    );
+  }
 
   @override
   void deactivate() {
@@ -2953,7 +2657,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     _messageAckSubscription?.cancel();
     _typingSubscription?.cancel();
     _messagePinSubscription?.cancel();
-    _messageReplySubscription?.cancel();
+    // _messageReplySubscription?.cancel();
     _onlineStatusSubscription?.cancel();
     _messageDeleteSubscription?.cancel();
     _typingAnimationController.dispose();
@@ -3025,9 +2729,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     _voiceModalAnimationController.dispose();
     _zigzagAnimationController.dispose();
     _timerStreamController.close();
-
-    // Clear message keys to prevent memory leaks
-    // _messageKeys.clear();
 
     super.dispose();
   }

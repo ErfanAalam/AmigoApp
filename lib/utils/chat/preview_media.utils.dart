@@ -1,11 +1,11 @@
 import 'dart:io' as io;
+import 'package:amigo/models/message.model.dart';
+import 'package:amigo/utils/chat/chat_helpers.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:path_provider/path_provider.dart';
-import '../../models/message_model.dart';
-import '../../db/repositories/messages_repository.dart';
+import '../../db/repositories/message.repo.dart';
 import '../../services/media_cache_service.dart';
-import '../../utils/chat/chat_helpers.dart';
 import '../../widgets/media_preview_widgets.dart';
 
 /// Opens an image preview screen with caching support
@@ -25,7 +25,7 @@ Future<void> openImagePreview({
   String? caption,
   required List<MessageModel> messages,
   required MediaCacheService mediaCacheService,
-  required MessagesRepository messagesRepo,
+  required MessageRepository messagesRepo,
   required bool mounted,
   bool checkExistingCache = true,
   String? debugPrefix,
@@ -53,8 +53,7 @@ Future<void> openImagePreview({
         // Start caching in background (don't wait for it)
         ChatHelpers.cacheMediaForMessage(
           url: imageUrl,
-          messageId: message.id,
-          messagesRepo: messagesRepo,
+          messageId: message.canonicalId!,
           mediaCacheService: mediaCacheService,
           checkExistingCache: checkExistingCache,
           debugPrefix: debugPrefix,
@@ -62,7 +61,10 @@ Future<void> openImagePreview({
       } else {
         // Update database with local path if not already set
         if (message.localMediaPath == null) {
-          await messagesRepo.updateLocalMediaPath(message.id, localPath);
+          await messagesRepo.updateLocalMediaPath(
+            message.canonicalId!,
+            localPath,
+          );
         }
       }
     }
@@ -112,7 +114,7 @@ Future<void> openVideoPreview({
   String? fileName,
   required List<MessageModel> messages,
   required MediaCacheService mediaCacheService,
-  required MessagesRepository messagesRepo,
+  required MessageRepository messagesRepo,
   required bool mounted,
   void Function(MessageModel updatedMessage)? onMessageUpdated,
 }) async {
@@ -148,7 +150,10 @@ Future<void> openVideoPreview({
 
         if (localPath != null) {
           // Update database with local path
-          await messagesRepo.updateLocalMediaPath(message.id, localPath);
+          await messagesRepo.updateLocalMediaPath(
+            message.canonicalId!,
+            localPath,
+          );
 
           // Update the message in memory if callback provided
           if (onMessageUpdated != null && mounted) {

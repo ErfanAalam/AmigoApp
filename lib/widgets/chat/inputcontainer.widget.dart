@@ -1,7 +1,9 @@
+import 'package:amigo/models/conversations.model.dart';
+import 'package:amigo/models/group_model.dart';
+import 'package:amigo/models/message.model.dart';
+import 'package:amigo/types/socket.type.dart';
 import 'package:flutter/material.dart';
-import '../../models/message_model.dart';
 import '../../models/community_model.dart';
-import '../../models/conversation_model.dart';
 
 class MessageInputContainer extends StatelessWidget {
   final TextEditingController messageController;
@@ -10,7 +12,7 @@ class MessageInputContainer extends StatelessWidget {
   final bool isReplying;
   final MessageModel? replyToMessageData;
   final int? currentUserId;
-  final VoidCallback? onSendMessage;
+  final Function(MessageType)? onSendMessage;
   final VoidCallback? onSendVoiceNote;
   final VoidCallback? onAttachmentTap;
   final ValueChanged<String>? onTyping;
@@ -21,7 +23,8 @@ class MessageInputContainer extends StatelessWidget {
   final CommunityGroupMetadata? communityGroupMetadata;
 
   // For DM - to determine if replied message is mine
-  final ConversationModel? conversation;
+  final DmModel? dm;
+  final GroupModel? group;
 
   const MessageInputContainer({
     super.key,
@@ -38,7 +41,8 @@ class MessageInputContainer extends StatelessWidget {
     this.onCancelReply,
     this.isCommunityGroup = false,
     this.communityGroupMetadata,
-    this.conversation,
+    this.dm,
+    this.group,
   });
 
   @override
@@ -115,8 +119,8 @@ class MessageInputContainer extends StatelessWidget {
                 onPressed: shouldDisableSending
                     ? null
                     : (messageController.text.isNotEmpty
-                          ? onSendMessage
-                          : onSendVoiceNote),
+                          ? () => onSendMessage!(MessageType.text)
+                          : () => onSendVoiceNote!()),
                 backgroundColor: shouldDisableSending
                     ? Colors.grey[400]
                     : Colors.teal,
@@ -146,17 +150,16 @@ class MessageInputContainer extends StatelessWidget {
     final replyMessage = replyToMessageData!;
 
     // Determine if replied message is from current user
-    final isRepliedMessageMine = _determineIfRepliedMessageIsMine(replyMessage);
-
+    final isRepliedMessageMine = replyMessage.senderId == currentUserId;
     return Container(
       padding: const EdgeInsets.all(12),
-      margin: conversation != null
+      margin: dm != null
           ? EdgeInsets
                 .zero // DM doesn't have horizontal margin
           : const EdgeInsets.symmetric(horizontal: 16), // Group has margin
       decoration: BoxDecoration(
         color: Colors.grey[50],
-        borderRadius: conversation != null
+        borderRadius: dm != null
             ? const BorderRadius.only(
                 // DM only has topRight
                 topRight: Radius.circular(12),
@@ -191,7 +194,7 @@ class MessageInputContainer extends StatelessWidget {
                     const Icon(Icons.reply, size: 16, color: Colors.teal),
                     const SizedBox(width: 4),
                     Text(
-                      isRepliedMessageMine ? 'You' : replyMessage.senderName,
+                      isRepliedMessageMine ? 'You' : replyMessage.senderName!,
                       style: const TextStyle(
                         color: Colors.teal,
                         fontSize: 12,
@@ -201,11 +204,11 @@ class MessageInputContainer extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 4),
-                if (replyMessage.body.isNotEmpty) ...[
+                if (replyMessage.body?.isNotEmpty ?? false) ...[
                   Text(
-                    replyMessage.body.length > 50
-                        ? '${replyMessage.body.substring(0, 50)}...'
-                        : replyMessage.body,
+                    replyMessage.body!.length > 50
+                        ? '${replyMessage.body!.substring(0, 50)}...'
+                        : replyMessage.body!,
                     style: TextStyle(
                       color: Colors.grey[600],
                       fontSize: 13,
@@ -240,18 +243,6 @@ class MessageInputContainer extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  bool _determineIfRepliedMessageIsMine(MessageModel replyMessage) {
-    if (currentUserId != null) {
-      return replyMessage.senderId == currentUserId;
-    }
-    // For DM, if currentUserId is null, check against conversation.userId
-    if (conversation != null) {
-      return replyMessage.senderId != conversation!.userId;
-    }
-    // For group, if currentUserId is null, assume it's not mine
-    return false;
   }
 
   // Helper method to check if community group is active

@@ -1,107 +1,12 @@
+import 'package:amigo/types/socket.type.dart';
 import 'package:flutter/material.dart';
-import '../../models/conversation_model.dart';
-import '../../api/user.service.dart';
 import '../../services/socket/websocket_service.dart';
-
-/// Configuration for loading available conversations
-class LoadAvailableConversationsConfig {
-  final UserService userService;
-  final int currentConversationId;
-  final Function(bool) setIsLoading;
-  final Function(List<ConversationModel>) setAvailableConversations;
-  final bool mounted;
-  final Function(String) showErrorDialog;
-  final String? debugPrefix;
-
-  LoadAvailableConversationsConfig({
-    required this.userService,
-    required this.currentConversationId,
-    required this.setIsLoading,
-    required this.setAvailableConversations,
-    required this.mounted,
-    required this.showErrorDialog,
-    this.debugPrefix,
-  });
-}
-
-/// Load available conversations for forwarding (excluding current conversation)
-Future<void> loadAvailableConversations(
-  LoadAvailableConversationsConfig config,
-) async {
-  config.setIsLoading(true);
-
-  try {
-    final response = await config.userService.getChatList('all');
-
-    if (response['success'] == true && response['data'] != null) {
-      final dynamic responseData = response['data'];
-      List<dynamic> conversationsList = [];
-
-      if (responseData is List) {
-        conversationsList = responseData;
-      } else if (responseData is Map<String, dynamic>) {
-        if (responseData.containsKey('data') && responseData['data'] is List) {
-          conversationsList = responseData['data'] as List<dynamic>;
-        } else {
-          for (var key in responseData.keys) {
-            if (responseData[key] is List) {
-              conversationsList = responseData[key] as List<dynamic>;
-              break;
-            }
-          }
-        }
-      }
-
-      if (conversationsList.isNotEmpty) {
-        final conversations = <ConversationModel>[];
-
-        for (int i = 0; i < conversationsList.length; i++) {
-          final json = conversationsList[i];
-          try {
-            final conversation = ConversationModel.fromJson(
-              json as Map<String, dynamic>,
-            );
-            // Exclude current conversation
-            if (conversation.id != config.currentConversationId) {
-              conversations.add(conversation);
-            } else {
-              final prefix = config.debugPrefix != null
-                  ? '${config.debugPrefix} '
-                  : '';
-              debugPrint(
-                '🚫 $prefix Forward modal - Excluding current conversation: ${conversation.id}',
-              );
-            }
-          } catch (e) {
-            final prefix = config.debugPrefix != null
-                ? '${config.debugPrefix} '
-                : '';
-            debugPrint('⚠️ $prefix Error parsing conversation $i: $e');
-            continue;
-          }
-        }
-
-        config.setAvailableConversations(conversations);
-      }
-    }
-  } catch (e) {
-    final prefix = config.debugPrefix != null ? '${config.debugPrefix} ' : '';
-    debugPrint('❌ ${prefix}Error loading conversations for forward: $e');
-    if (config.mounted) {
-      config.showErrorDialog('Failed to load conversations. Please try again.');
-    }
-  } finally {
-    if (config.mounted) {
-      config.setIsLoading(false);
-    }
-  }
-}
 
 /// Configuration for handling forward to conversations
 class HandleForwardToConversationsConfig {
   final Set<int> messagesToForward;
   final List<int> selectedConversationIds;
-  final WebSocketService websocketService;
+  // final WebSocketService websocketService;
   final int currentUserId;
   final int sourceConversationId;
   final BuildContext context;
@@ -113,7 +18,7 @@ class HandleForwardToConversationsConfig {
   HandleForwardToConversationsConfig({
     required this.messagesToForward,
     required this.selectedConversationIds,
-    required this.websocketService,
+    // required this.websocketService,
     required this.currentUserId,
     required this.sourceConversationId,
     required this.context,
@@ -123,6 +28,8 @@ class HandleForwardToConversationsConfig {
     this.debugPrefix,
   });
 }
+
+final WebSocketService websocketService = WebSocketService();
 
 /// Handle forwarding messages to selected conversations
 Future<void> handleForwardToConversations(
@@ -134,15 +41,21 @@ Future<void> handleForwardToConversations(
   }
 
   try {
-    // Send WebSocket message for forwarding
-    await config.websocketService.sendMessage({
-      'type': 'message_forward',
-      'data': {
-        'user_id': config.currentUserId,
-        'source_conversation_id': config.sourceConversationId,
-        'target_conversation_ids': config.selectedConversationIds,
-      },
-      'message_ids': config.messagesToForward.toList(),
+    final forwardMessagePayload = MessageForwardPayload(
+      sourceConvId: config.sourceConversationId,
+      forwarderId: config.currentUserId,
+      forwardedMessageIds: config.messagesToForward.toList(),
+      targetConvIds: config.selectedConversationIds,
+    ).toJson();
+
+    final wsmsg = WSMessage(
+      type: WSMessageType.messageForward,
+      payload: forwardMessagePayload,
+      wsTimestamp: DateTime.now(),
+    ).toJson();
+
+    websocketService.sendMessage(wsmsg).catchError((e) {
+      debugPrint('❌ Error sending message forward');
     });
 
     // Show success message

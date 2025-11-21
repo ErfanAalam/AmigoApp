@@ -1,9 +1,6 @@
 import 'dart:async';
 import 'package:amigo/env.dart';
 import 'package:amigo/services/notification_service.dart';
-import 'package:amigo/db/database_helper.dart';
-import 'package:amigo/models/message_model.dart';
-import 'package:amigo/db/repositories/messages_repository.dart';
 import 'package:dio/dio.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -278,107 +275,5 @@ void _stopBackgroundStatusPolling() {
     _backgroundPollingTimer?.cancel();
     _backgroundPollingTimer = null;
     _backgroundPollingCallId = null;
-  }
-}
-
-/// Handle background message notifications and store in local database
-Future<void> _handleBackgroundMessage(Map<String, dynamic> data) async {
-  try {
-    debugPrint('📨 Processing background message: $data');
-
-    // Parse the message data from FCM payload
-    final messageData = _parseMessageFromFCM(data);
-    if (messageData == null) {
-      debugPrint('❌ Failed to parse message data from FCM payload');
-      return;
-    }
-
-    // Initialize database helper and messages repository
-    final dbHelper = DatabaseHelper.instance;
-    final messagesRepo = MessagesRepository();
-
-    // Ensure database is initialized
-    await dbHelper.database;
-
-    // Store the message in local SQLite database
-    await messagesRepo.insertOrUpdateMessage(messageData);
-
-    debugPrint('✅ Successfully stored background message in local database');
-    debugPrint('   Message ID: ${messageData.id}');
-    debugPrint('   Conversation ID: ${messageData.conversationId}');
-    debugPrint('   Sender: ${messageData.senderName}');
-    debugPrint('   Body: ${messageData.body}');
-  } catch (e) {
-    debugPrint('❌ Error handling background message: $e');
-    debugPrint('   Stack trace: ${StackTrace.current}');
-  }
-}
-
-/// Parse message data from FCM payload
-MessageModel? _parseMessageFromFCM(Map<String, dynamic> data) {
-  try {
-    // Extract message data from FCM payload
-    final messageId = int.tryParse(data['messageId']?.toString() ?? '0') ?? 0;
-    final conversationId =
-        int.tryParse(data['conversationId']?.toString() ?? '0') ?? 0;
-    final senderId = int.tryParse(data['senderId']?.toString() ?? '0') ?? 0;
-    final senderName = data['senderName']?.toString() ?? '';
-    final senderProfilePic = data['senderProfilePic']?.toString();
-    final body = data['body']?.toString() ?? '';
-    final type = data['messageType']?.toString() ?? 'text';
-    final createdAt =
-        data['createdAt']?.toString() ?? DateTime.now().toIso8601String();
-    final editedAt = data['editedAt']?.toString();
-
-    // Parse attachments if present
-    Map<String, dynamic>? attachments;
-    if (data['attachments'] != null) {
-      try {
-        attachments = Map<String, dynamic>.from(data['attachments'] as Map);
-      } catch (e) {
-        debugPrint('⚠️ Failed to parse attachments: $e');
-      }
-    }
-
-    // Parse metadata if present
-    Map<String, dynamic>? metadata;
-    if (data['metadata'] != null) {
-      try {
-        metadata = Map<String, dynamic>.from(data['metadata'] as Map);
-      } catch (e) {
-        debugPrint('⚠️ Failed to parse metadata: $e');
-      }
-    }
-
-    // Parse reply data if present
-    MessageModel? replyToMessage;
-    int? replyToMessageId;
-    if (data['replyToMessageId'] != null) {
-      replyToMessageId = int.tryParse(
-        data['replyToMessageId']?.toString() ?? '0',
-      );
-    }
-
-    // Create MessageModel
-    return MessageModel(
-      id: messageId,
-      body: body,
-      type: type,
-      senderId: senderId,
-      conversationId: conversationId,
-      createdAt: createdAt,
-      editedAt: editedAt,
-      metadata: metadata,
-      attachments: attachments,
-      deleted: false,
-      senderName: senderName,
-      senderProfilePic: senderProfilePic,
-      replyToMessage: replyToMessage,
-      replyToMessageId: replyToMessageId,
-      isDelivered: true, // Messages received via FCM are considered delivered
-    );
-  } catch (e) {
-    debugPrint('❌ Error parsing message from FCM: $e');
-    return null;
   }
 }

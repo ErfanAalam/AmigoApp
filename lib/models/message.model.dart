@@ -160,7 +160,7 @@ class MessageModel {
       type == MessageType.forwarded || isForwarded == true;
 
   /// Get the message ID (canonical if available, otherwise optimistic)
-  int? get id => canonicalId ?? optimisticId;
+  int get id => canonicalId ?? optimisticId ?? 0;
 
   /// Create a copy of this message with updated fields
   MessageModel copyWith({

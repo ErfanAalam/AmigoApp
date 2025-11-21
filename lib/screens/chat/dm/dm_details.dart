@@ -10,9 +10,9 @@ import '../../../types/socket.type.dart';
 import '../../../utils/user.utils.dart';
 
 class DmDetailsScreen extends ConsumerStatefulWidget {
-  final ConversationModel conversation;
+  final DmModel dm;
 
-  const DmDetailsScreen({super.key, required this.conversation});
+  const DmDetailsScreen({super.key, required this.dm});
 
   @override
   ConsumerState<DmDetailsScreen> createState() => _DmDetailsScreenState();
@@ -38,7 +38,7 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
       final chatState = ref.read(chatProvider);
       try {
         final dm = chatState.dmList.firstWhere(
-          (dm) => dm.conversationId == widget.conversation.id,
+          (dm) => dm.conversationId == widget.dm.conversationId,
         );
 
         // Use recipient info from DM model
@@ -62,7 +62,7 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
       final currentUserId = currentUser?.id;
 
       final members = await _conversationMemberRepo
-          .getActiveMembersByConversationId(widget.conversation.id);
+          .getActiveMembersByConversationId(widget.dm.conversationId);
 
       if (members.isNotEmpty && currentUserId != null) {
         // Find the recipient user (the one that's not the current user)
@@ -118,22 +118,18 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
 
     try {
       final chatState = ref.read(chatProvider);
-      final isPinned = chatState.pinnedChats.contains(widget.conversation.id);
+      final isPinned = chatState.pinnedChats.contains(widget.dm.conversationId);
       final action = isPinned ? 'unpin' : 'pin';
 
-      await ref.read(chatProvider.notifier).handleChatAction(
-            action,
-            widget.conversation.id,
-            ChatType.dm,
-          );
+      await ref
+          .read(chatProvider.notifier)
+          .handleChatAction(action, widget.dm.conversationId, ChatType.dm);
 
       setState(() => _isLoading = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            isPinned ? 'Chat unpinned' : 'Chat pinned to top',
-          ),
+          content: Text(isPinned ? 'Chat unpinned' : 'Chat pinned to top'),
           duration: const Duration(seconds: 2),
         ),
       );
@@ -152,22 +148,18 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
 
     try {
       final chatState = ref.read(chatProvider);
-      final isMuted = chatState.mutedChats.contains(widget.conversation.id);
+      final isMuted = chatState.mutedChats.contains(widget.dm.conversationId);
       final action = isMuted ? 'unmute' : 'mute';
 
-      await ref.read(chatProvider.notifier).handleChatAction(
-            action,
-            widget.conversation.id,
-            ChatType.dm,
-          );
+      await ref
+          .read(chatProvider.notifier)
+          .handleChatAction(action, widget.dm.conversationId, ChatType.dm);
 
       setState(() => _isLoading = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            isMuted ? 'Chat unmuted' : 'Chat muted',
-          ),
+          content: Text(isMuted ? 'Chat unmuted' : 'Chat muted'),
           duration: const Duration(seconds: 2),
         ),
       );
@@ -186,14 +178,14 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
 
     try {
       final chatState = ref.read(chatProvider);
-      final isFavorite = chatState.favoriteChats.contains(widget.conversation.id);
+      final isFavorite = chatState.favoriteChats.contains(
+        widget.dm.conversationId,
+      );
       final action = isFavorite ? 'unfavorite' : 'favorite';
 
-      await ref.read(chatProvider.notifier).handleChatAction(
-            action,
-            widget.conversation.id,
-            ChatType.dm,
-          );
+      await ref
+          .read(chatProvider.notifier)
+          .handleChatAction(action, widget.dm.conversationId, ChatType.dm);
 
       setState(() => _isLoading = false);
 
@@ -238,11 +230,9 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
 
     if (confirmed == true) {
       try {
-        await ref.read(chatProvider.notifier).handleChatAction(
-              'delete',
-              widget.conversation.id,
-              ChatType.dm,
-            );
+        await ref
+            .read(chatProvider.notifier)
+            .handleChatAction('delete', widget.dm.conversationId, ChatType.dm);
 
         if (mounted) {
           // Return true to indicate chat was deleted
@@ -268,9 +258,11 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     final chatState = ref.watch(chatProvider);
-    final isPinned = chatState.pinnedChats.contains(widget.conversation.id);
-    final isMuted = chatState.mutedChats.contains(widget.conversation.id);
-    final isFavorite = chatState.favoriteChats.contains(widget.conversation.id);
+    final isPinned = chatState.pinnedChats.contains(widget.dm.conversationId);
+    final isMuted = chatState.mutedChats.contains(widget.dm.conversationId);
+    final isFavorite = chatState.favoriteChats.contains(
+      widget.dm.conversationId,
+    );
 
     final recipientName = _recipientUser?.name ?? 'Unknown';
     final recipientProfilePic = _recipientUser?.profilePic;
@@ -327,12 +319,12 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
           _buildInfoTile(
             icon: Icons.info_outline,
             title: 'Created',
-            subtitle: _formatDate(widget.conversation.createdAt),
+            subtitle: _formatDate(widget.dm.createdAt),
           ),
           _buildInfoTile(
             icon: Icons.chat_bubble_outline,
             title: 'Conversation ID',
-            subtitle: '${widget.conversation.id}',
+            subtitle: '${widget.dm.conversationId}',
           ),
           const Divider(height: 1),
           // Actions section

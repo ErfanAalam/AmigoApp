@@ -1,5 +1,9 @@
 import 'dart:io' as io;
+import 'package:amigo/db/repositories/conversations.repo.dart';
+import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/models/message.model.dart';
+import 'package:amigo/services/socket/websocket_service.dart';
+import 'package:amigo/types/socket.type.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart' as material_provider;
@@ -7,8 +11,12 @@ import '../animations.utils.dart';
 import '../../services/call_service.dart';
 
 class ChatHelpers {
+  static final MessageRepository messageRepo = MessageRepository();
+  static final WebSocketService webSocketService = WebSocketService();
+  static final ConversationRepository conversationRepo =
+      ConversationRepository();
   // Check if a message is a media message (image, video, audio, document)
-  bool isMediaMessage(MessageModel message) {
+  static bool isMediaMessage(MessageModel message) {
     // Check type first - new message types
     final type = message.type.value;
     if (type == 'image' ||
@@ -326,7 +334,6 @@ class ChatHelpers {
   static Future<void> cacheMediaForMessage({
     required String url,
     required int messageId,
-    required dynamic messagesRepo,
     required dynamic mediaCacheService,
     bool checkExistingCache = true,
     String? debugPrefix,
@@ -334,7 +341,7 @@ class ChatHelpers {
     try {
       // Check if already cached in DB (only for DM, groups skip this check)
       if (checkExistingCache) {
-        final hasLocalMedia = await messagesRepo.hasLocalMedia(messageId);
+        final hasLocalMedia = await messageRepo.hasLocalMedia(messageId);
         if (hasLocalMedia) {
           return;
         }
@@ -344,7 +351,7 @@ class ChatHelpers {
       final localPath = await mediaCacheService.downloadAndCacheMedia(url);
       if (localPath != null) {
         // Update database with local path
-        await messagesRepo.updateLocalMediaPath(messageId, localPath);
+        await messageRepo.updateLocalMediaPath(messageId, localPath);
         final prefix = debugPrefix != null ? '$debugPrefix ' : '';
         debugPrint('✅ Cached media for $prefix$messageId');
       }
@@ -379,93 +386,58 @@ class ChatHelpers {
     return url;
   }
 
-  /// Toggle message selection state
-  ///
-  /// [messageId] - The message ID to toggle
-  /// [selectedMessages] - Set of selected message IDs
-  /// [setIsSelectionMode] - Callback to set selection mode state
-  /// [setState] - Callback to update state
-  static void toggleMessageSelection({
-    required int messageId,
-    required Set<int> selectedMessages,
-    required void Function(bool) setIsSelectionMode,
-    required void Function(void Function()) setState,
-  }) {
-    setState(() {
-      if (selectedMessages.contains(messageId)) {
-        selectedMessages.remove(messageId);
-        if (selectedMessages.isEmpty) {
-          setIsSelectionMode(false);
-        }
-      } else {
-        selectedMessages.add(messageId);
-      }
-    });
-  }
-
-  /// Enter selection mode with a message
-  ///
-  /// [messageId] - The message ID to select
-  /// [selectedMessages] - Set of selected message IDs
-  /// [setIsSelectionMode] - Callback to set selection mode state
-  /// [setState] - Callback to update state
-  static void enterSelectionMode({
-    required int messageId,
-    required Set<int> selectedMessages,
-    required void Function(bool) setIsSelectionMode,
-    required void Function(void Function()) setState,
-  }) {
-    setState(() {
-      setIsSelectionMode(true);
-      selectedMessages.add(messageId);
-    });
-  }
-
   /// Toggle pin message
   ///
-  /// [messageId] - The message ID to pin/unpin
+  /// [message] - The message to pin/unpin
   /// [conversationId] - The conversation ID
-  /// [getPinnedMessageId] - Getter for current pinned message ID
+  /// [currentPinnedMessageId] - Current pinned message ID
   /// [setPinnedMessageId] - Setter for pinned message ID
   /// [currentUserId] - Current user ID
-  /// [messagesRepo] - MessagesRepository instance
-  /// [websocketService] - WebSocketService instance
   /// [setState] - Callback to update state
   static Future<void> togglePinMessage({
-    required int messageId,
+    required MessageModel message,
     required int conversationId,
-    required int? Function() getPinnedMessageId,
-    required void Function(int?) setPinnedMessageId,
+    required int? currentPinnedMessageId,
+    required void Function(MessageModel?) setPinnedMessageId,
     required int? currentUserId,
-    required dynamic messagesRepo,
-    required dynamic websocketService,
     required void Function(void Function()) setState,
   }) async {
-    final wasPinned = messageId == getPinnedMessageId();
+    final wasPinned = message.canonicalId == currentPinnedMessageId;
 
     setState(() {
       if (wasPinned) {
         setPinnedMessageId(null);
       } else {
-        setPinnedMessageId(messageId);
+        setPinnedMessageId(message);
       }
     });
 
-    final newPinnedMessageId = getPinnedMessageId();
+    final newPinnedMessageId = message.canonicalId;
 
-    // Save to local storage
-    await messagesRepo.savePinnedMessage(
-      conversationId: conversationId,
-      pinnedMessageId: newPinnedMessageId,
+    await conversationRepo.updatePinnedMessage(
+      conversationId,
+      newPinnedMessageId,
     );
 
-    // Send WebSocket message to other users
-    await websocketService.sendMessage({
-      'type': 'message_pin',
-      'data': {'user_id': currentUserId, 'action': wasPinned ? 'unpin' : 'pin'},
-      'conversation_id': conversationId,
-      'message_ids': [messageId],
+    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    final joinConvPayload = MessagePinPayload(
+      messageId: message.canonicalId!,
+      messageType: message.type,
+      senderId: currentUserId!,
+      convId: conversationId,
+      isPinned: !wasPinned,
+    ).toJson();
+
+    final wsmsg = WSMessage(
+      type: WSMessageType.messagePin,
+      payload: joinConvPayload,
+      wsTimestamp: DateTime.now(),
+    ).toJson();
+
+    webSocketService.sendMessage(wsmsg).catchError((e) {
+      debugPrint('❌ Error sending message pin: $e');
     });
+    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
   }
 
   /// Toggle star message
@@ -474,16 +446,12 @@ class ChatHelpers {
   /// [conversationId] - The conversation ID
   /// [starredMessages] - Set of starred message IDs
   /// [currentUserId] - Current user ID
-  /// [messagesRepo] - MessagesRepository instance
-  /// [websocketService] - WebSocketService instance
   /// [setState] - Callback to update state
   static Future<void> toggleStarMessage({
     required int messageId,
     required int conversationId,
     required Set<int> starredMessages,
     required int? currentUserId,
-    required dynamic messagesRepo,
-    required dynamic websocketService,
     required void Function(void Function()) setState,
   }) async {
     final isCurrentlyStarred = starredMessages.contains(messageId);
@@ -499,7 +467,7 @@ class ChatHelpers {
 
     // Save to local storage
     try {
-      await messagesRepo.toggleStarMessage(messageId);
+      await messageRepo.toggleStarMessage(messageId);
     } catch (e) {
       debugPrint('❌ Error saving star state to storage: $e');
       // Revert UI state on storage error
@@ -511,38 +479,6 @@ class ChatHelpers {
         }
       });
     }
-
-    // Send WebSocket message to other users
-    await websocketService.sendMessage({
-      'type': 'message_star',
-      'data': {
-        'user_id': currentUserId,
-        'message_id': messageId,
-        'action': starredMessages.contains(messageId) ? 'star' : 'unstar',
-      },
-      'conversation_id': conversationId,
-      'message_ids': [messageId],
-    });
-  }
-
-  /// Forward a single message
-  ///
-  /// [messageId] - The message ID to forward
-  /// [messagesToForward] - Set of message IDs to forward (will be updated)
-  /// [setState] - Callback to update state
-  /// [showForwardModal] - Callback to show forward modal
-  static Future<void> forwardMessage({
-    required int messageId,
-    required Set<int> messagesToForward,
-    required void Function(void Function()) setState,
-    required Future<void> Function() showForwardModal,
-  }) async {
-    setState(() {
-      messagesToForward.clear();
-      messagesToForward.add(messageId);
-    });
-
-    await showForwardModal();
   }
 
   /// Delete a message
@@ -591,8 +527,6 @@ class ChatHelpers {
   /// [selectedMessages] - Set of selected message IDs
   /// [starredMessages] - Set of starred message IDs
   /// [currentUserId] - Current user ID
-  /// [messagesRepo] - MessagesRepository instance
-  /// [websocketService] - WebSocketService instance
   /// [setState] - Callback to update state
   /// [exitSelectionMode] - Callback to exit selection mode
   static Future<void> bulkStarMessages({
@@ -600,8 +534,6 @@ class ChatHelpers {
     required Set<int> selectedMessages,
     required Set<int> starredMessages,
     required int? currentUserId,
-    required dynamic messagesRepo,
-    required dynamic websocketService,
     required void Function(void Function()) setState,
     required void Function() exitSelectionMode,
   }) async {
@@ -627,9 +559,9 @@ class ChatHelpers {
     try {
       for (final messageId in messagesToStar) {
         if (areAllStarred) {
-          await messagesRepo.unstarMessage(messageId);
+          await messageRepo.unstarMessage(messageId);
         } else {
-          await messagesRepo.starMessage(messageId);
+          await messageRepo.starMessage(messageId);
         }
       }
     } catch (e) {
@@ -643,18 +575,6 @@ class ChatHelpers {
         }
       });
     }
-
-    // Send WebSocket message
-    await websocketService.sendMessage({
-      'type': 'message_star',
-      'data': {
-        'user_id': currentUserId,
-        'message_ids': messagesToStar,
-        'action': action,
-      },
-      'conversation_id': conversationId,
-      'message_ids': messagesToStar,
-    });
   }
 
   /// Bulk forward messages

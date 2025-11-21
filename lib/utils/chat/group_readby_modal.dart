@@ -1,11 +1,24 @@
+import 'package:amigo/db/repositories/messageStatus.repo.dart';
+import 'package:amigo/models/message.model.dart';
+import 'package:amigo/models/message_status.model.dart';
+import 'package:amigo/models/user_model.dart';
+import 'package:amigo/types/socket.type.dart' hide MessageStatusType;
 import 'package:flutter/material.dart';
-import '../../models/message_model.dart';
+
+/// Helper class to combine UserModel with status timestamps
+class MemberWithStatus {
+  final UserModel user;
+  final String? deliveredAt;
+  final String? readAt;
+
+  MemberWithStatus({required this.user, this.deliveredAt, this.readAt});
+}
 
 /// ReadBy Modal Widget with smooth animations and good UI/UX
 /// Shows which group members have read a message and which haven't
 class ReadByModal extends StatefulWidget {
   final MessageModel message;
-  final List<Map<String, dynamic>> members;
+  final List<UserModel> members;
   final int? currentUserId;
 
   const ReadByModal({
@@ -25,6 +38,87 @@ class _ReadByModalState extends State<ReadByModal>
   late AnimationController _fadeController;
   late Animation<Offset> _slideAnimation;
   late Animation<double> _fadeAnimation;
+  final MessageStatusRepository _messageStatusRepo = MessageStatusRepository();
+  List<MemberWithStatus> readMembers = [];
+  List<MemberWithStatus> deliveredMembers = [];
+  bool isLoading = true;
+
+  @override
+  void dispose() {
+    _slideController.dispose();
+    _fadeController.dispose();
+    super.dispose();
+  }
+
+  /// Load all members with their read and delivered statuses
+  Future<void> _loadMembersWithStatus() async {
+    setState(() {
+      isLoading = true;
+      readMembers = [];
+      deliveredMembers = [];
+    });
+
+    // Get all statuses for this message
+    final allStatuses = await _messageStatusRepo.getMessageStatusesByMessageId(
+      widget.message.id,
+    );
+
+    // Create a map of userId -> status for quick lookup
+    final statusMap = <int, MessageStatusType>{};
+    for (final status in allStatuses) {
+      statusMap[status.userId] = status;
+    }
+
+    // Separate members into read and delivered (but not read)
+    for (final member in widget.members) {
+      // Skip the current user if they're the sender
+      if (widget.currentUserId != null && member.id == widget.currentUserId) {
+        continue;
+      }
+
+      final status = statusMap[member.id];
+      if (status != null) {
+        if (status.readAt != null) {
+          // Member has read the message
+          readMembers.add(
+            MemberWithStatus(
+              user: member,
+              deliveredAt: status.deliveredAt,
+              readAt: status.readAt,
+            ),
+          );
+        } else if (status.deliveredAt != null) {
+          // Member has delivered but not read
+          deliveredMembers.add(
+            MemberWithStatus(
+              user: member,
+              deliveredAt: status.deliveredAt,
+              readAt: null,
+            ),
+          );
+        }
+      }
+    }
+
+    // Sort by timestamp (most recent first)
+    readMembers.sort((a, b) {
+      if (a.readAt == null && b.readAt == null) return 0;
+      if (a.readAt == null) return 1;
+      if (b.readAt == null) return -1;
+      return b.readAt!.compareTo(a.readAt!);
+    });
+
+    deliveredMembers.sort((a, b) {
+      if (a.deliveredAt == null && b.deliveredAt == null) return 0;
+      if (a.deliveredAt == null) return 1;
+      if (b.deliveredAt == null) return -1;
+      return b.deliveredAt!.compareTo(a.deliveredAt!);
+    });
+
+    setState(() {
+      isLoading = false;
+    });
+  }
 
   @override
   void initState() {
@@ -55,67 +149,9 @@ class _ReadByModalState extends State<ReadByModal>
     // Start animations
     _slideController.forward();
     _fadeController.forward();
-  }
 
-  @override
-  void dispose() {
-    _slideController.dispose();
-    _fadeController.dispose();
-    super.dispose();
-  }
-
-  /// Get members who have read the message
-  List<Map<String, dynamic>> _getReadMembers() {
-    final readMembers = <Map<String, dynamic>>[];
-
-    for (final member in widget.members) {
-      final lastReadMessageId = member['last_read_message_id'];
-      final userId = member['user_id'];
-
-      // Skip current user
-      if (userId == widget.currentUserId) continue;
-
-      // Check if member has read this message or a later one
-      if (lastReadMessageId != null) {
-        final lastReadId = lastReadMessageId is int
-            ? lastReadMessageId
-            : int.tryParse(lastReadMessageId.toString());
-
-        if (lastReadId != null && lastReadId >= widget.message.id) {
-          readMembers.add(member);
-        }
-      }
-    }
-
-    return readMembers;
-  }
-
-  /// Get members who haven't read the message
-  List<Map<String, dynamic>> _getUnreadMembers() {
-    final unreadMembers = <Map<String, dynamic>>[];
-
-    for (final member in widget.members) {
-      final lastReadMessageId = member['last_read_message_id'];
-      final userId = member['user_id'];
-
-      // Skip current user
-      if (userId == widget.currentUserId) continue;
-
-      // Check if member hasn't read this message
-      if (lastReadMessageId == null) {
-        unreadMembers.add(member);
-      } else {
-        final lastReadId = lastReadMessageId is int
-            ? lastReadMessageId
-            : int.tryParse(lastReadMessageId.toString());
-
-        if (lastReadId == null || lastReadId < widget.message.id) {
-          unreadMembers.add(member);
-        }
-      }
-    }
-
-    return unreadMembers;
+    // Load members with status
+    _loadMembersWithStatus();
   }
 
   void _closeModal() async {
@@ -126,11 +162,70 @@ class _ReadByModalState extends State<ReadByModal>
     }
   }
 
+  String _formatTimestamp(String? timestamp) {
+    if (timestamp == null) return '';
+    try {
+      // Parse the timestamp and convert to local time
+      final dateTime = DateTime.parse(timestamp).toLocal();
+      final now = DateTime.now();
+      final difference = now.difference(dateTime);
+
+      // Format hour in 12-hour format
+      int hour12 = dateTime.hour == 0
+          ? 12
+          : (dateTime.hour > 12 ? dateTime.hour - 12 : dateTime.hour);
+      final minute = dateTime.minute.toString().padLeft(2, '0');
+      final period = dateTime.hour >= 12 ? 'PM' : 'AM';
+
+      if (difference.inDays == 0) {
+        if (difference.inHours == 0) {
+          if (difference.inMinutes == 0) {
+            return 'Just now';
+          }
+          return '${difference.inMinutes}m ago';
+        }
+        return '${difference.inHours}h ago';
+      } else if (difference.inDays == 1) {
+        return 'Yesterday $hour12:$minute $period';
+      } else if (difference.inDays < 7) {
+        final weekdays = [
+          'Monday',
+          'Tuesday',
+          'Wednesday',
+          'Thursday',
+          'Friday',
+          'Saturday',
+          'Sunday',
+        ];
+        final weekday = weekdays[dateTime.weekday - 1];
+        return '$weekday $hour12:$minute $period';
+      } else {
+        final months = [
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
+        ];
+        final month = months[dateTime.month - 1];
+        final day = dateTime.day;
+        final year = dateTime.year;
+        return '$month $day, $year $hour12:$minute $period';
+      }
+    } catch (e) {
+      return timestamp;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final readMembers = _getReadMembers();
-    final unreadMembers = _getUnreadMembers();
-
     return AnimatedBuilder(
       animation: _fadeAnimation,
       builder: (context, child) {
@@ -203,7 +298,9 @@ class _ReadByModalState extends State<ReadByModal>
                                           ),
                                         ),
                                         Text(
-                                          '${readMembers.length} of ${widget.members.length - 1} members',
+                                          isLoading
+                                              ? 'Loading...'
+                                              : '${readMembers.length} read, ${deliveredMembers.length} delivered',
                                           style: TextStyle(
                                             fontSize: 14,
                                             color: Colors.grey[600],
@@ -244,8 +341,8 @@ class _ReadByModalState extends State<ReadByModal>
                                     const SizedBox(width: 12),
                                     Expanded(
                                       child: Text(
-                                        widget.message.body.isNotEmpty
-                                            ? widget.message.body
+                                        widget.message.body?.isNotEmpty ?? false
+                                            ? widget.message.body!
                                             : _getMessageTypeText(),
                                         style: TextStyle(
                                           fontSize: 14,
@@ -262,44 +359,77 @@ class _ReadByModalState extends State<ReadByModal>
                           ),
                         ),
 
-                        // Read members section
-                        if (readMembers.isNotEmpty) ...[
-                          _buildSectionHeader(
-                            'Read by ${readMembers.length}',
-                            true,
-                          ),
-                          Expanded(
-                            child: ListView.builder(
-                              itemCount: readMembers.length,
-                              itemBuilder: (context, index) {
-                                return _buildMemberTile(
-                                  readMembers[index],
-                                  true,
-                                  index,
-                                );
-                              },
+                        // Loading indicator
+                        if (isLoading)
+                          const Padding(
+                            padding: EdgeInsets.all(20),
+                            child: CircularProgressIndicator(),
+                          )
+                        else ...[
+                          // Read members section
+                          if (readMembers.isNotEmpty) ...[
+                            _buildSectionHeader(
+                              'Read by ${readMembers.length}',
+                              true,
                             ),
-                          ),
-                        ],
+                            Flexible(
+                              child: ListView.builder(
+                                shrinkWrap: true,
+                                itemCount: readMembers.length,
+                                itemBuilder: (context, index) {
+                                  return _buildMemberTile(
+                                    readMembers[index],
+                                    true,
+                                    index,
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
 
-                        // Unread members section
-                        if (unreadMembers.isNotEmpty) ...[
-                          _buildSectionHeader(
-                            'Not read by ${unreadMembers.length}',
-                            false,
-                          ),
-                          Expanded(
-                            child: ListView.builder(
-                              itemCount: unreadMembers.length,
-                              itemBuilder: (context, index) {
-                                return _buildMemberTile(
-                                  unreadMembers[index],
-                                  false,
-                                  index + readMembers.length,
-                                );
-                              },
+                          // Delivered members section
+                          if (deliveredMembers.isNotEmpty) ...[
+                            _buildSectionHeader(
+                              'Delivered (not read) ${deliveredMembers.length}',
+                              false,
                             ),
-                          ),
+                            Flexible(
+                              child: ListView.builder(
+                                shrinkWrap: true,
+                                itemCount: deliveredMembers.length,
+                                itemBuilder: (context, index) {
+                                  return _buildMemberTile(
+                                    deliveredMembers[index],
+                                    false,
+                                    index + readMembers.length,
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+
+                          // Empty state
+                          if (readMembers.isEmpty && deliveredMembers.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.all(40),
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    Icons.info_outline,
+                                    size: 48,
+                                    color: Colors.grey[400],
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'No status information available',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                         ],
 
                         const SizedBox(height: 20),
@@ -343,13 +473,13 @@ class _ReadByModalState extends State<ReadByModal>
   }
 
   Widget _buildMemberTile(
-    Map<String, dynamic> member,
+    MemberWithStatus memberWithStatus,
     bool hasRead,
     int index,
   ) {
-    final name = member['name']?.toString() ?? 'Unknown User';
-    final profilePic = member['profile_pic']?.toString();
-    final lastReadMessageId = member['last_read_message_id'];
+    final user = memberWithStatus.user;
+    final name = user.name;
+    final profilePic = user.profilePic;
 
     return AnimatedBuilder(
       animation: _fadeAnimation,
@@ -372,8 +502,8 @@ class _ReadByModalState extends State<ReadByModal>
                 children: [
                   // Profile picture or initials
                   Container(
-                    width: 40,
-                    height: 40,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       color: hasRead ? Colors.green[100] : Colors.orange[100],
                       shape: BoxShape.circle,
@@ -406,17 +536,63 @@ class _ReadByModalState extends State<ReadByModal>
                             color: Colors.grey[800],
                           ),
                         ),
-                        if (hasRead && lastReadMessageId != null)
-                          Text(
-                            'Read at message #$lastReadMessageId',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
+                        const SizedBox(height: 4),
+                        if (hasRead && memberWithStatus.readAt != null)
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.done_all,
+                                    size: 14,
+                                    color: Colors.green[700],
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Read ${_formatTimestamp(memberWithStatus.readAt)}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[700],
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (memberWithStatus.deliveredAt != null) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Delivered ${_formatTimestamp(memberWithStatus.deliveredAt)}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              ],
+                            ],
+                          )
+                        else if (memberWithStatus.deliveredAt != null)
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.done,
+                                size: 14,
+                                color: Colors.orange[700],
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Delivered ${_formatTimestamp(memberWithStatus.deliveredAt)}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[700],
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
                           )
                         else
                           Text(
-                            'Not read yet',
+                            'Not delivered yet',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.grey[600],
@@ -434,9 +610,9 @@ class _ReadByModalState extends State<ReadByModal>
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
-                      hasRead ? Icons.check : Icons.schedule,
+                      hasRead ? Icons.check_circle : Icons.schedule,
                       color: Colors.white,
-                      size: 16,
+                      size: 18,
                     ),
                   ),
                 ],
@@ -472,13 +648,13 @@ class _ReadByModalState extends State<ReadByModal>
 
   String _getMessageTypeText() {
     switch (widget.message.type) {
-      case 'image':
+      case MessageType.image:
         return '📷 Image';
-      case 'video':
+      case MessageType.video:
         return '🎥 Video';
-      case 'document':
+      case MessageType.document:
         return '📄 Document';
-      case 'audios':
+      case MessageType.audio:
         return '🎵 Voice Message';
       default:
         return 'Message';

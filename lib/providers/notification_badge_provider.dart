@@ -1,9 +1,10 @@
 import 'dart:async';
+import 'package:amigo/db/repositories/call.repo.dart';
+import 'package:amigo/db/repositories/conversations.repo.dart';
+import 'package:amigo/types/socket.type.dart';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../db/repositories/conversations_repository.dart';
-import '../db/repositories/groups_repository.dart';
-import '../db/repositories/call_repository.dart';
 import '../models/call_model.dart';
 import '../services/call_seen_service.dart';
 
@@ -39,8 +40,7 @@ final notificationBadgeProvider =
     });
 
 class NotificationBadgeNotifier extends Notifier<NotificationBadgeState> {
-  final ConversationsRepository _conversationsRepo = ConversationsRepository();
-  final GroupsRepository _groupsRepo = GroupsRepository();
+  final ConversationRepository _conversationsRepo = ConversationRepository();
   final CallRepository _callRepo = CallRepository();
   final CallSeenService _callSeenService = CallSeenService.instance;
 
@@ -87,11 +87,13 @@ class NotificationBadgeNotifier extends Notifier<NotificationBadgeState> {
   /// Get total unread chat count
   Future<int> _getUnreadChatCount() async {
     try {
-      final conversations = await _conversationsRepo.getAllConversations();
+      final conversations = await _conversationsRepo.getConversationsByType(
+        ChatType.dm,
+      );
       int total = 0;
       for (final conv in conversations) {
-        if (conv.unreadCount > 0) {
-          total += conv.unreadCount;
+        if (conv.unreadCount != null && conv.unreadCount! > 0) {
+          total += conv.unreadCount!;
         }
       }
       return total;
@@ -103,11 +105,13 @@ class NotificationBadgeNotifier extends Notifier<NotificationBadgeState> {
   /// Get total unread group count
   Future<int> _getUnreadGroupCount() async {
     try {
-      final groups = await _groupsRepo.getAllGroups();
+      final groups = await _conversationsRepo.getConversationsByType(
+        ChatType.group,
+      );
       int total = 0;
       for (final group in groups) {
-        if (group.unreadCount > 0) {
-          total += group.unreadCount;
+        if (group.unreadCount != null && group.unreadCount! > 0) {
+          total += group.unreadCount!;
         }
       }
       return total;
@@ -119,7 +123,8 @@ class NotificationBadgeNotifier extends Notifier<NotificationBadgeState> {
   /// Get count of unseen missed calls
   Future<int> _getUnseenMissedCallCount() async {
     try {
-      final calls = await _callRepo.getAllCalls();
+      final currentUser = await UserUtils().getUserDetails();
+      final calls = await _callRepo.getAllCalls(currentUser?.id ?? 0);
       final seenCallIds = await _callSeenService.getSeenCallIds();
 
       return calls.where((call) {
@@ -139,7 +144,9 @@ class NotificationBadgeNotifier extends Notifier<NotificationBadgeState> {
   /// Mark calls as seen (call this when call screen is viewed)
   Future<void> markCallsAsSeen() async {
     try {
-      final calls = await _callRepo.getAllCalls();
+      final currentUser = await UserUtils().getUserDetails();
+
+      final calls = await _callRepo.getAllCalls(currentUser?.id ?? 0);
       final missedCallIds = calls
           .where((call) => call.status == CallStatus.missed)
           .map((call) => call.id)

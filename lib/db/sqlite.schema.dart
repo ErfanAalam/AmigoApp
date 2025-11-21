@@ -103,6 +103,7 @@ class Messages extends Table {
 
 class MessageStatusModel extends Table {
   Int64Column get id => int64().autoIncrement()();
+  IntColumn get conversationId => integer()();
   IntColumn get messageId => integer()();
   IntColumn get userId => integer()();
   TextColumn get deliveredAt => text().nullable()();

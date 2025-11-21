@@ -1,33 +1,33 @@
 import 'dart:async';
 import 'dart:math';
 import 'dart:io';
+import 'package:amigo/db/repositories/conversation_member.repo.dart';
+import 'package:amigo/db/repositories/conversations.repo.dart';
+import 'package:amigo/db/repositories/message.repo.dart';
+import 'package:amigo/db/repositories/messageStatus.repo.dart';
+import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
+import 'package:amigo/models/message.model.dart';
+import 'package:amigo/providers/chat_provider.dart';
+import 'package:amigo/utils/chat/chat_helpers.utils.dart';
+import 'package:amigo/utils/snowflake.util.dart';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../models/group_model.dart';
-import '../../../models/message_model.dart';
-import '../../../models/conversation_model.dart';
 import '../../../models/community_model.dart';
 import '../../../models/user_model.dart';
 import '../../../api/groups.services.dart';
 import '../../../api/user.service.dart';
 import '../../../api/chats.services.dart';
-import '../../../services/message_storage_service.dart';
-import '../../../db/repositories/messages_repository.dart';
-import '../../../db/repositories/user_repository.dart';
-import '../../../db/repositories/groups_repository.dart';
-import '../../../db/repositories/group_members_repository.dart';
 import '../../../services/socket/websocket_service.dart';
 import '../../../services/socket/websocket_message_handler.dart';
 import '../../../types/socket.type.dart';
 import '../../../widgets/loading_dots_animation.dart';
 import '../../../services/media_cache_service.dart';
-import '../../../utils/chat/chat_helpers.dart';
-import '../../../utils/chat/sync_messages.utils.dart';
-import '../../../utils/message_storage_helpers.dart';
 import '../../../utils/animations.utils.dart';
 import '../../../widgets/chat/attachment_action_sheet.dart';
 import '../../../utils/chat/attachments.utils.dart';
@@ -42,8 +42,6 @@ import '../../../utils/chat/group_readby_modal.dart';
 import '../../../utils/chat/forward_message.utils.dart';
 import '../../../utils/chat/preview_media.utils.dart';
 import '../../../utils/chat/audio_playback.utils.dart';
-import '../../../utils/chat/sendMediaMessage.utils.dart';
-import '../../../utils/chat/chatActions.utils.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../services/draft_message_service.dart';
 import '../../../providers/draft_provider.dart';
@@ -69,50 +67,69 @@ class InnerGroupChatPage extends ConsumerStatefulWidget {
 
 class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     with TickerProviderStateMixin {
-  final GroupsService _groupsService = GroupsService();
-  final UserService _userService = UserService();
+  // final GroupsService _groupsService = GroupsService();
+  // final UserService _userService = UserService();
   final ChatsServices _chatsServices = ChatsServices();
-  final MessagesRepository _messagesRepo = MessagesRepository();
+  final MessageRepository _messagesRepo = MessageRepository();
+  final ConversationRepository _conversationRepo = ConversationRepository();
   final UserRepository _userRepo = UserRepository();
-  final GroupMembersRepository _groupMembersRepo = GroupMembersRepository();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _messageController = TextEditingController();
-  final WebSocketService _websocketService = WebSocketService();
-  final WebSocketMessageHandler _messageHandler = WebSocketMessageHandler();
+  final WebSocketService _webSocket = WebSocketService();
+  // final WebSocketMessageHandler _messageHandler = WebSocketMessageHandler();
+  final UserUtils _userUtils = UserUtils();
+  final ConversationMemberRepository _conversationMemberRepo =
+      ConversationMemberRepository();
+
+  final MessageStatusRepository _messageStatusRepo = MessageStatusRepository();
+
+  final WebSocketMessageHandler _wsMessageHandler = WebSocketMessageHandler();
   final ImagePicker _imagePicker = ImagePicker();
   final MediaCacheService _mediaCacheService = MediaCacheService();
   List<MessageModel> _messages = [];
   bool _isLoading = false;
-  bool _isLoadingMore = false;
-  bool _hasMoreMessages = true;
-  int _currentPage = 1;
-  String? _errorMessage;
-  int? _currentUserId;
-  bool _isInitialized = false;
-  ConversationMeta? _conversationMeta;
-  bool _isLoadingFromCache = false;
-  bool _hasCheckedCache = false;
-  bool _isCheckingCache = true;
+
+  UserModel? _currentUserDetails;
+
+  // Message sync state variables
+  bool _isSyncingMessages = false;
+  double _syncProgress = 0.0;
+  String _syncStatus = '';
+  int _syncedMessageCount = 0;
+  int _totalMessageCount = 0;
+
+  List<UserModel> _conversationMembers = [];
+
+  // bool _isLoadingMore = false;
+  // bool _hasMoreMessages = true;
+  // int _currentPage = 1;
+  // String? _errorMessage;
+  // int? _currentUserId;
+  // bool _isInitialized = false;
+  // ConversationMeta? _conversationMeta;
+  // bool _isLoadingFromCache = false;
+  // bool _hasCheckedCache = false;
+  // bool _isCheckingCache = true;
   bool _isTyping = false;
   bool _isAdminOrStaff = false;
   // bool _isOtherTyping = false;
   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
+  bool _isDisposed = false;
 
   // Scroll to bottom button state
   bool _isAtBottom = true;
-  int _unreadCountWhileScrolled = 0;
-  int _previousMessageCount = 0;
+  // int _unreadCountWhileScrolled = 0;
+  // int _previousMessageCount = 0;
 
   // For optimistic message handling - using filtered streams per conversation
-  StreamSubscription<Map<String, dynamic>>? _messageSubscription;
-  StreamSubscription<Map<String, dynamic>>? _typingSubscription;
-  StreamSubscription<Map<String, dynamic>>? _mediaSubscription;
-  StreamSubscription<Map<String, dynamic>>? _messagePinSubscription;
-  StreamSubscription<Map<String, dynamic>>? _messageStarSubscription;
-  StreamSubscription<ChatMessagePayload>? _messageReplySubscription;
-  StreamSubscription<Map<String, dynamic>>? _messageDeleteSubscription;
-  int _optimisticMessageId = -1;
-  final Set<int> _optimisticMessageIds = {};
+  // StreamSubscription<OnlineStatusPayload>? _onlineStatusSubscription;
+  StreamSubscription<TypingPayload>? _typingSubscription;
+  StreamSubscription<ChatMessagePayload>? _messageSubscription;
+  StreamSubscription<ChatMessageAckPayload>? _messageAckSubscription;
+  StreamSubscription<MessagePinPayload>? _messagePinSubscription;
+  StreamSubscription<DeleteMessagePayload>? _messageDeleteSubscription;
+  // int _optimisticMessageId = -1;
+  // final Set<int> _optimisticMessageIds = {};
   bool _isTestSending = false;
 
   Future<void> _startTestSequence(int totalMessages) async {
@@ -123,7 +140,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       for (int i = 1; i <= totalMessages; i++) {
         if (!mounted) break;
         _messageController.text = 'test sequence $i';
-        _sendMessage();
+        _sendMessage(MessageType.text);
         // Human-like delay between 300ms to 1200ms
         final delayMs = 400;
         await Future.delayed(Duration(milliseconds: delayMs));
@@ -150,83 +167,79 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   // User info cache for sender names and profile pics
-  final Map<int, Map<String, String?>> _userInfoCache = {};
+  // final Map<int, Map<String, String?>> _userInfoCache = {};
 
   /// Get user info from cache, metadata, or local DB
-  Map<String, String?> _getUserInfo(int userId) {
-    // PRIORITY 1: Check in-memory cache (INSTANT - populated during init)
-    if (_userInfoCache.containsKey(userId)) {
-      return _userInfoCache[userId]!;
-    }
+  // Map<String, String?> _getUserInfo(int userId) {
+  //   // PRIORITY 1: Check in-memory cache (INSTANT - populated during init)
+  //   if (_userInfoCache.containsKey(userId)) {
+  //     return _userInfoCache[userId]!;
+  //   }
 
-    // PRIORITY 2: Check conversation metadata members data
-    if (_conversationMeta != null && _conversationMeta!.members.isNotEmpty) {
-      final senderName = _conversationMeta!.getSenderName(userId);
-      final senderProfilePic = _conversationMeta!.getSenderProfilePic(userId);
-      if (senderName != 'Unknown User') {
-        // Cache it for next time
-        _userInfoCache[userId] = {
-          'name': senderName,
-          'profile_pic': senderProfilePic,
-        };
-        return {'name': senderName, 'profile_pic': senderProfilePic};
-      }
-    }
+  //   // PRIORITY 2: Check conversation metadata members data
+  //   if (_conversationMeta != null && _conversationMeta!.members.isNotEmpty) {
+  //     final senderName = _conversationMeta!.getSenderName(userId);
+  //     final senderProfilePic = _conversationMeta!.getSenderProfilePic(userId);
+  //     if (senderName != 'Unknown User') {
+  //       // Cache it for next time
+  //       _userInfoCache[userId] = {
+  //         'name': senderName,
+  //         'profile_pic': senderProfilePic,
+  //       };
+  //       return {'name': senderName, 'profile_pic': senderProfilePic};
+  //     }
+  //   }
 
-    // PRIORITY 3: Check local DB asynchronously and update cache
-    // (Runs in background, will update UI when complete)
-    Future.microtask(() async {
-      // Try group_members table first (for group member info)
-      final groupMember = await _groupMembersRepo.getMemberByUserId(userId);
-      if (groupMember != null && mounted) {
-        _userInfoCache[userId] = {
-          'name': groupMember.userName,
-          'profile_pic': groupMember.profilePic,
-        };
-        debugPrint(
-          '💾 Loaded user $userId (${groupMember.userName}) from group_members DB - updating UI',
-        );
-        // Trigger rebuild to show updated names
-        setState(() {});
-        return;
-      }
+  // // PRIORITY 3: Check local DB asynchronously and update cache
+  // // (Runs in background, will update UI when complete)
+  // Future.microtask(() async {
+  //   // Try group_members table first (for group member info)
+  //   final groupMember = await _groupMembersRepo.getMemberByUserId(userId);
+  //   if (groupMember != null && mounted) {
+  //     _userInfoCache[userId] = {
+  //       'name': groupMember.userName,
+  //       'profile_pic': groupMember.profilePic,
+  //     };
+  //     // Trigger rebuild to show updated names
+  //     setState(() {});
+  //     return;
+  //   }
 
-      // Fallback to users table (only for current user)
-      final user = await _userRepo.getUserById(userId);
-      if (user != null && mounted) {
-        _userInfoCache[userId] = {
-          'name': user.name,
-          'profile_pic': user.profilePic,
-        };
-        debugPrint(
-          '💾 Loaded user $userId (${user.name}) from users DB - updating UI',
-        );
-        // Trigger rebuild to show updated names
-        setState(() {});
-      } else {
-        debugPrint('! User $userId not found in local DB');
-      }
-    });
+  //   // Fallback to users table (only for current user)
+  //   final user = await _userRepo.getUserById(userId);
+  //   if (user != null && mounted) {
+  //     _userInfoCache[userId] = {
+  //       'name': user.name,
+  //       'profile_pic': user.profilePic,
+  //     };
+  //     debugPrint(
+  //       '💾 Loaded user $userId (${user.name}) from users DB - updating UI',
+  //     );
+  //     // Trigger rebuild to show updated names
+  //     setState(() {});
+  //   } else {
+  //     debugPrint('! User $userId not found in local DB');
+  //   }
+  // });
 
-    // PRIORITY 4: Return temporary fallback (will update when DB lookup completes)
-    debugPrint('! Using fallback for user $userId - will check DB');
-    return {'name': 'Unknown User', 'profile_pic': null};
-  }
+  // PRIORITY 4: Return temporary fallback (will update when DB lookup completes)
+  // debugPrint('! Using fallback for user $userId - will check DB');
+  // return {'name': 'Unknown User', 'profile_pic': null};
+  // }
 
   // Message selection and actions
   final Set<int> _selectedMessages = {};
-  bool _isSelectionMode = false;
-  int? _pinnedMessageId; // Only one message can be pinned
+  // bool _isSelectionMode = false;
+  MessageModel? _pinnedMessage; // Only one message can be pinned
   final Set<int> _starredMessages = {};
 
   // Forward message state
   final Set<int> _messagesToForward = {};
-  List<ConversationModel> _availableConversations = [];
   bool _isLoadingConversations = false;
 
   // Reply message state
   MessageModel? _replyToMessageData;
-  bool _isReplying = false;
+  // bool _isReplying = false;
 
   // Highlighted message state (for scroll-to effect)
   int? _highlightedMessageId;
@@ -295,7 +308,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     super.initState();
     _scrollController.addListener(_onScroll);
 
-    _websocketService.connect(widget.group.conversationId);
+    // _websocketService.connect(widget.group.conversationId);
+
+    getAllConversationMembers();
 
     // Initialize typing animation
     _initializeTypingAnimation();
@@ -309,17 +324,22 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // Start initialization immediately
     _initializeChat();
 
-    // Also try a super quick cache check for even faster display
-    _quickCacheCheck();
-
     // Load draft message for this conversation
     _loadDraft();
 
     // Check admin or staff status
-    _updateIsAdminOrStaff();
+    // _updateIsAdminOrStaff();
 
     // Listen to text changes for draft saving
     _messageController.addListener(_onMessageTextChanged);
+  }
+
+  Future<void> getAllConversationMembers() async {
+    final members = await _conversationMemberRepo
+        .getMembersWithUserDetailsByConversationId(widget.group.conversationId);
+    setState(() {
+      _conversationMembers = members;
+    });
   }
 
   /// Load draft message when opening conversation
@@ -335,27 +355,27 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
   }
 
-  Future<void> _updateIsAdminOrStaff() async {
-    // Load directly from service for immediate access
+  // Future<void> _updateIsAdminOrStaff() async {
+  //   // Load directly from service for immediate access
 
-    if (widget.group.role == 'admin') {
-      setState(() {
-        _isAdminOrStaff = true;
-      });
-    } else {
-      // Check if user role is 'staff'
-      try {
-        final currentUser = await _userRepo.getFirstUser();
-        if (currentUser != null && currentUser.role == 'staff') {
-          setState(() {
-            _isAdminOrStaff = true;
-          });
-        }
-      } catch (e) {
-        debugPrint('❌ Error checking user role: $e');
-      }
-    }
-  }
+  //   if (widget.group.role == 'admin') {
+  //     setState(() {
+  //       _isAdminOrStaff = true;
+  //     });
+  //   } else {
+  //     // Check if user role is 'staff'
+  //     try {
+  //       final currentUser = await _userRepo.getFirstUser();
+  //       if (currentUser != null && currentUser.role == 'staff') {
+  //         setState(() {
+  //           _isAdminOrStaff = true;
+  //         });
+  //       }
+  //     } catch (e) {
+  //       debugPrint('❌ Error checking user role: $e');
+  //     }
+  //   }
+  // }
 
   /// Handle message text changes with debouncing for draft saving
   void _onMessageTextChanged() {
@@ -404,7 +424,6 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       setState: () => setState(() {}),
       showErrorDialog: _showErrorDialog,
       mediaCacheService: _mediaCacheService,
-      messagesRepo: _messagesRepo,
       messages: _messages,
     );
 
@@ -412,716 +431,453 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     _audioPlaybackManager.initialize();
   }
 
-  /// Ultra-fast cache check that runs immediately
-  void _quickCacheCheck() async {
-    try {
-      final conversationId = widget.group.conversationId;
+  Future<void> _initializeChat() async {
+    // get the current user details
+    final currentUser = await _userUtils.getUserDetails();
+    if (currentUser != null) {
+      setState(() {
+        _currentUserDetails = currentUser;
+      });
+    }
 
-      // Quick check if we have cached messages in DB
-      final count = await _messagesRepo.getMessageCount(conversationId);
-      if (count > 0) {
-        // Don't load here, just indicate cache is available
+    // load pinned message from prefs and then DB
+    if (widget.group.pinnedMessageId != null) {
+      final pinnedMessage = await _messagesRepo.getMessageById(
+        widget.group.pinnedMessageId!,
+      );
+      setState(() {
+        _pinnedMessage = pinnedMessage;
+      });
+
+      final messaagesFromLocal = await _messagesRepo
+          .getMessagesByConversationWithSenderDetails(
+            widget.group.conversationId,
+            limit: 100,
+            offset: 0,
+          );
+
+      setState(() {
+        _messages = messaagesFromLocal;
+        _sortMessagesBySentAt();
+        _isLoading = false;
+      });
+    }
+
+    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    // Send WebSocket messages in background (non-blocking, non-critical)
+    final joinConvPayload = JoinLeavePayload(
+      convId: widget.group.conversationId,
+      convType: ChatType.group,
+      userId: _currentUserDetails?.id ?? 0,
+      userName: _currentUserDetails?.name ?? '',
+    ).toJson();
+
+    final wsmsg = WSMessage(
+      type: WSMessageType.conversationJoin,
+      payload: joinConvPayload,
+      wsTimestamp: DateTime.now(),
+    ).toJson();
+
+    await _webSocket.sendMessage(wsmsg);
+    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    // start silent message sync (from server to local DB)
+    await _syncMessagesFromServer();
+  }
+
+  Future<void> _loadMoreMessages() async {
+    // Implement loading more messages from server to local DB
+    final moreMessages = await _messagesRepo.getMessagesByConversation(
+      widget.group.conversationId,
+      limit: 100,
+      offset: _messages.length,
+    );
+
+    setState(() {
+      _messages.addAll(moreMessages);
+      _sortMessagesBySentAt();
+    });
+  }
+
+  /// Sync all messages from server to local DB
+  /// This is called when user visits the conversation for the first time
+  Future<void> _syncMessagesFromServer() async {
+    // Check if sync is needed
+    final needSync = await _conversationRepo.getNeedSyncStatus(
+      widget.group.conversationId,
+    );
+    if (!needSync) return;
+
+    // Start syncing
+    if (mounted) {
+      setState(() {
+        _isSyncingMessages = true;
+        _syncProgress = 0.0;
+        _syncStatus = 'Starting sync...';
+        _syncedMessageCount = 0;
+        _totalMessageCount = 0;
+      });
+    }
+
+    try {
+      int page = 1;
+      const int limit = 100; // Fetch 100 messages per page
+      bool hasMorePages = true;
+      int totalSynced = 0;
+
+      // First, get the first page to know total count
+      final firstPageResponse = await _chatsServices.getConversationHistory(
+        conversationId: widget.group.conversationId,
+        page: page,
+        limit: limit,
+      );
+
+      if (firstPageResponse['success'] != true ||
+          firstPageResponse['data'] == null) {
+        // Failed to fetch, stop syncing
         if (mounted) {
           setState(() {
-            _isCheckingCache = true; // Show cache loader
+            _isSyncingMessages = false;
+            _syncStatus = 'Sync failed';
+          });
+        }
+        return;
+      }
+
+      final firstPageHistory = ConversationHistoryResponse.fromJson(
+        firstPageResponse['data'],
+      );
+      _totalMessageCount = firstPageHistory.totalCount;
+
+      if (_totalMessageCount == 0) {
+        // No messages to sync
+        if (mounted) {
+          setState(() {
+            _isSyncingMessages = false;
+            _syncStatus = '';
+          });
+        }
+        return;
+      }
+
+      // Process first page
+      if (firstPageHistory.messages.isNotEmpty) {
+        await _messagesRepo.insertMessages(firstPageHistory.messages);
+        totalSynced += firstPageHistory.messages.length;
+
+        if (mounted) {
+          setState(() {
+            _syncedMessageCount = totalSynced;
+            _syncProgress = totalSynced / _totalMessageCount;
+            _syncStatus =
+                'Syncing messages... ($totalSynced/$_totalMessageCount)';
           });
         }
       }
-    } catch (e) {
-      debugPrint('🚀 Quick group cache check error: $e');
-    }
-  }
 
-  /// Smart sync: Compare cached message count with backend and add only new messages
-  Future<void> _performSmartSync(int conversationId) async {
-    try {
-      // Get current cached message count
-      final cachedCount = _messages.length;
+      hasMorePages = firstPageHistory.hasNextPage;
+      page++;
 
-      // Fetch latest data from backend (silently)
-      final response = await _chatsServices.getConversationHistory(
-        conversationId: conversationId,
-        page: 1,
-        limit: 50, // Get more messages to check for new ones
-      );
+      // Continue fetching remaining pages
+      while (hasMorePages && mounted && !_isDisposed) {
+        final response = await _chatsServices.getConversationHistory(
+          conversationId: widget.group.conversationId,
+          page: page,
+          limit: limit,
+        );
 
-      if (response['success'] == true && response['data'] != null) {
+        if (response['success'] != true || response['data'] == null) {
+          break; // Stop on error
+        }
+
         final historyResponse = ConversationHistoryResponse.fromJson(
           response['data'],
         );
 
-        final backendMessages = historyResponse.messages;
-        final backendCount = backendMessages.length;
-
-        if (backendCount > cachedCount) {
-          // Backend has more messages - add only the new ones
-          final newMessages = backendMessages.skip(cachedCount).toList();
-
-          // Add new messages to cache
-          _conversationMeta = ConversationMeta.fromResponse(historyResponse);
-          await _messagesRepo.addMessagesToCache(
-            conversationId: conversationId,
-            newMessages: newMessages,
-            updatedMeta: _conversationMeta!,
-            insertAtBeginning: false, // Add new messages at the end
-          );
-
-          // Update UI with all messages (cached + new) - no loading state
-          if (mounted) {
-            setState(() {
-              _messages =
-                  backendMessages; // Show all messages including new ones
-              _conversationMeta = ConversationMeta.fromResponse(
-                historyResponse,
-              );
-              _hasMoreMessages = historyResponse.hasNextPage;
-            });
-            _populateReplyMessageSenderNames();
-          }
-        } else if (backendCount == cachedCount) {
-          // Just update metadata in case pagination info changed
-          _conversationMeta = ConversationMeta.fromResponse(historyResponse);
-          await _messagesRepo.saveMessages(
-            conversationId: conversationId,
-            messages: _messages,
-            meta: _conversationMeta!,
-          );
-        } else {
-          // Replace cache with backend data
-          _conversationMeta = ConversationMeta.fromResponse(historyResponse);
-          await _messagesRepo.saveMessages(
-            conversationId: conversationId,
-            messages: backendMessages,
-            meta: _conversationMeta!,
-          );
-
-          if (mounted) {
-            setState(() {
-              _messages = backendMessages;
-              _conversationMeta = ConversationMeta.fromResponse(
-                historyResponse,
-              );
-              _hasMoreMessages = historyResponse.hasNextPage;
-            });
-            _populateReplyMessageSenderNames();
-          }
+        if (historyResponse.messages.isEmpty) {
+          break; // No more messages
         }
 
-        // Cache user info from metadata for offline access
-        await _cacheUsersFromMetadata();
-      }
-    } catch (e) {
-      debugPrint('❌ Error in group smart sync: $e');
-      // Don't show error to user, just log it
-    }
-  }
+        // Insert messages into local DB
+        await _messagesRepo.insertMessages(historyResponse.messages);
+        totalSynced += historyResponse.messages.length;
 
-  Future<void> _initializeChat() async {
-    // CRITICAL: Get user ID FIRST (must know who "I" am before displaying messages)
-    await _getCurrentUserId();
-
-    // CRITICAL: Initialize and AWAIT user info cache with group members
-    // This MUST complete BEFORE displaying messages so names show correctly
-    await _initializeUserCache();
-
-    // NOW load and display messages (user ID and user names are known)
-    // This also loads _conversationMeta which contains pinned message info
-    await _tryLoadFromCacheFirst();
-
-    // Load pinned and starred messages from local DB (fast)
-    // Must be called AFTER _tryLoadFromCacheFirst to access _conversationMeta
-    await _loadPinnedMessageFromStorage();
-    await _loadStarredMessagesFromStorage();
-
-    // Load from server (in background if we have cache)
-    await _loadInitialMessages();
-
-    // Send WebSocket messages in background (non-blocking, non-critical)
-    Future.delayed(Duration.zero, () {
-      _websocketService
-          .sendMessage({
-            'type': 'active_in_conversation',
-            'conversation_id': widget.group.conversationId,
-          })
-          .catchError((e) {
-            debugPrint('❌ Error sending active_in_conversation for group: $e');
+        // Update progress
+        if (mounted) {
+          setState(() {
+            _syncedMessageCount = totalSynced;
+            _syncProgress = totalSynced / _totalMessageCount;
+            _syncStatus =
+                'Syncing messages... ($totalSynced/$_totalMessageCount)';
           });
-    });
-  }
+        }
 
-  /// Quick cache check and load for instant display
-  Future<void> _tryLoadFromCacheFirst() async {
-    final conversationId = widget.group.conversationId;
+        hasMorePages = historyResponse.hasNextPage;
+        page++;
 
-    await tryLoadFromCacheFirst(
-      TryLoadFromCacheFirstConfig(
-        conversationId: conversationId,
-        messagesRepo: _messagesRepo,
-        mounted: () => mounted,
-        setState: setState,
-        hasCheckedCache: () => _hasCheckedCache,
-        setHasCheckedCache: (value) => _hasCheckedCache = value,
-        setMessages: (value) => _messages = value,
-        setConversationMeta: (value) => _conversationMeta = value,
-        setHasMoreMessages: (value) => _hasMoreMessages = value,
-        setCurrentPage: (value) => _currentPage = value,
-        setIsInitialized: (value) => _isInitialized = value,
-        setIsLoading: (value) => _isLoading = value,
-        setErrorMessage: (value) => _errorMessage = value,
-        setIsCheckingCache: (value) => _isCheckingCache = value,
-        setIsLoadingFromCache: (value) => _isLoadingFromCache = value,
-        validateMessages: (messages) {
-          _validatePinnedMessage();
-          _validateStarredMessages();
-          _validateReplyMessages();
-        },
-        populateReplyMessageSenderNames: _populateReplyMessageSenderNames,
-        cleanCachedMessages: (messages) {
-          // Filter out old orphaned optimistic messages (messages with negative IDs older than 5 minutes)
-          // final now = DateTime.now();
-          // final fiveMinutesAgo = now.subtract(const Duration(minutes: 5));
-
-          final cleanedMessages = messages.where((msg) {
-            // Keep all messages with positive IDs (server-confirmed)
-            if (msg.id >= 0) return true;
-
-            // For optimistic messages (negative IDs), only keep recent ones
-            try {
-              // final createdAt = DateTime.parse(msg.createdAt);
-              // return createdAt.isAfter(fiveMinutesAgo);
-              return true;
-            } catch (e) {
-              // If we can't parse the date, keep the message to be safe
-              return true;
-            }
-          }).toList();
-
-          // Remove duplicates by ID (keep the one with positive ID if both exist)
-          final messageMap = <int, MessageModel>{};
-          for (final msg in cleanedMessages) {
-            final existingMsg = messageMap[msg.id.abs()];
-            // Prefer positive IDs (server-confirmed) over negative IDs (optimistic)
-            if (existingMsg == null || msg.id > 0) {
-              messageMap[msg.id.abs()] = msg;
-            }
-          }
-          final deduplicatedMessages = messageMap.values.toList()
-            ..sort((a, b) => a.id.compareTo(b.id));
-
-          return deduplicatedMessages;
-        },
-        onAfterLoadFromCache: (processedMessages, originalCount) {},
-        getErrorLogMessage: () => 'Error in quick group cache check',
-      ),
-    );
-  }
-
-  Future<void> _getCurrentUserId() async {
-    try {
-      // FAST PATH: Try to get from local DB first (instant)
-      // final conversationId = widget.group.conversationId;
-      // final cachedMessages = await _messagesRepo.getMessagesByConversation(
-      //   conversationId,
-      //   limit: 20,
-      // );
-
-      // For groups, find messages we sent by checking local DB
-      final cachedUser = await _userRepo.getFirstUser();
-      if (cachedUser != null) {
-        // Assume the first user we find in local cache is us
-        _currentUserId = cachedUser.id;
-        // Cache admin/staff status
-        _isAdminOrStaff =
-            widget.group.role == 'admin' || cachedUser.role == 'staff';
-        return;
+        // Small delay to avoid overwhelming the server
+        await Future.delayed(const Duration(milliseconds: 100));
       }
 
-      // SLOW PATH: Fetch from API (only if not found in cache)
-      final response = await _userService.getUser().timeout(
-        Duration(seconds: 2),
-        onTimeout: () {
-          return {'success': false, 'message': 'Timeout'};
-        },
-      );
+      // Reload messages from local DB after sync
+      if (mounted && !_isDisposed) {
+        final syncedMessages = await _messagesRepo
+            .getMessagesByConversationWithSenderDetails(
+              widget.group.conversationId,
+              limit: 100,
+              offset: 0,
+            );
 
-      if (response['success'] == true && response['data'] != null) {
-        final userData = response['data'];
-        _currentUserId = _parseToInt(userData['id']);
-
-        // Save to local DB for next time
-        final userModel = UserModel(
-          id: _currentUserId!,
-          name: userData['name'] ?? '',
-          phone: userData['phone'] ?? '',
-          role: userData['role'] ?? '',
-          profilePic: userData['profile_pic'],
-          callAccess: userData['call_access'] == true,
-        );
-        await _userRepo.insertOrUpdateUser(userModel);
-        // Cache admin/staff status
-        _isAdminOrStaff =
-            widget.group.role == 'admin' || userModel.role == 'staff';
-      } else {
-        debugPrint('⚠️ Could not get current user ID from API');
-      }
-    } catch (e) {
-      debugPrint('❌ Error getting current user: $e');
-    }
-
-    if (_currentUserId == null) {
-      debugPrint('⚠️ WARNING: Could not determine current user ID for group');
-    }
-
-    // Initialize admin/staff status if not already set
-
-    // Try to get user role from cache
-    try {
-      final cachedUser = await _userRepo.getFirstUser();
-      if (cachedUser != null) {
         setState(() {
-          _isAdminOrStaff =
-              widget.group.role == 'admin' || cachedUser.role == 'staff';
+          _messages = syncedMessages;
+          _sortMessagesBySentAt();
+          _isSyncingMessages = false;
+          _syncProgress = 1.0;
+          _syncStatus = 'Sync complete';
+        });
+
+        // Mark sync as completed in conversations repo
+        await _conversationRepo.updateNeedSyncStatus(
+          widget.group.conversationId,
+          false,
+        );
+
+        // Clear sync status after a short delay
+        Future.delayed(const Duration(seconds: 1), () {
+          if (mounted && !_isDisposed) {
+            setState(() {
+              _syncStatus = '';
+              _syncProgress = 0.0;
+            });
+          }
         });
       }
     } catch (e) {
-      debugPrint('❌ Error checking admin/staff status: $e');
-    }
-  }
-
-  int _parseToInt(dynamic value) {
-    if (value == null) return 0;
-    if (value is int) return value;
-    if (value is String) return int.tryParse(value) ?? 0;
-    return 0;
-  }
-
-  /// Initialize user info cache with known group members and save to DB
-  /// MUST be awaited to ensure names are available before displaying messages
-  Future<void> _initializeUserCache() async {
-    debugPrint('👥 Loading group members for caching...');
-
-    // STEP 1: Load latest group info from local DB (might have more up-to-date member list)
-    GroupModel? cachedGroup;
-    try {
-      final groupsRepo = GroupsRepository();
-      cachedGroup = await groupsRepo.getGroupById(widget.group.conversationId);
-      if (cachedGroup != null && cachedGroup.members.isNotEmpty) {
-        debugPrint(
-          '📦 Using ${cachedGroup.members.length} members from local DB',
-        );
-      }
-    } catch (e) {
-      debugPrint('⚠️ Could not load group from local DB: $e');
-    }
-
-    // Use cached group members if available, otherwise use widget.group.members
-    final membersToCache = cachedGroup?.members ?? widget.group.members;
-
-    debugPrint('👥 Caching ${membersToCache.length} group members...');
-
-    // STEP 2: Cache all members to BOTH memory AND local DB
-    for (final member in membersToCache) {
-      // 1. Cache in memory FIRST (synchronous, instant lookup)
-      _userInfoCache[member.userId] = {
-        'name': member.name,
-        'profile_pic': member.profilePic,
-      };
-
-      // 2. Save to group_members table (not users table) for offline access
-      try {
-        final memberInfo = GroupMemberInfo(
-          userId: member.userId,
-          userName: member.name,
-          profilePic: member.profilePic,
-          role: member.role,
-          joinedAt: member.joinedAt,
-        );
-        await _groupMembersRepo.insertOrUpdateGroupMember(
-          widget.group.conversationId,
-          memberInfo,
-        );
-      } catch (e) {
-        debugPrint('❌ Error caching member ${member.userId} to DB: $e');
-      }
-    }
-
-    // STEP 3: Cache current user info in memory
-    if (_currentUserId != null) {
-      _userInfoCache[_currentUserId!] = {'name': 'You', 'profile_pic': null};
-    }
-
-    debugPrint(
-      '✅ Cached ${membersToCache.length} group members to local DB and memory',
-    );
-    debugPrint('✅ _userInfoCache now has ${_userInfoCache.length} users');
-  }
-
-  /// Load pinned message from storage or conversation metadata
-  Future<void> _loadPinnedMessageFromStorage() async {
-    final conversationId = widget.group.conversationId;
-
-    // First check if group metadata has pinned message
-    if (widget.group.metadata?.pinnedMessage != null) {
-      final pinnedMessageId = widget.group.metadata!.pinnedMessage!.messageId;
+      debugPrint('❌ Error syncing messages: $e');
       if (mounted) {
         setState(() {
-          _pinnedMessageId = pinnedMessageId;
+          _isSyncingMessages = false;
+          _syncStatus = 'Sync failed';
         });
-        return;
-      }
-    }
-
-    // Fallback to local storage
-    final pinnedMessageId =
-        await MessageStorageHelpers.loadPinnedMessageFromStorage(
-          conversationId,
-        );
-
-    if (pinnedMessageId != null && mounted) {
-      setState(() {
-        _pinnedMessageId = pinnedMessageId;
-      });
-    }
-  }
-
-  /// Load starred messages from storage
-  Future<void> _loadStarredMessagesFromStorage() async {
-    final conversationId = widget.group.conversationId;
-    final starredMessages =
-        await MessageStorageHelpers.loadStarredMessagesFromStorage(
-          conversationId,
-        );
-
-    if (starredMessages.isNotEmpty && mounted) {
-      setState(() {
-        _starredMessages.clear();
-        _starredMessages.addAll(starredMessages);
-      });
-    }
-  }
-
-  /// Validate pinned message exists in current messages and clean up if not
-  void _validatePinnedMessage() {
-    // Don't validate if we don't have a full message set yet
-    // Only validate if we've loaded a significant number of messages
-    // This prevents clearing pinned messages during initial load or pagination
-    if (_pinnedMessageId != null && _messages.length > 20) {
-      final messageExists = _messages.any((msg) => msg.id == _pinnedMessageId);
-      if (!messageExists && mounted) {
-        debugPrint(
-          '⚠️ Pinned message $_pinnedMessageId not found in current group messages, but keeping it (might be paginated)',
-        );
-        // Don't clear the pinned message - it might just be in a different page
-        // Only clear if we explicitly receive an unpin action via WebSocket
       }
     }
   }
 
-  /// Validate starred messages exist in current messages and clean up invalid ones
-  void _validateStarredMessages() {
-    if (_starredMessages.isNotEmpty && _messages.isNotEmpty) {
-      final currentMessageIds = _messages.map((msg) => msg.id).toSet();
-      final invalidStarredMessages = _starredMessages
-          .where((starredId) => !currentMessageIds.contains(starredId))
-          .toList();
-
-      if (invalidStarredMessages.isNotEmpty && mounted) {
-        debugPrint(
-          '⚠️ ${invalidStarredMessages.length} starred messages not found in current group messages, cleaning up',
-        );
-
-        setState(() {
-          _starredMessages.removeAll(invalidStarredMessages);
-        });
-
-        // Update storage with cleaned up starred messages
-        _messagesRepo.saveStarredMessages(
-          conversationId: widget.group.conversationId,
-          starredMessageIds: _starredMessages,
-        );
-      }
-    }
-  }
-
-  /// Validate reply messages are properly loaded and structured
-  void _validateReplyMessages() {
-    if (_messages.isEmpty) return;
-
-    Future.microtask(() async {
+  /// Sort messages by sentAt timestamp to maintain consistent order
+  /// This prevents messages from flipping when setState is called
+  void _sortMessagesBySentAt() {
+    _messages.sort((a, b) {
       try {
-        // Count reply messages in current UI
-        final replyMessagesInUI = _messages
-            .where(
-              (msg) =>
-                  msg.replyToMessage != null || msg.replyToMessageId != null,
-            )
-            .toList();
-
-        debugPrint(
-          '🔍 Found ${replyMessagesInUI.length} reply messages in group cache',
-        );
-
-        // Validate each reply message
-        for (final message in replyMessagesInUI) {
-          if (message.replyToMessage != null) {
-            debugPrint(
-              '✅ Group reply message ${message.id} has complete reply data: "${message.replyToMessage!.body}" by ${message.replyToMessage!.senderName}',
-            );
-          } else if (message.replyToMessageId != null) {
-            // Try to find the referenced message in current messages
-            MessageModel? referencedMessage;
-            try {
-              referencedMessage = _messages.firstWhere(
-                (msg) => msg.id == message.replyToMessageId,
-              );
-            } catch (e) {
-              referencedMessage = null;
-            }
-            if (referencedMessage != null) {
-              debugPrint(
-                '🔗 Group reply message ${message.id} references existing message ${message.replyToMessageId}',
-              );
-            } else {
-              debugPrint(
-                '⚠️ Group reply message ${message.id} references missing message ${message.replyToMessageId}',
-              );
-            }
-          }
-        }
-
-        // Validate storage
-        await _messagesRepo.validateReplyMessageStorage(
-          widget.group.conversationId,
-        );
+        final aTime = DateTime.parse(a.sentAt);
+        final bTime = DateTime.parse(b.sentAt);
+        return aTime.compareTo(bTime);
       } catch (e) {
-        debugPrint('❌ Error validating group reply messages: $e');
+        // If parsing fails, fall back to string comparison
+        return a.sentAt.compareTo(b.sentAt);
       }
     });
   }
 
+  // int _  parseToInt(dynamic value) {
+  //   if (value == null) return 0;
+  //   if (value is int) return value;
+  //   if (value is String) return int.tryParse(value) ?? 0;
+  //   return 0;
+  // }
+
+  /// Load pinned message from storage or conversation metadata
+  // /// The above code snippet contains commented-out functions related to loading, validating, and
+  /// cleaning up pinned and starred messages in a chat application.
+  // Future<void> _loadPinnedMessageFromStorage() async {
+  //   final conversationId = widget.group.conversationId;
+
+  //   // First check if group metadata has pinned message
+  //   if (widget.group.metadata?.pinnedMessage != null) {
+  //     final pinnedMessage = widget.group.metadata!.pinnedMessage!;
+  //     if (mounted) {
+  //       setState(() {
+  //         _pinnedMessage = pinnedMessage;
+  //       });
+  //       return;
+  //     }
+  //   }
+
+  //   // Fallback to local storage
+  //   final pinnedMessageId =
+  //       await MessageStorageHelpers.loadPinnedMessageFromStorage(
+  //         conversationId,
+  //       );
+
+  //   if (pinnedMessageId != null && mounted) {
+  //     setState(() {
+  //       _pinnedMessageId = pinnedMessageId;
+  //     });
+  //   }
+  // }
+
+  // /// Load starred messages from storage
+  // Future<void> _loadStarredMessagesFromStorage() async {
+  //   final conversationId = widget.group.conversationId;
+  //   final starredMessages =
+  //       await MessageStorageHelpers.loadStarredMessagesFromStorage(
+  //         conversationId,
+  //       );
+
+  //   if (starredMessages.isNotEmpty && mounted) {
+  //     setState(() {
+  //       _starredMessages.clear();
+  //       _starredMessages.addAll(starredMessages);
+  //     });
+  //   }
+  // }
+
+  // /// Validate pinned message exists in current messages and clean up if not
+  // void _validatePinnedMessage() {
+  //   // Don't validate if we don't have a full message set yet
+  //   // Only validate if we've loaded a significant number of messages
+  //   // This prevents clearing pinned messages during initial load or pagination
+  //   if (_pinnedMessageId != null && _messages.length > 20) {
+  //     final messageExists = _messages.any((msg) => msg.id == _pinnedMessageId);
+  //     if (!messageExists && mounted) {
+  //       debugPrint(
+  //         '⚠️ Pinned message $_pinnedMessageId not found in current group messages, but keeping it (might be paginated)',
+  //       );
+  //       // Don't clear the pinned message - it might just be in a different page
+  //       // Only clear if we explicitly receive an unpin action via WebSocket
+  //     }
+  //   }
+  // }
+
+  // /// Validate starred messages exist in current messages and clean up invalid ones
+  // void _validateStarredMessages() {
+  //   if (_starredMessages.isNotEmpty && _messages.isNotEmpty) {
+  //     final currentMessageIds = _messages.map((msg) => msg.id).toSet();
+  //     final invalidStarredMessages = _starredMessages
+  //         .where((starredId) => !currentMessageIds.contains(starredId))
+  //         .toList();
+
+  //     if (invalidStarredMessages.isNotEmpty && mounted) {
+  //       debugPrint(
+  //         '⚠️ ${invalidStarredMessages.length} starred messages not found in current group messages, cleaning up',
+  //       );
+
+  //       setState(() {
+  //         _starredMessages.removeAll(invalidStarredMessages);
+  //       });
+
+  //       // Update storage with cleaned up starred messages
+  //       _messagesRepo.saveStarredMessages(
+  //         conversationId: widget.group.conversationId,
+  //         starredMessageIds: _starredMessages,
+  //       );
+  //     }
+  //   }
+  // }
+
+  /// Validate reply messages are properly loaded and structured
+  // void _validateReplyMessages() {
+  //   if (_messages.isEmpty) return;
+
+  //   Future.microtask(() async {
+  //     try {
+  //       // Count reply messages in current UI
+  //       final replyMessagesInUI = _messages
+  //           .where(
+  //             (msg) =>
+  //                 msg.replyToMessage != null || msg.replyToMessageId != null,
+  //           )
+  //           .toList();
+
+  //       debugPrint(
+  //         '🔍 Found ${replyMessagesInUI.length} reply messages in group cache',
+  //       );
+
+  //       // Validate each reply message
+  //       for (final message in replyMessagesInUI) {
+  //         if (message.replyToMessage != null) {
+  //           debugPrint(
+  //             '✅ Group reply message ${message.id} has complete reply data: "${message.replyToMessage!.body}" by ${message.replyToMessage!.senderName}',
+  //           );
+  //         } else if (message.replyToMessageId != null) {
+  //           // Try to find the referenced message in current messages
+  //           MessageModel? referencedMessage;
+  //           try {
+  //             referencedMessage = _messages.firstWhere(
+  //               (msg) => msg.id == message.replyToMessageId,
+  //             );
+  //           } catch (e) {
+  //             referencedMessage = null;
+  //           }
+  //           if (referencedMessage != null) {
+  //             debugPrint(
+  //               '🔗 Group reply message ${message.id} references existing message ${message.replyToMessageId}',
+  //             );
+  //           } else {
+  //             debugPrint(
+  //               '⚠️ Group reply message ${message.id} references missing message ${message.replyToMessageId}',
+  //             );
+  //           }
+  //         }
+  //       }
+
+  //       // Validate storage
+  //       await _messagesRepo.validateReplyMessageStorage(
+  //         widget.group.conversationId,
+  //       );
+  //     } catch (e) {
+  //       debugPrint('❌ Error validating group reply messages: $e');
+  //     }
+  //   });
+  // }
+
   /// Cache user info from conversation metadata to local DB
-  Future<void> _cacheUsersFromMetadata() async {
-    if (_conversationMeta == null || _conversationMeta!.members.isEmpty) return;
+  // Future<void> _cacheUsersFromMetadata() async {
+  //   if (_conversationMeta == null || _conversationMeta!.members.isEmpty) return;
 
-    try {
-      for (final member in _conversationMeta!.members) {
-        final userId = member['user_id'] as int?;
-        final userName = member['name'] as String?;
-        final profilePic = member['profile_pic'] as String?;
+  //   try {
+  //     for (final member in _conversationMeta!.members) {
+  //       final userId = member['user_id'] as int?;
+  //       final userName = member['name'] as String?;
+  //       final profilePic = member['profile_pic'] as String?;
 
-        if (userId != null && userName != null) {
-          // Cache in memory
-          _userInfoCache[userId] = {
-            'name': userName,
-            'profile_pic': profilePic,
-          };
+  //       if (userId != null && userName != null) {
+  //         // Cache in memory
+  //         _userInfoCache[userId] = {
+  //           'name': userName,
+  //           'profile_pic': profilePic,
+  //         };
 
-          // Save to group_members table (not users table) for offline access
-          final memberInfo = GroupMemberInfo(
-            userId: userId,
-            userName: userName,
-            profilePic: profilePic,
-            role: 'member', // Default role from metadata
-            joinedAt: null,
-          );
-          await _groupMembersRepo.insertOrUpdateGroupMember(
-            widget.group.conversationId,
-            memberInfo,
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ Error caching users from metadata: $e');
-    }
-  }
-
-  /// Populate sender names for reply messages loaded from cache
-  void _populateReplyMessageSenderNames() {
-    if (_messages.isEmpty) return;
-
-    bool hasUpdates = false;
-    final updatedMessages = <MessageModel>[];
-
-    for (final message in _messages) {
-      if (message.replyToMessage != null &&
-          message.replyToMessage!.senderName.isEmpty) {
-        // Reply message exists but sender name is empty, populate it
-        final senderId = message.replyToMessage!.senderId;
-        String senderName;
-        String? senderProfilePic;
-
-        // First try to find the original message in the messages array
-        try {
-          final originalMessage = _messages.firstWhere(
-            (msg) => msg.id == message.replyToMessage!.id,
-          );
-          senderName = originalMessage.senderName;
-          senderProfilePic = originalMessage.senderProfilePic;
-          debugPrint(
-            '✅ Found original message in array for cached reply: $senderName',
-          );
-        } catch (e) {
-          // If not found, use cache/DB
-          final senderInfo = _getUserInfo(senderId);
-          senderName = senderInfo['name'] ?? 'Unknown User';
-          senderProfilePic = senderInfo['profile_pic'];
-          debugPrint(
-            '⚠️ Original message not in array, using cache for cached reply: $senderName',
-          );
-        }
-
-        final updatedReplyMessage = MessageModel(
-          id: message.replyToMessage!.id,
-          body: message.replyToMessage!.body,
-          type: message.replyToMessage!.type,
-          senderId: message.replyToMessage!.senderId,
-          conversationId: message.replyToMessage!.conversationId,
-          createdAt: message.replyToMessage!.createdAt,
-          editedAt: message.replyToMessage!.editedAt,
-          metadata: message.replyToMessage!.metadata,
-          attachments: message.replyToMessage!.attachments,
-          deleted: message.replyToMessage!.deleted,
-          senderName: senderName,
-          senderProfilePic: senderProfilePic,
-          replyToMessage: message.replyToMessage!.replyToMessage,
-          replyToMessageId: message.replyToMessage!.replyToMessageId,
-        );
-
-        final updatedMessage = MessageModel(
-          id: message.id,
-          body: message.body,
-          type: message.type,
-          senderId: message.senderId,
-          conversationId: message.conversationId,
-          createdAt: message.createdAt,
-          editedAt: message.editedAt,
-          metadata: message.metadata,
-          attachments: message.attachments,
-          deleted: message.deleted,
-          senderName: message.senderName,
-          senderProfilePic: message.senderProfilePic,
-          replyToMessage: updatedReplyMessage,
-          replyToMessageId: message.replyToMessageId,
-        );
-
-        updatedMessages.add(updatedMessage);
-        hasUpdates = true;
-
-        debugPrint(
-          '🔧 Updated group reply message sender name for message ${message.id}',
-        );
-      } else {
-        updatedMessages.add(message);
-      }
-    }
-
-    if (hasUpdates && mounted) {
-      setState(() {
-        _messages = updatedMessages;
-      });
-      debugPrint(
-        '✅ Updated ${updatedMessages.where((m) => m.replyToMessage != null).length} group reply messages with sender names',
-      );
-    }
-  }
+  //         // Save to group_members table (not users table) for offline access
+  //         final memberInfo = GroupMemberInfo(
+  //           userId: userId,
+  //           userName: userName,
+  //           profilePic: profilePic,
+  //           role: 'member', // Default role from metadata
+  //           joinedAt: null,
+  //         );
+  //         await _groupMembersRepo.insertOrUpdateGroupMember(
+  //           widget.group.conversationId,
+  //           memberInfo,
+  //         );
+  //       }
+  //     }
+  //   } catch (e) {
+  //     debugPrint('❌ Error caching users from metadata: $e');
+  //   }
+  // }
 
   /// Show ReadBy modal for a specific message
-  void _showReadByModal(MessageModel message) {
+  Future<void> _showReadByModal(MessageModel message) async {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => ReadByModal(
         message: message,
-        members: _conversationMeta?.members ?? [],
-        currentUserId: _currentUserId,
+        members: _conversationMembers,
+        currentUserId: _currentUserDetails!.id,
       ),
     );
-  }
-
-  @override
-  void deactivate() {
-    // Send inactive message when user navigates away from the page
-    _websocketService
-        .sendMessage({
-          'type': 'inactive_in_conversation',
-          'conversation_id': widget.group.conversationId,
-        })
-        .catchError((e) {
-          debugPrint(
-            '❌ Error sending inactive_in_conversation in deactivate: $e',
-          );
-        });
-    super.deactivate();
-  }
-
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    _messageController.dispose();
-    _isOtherTypingNotifier.dispose();
-    _messageSubscription?.cancel();
-    _typingSubscription?.cancel();
-    _mediaSubscription?.cancel();
-    _messagePinSubscription?.cancel();
-    _messageStarSubscription?.cancel();
-    _messageReplySubscription?.cancel();
-    _messageDeleteSubscription?.cancel();
-    _typingAnimationController.dispose();
-    _typingTimeout?.cancel();
-    _scrollDebounceTimer?.cancel();
-    _highlightTimer?.cancel();
-    _draftSaveTimer?.cancel();
-
-    // Save draft before disposing
-    if (_messageController.text.isNotEmpty) {
-      final draftNotifier = ref.read(draftMessagesProvider.notifier);
-      draftNotifier.saveDraft(
-        widget.group.conversationId,
-        _messageController.text,
-      );
-    }
-
-    // Remove listener
-    _messageController.removeListener(_onMessageTextChanged);
-
-    // Dispose message animation controllers
-    for (final controller in _messageAnimationControllers.values) {
-      controller.dispose();
-    }
-    _messageAnimationControllers.clear();
-    _messageSlideAnimations.clear();
-    _messageFadeAnimations.clear();
-    _animatedMessages.clear();
-
-    // Dispose swipe animation controllers
-    for (final controller in _swipeAnimationControllers.values) {
-      controller.dispose();
-    }
-    _swipeAnimationControllers.clear();
-    _swipeAnimations.clear();
-
-    // Dispose audio playback manager
-    _audioPlaybackManager.dispose();
-
-    // Dispose voice recording manager
-    _voiceRecordingManager.dispose();
-
-    // Dispose voice recording controllers
-    _voiceModalAnimationController.dispose();
-    _zigzagAnimationController.dispose();
-    _timerStreamController.close();
-
-    _websocketService
-        .sendMessage({
-          'type': 'inactive_in_conversation',
-          'conversation_id': widget.group.conversationId,
-        })
-        .catchError((e) {
-          debugPrint('❌ Error sending inactive_in_conversation: $e');
-        });
-
-    super.dispose();
   }
 
   void _onScroll() {
@@ -1162,13 +918,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     final maxScrollExtent = _scrollController.position.maxScrollExtent;
     final distanceFromTop = maxScrollExtent - scrollPosition;
 
-    if (distanceFromTop <= 100000) {
-      if (!_isLoadingMore && _hasMoreMessages && _isInitialized) {
-        debugPrint(
-          '🔄 Triggering load more group messages - Distance from top: $distanceFromTop',
-        );
-        _loadMoreMessages();
-      }
+    if (distanceFromTop <= 1000) {
+      _loadMoreMessages();
     }
   }
 
@@ -1186,7 +937,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     if (messageIndex >= 0 && messageIndex < _messages.length) {
       final currentMessage = _messages[messageIndex];
       final currentDateString = ChatHelpers.getMessageDateString(
-        currentMessage.createdAt,
+        currentMessage.sentAt,
       );
 
       // Only update if the date has changed
@@ -1208,7 +959,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // Find a message with the current date to get the formatted date string
     final messageWithCurrentDate = _messages.firstWhere(
       (message) =>
-          ChatHelpers.getMessageDateString(message.createdAt) ==
+          ChatHelpers.getMessageDateString(message.sentAt) ==
           _currentStickyDate,
       orElse: () => _messages.first,
     );
@@ -1221,7 +972,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           borderRadius: BorderRadius.circular(100),
         ),
         child: Text(
-          ChatHelpers.formatDateSeparator(messageWithCurrentDate.createdAt),
+          ChatHelpers.formatDateSeparator(messageWithCurrentDate.sentAt),
           style: const TextStyle(
             color: Colors.black,
             fontSize: 11,
@@ -1232,945 +983,449 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     );
   }
 
-  Future<void> _loadInitialMessages() async {
-    final conversationId = widget.group.conversationId;
+  // Future<void> _loadInitialMessages() async {
+  //   final conversationId = widget.group.conversationId;
 
-    await loadInitialMessages(
-      LoadInitialMessagesConfig(
-        conversationId: conversationId,
-        messagesRepo: _messagesRepo,
-        chatsServices: _chatsServices,
-        mounted: () => mounted,
-        setState: setState,
-        hasCheckedCache: () => _hasCheckedCache,
-        getMessages: () => _messages,
-        getConversationMeta: () => _conversationMeta,
-        getHasMoreMessages: () => _hasMoreMessages,
-        getCurrentPage: () => _currentPage,
-        getIsInitialized: () => _isInitialized,
-        getIsLoading: () => _isLoading,
-        getErrorMessage: () => _errorMessage,
-        getIsCheckingCache: () => _isCheckingCache,
-        getIsLoadingFromCache: () => _isLoadingFromCache,
-        setHasCheckedCache: (value) => _hasCheckedCache = value,
-        setMessages: (value) => _messages = value,
-        setConversationMeta: (value) => _conversationMeta = value,
-        setHasMoreMessages: (value) => _hasMoreMessages = value,
-        setCurrentPage: (value) => _currentPage = value,
-        setIsInitialized: (value) => _isInitialized = value,
-        setIsLoading: (value) => _isLoading = value,
-        setErrorMessage: (value) => _errorMessage = value,
-        setIsCheckingCache: (value) => _isCheckingCache = value,
-        setIsLoadingFromCache: (value) => _isLoadingFromCache = value,
-        performSmartSync: _performSmartSync,
-        validateMessages: (messages) {
-          _validatePinnedMessage();
-          _validateStarredMessages();
-          _validateReplyMessages();
-        },
-        populateReplyMessageSenderNames: _populateReplyMessageSenderNames,
-        cleanCachedMessages: (messages) {
-          // Filter out old orphaned optimistic messages (messages with negative IDs older than 5 minutes)
-          final now = DateTime.now();
-          final fiveMinutesAgo = now.subtract(const Duration(minutes: 5));
+  //   await loadInitialMessages(
+  //     LoadInitialMessagesConfig(
+  //       conversationId: conversationId,
+  //       messagesRepo: _messagesRepo,
+  //       chatsServices: _chatsServices,
+  //       mounted: () => mounted,
+  //       setState: setState,
+  //       hasCheckedCache: () => _hasCheckedCache,
+  //       getMessages: () => _messages,
+  //       getConversationMeta: () => _conversationMeta,
+  //       getHasMoreMessages: () => _hasMoreMessages,
+  //       getCurrentPage: () => _currentPage,
+  //       getIsInitialized: () => _isInitialized,
+  //       getIsLoading: () => _isLoading,
+  //       getErrorMessage: () => _errorMessage,
+  //       getIsCheckingCache: () => _isCheckingCache,
+  //       getIsLoadingFromCache: () => _isLoadingFromCache,
+  //       setHasCheckedCache: (value) => _hasCheckedCache = value,
+  //       setMessages: (value) => _messages = value,
+  //       setConversationMeta: (value) => _conversationMeta = value,
+  //       setHasMoreMessages: (value) => _hasMoreMessages = value,
+  //       setCurrentPage: (value) => _currentPage = value,
+  //       setIsInitialized: (value) => _isInitialized = value,
+  //       setIsLoading: (value) => _isLoading = value,
+  //       setErrorMessage: (value) => _errorMessage = value,
+  //       setIsCheckingCache: (value) => _isCheckingCache = value,
+  //       setIsLoadingFromCache: (value) => _isLoadingFromCache = value,
+  //       performSmartSync: _performSmartSync,
+  //       validateMessages: (messages) {
+  //         _validatePinnedMessage();
+  //         _validateStarredMessages();
+  //         _validateReplyMessages();
+  //       },
+  //       populateReplyMessageSenderNames: _populateReplyMessageSenderNames,
+  //       cleanCachedMessages: (messages) {
+  //         // Filter out old orphaned optimistic messages (messages with negative IDs older than 5 minutes)
+  //         final now = DateTime.now();
+  //         final fiveMinutesAgo = now.subtract(const Duration(minutes: 5));
 
-          final cleanedMessages = messages.where((msg) {
-            // Keep all messages with positive IDs (server-confirmed)
-            if (msg.id >= 0) return true;
+  //         final cleanedMessages = messages.where((msg) {
+  //           // Keep all messages with positive IDs (server-confirmed)
+  //           if (msg.id >= 0) return true;
 
-            // For optimistic messages (negative IDs), only keep recent ones
-            try {
-              final createdAt = DateTime.parse(msg.createdAt);
-              return createdAt.isAfter(fiveMinutesAgo);
-            } catch (e) {
-              // If we can't parse the date, keep the message to be safe
-              return true;
-            }
-          }).toList();
+  //           // For optimistic messages (negative IDs), only keep recent ones
+  //           try {
+  //             final createdAt = DateTime.parse(msg.createdAt);
+  //             return createdAt.isAfter(fiveMinutesAgo);
+  //           } catch (e) {
+  //             // If we can't parse the date, keep the message to be safe
+  //             return true;
+  //           }
+  //         }).toList();
 
-          // Remove duplicates by ID (keep the one with positive ID if both exist)
-          final messageMap = <int, MessageModel>{};
-          for (final msg in cleanedMessages) {
-            final existingMsg = messageMap[msg.id.abs()];
-            // Prefer positive IDs (server-confirmed) over negative IDs (optimistic)
-            if (existingMsg == null || msg.id > 0) {
-              messageMap[msg.id.abs()] = msg;
-            }
-          }
-          final deduplicatedMessages = messageMap.values.toList()
-            ..sort((a, b) => a.id.compareTo(b.id));
+  //         // Remove duplicates by ID (keep the one with positive ID if both exist)
+  //         final messageMap = <int, MessageModel>{};
+  //         for (final msg in cleanedMessages) {
+  //           final existingMsg = messageMap[msg.id.abs()];
+  //           // Prefer positive IDs (server-confirmed) over negative IDs (optimistic)
+  //           if (existingMsg == null || msg.id > 0) {
+  //             messageMap[msg.id.abs()] = msg;
+  //           }
+  //         }
+  //         final deduplicatedMessages = messageMap.values.toList()
+  //           ..sort((a, b) => a.id.compareTo(b.id));
 
-          return deduplicatedMessages;
-        },
-        onAfterLoadFromServer: _cacheUsersFromMetadata,
-        getErrorMessageText: () => 'Failed to load group messages',
-        getNoCacheMessage: () =>
-            'ℹ️ No cached group messages found in local DB',
-      ),
-    );
-  }
+  //         return deduplicatedMessages;
+  //       },
+  //       onAfterLoadFromServer: _cacheUsersFromMetadata,
+  //       getErrorMessageText: () => 'Failed to load group messages',
+  //       getNoCacheMessage: () =>
+  //           'ℹ️ No cached group messages found in local DB',
+  //     ),
+  //   );
+  // }
 
-  Future<void> _loadMoreMessages() async {
-    final conversationId = widget.group.conversationId;
+  // Future<void> _loadMoreMessages() async {
+  //   final conversationId = widget.group.conversationId;
 
-    await loadMoreMessages(
-      LoadMoreMessagesConfig(
-        conversationId: conversationId,
-        messagesRepo: _messagesRepo,
-        chatsServices: _chatsServices,
-        mounted: () => mounted,
-        setState: setState,
-        isLoadingMore: () => _isLoadingMore,
-        hasMoreMessages: () => _hasMoreMessages,
-        currentPage: () => _currentPage,
-        getMessages: () => _messages,
-        getConversationMeta: () => _conversationMeta,
-        setIsLoadingMore: (value) => _isLoadingMore = value,
-        setHasMoreMessages: (value) => _hasMoreMessages = value,
-        setCurrentPage: (value) => _currentPage = value,
-        setMessages: (value) => _messages = value,
-        setConversationMeta: (value) => _conversationMeta = value,
-        populateReplyMessageSenderNames: _populateReplyMessageSenderNames,
-        onAfterLoadMore: _cacheUsersFromMetadata,
-      ),
-    );
-  }
+  //   await loadMoreMessages(
+  //     LoadMoreMessagesConfig(
+  //       conversationId: conversationId,
+  //       messagesRepo: _messagesRepo,
+  //       chatsServices: _chatsServices,
+  //       mounted: () => mounted,
+  //       setState: setState,
+  //       isLoadingMore: () => _isLoadingMore,
+  //       hasMoreMessages: () => _hasMoreMessages,
+  //       currentPage: () => _currentPage,
+  //       getMessages: () => _messages,
+  //       getConversationMeta: () => _conversationMeta,
+  //       setIsLoadingMore: (value) => _isLoadingMore = value,
+  //       setHasMoreMessages: (value) => _hasMoreMessages = value,
+  //       setCurrentPage: (value) => _currentPage = value,
+  //       setMessages: (value) => _messages = value,
+  //       setConversationMeta: (value) => _conversationMeta = value,
+  //       populateReplyMessageSenderNames: _populateReplyMessageSenderNames,
+  //       onAfterLoadMore: _cacheUsersFromMetadata,
+  //     ),
+  //   );
+  // }
 
   /// Set up WebSocket message listener for real-time group messages
   void _setupWebSocketListener() {
-    final conversationId = widget.group.conversationId;
+    final convId = widget.group.conversationId;
 
     // Listen to messages filtered for this conversation
-    _messageSubscription = _messageHandler
-        .messagesForConversation(conversationId)
+    _messageSubscription = _wsMessageHandler
+        .messagesForConversation(convId)
         .listen(
-          (message) => _handleIncomingMessage(message),
+          (payload) {
+            _handleMessageNew(payload);
+          },
           onError: (error) {
-            debugPrint('❌ Group message stream error: $error');
+            debugPrint('❌ Message stream error: $error');
+          },
+        );
+
+    // Listen to ack messages filtered for this conversation
+    _messageAckSubscription = _wsMessageHandler
+        .messagesAckForConversation(convId)
+        .listen(
+          (payload) {
+            _handleMessageAck(payload);
+          },
+          onError: (error) {
+            debugPrint('❌ Message stream error: $error');
           },
         );
 
     // Listen to typing events for this conversation
-    _typingSubscription = _messageHandler
-        .typingForConversation(conversationId)
+    _typingSubscription = _wsMessageHandler
+        .typingForConversation(convId)
         .listen(
-          (message) => _reciveTyping(message),
+          (payload) => _receiveTyping(payload),
           onError: (error) {
-            debugPrint('❌ Group typing stream error: $error');
-          },
-        );
-
-    // Listen to media messages for this conversation
-    _mediaSubscription = _messageHandler
-        .mediaForConversation(conversationId)
-        .listen(
-          (message) => _handleIncomingMediaMessages(message),
-          onError: (error) {
-            debugPrint('❌ Group media stream error: $error');
+            debugPrint('❌ Typing stream error: $error');
           },
         );
 
     // Listen to message pins for this conversation
-    _messagePinSubscription = _messageHandler
-        .messagePinsForConversation(conversationId)
+    _messagePinSubscription = _wsMessageHandler
+        .messagePinsForConversation(convId)
         .listen(
-          (message) => _handleMessagePin(message),
+          (payload) => _handleMessagePin(payload),
           onError: (error) {
-            debugPrint('❌ Group message pin stream error: $error');
-          },
-        );
-
-    // Listen to message stars for this conversation
-    _messageStarSubscription = _messageHandler
-        .messageStarsForConversation(conversationId)
-        .listen(
-          (message) => _handleMessageStar(message),
-          onError: (error) {
-            debugPrint('❌ Group message star stream error: $error');
-          },
-        );
-
-    // Listen to message replies for this conversation
-    _messageReplySubscription = _messageHandler
-        .messageRepliesForConversation(conversationId)
-        .listen(
-          (message) => _handleMessageReply(message),
-          onError: (error) {
-            debugPrint('❌ Group message reply stream error: $error');
+            debugPrint('❌ Message pin stream error: $error');
           },
         );
 
     // Listen to message delete events for this conversation
-    _messageDeleteSubscription = _messageHandler
-        .messageDeletesForConversation(conversationId)
+    _messageDeleteSubscription = _wsMessageHandler
+        .messageDeletesForConversation(convId)
         .listen(
-          (message) => _handleMessageDelete(message),
+          (payload) => _handleMessageDelete(payload),
           onError: (error) {
-            debugPrint('❌ Group message delete stream error: $error');
+            debugPrint('❌ Message delete stream error: $error');
           },
         );
   }
 
   /// Handle incoming message from WebSocket
-  void _handleIncomingMessage(Map<String, dynamic> messageData) async {
+  void _handleMessageNew(ChatMessagePayload payload) async {
     try {
-      // Extract message data from WebSocket payload
-      final data = messageData['data'] as Map<String, dynamic>? ?? {};
-      final messageBody = data['body'] as String? ?? '';
-      final senderId = _parseToInt(data['sender_id']);
-      final senderName = data['sender_name'];
-      final messageId = data['id'];
-
-      final optimisticId = data['optimistic_id'] ?? data['optimisticId'];
-
-      // Skip if this is our own optimistic message being echoed back
-      if (_optimisticMessageIds.contains(optimisticId)) {
-        debugPrint('🔄 Replacing optimistic group message with server message');
-        _replaceOptimisticMessage(optimisticId, messageData);
-        return;
+      UserModel? senderDetails;
+      if (payload.senderName == null) {
+        senderDetails = await _userRepo.getUserById(payload.senderId);
       }
 
-      // If this is our own message (sender), update the optimistic message in local storage
-      if (_currentUserId != null && senderId == _currentUserId) {
-        await _updateOptimisticMessageInStorage(
-          optimisticId,
-          messageId,
-          messageData,
-        );
-        return;
-      }
-
-      // Check for duplicate message before processing
-      if (messageId != null && _messages.any((msg) => msg.id == messageId)) {
-        debugPrint('⚠️ Duplicate message detected (ID: $messageId), skipping');
-        return;
-      }
-
-      // Use sender name directly from socket message
-      String? senderProfilePic;
-
-      // Try to get profile pic from cache if available
-      final senderInfo = _getUserInfo(senderId);
-      senderProfilePic = senderInfo['profile_pic'];
-
-      // Handle reply message data
-      MessageModel? replyToMessage;
-      int? replyToMessageId;
-
-      // Check for reply data in metadata first (server format)
-      final metadata = data['metadata'] as Map<String, dynamic>?;
-      if (metadata != null && metadata['reply_to'] != null) {
-        final replyToData = metadata['reply_to'] as Map<String, dynamic>;
-        replyToMessageId = _parseToInt(replyToData['message_id']);
-
-        // Try to find the original message in local messages first
-        try {
-          replyToMessage = _messages.firstWhere(
-            (msg) => msg.id == replyToMessageId,
-          );
-          debugPrint('✅ Found original message in local array for reply');
-        } catch (e) {
-          // Message not in local array, create from metadata
-          final repliedToSenderId = _parseToInt(replyToData['sender_id']);
-
-          // Get the sender name for the replied-to message
-          final replySenderName = replyToData['sender_name'] as String?;
-          String finalReplySenderName;
-          String? replySenderProfilePic;
-
-          if (replySenderName != null && replySenderName.isNotEmpty) {
-            // Use sender name from metadata
-            finalReplySenderName = replySenderName;
-          } else {
-            // Fallback to user info cache/DB
-            final senderInfo = _getUserInfo(repliedToSenderId);
-            finalReplySenderName = senderInfo['name'] ?? 'Unknown User';
-          }
-
-          replySenderProfilePic = _getUserInfo(
-            repliedToSenderId,
-          )['profile_pic'];
-
-          // Create reply message from metadata
-          replyToMessage = MessageModel(
-            id: replyToMessageId,
-            body: replyToData['body'] ?? '',
-            type: 'text',
-            senderId: repliedToSenderId,
-            conversationId: widget.group.conversationId,
-            createdAt: replyToData['created_at'] ?? '',
-            deleted: false,
-            senderName: finalReplySenderName,
-            senderProfilePic: replySenderProfilePic,
-          );
-        }
-      } else if (data['reply_to_message'] != null) {
-        replyToMessage = MessageModel.fromJson(
-          data['reply_to_message'] as Map<String, dynamic>,
-        );
-      } else if (data['reply_to_message_id'] != null) {
-        replyToMessageId = _parseToInt(data['reply_to_message_id']);
-        // Find the replied message in our local messages
-        try {
-          replyToMessage = _messages.firstWhere(
-            (msg) => msg.id == replyToMessageId,
-          );
-        } catch (e) {
-          debugPrint(
-            '⚠️ Reply message not found in local group messages: $replyToMessageId',
-          );
-        }
-      }
-
-      // Create MessageModel from WebSocket data
-      final nowUTC = DateTime.now().toUtc();
-      final newMessage = MessageModel(
-        id: messageId ?? DateTime.now().millisecondsSinceEpoch,
-        body: messageBody,
-        type: data['type'] ?? 'text',
-        senderId: senderId,
-        conversationId: widget.group.conversationId,
-        createdAt:
-            data['created_at'] ?? nowUTC.toIso8601String(), // Store as UTC
-        editedAt: data['edited_at'],
-        metadata: data['metadata'],
-        attachments: data['attachments'],
-        deleted: data['deleted'] == true,
-        senderName: senderName,
-        senderProfilePic: senderProfilePic,
-        replyToMessage: replyToMessage,
-        replyToMessageId: replyToMessageId,
-      );
-
-      // Add message to UI immediately with animation
-      if (mounted) {
-        setState(() {
-          _messages.add(newMessage);
-          // _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
-          // Update sticky date separator for new messages
-          _currentStickyDate = ChatHelpers.getMessageDateString(
-            newMessage.createdAt,
-          );
-          _showStickyDate = true;
-        });
-
-        // _animateNewMessage(newMessage.id);
-        if (!_isAtBottom) {
-          _trackNewMessage();
-        }
-      }
-
-      // Store message asynchronously
-      _storeMessageAsync(newMessage);
-    } catch (e) {
-      debugPrint('❌ Error processing incoming group message: $e');
-    }
-  }
-
-  /// Update optimistic message in local storage with server ID (for sender's own messages)
-  Future<void> _updateOptimisticMessageInStorage(
-    int? optimisticId,
-    int? serverId,
-    Map<String, dynamic> messageData,
-  ) async {
-    final updatedMessage =
-        await MessageStorageHelpers.updateOptimisticMessageInStorage(
-          widget.group.conversationId,
-          optimisticId,
-          serverId,
-          messageData,
-        );
-
-    if (updatedMessage != null && optimisticId != null && mounted) {
-      // Update the in-memory _messages list
-      final uiMessageIndex = _messages.indexWhere(
-        (msg) => msg.id == optimisticId,
-      );
-      if (uiMessageIndex != -1) {
-        setState(() {
-          _messages[uiMessageIndex] = updatedMessage;
-        });
-        debugPrint(
-          '✅ Updated group message ID from $optimisticId to ${updatedMessage.id} in UI',
-        );
-      }
-    }
-  }
-
-  /// Replace optimistic message with server-confirmed message
-  void _replaceOptimisticMessage(
-    int optimisticId,
-    Map<String, dynamic> messageData,
-  ) async {
-    try {
-      final index = _messages.indexWhere((msg) => msg.id == optimisticId);
-      if (index != -1) {
-        final data = messageData['data'] as Map<String, dynamic>? ?? {};
-        final messageType = messageData['type'];
-
-        // Handle media messages
-        if (messageType == 'media') {
-          final optimisticMessage = _messages[index];
-          final mediaType = data['message_type'] ?? data['type'] ?? 'image';
-          final mediaData = data['media'] as Map<String, dynamic>? ?? data;
-          final serverId = data['id'] ?? data['messageId'];
-
-          // Determine the actual message type based on loading type or media type
-          String actualType;
-          if (optimisticMessage.type == 'image_loading') {
-            actualType = 'image';
-          } else if (optimisticMessage.type == 'video_loading') {
-            actualType = 'video';
-          } else if (optimisticMessage.type == 'document_loading') {
-            actualType = 'document';
-          } else if (optimisticMessage.type == 'audio_loading') {
-            actualType =
-                'audios'; // Use 'audios' to match the UI rendering logic
-          } else {
-            // Use the media type from server
-            actualType = mediaType.toLowerCase();
-            // Audio messages use 'audios' type
-            if (actualType == 'audio' || actualType == 'voice') {
-              actualType = 'audios';
-            }
-          }
-
-          // Create confirmed media message preserving all optimistic data
-          final confirmedMessage = MessageModel(
-            id: serverId ?? optimisticMessage.id,
-            body: optimisticMessage.body,
-            type: actualType,
-            senderId: optimisticMessage.senderId,
-            conversationId: optimisticMessage.conversationId,
-            createdAt: data['created_at'] ?? optimisticMessage.createdAt,
-            editedAt: data['edited_at'],
-            metadata: data['metadata'] ?? optimisticMessage.metadata,
-            attachments: mediaData,
-            deleted: data['deleted'] == true,
-            senderName: optimisticMessage.senderName,
-            senderProfilePic: optimisticMessage.senderProfilePic,
-            replyToMessage: optimisticMessage.replyToMessage,
-            replyToMessageId: optimisticMessage.replyToMessageId,
-          );
-
-          if (mounted) {
-            setState(() {
-              _messages[index] = confirmedMessage;
-            });
-          }
-
-          // Delete old optimistic message and add confirmed message to database
-          Future.microtask(() async {
-            try {
-              // Delete the old optimistic message from database
-              await _messagesRepo.deleteMessage(optimisticMessage.id);
-
-              // Store confirmed message with server ID
-              if (_conversationMeta != null) {
-                await _messagesRepo.addMessageToCache(
-                  conversationId: widget.group.conversationId,
-                  newMessage: confirmedMessage,
-                  updatedMeta: _conversationMeta!,
-                  insertAtBeginning: false,
-                );
-                debugPrint(
-                  '💾 Stored confirmed media message ${confirmedMessage.id} to DB',
-                );
-              }
-            } catch (e) {
-              debugPrint(
-                '❌ Error replacing optimistic media message in DB: $e',
-              );
-            }
-          });
-        } else if (messageType == 'message_reply') {
-          // Handle reply messages differently
-          final newMessageId = data['new_message_id'];
-          final messageBody = data['new_message'] ?? _messages[index].body;
-          final timestamp =
-              messageData['timestamp'] ?? _messages[index].createdAt;
-
-          // Preserve the reply relationship from the optimistic message
-          final optimisticMessage = _messages[index];
-
-          // Create confirmed reply message
-          final confirmedMessage = MessageModel(
-            id: newMessageId ?? DateTime.now().millisecondsSinceEpoch,
-            body: messageBody,
-            type: 'text',
-            senderId: optimisticMessage.senderId,
-            conversationId: optimisticMessage.conversationId,
-            createdAt: timestamp,
-            deleted: false,
-            senderName: optimisticMessage.senderName,
-            senderProfilePic: optimisticMessage.senderProfilePic,
-            replyToMessage:
-                optimisticMessage.replyToMessage, // Preserve reply relationship
-            replyToMessageId: optimisticMessage.replyToMessageId,
-          );
-
-          if (mounted) {
-            setState(() {
-              _messages[index] = confirmedMessage;
-            });
-          }
-
-          await _messagesRepo.updateOptimisticMessage(
-            optimisticMessage.conversationId,
-            optimisticId,
-            newMessageId,
-            messageData,
-          );
-
-          // Store confirmed message with reply data
-          _storeMessageAsync(confirmedMessage);
-
-          debugPrint(
-            '✅ Replaced optimistic group reply message with server-confirmed message',
-          );
-        } else {
-          // Handle regular text messages
-          final senderId = data['sender_id'] != null
-              ? _parseToInt(data['sender_id'])
-              : _messages[index].senderId;
-          final senderInfo = _getUserInfo(senderId);
-
-          // Create the confirmed message using utility
-          final confirmedMessage = MessageStorageHelpers.createConfirmedMessage(
-            optimisticId,
-            messageData,
-            _messages[index],
-            senderInfo,
-          );
-
-          if (mounted) {
-            setState(() {
-              _messages[index] = confirmedMessage;
-            });
-          }
-
-          // Store confirmed message
-          _storeMessageAsync(confirmedMessage);
-        }
-
-        // Remove from optimistic tracking
-        _optimisticMessageIds.remove(optimisticId);
-      }
-    } catch (e) {
-      debugPrint('❌ Error replacing optimistic group message: $e');
-    }
-  }
-
-  void _handleMessageReply(ChatMessagePayload payload) async {
-    try {
-      debugPrint('📨 Received group message_reply: $payload');
-
-      // Skip if this is not for our group conversation
-      if (payload.convId != widget.group.conversationId) {
-        return;
-      }
-
-      // Skip if this is not actually a reply message
-      if (payload.replyToMessageId == null) {
-        return;
-      }
-
-      final canonicalId = payload.canonicalId;
-      final optimisticId = payload.optimisticId;
-
-      // Check if this is our own optimistic message being confirmed
-      if (_optimisticMessageIds.contains(optimisticId)) {
-        _replaceOptimisticMessage(optimisticId, payload.toJson());
-        return;
-      }
-
-      // If this is our own message (sender), update the optimistic message in local storage
-      if (_currentUserId != null && payload.senderId == _currentUserId) {
-        await _updateOptimisticMessageInStorage(
-          optimisticId,
-          canonicalId,
-          payload.toJson(),
-        );
-        return;
-      }
-
-      // Check for duplicate message before processing
-      if (canonicalId != null &&
-          _messages.any((msg) => msg.id == canonicalId)) {
-        debugPrint(
-          '⚠️ Duplicate reply message detected (ID: $canonicalId), skipping',
-        );
-        return;
-      }
-
-      // Try to get profile pic from cache if available
-      String? senderProfilePic;
-      final cachedInfo = _getUserInfo(payload.senderId);
-      senderProfilePic = cachedInfo['profile_pic'];
-      final senderName = payload.senderName ?? cachedInfo['name'] ?? 'Unknown User';
-
-      // Find the original message being replied to
-      MessageModel? replyToMessage;
-      final replyToMessageId = payload.replyToMessageId;
-
-      if (replyToMessageId != null) {
-        // Try to find the original message in our local messages
-        try {
-          replyToMessage = _messages.firstWhere(
-            (msg) => msg.id == replyToMessageId,
-          );
-        } catch (e) {
-          debugPrint(
-            '⚠️ Original message not found in local group messages: $replyToMessageId',
-          );
-          // Create a placeholder if we don't have the original message
-          replyToMessage = null;
-        }
-      }
-
-      // Create the reply message
-      final replyMessage = MessageModel(
-        id: canonicalId ?? DateTime.now().millisecondsSinceEpoch,
-        body: payload.body,
-        type: payload.msgType.value,
-        senderId: payload.senderId,
+      // create message model from payload
+      final message = MessageModel(
+        canonicalId: payload.canonicalId,
         conversationId: payload.convId,
-        createdAt: payload.sentAt.toUtc().toIso8601String(),
-        deleted: false,
-        senderName: senderName,
-        senderProfilePic: senderProfilePic,
-        replyToMessage: replyToMessage,
-        replyToMessageId: replyToMessageId,
+        senderId: payload.senderId,
         attachments: payload.attachments,
+        body: payload.body,
         metadata: payload.metadata,
+        senderName: payload.senderName ?? senderDetails?.name ?? '',
+        senderProfilePic: senderDetails?.profilePic ?? '',
+        isReplied: payload.replyToMessageId != null,
+        type: payload.msgType,
+        status: MessageStatusType.read,
+        sentAt: payload.sentAt.toIso8601String(),
       );
-
       // Add message to UI immediately with animation
       if (mounted) {
         setState(() {
-          _messages.add(replyMessage);
-          // Update sticky date separator for new messages
-          _currentStickyDate = ChatHelpers.getMessageDateString(
-            replyMessage.createdAt,
-          );
-          _showStickyDate = true;
+          _messages.add(message);
+          _sortMessagesBySentAt();
         });
+        // // Update sticky date separator for new messages - using ValueNotifier
+        // _currentStickyDate.value = ChatHelpers.getMessageDateString(
+        //   newMessage.createdAt,
+        // );
+        // _showStickyDate.value = true;
 
-        _animateNewMessage(replyMessage.id);
-        if (_isAtBottom) {
-          _scrollToBottom();
-        } else {
-          _trackNewMessage();
+        if (message.id > 0) {
+          _animateNewMessage(message.id);
+          // if (!_isAtBottom) {
+          //   _trackNewMessage();
+          // }
+          // _scrollToBottom();
         }
       }
-
-      // Store message asynchronously in local storage
-      _storeMessageAsync(replyMessage);
     } catch (e) {
-      debugPrint('❌ Error processing group message_reply: $e');
+      debugPrint('❌ Error processing incoming message: $e');
     }
   }
 
-  /// Handle incoming media messages from WebSocket
-  void _handleIncomingMediaMessages(Map<String, dynamic> messageData) async {
+  void _handleMessageAck(ChatMessageAckPayload payload) async {
     try {
-      // Extract message data from WebSocket payload
-      final data = messageData['data'] as Map<String, dynamic>? ?? {};
-      final senderId = _parseToInt(
-        data['sender_id'] ?? data['senderId'] ?? data['user_id'],
+      // Find the message with matching optimisticId
+      final messageIndex = _messages.indexWhere(
+        (msg) =>
+            msg.optimisticId == payload.optimisticId ||
+            msg.id == payload.optimisticId,
       );
-      final messageId =
-          data['id'] ?? data['messageId'] ?? data['media_message_id'];
-      final optimisticId = data['optimistic_id'] ?? data['optimisticId'];
 
-      // Skip if this is our own optimistic message being echoed back
-      if (_optimisticMessageIds.contains(optimisticId)) {
-        _replaceOptimisticMessage(optimisticId, messageData);
-        return;
-      }
-
-      // If this is our own message (sender), update the optimistic message in local storage
-      if (_currentUserId != null && senderId == _currentUserId) {
-        await _updateOptimisticMessageInStorage(
-          optimisticId,
-          messageId,
-          messageData,
-        );
-        return;
-      }
-
-      // Check for duplicate message before processing
-      if (messageId != null && _messages.any((msg) => msg.id == messageId)) {
+      if (messageIndex == -1) {
         debugPrint(
-          '⚠️ Duplicate media message detected (ID: $messageId), skipping',
+          '⚠️ Message with optimisticId ${payload.optimisticId} not found in _messages',
         );
         return;
       }
 
-      // Extract sender_name directly from socket message
-      final senderName = data['sender_name'] ?? 'Unknown User';
-
-      // Try to get profile pic from cache if available
-      String? senderProfilePic;
-      final senderInfo = _getUserInfo(senderId);
-      senderProfilePic = senderInfo['profile_pic'];
-
-      // Handle reply message data for media messages
-      MessageModel? replyToMessage;
-      int? replyToMessageId;
-
-      // Check for reply data in metadata first (server format)
-      final metadata = data['metadata'] as Map<String, dynamic>?;
-      if (metadata != null && metadata['reply_to'] != null) {
-        final replyToData = metadata['reply_to'] as Map<String, dynamic>;
-        replyToMessageId = _parseToInt(replyToData['message_id']);
-
-        // Try to find the original message in local messages first
-        try {
-          replyToMessage = _messages.firstWhere(
-            (msg) => msg.id == replyToMessageId,
-          );
-          debugPrint('✅ Found original message in local array for media reply');
-        } catch (e) {
-          // Message not in local array, create from metadata
-          final repliedToSenderId = _parseToInt(replyToData['sender_id']);
-
-          // Get the sender name for the replied-to message
-          final replySenderName = replyToData['sender_name'] as String?;
-          String finalReplySenderName;
-          String? replySenderProfilePic;
-
-          if (replySenderName != null && replySenderName.isNotEmpty) {
-            // Use sender name from metadata
-            finalReplySenderName = replySenderName;
-          } else {
-            // Fallback to user info cache/DB
-            final senderInfo = _getUserInfo(repliedToSenderId);
-            finalReplySenderName = senderInfo['name'] ?? 'Unknown User';
-          }
-
-          replySenderProfilePic = _getUserInfo(
-            repliedToSenderId,
-          )['profile_pic'];
-
-          // Create reply message from metadata
-          replyToMessage = MessageModel(
-            id: replyToMessageId,
-            body: replyToData['body'] ?? '',
-            type: 'text',
-            senderId: repliedToSenderId,
-            conversationId: widget.group.conversationId,
-            createdAt: replyToData['created_at'] ?? '',
-            deleted: false,
-            senderName: finalReplySenderName,
-            senderProfilePic: replySenderProfilePic,
-          );
-        }
-      } else if (data['reply_to_message'] != null) {
-        replyToMessage = MessageModel.fromJson(
-          data['reply_to_message'] as Map<String, dynamic>,
-        );
-      } else if (data['reply_to_message_id'] != null) {
-        replyToMessageId = _parseToInt(data['reply_to_message_id']);
-        // Find the replied message in our local messages
-        try {
-          replyToMessage = _messages.firstWhere(
-            (msg) => msg.id == replyToMessageId,
-          );
-        } catch (e) {
-          debugPrint(
-            '⚠️ Reply message not found in local group messages: $replyToMessageId',
-          );
-        }
-      }
-
-      // Determine media type from the message data
-      final mediaType = data['message_type'] ?? data['type'] ?? 'image';
-      final mediaData = data['media'] as Map<String, dynamic>? ?? data;
-
-      // Create MessageModel based on media type
-      final nowUTC = DateTime.now().toUtc();
-      MessageModel newMediaMessage;
-
-      switch (mediaType.toLowerCase()) {
-        case 'image':
-          newMediaMessage = MessageModel(
-            id: messageId ?? DateTime.now().millisecondsSinceEpoch,
-            body: '', // Empty body for media messages
-            type: 'image',
-            senderId: senderId,
-            conversationId: widget.group.conversationId,
-            createdAt: data['created_at'] ?? nowUTC.toIso8601String(),
-            editedAt: data['edited_at'],
-            metadata: data['metadata'],
-            attachments: mediaData,
-            deleted: data['deleted'] == true,
-            senderName: senderName,
-            senderProfilePic: senderProfilePic,
-            replyToMessage: replyToMessage,
-            replyToMessageId: replyToMessageId,
-          );
-          break;
-
-        case 'video':
-          newMediaMessage = MessageModel(
-            id: messageId ?? DateTime.now().millisecondsSinceEpoch,
-            body: '', // Empty body for media messages
-            type: 'video',
-            senderId: senderId,
-            conversationId: widget.group.conversationId,
-            createdAt: data['created_at'] ?? nowUTC.toIso8601String(),
-            editedAt: data['edited_at'],
-            metadata: data['metadata'],
-            attachments: mediaData,
-            deleted: data['deleted'] == true,
-            senderName: senderName,
-            senderProfilePic: senderProfilePic,
-            replyToMessage: replyToMessage,
-            replyToMessageId: replyToMessageId,
-          );
-          break;
-
-        case 'document':
-        case 'docs':
-          newMediaMessage = MessageModel(
-            id: messageId ?? DateTime.now().millisecondsSinceEpoch,
-            body: '', // Empty body for media messages
-            type: 'document',
-            senderId: senderId,
-            conversationId: widget.group.conversationId,
-            createdAt: data['created_at'] ?? nowUTC.toIso8601String(),
-            editedAt: data['edited_at'],
-            metadata: data['metadata'],
-            attachments: mediaData,
-            deleted: data['deleted'] == true,
-            senderName: senderName,
-            senderProfilePic: senderProfilePic,
-            replyToMessage: replyToMessage,
-            replyToMessageId: replyToMessageId,
-          );
-          break;
-
-        case 'audio':
-        case 'audios':
-        case 'voice':
-          newMediaMessage = MessageModel(
-            id: messageId ?? DateTime.now().millisecondsSinceEpoch,
-            body: '', // Empty body for media messages
-            type: 'audios', // Use 'audios' to match the UI rendering logic
-            senderId: senderId,
-            conversationId: widget.group.conversationId,
-            createdAt: data['created_at'] ?? nowUTC.toIso8601String(),
-            editedAt: data['edited_at'],
-            metadata: data['metadata'],
-            attachments: mediaData,
-            deleted: data['deleted'] == true,
-            senderName: senderName,
-            senderProfilePic: senderProfilePic,
-            replyToMessage: replyToMessage,
-            replyToMessageId: replyToMessageId,
-          );
-          break;
-
-        default:
-          debugPrint('⚠️ Unknown media type received: $mediaType');
-          newMediaMessage = MessageModel(
-            id: messageId ?? DateTime.now().millisecondsSinceEpoch,
-            body: '', // Empty body for media messages
-            type: 'attachment', // Fallback type
-            senderId: senderId,
-            conversationId: widget.group.conversationId,
-            createdAt: data['created_at'] ?? nowUTC.toIso8601String(),
-            editedAt: data['edited_at'],
-            metadata: data['metadata'],
-            attachments: mediaData,
-            deleted: data['deleted'] == true,
-            senderName: senderName,
-            senderProfilePic: senderProfilePic,
-            replyToMessage: replyToMessage,
-            replyToMessageId: replyToMessageId,
-          );
-      }
-
-      // Add message to UI immediately with animation
-      if (mounted) {
-        setState(() {
-          _messages.add(newMediaMessage);
-          // _messages.sort((a, b) => a.id.toString().compareTo(b.id.toString()));
-          // Update sticky date separator for new messages
-          _currentStickyDate = ChatHelpers.getMessageDateString(
-            newMediaMessage.createdAt,
-          );
-          _showStickyDate = true;
-        });
-
-        // _animateNewMessage(newMediaMessage.id);
-        if (!_isAtBottom) {
-          _trackNewMessage();
-        }
-      }
-
-      // Store message asynchronously in local storage
-      _storeMessageAsync(newMediaMessage);
+      // Update the message in-place with canonicalId (no setState to avoid UI update)
+      // The canonicalId will take precedence in the id getter
+      _messages[messageIndex] = _messages[messageIndex].copyWith(
+        canonicalId: payload.canonicalId,
+      );
     } catch (e) {
-      debugPrint('❌ Error processing incoming group media message: $e');
+      debugPrint('❌ Error processing message_ack: $e');
+    }
+  }
+
+  void _receiveTyping(TypingPayload payload) {
+    final isTyping = payload.isTyping;
+
+    // Cancel any existing timeout
+    _typingTimeout?.cancel();
+
+    // Update the ValueNotifier directly without setState
+    _isOtherTypingNotifier.value = isTyping;
+
+    // Control the typing animation
+    if (isTyping) {
+      _typingAnimationController.repeat(reverse: true);
+
+      // Set a safety timeout to hide typing indicator after 2 seconds
+      _typingTimeout = Timer(const Duration(seconds: 2), () {
+        if (mounted) {
+          _isOtherTypingNotifier.value = false;
+          _typingAnimationController.stop();
+          _typingAnimationController.reset();
+        }
+      });
+    } else {
+      // Immediately stop typing indicator
+      _typingAnimationController.stop();
+      _typingAnimationController.reset();
     }
   }
 
   /// Handle incoming message pin from WebSocket
-  void _handleMessagePin(Map<String, dynamic> message) async {
-    await handleMessagePin(
-      HandleMessagePinConfig(
-        message: message,
-        conversationId: widget.group.conversationId,
-        mounted: () => mounted,
-        setState: setState,
-        getPinnedMessageId: () => _pinnedMessageId,
-        setPinnedMessageId: (value) => _pinnedMessageId = value,
-        messagesRepo: _messagesRepo,
-      ),
-    );
-  }
-
-  /// Handle incoming message star from WebSocket
-  void _handleMessageStar(Map<String, dynamic> message) async {
-    await handleMessageStar(
-      HandleMessageStarConfig(
-        message: message,
-        mounted: () => mounted,
-        setState: setState,
-        starredMessages: _starredMessages,
-        messagesRepo: _messagesRepo,
-      ),
-    );
+  void _handleMessagePin(MessagePinPayload payload) async {
+    // load pinned message from prefs and then DB
+    if (payload.isPinned) {
+      final pinnedMessage = await _messagesRepo.getMessageById(
+        payload.messageId,
+      );
+      setState(() {
+        _pinnedMessage = pinnedMessage;
+      });
+    } else {
+      setState(() {
+        _pinnedMessage = null;
+      });
+    }
   }
 
   /// Handle message delete event from WebSocket
-  void _handleMessageDelete(Map<String, dynamic> message) async {
-    await handleMessageDelete(
-      HandleMessageDeleteConfig(
-        message: message,
-        mounted: () => mounted,
-        setState: setState,
-        messages: _messages,
-        conversationId: widget.group.conversationId,
-        messagesRepo: _messagesRepo,
-      ),
-    );
+  // void _handleMessageDelete(Map<String, dynamic> message) async {
+  //   await handleMessageDelete(
+  //     HandleMessageDeleteConfig(
+  //       message: message,
+  //       mounted: () => mounted,
+  //       setState: setState,
+  //       messages: _messages,
+  //       conversationId: widget.group.conversationId,
+  //       messagesRepo: _messagesRepo,
+  //     ),
+  //   );
+  // }
+
+  void _handleMessageDelete(DeleteMessagePayload payload) async {
+    // find the message in _messages and set isDeleted to true
+    for (final msgId in payload.messageIds) {
+      final messageIndex = _messages.indexWhere((msg) => msg.id == msgId);
+      if (messageIndex != -1) {
+        _messages.removeAt(messageIndex);
+      }
+    }
+    // update UI
+    if (mounted) {
+      setState(() {});
+    }
+
+    // delete messages from local DB
+    await _messagesRepo.deleteMessages(payload.messageIds);
   }
 
-  /// Send group message with immediate display (optimistic UI)
-  void _sendMessage() async {
-    final messageText = _messageController.text.trim();
-    if (messageText.isEmpty) return;
+  // /// Send group message with immediate display (optimistic UI)
+  // void _sendMessage(
+  //   MessageType messageType, {
+  //   MediaResponse? mediaResponse,
+  // }) async {
+  //   final messageText = _messageController.text.trim();
+  //   if (messageText.isEmpty) return;
 
-    // Store reply message reference
-    final replyMessage = _replyToMessageData;
-    final replyMessageId = _replyToMessageData?.id;
+  //   // Store reply message reference
+  //   final replyMessage = _replyToMessageData;
+  //   final replyMessageId = _replyToMessageData?.id;
 
-    // Clear input and reply state immediately for better UX
-    _messageController.clear();
-    _cancelReply();
+  //   // Clear input and reply state immediately for better UX
+  //   _messageController.clear();
+  //   _cancelReply();
+
+  //   // Clear draft when message is sent
+  //   final draftNotifier = ref.read(draftMessagesProvider.notifier);
+  //   await draftNotifier.removeDraft(widget.group.conversationId);
+
+  //   // Create optimistic message for immediate display with current UTC time
+  //   final nowUTC = DateTime.now().toUtc();
+  //   final optimisticMessage = MessageModel(
+  //     id: _optimisticMessageId, // Use negative ID for optimistic messages
+  //     body: messageText,
+  //     type: 'text',
+  //     senderId: _currentUserId ?? 0,
+  //     conversationId: widget.group.conversationId,
+  //     createdAt: nowUTC
+  //         .toIso8601String(), // Store as UTC, convert to IST when displaying
+  //     deleted: false,
+  //     senderName: 'You', // Current user name
+  //     senderProfilePic: null,
+  //     replyToMessage: replyMessage,
+  //     replyToMessageId: replyMessageId,
+  //   );
+
+  //   // Track this as an optimistic message
+  //   _optimisticMessageIds.add(_optimisticMessageId);
+
+  //   // Add message to UI immediately with animation
+  //   if (mounted) {
+  //     setState(() {
+  //       _messages.add(optimisticMessage);
+  //       // Update sticky date separator for new messages
+  //       _currentStickyDate = ChatHelpers.getMessageDateString(
+  //         optimisticMessage.createdAt,
+  //       );
+  //       _showStickyDate = true;
+  //     });
+
+  //     _animateNewMessage(optimisticMessage.id);
+  //     _scrollToBottom();
+  //   }
+
+  //   // Store message immediately in cache (optimistic storage)
+  //   _storeMessageAsync(optimisticMessage);
+
+  //   final prefs = await SharedPreferences.getInstance();
+  //   final currentUserName = prefs.getString('current_user_name');
+  //   try {
+  //     // Check if this is a reply message
+  //     if (replyMessageId != null) {
+  //       debugPrint('🔄 Sending group reply message via WebSocket');
+  //       // Send reply message via WebSocket
+  //       await _websocketService.sendMessage({
+  //         'type': 'message_reply',
+  //         'data': {
+  //           'new_message': messageText,
+  //           'optimistic_id': _optimisticMessageId,
+  //         },
+  //         'conversation_id': widget.group.conversationId,
+  //         'message_ids': [
+  //           replyMessageId,
+  //         ], // Array of message IDs being replied to
+  //       });
+  //     } else {
+  //       // Send regular message
+  //       final messageData = {
+  //         'type': 'text',
+  //         'body': messageText,
+  //         'optimistic_id': _optimisticMessageId,
+  //       };
+
+  //       await _websocketService.sendMessage({
+  //         'type': 'message',
+  //         'data': messageData,
+  //         'conversation_id': widget.group.conversationId,
+  //         'sender_name': currentUserName,
+  //       });
+  //     }
+
+  //     _optimisticMessageId--;
+  //   } catch (e) {
+  //     debugPrint('❌ Error sending group message: $e');
+  //     _retryMessage(optimisticMessage.id);
+  //     // Handle send failure - mark message as failed
+  //     // _handleMessageSendFailure(optimisticMessage.id, e.toString());
+  //   }
+  // }
+
+  Future<void> _sendMediaMessageToServer(
+    File mediaFile,
+    MessageType messageType,
+  ) async {
+    final response = await _chatsServices.sendMediaMessage(mediaFile);
+    if (response['success'] == true && response['data'] != null) {
+      final mediaData = MediaResponse.fromJson(response['data']);
+      // return mediaData;
+
+      _sendMessage(messageType, mediaResponse: mediaData);
+
+      debugPrint('Media data: $mediaData, messageType: $messageType');
+    } else {
+      throw Exception('Failed to send media message');
+    }
+  }
+
+  /// Send message with immediate display (optimistic UI)
+  void _sendMessage(
+    MessageType messageType, {
+    MediaResponse? mediaResponse,
+  }) async {
+    String messageText = '';
+    if (messageType == MessageType.text) {
+      messageText = _messageController.text.trim();
+      if (messageText.isEmpty) return;
+    }
+
+    final optimisticMessageId = Snowflake.generateNegative();
 
     // Clear draft when message is sent
     final draftNotifier = ref.read(draftMessagesProvider.notifier);
@@ -2178,193 +1433,78 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     // Create optimistic message for immediate display with current UTC time
     final nowUTC = DateTime.now().toUtc();
-    final optimisticMessage = MessageModel(
-      id: _optimisticMessageId, // Use negative ID for optimistic messages
-      body: messageText,
-      type: 'text',
-      senderId: _currentUserId ?? 0,
+    final newMsg = MessageModel(
+      optimisticId: optimisticMessageId,
       conversationId: widget.group.conversationId,
-      createdAt: nowUTC
-          .toIso8601String(), // Store as UTC, convert to IST when displaying
-      deleted: false,
-      senderName: 'You', // Current user name
-      senderProfilePic: null,
-      replyToMessage: replyMessage,
-      replyToMessageId: replyMessageId,
+      senderId: _currentUserDetails!.id,
+      senderName: _currentUserDetails!.name,
+      senderProfilePic: _currentUserDetails!.profilePic,
+      attachments: mediaResponse?.toJson(),
+      type: messageType,
+      body: messageText,
+      isReplied: _replyToMessageData != null,
+      status: MessageStatusType.sent,
+      sentAt: nowUTC.toIso8601String(),
     );
 
-    // Track this as an optimistic message
-    _optimisticMessageIds.add(_optimisticMessageId);
+    // Clear input and reply state immediately for better UX
+    _messageController.clear();
+    _cancelReply();
 
     // Add message to UI immediately with animation
     if (mounted) {
       setState(() {
-        _messages.add(optimisticMessage);
-        // Update sticky date separator for new messages
-        _currentStickyDate = ChatHelpers.getMessageDateString(
-          optimisticMessage.createdAt,
-        );
-        _showStickyDate = true;
+        _messages.add(newMsg);
+        _sortMessagesBySentAt();
       });
 
-      _animateNewMessage(optimisticMessage.id);
+      _animateNewMessage(newMsg.optimisticId!);
       _scrollToBottom();
     }
 
-    // Store message immediately in cache (optimistic storage)
-    _storeMessageAsync(optimisticMessage);
-
-    final prefs = await SharedPreferences.getInstance();
-    final currentUserName = prefs.getString('current_user_name');
     try {
-      // Check if this is a reply message
-      if (replyMessageId != null) {
-        debugPrint('🔄 Sending group reply message via WebSocket');
-        // Send reply message via WebSocket
-        await _websocketService.sendMessage({
-          'type': 'message_reply',
-          'data': {
-            'new_message': messageText,
-            'optimistic_id': _optimisticMessageId,
-          },
-          'conversation_id': widget.group.conversationId,
-          'message_ids': [
-            replyMessageId,
-          ], // Array of message IDs being replied to
-        });
-      } else {
-        // Send regular message
-        final messageData = {
-          'type': 'text',
-          'body': messageText,
-          'optimistic_id': _optimisticMessageId,
-        };
+      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-        await _websocketService.sendMessage({
-          'type': 'message',
-          'data': messageData,
-          'conversation_id': widget.group.conversationId,
-          'sender_name': currentUserName,
-        });
-      }
-
-      _optimisticMessageId--;
-    } catch (e) {
-      debugPrint('❌ Error sending group message: $e');
-      _retryMessage(optimisticMessage.id);
-      // Handle send failure - mark message as failed
-      // _handleMessageSendFailure(optimisticMessage.id, e.toString());
-    }
-  }
-
-  /// Handle message send failure
-  void _handleMessageSendFailure(int messageId, String error) {
-    if (!mounted) return;
-
-    // Find and update the failed message
-    final index = _messages.indexWhere((msg) => msg.id == messageId);
-    if (index != -1) {
-      // You could add a "failed" status to MessageModel or show an error indicator
-      // For now, we'll show a snackbar
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Failed to send group message: Please check your internet!',
-          ),
-          backgroundColor: Colors.teal,
-          action: SnackBarAction(
-            label: 'Retry',
-            textColor: Colors.white,
-            onPressed: () => _retryMessage(messageId),
-          ),
-        ),
+      final messagePayload = ChatMessagePayload(
+        optimisticId: optimisticMessageId,
+        convId: widget.group.conversationId,
+        senderId: _currentUserDetails!.id,
+        senderName: _currentUserDetails!.name,
+        convType: ChatType.group,
+        msgType: MessageType.text,
+        body: messageText,
+        replyToMessageId: _replyToMessageData?.id,
+        sentAt: nowUTC,
       );
-    }
-  }
 
-  /// Retry sending a failed message
-  void _retryMessage(int messageId) {
-    if (!_websocketService.isConnected) {
-      _websocketService.connect();
-    }
+      final wsmsg = WSMessage(
+        type: WSMessageType.messageNew,
+        payload: messagePayload,
+        wsTimestamp: DateTime.now(),
+      ).toJson();
 
-    final index = _messages.indexWhere((msg) => msg.id == messageId);
-    if (index != -1) {
-      final message = _messages[index];
+      await _webSocket.sendMessage(wsmsg).catchError((e) {
+        debugPrint('Error sending message');
+      });
 
-      // Re-send the message
-      _websocketService
-          .sendMessage({
-            'type': 'message',
-            'data': {
-              'type': message.type,
-              'body': message.body,
-              'optimistic_id': messageId,
-            },
-            'conversation_id': widget.group.conversationId,
-          })
-          .catchError((error) {
-            _handleMessageSendFailure(messageId, error.toString());
-          });
-    }
-  }
+      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-  /// Store message asynchronously without blocking UI
-  void _storeMessageAsync(MessageModel message) {
-    // Run storage operation in background
-    Future.microtask(() async {
-      try {
-        if (_conversationMeta != null) {
-          await _messagesRepo.addMessageToCache(
-            conversationId: widget.group.conversationId,
-            newMessage: message,
-            updatedMeta: _conversationMeta!.copyWith(
-              totalCount: _conversationMeta!.totalCount + 1,
-            ),
-            insertAtBeginning: false, // Add new messages at the end
+      ref
+          .read(chatProvider.notifier)
+          .updateLastMessageOnSendingOwnMessage(
+            widget.group.conversationId,
+            newMsg,
           );
-          debugPrint('💾 Group message stored asynchronously: ${message.id}');
 
-          // Trigger background media caching for media messages
-          if (message.type == 'image' ||
-              message.type == 'video' ||
-              message.type == 'audio') {
-            String? mediaUrl;
-            if (message.attachments != null) {
-              if (message.type == 'image') {
-                mediaUrl =
-                    (message.attachments!['image_url'] ??
-                            message.attachments!['url'])
-                        as String?;
-              } else if (message.type == 'video') {
-                mediaUrl =
-                    (message.attachments!['video_url'] ??
-                            message.attachments!['url'])
-                        as String?;
-              } else if (message.type == 'audio') {
-                mediaUrl =
-                    (message.attachments!['audio_url'] ??
-                            message.attachments!['url'])
-                        as String?;
-              }
-
-              if (mediaUrl != null && mediaUrl.isNotEmpty) {
-                ChatHelpers.cacheMediaForMessage(
-                  url: mediaUrl,
-                  messageId: message.id,
-                  messagesRepo: _messagesRepo,
-                  mediaCacheService: _mediaCacheService,
-                  checkExistingCache: false,
-                  debugPrefix: 'group message',
-                );
-              }
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('❌ Error storing group message asynchronously: $e');
-      }
-    });
+      // store that message in the message status table
+      await _messageStatusRepo.insertMessageStatusesWithMultipleUserIds(
+        messageId: newMsg.id,
+        conversationId: widget.group.conversationId,
+        userIds: _conversationMembers.map((member) => member.id).toList(),
+      );
+    } catch (e) {
+      debugPrint('Error sending message');
+    }
   }
 
   /// Scroll to bottom of message list
@@ -2374,7 +1514,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       onScrollComplete: () {
         if (mounted) {
           setState(() {
-            _unreadCountWhileScrolled = 0;
+            // _unreadCountWhileScrolled = 0;
             _isAtBottom = true;
           });
         }
@@ -2388,7 +1528,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     _scrollToBottom();
     // Clear unread count
     setState(() {
-      _unreadCountWhileScrolled = 0;
+      // _unreadCountWhileScrolled = 0;
     });
   }
 
@@ -2407,10 +1547,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     if (isAtBottomNow) {
       // User is at bottom - clear unread count
-      if (mounted && (!_isAtBottom || _unreadCountWhileScrolled > 0)) {
+      if (mounted &&
+          (!_isAtBottom
+          // || _unreadCountWhileScrolled > 0
+          )) {
         setState(() {
           _isAtBottom = true;
-          _unreadCountWhileScrolled = 0;
+          // _unreadCountWhileScrolled = 0;
         });
       }
     } else if (scrolledUp || scrollPosition > 100) {
@@ -2421,16 +1564,6 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         });
       }
     }
-  }
-
-  /// Track new messages when added while scrolled up
-  void _trackNewMessage() {
-    if (!_isAtBottom && mounted) {
-      setState(() {
-        _unreadCountWhileScrolled++;
-      });
-    }
-    _previousMessageCount = _messages.length;
   }
 
   /// Create and start animation for a new message
@@ -2487,45 +1620,33 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     // Only send websocket message if typing state changed
     if (isTyping) {
-      await _websocketService.sendMessage({
-        'type': 'typing',
-        'data': {'user_id': _currentUserId, 'is_typing': isTyping},
-        'conversation_id': widget.group.conversationId,
+      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      // Send inactive message when user navigates away from the page
+      final typingPayload = TypingPayload(
+        convId: widget.group.conversationId,
+        isTyping: true,
+        senderId: _currentUserDetails!.id,
+        senderName: _currentUserDetails!.name,
+        senderPfp: _currentUserDetails!.profilePic,
+      ).toJson();
+
+      final wsmsg = WSMessage(
+        type: WSMessageType.conversationTyping,
+        payload: typingPayload,
+        wsTimestamp: DateTime.now(),
+      ).toJson();
+
+      await _webSocket.sendMessage(wsmsg).catchError((e) {
+        debugPrint('Error sending conversation:leave in deactivate');
       });
-    }
-  }
-
-  void _reciveTyping(Map<String, dynamic> message) {
-    final isTyping = message['data']['is_typing'] as bool;
-    // final senderName = message['data']['sender_name'];
-    // Cancel any existing timeout
-    _typingTimeout?.cancel();
-
-    _isOtherTypingNotifier.value = isTyping;
-
-    // Control the typing animation
-    if (isTyping) {
-      _typingAnimationController.repeat(reverse: true);
-
-      // Set a safety timeout to hide typing indicator after 5 seconds
-      _typingTimeout = Timer(const Duration(seconds: 2), () {
-        if (mounted) {
-          _isOtherTypingNotifier.value = false;
-          _typingAnimationController.stop();
-          _typingAnimationController.reset();
-        }
-      });
-    } else {
-      // Immediately stop typing indicator
-      _typingAnimationController.stop();
-      _typingAnimationController.reset();
+      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     }
   }
 
   void _replyToMessage(MessageModel message) {
     setState(() {
       _replyToMessageData = message;
-      _isReplying = true;
+      // _isReplying = true;
     });
   }
 
@@ -2551,7 +1672,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     return Scaffold(
       backgroundColor: Colors.white, // Pure white background
       appBar: AppBar(
-        leading: _isSelectionMode
+        leading: _selectedMessages.isNotEmpty
             ? IconButton(
                 icon: const Icon(Icons.close, color: Colors.white),
                 onPressed: _exitSelectionMode,
@@ -2560,7 +1681,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                 icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
                 onPressed: () => Navigator.pop(context),
               ),
-        title: _isSelectionMode
+        title: _selectedMessages.isNotEmpty
             ? Text(
                 '${_selectedMessages.length} selected',
                 style: const TextStyle(
@@ -2605,7 +1726,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
               ),
         backgroundColor: Colors.teal,
         elevation: 0,
-        actions: _isSelectionMode
+        actions: _selectedMessages.isNotEmpty
             ? _buildSelectionModeActions()
             : [
                 IconButton(
@@ -2635,15 +1756,16 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             Column(
               children: [
                 // Pinned Message Section
-                if (_pinnedMessageId != null)
+                if (_pinnedMessage != null)
                   PinnedMessageSection(
                     pinnedMessage: _messages.firstWhere(
-                      (message) => message.id == _pinnedMessageId,
+                      (message) => message.id == _pinnedMessage?.canonicalId,
                     ),
-                    currentUserId: _currentUserId,
-                    isGroupChat: true,
-                    onTap: () => _scrollToMessage(_pinnedMessageId!),
-                    onUnpin: () => _togglePinMessage(_pinnedMessageId!),
+                    currentUserId: _currentUserDetails?.id ?? 0,
+                    // isGroupChat: widget.group.type == ChatType.group,
+                    onTap: () =>
+                        _scrollToMessage(_pinnedMessage?.canonicalId ?? 0),
+                    onUnpin: () => _togglePinMessage(_pinnedMessage!),
                   ),
 
                 // Messages List
@@ -2653,9 +1775,17 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                 _buildMessageInput(),
               ],
             ),
+
+            if (_isSyncingMessages)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: _buildSyncProgressBar(),
+              ),
             // Sticky Date Separator - Overlay on top
             Positioned(
-              top: 10,
+              top: _isSyncingMessages ? 60 : 10,
               left: 0,
               right: 0,
               child: _buildStickyDateSeparator(),
@@ -2663,16 +1793,16 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             // Scroll to Bottom Button - positioned at right bottom
             Positioned(
               right: 16,
-              bottom: _isReplying
+              bottom: _replyToMessageData != null
                   ? 150.0
                   : 80.0, // Position above message input
               child: ScrollToBottomButton(
                 scrollController: _scrollController,
                 onTap: _handleScrollToBottomTap,
                 isAtBottom: _isAtBottom,
-                unreadCount: _unreadCountWhileScrolled > 0
-                    ? _unreadCountWhileScrolled
-                    : null,
+                // unreadCount: _unreadCountWhileScrolled > 0
+                //     ? _unreadCountWhileScrolled
+                //     : null,
                 bottomPadding:
                     0.0, // Not used anymore, positioning handled by parent
               ),
@@ -2695,23 +1825,72 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     );
   }
 
+  Widget _buildSyncProgressBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.teal.shade700,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                  value: _syncProgress > 0 ? _syncProgress : null,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _syncStatus.isNotEmpty
+                          ? _syncStatus
+                          : 'Syncing messages...',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (_totalMessageCount > 0) ...[
+                      const SizedBox(height: 4),
+                      LinearProgressIndicator(
+                        value: _syncProgress,
+                        backgroundColor: Colors.white.withOpacity(0.3),
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          Colors.white,
+                        ),
+                        minHeight: 2,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMessagesList() {
-    // Show cache loader while checking cache (prevent black screen)
-    if (_isCheckingCache && _messages.isEmpty) {
-      return Center(child: LoadingDotsAnimation(color: Colors.blue[400]));
-    }
-
-    // Show appropriate loader based on state
-    if (_isLoadingFromCache) {
-      return Center(child: LoadingDotsAnimation(color: Colors.orange[400]));
-    }
-
-    // Only show loading if we haven't initialized and don't have messages
-    if (_isLoading && !_isInitialized && _messages.isEmpty) {
-      return Center(child: LoadingDotsAnimation(color: Colors.blue[400]));
-    }
-
-    if (_errorMessage != null && _messages.isEmpty) {
+    if (_messages.isEmpty && !_isLoading) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -2719,25 +1898,22 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
             Text(
-              'Connection lost please refresh',
+              'No messages yet',
               style: TextStyle(color: Colors.black, fontSize: 16),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _loadInitialMessages,
-              child: const Text('Refresh'),
-            ),
+            // ElevatedButton(
+            //   onPressed: null,
+            //   child: const Text('Refresh'),
+            // ),
           ],
         ),
       );
     }
 
     // Only show "No messages yet" if we've fully initialized and confirmed no messages
-    if (_messages.isEmpty &&
-        _isInitialized &&
-        !_isLoading &&
-        !_isLoadingFromCache) {
+    if (_messages.isEmpty && !_isLoading) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -2750,35 +1926,35 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _loadInitialMessages,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 10,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                elevation: 0,
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.refresh_rounded, size: 16, color: Colors.black),
-                  SizedBox(width: 6),
-                  Text(
-                    'Refresh',
-                    style: TextStyle(
-                      color: Colors.black,
-                      fontSize: 12,
-                      fontWeight: FontWeight.normal,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            // ElevatedButton(
+            //   onPressed: _loadInitialMessages,
+            //   style: ElevatedButton.styleFrom(
+            //     backgroundColor: Colors.white,
+            //     padding: const EdgeInsets.symmetric(
+            //       horizontal: 20,
+            //       vertical: 10,
+            //     ),
+            //     shape: RoundedRectangleBorder(
+            //       borderRadius: BorderRadius.circular(10),
+            //     ),
+            //     elevation: 0,
+            //   ),
+            //   child: const Row(
+            //     mainAxisSize: MainAxisSize.min,
+            //     children: [
+            //       Icon(Icons.refresh_rounded, size: 16, color: Colors.black),
+            //       SizedBox(width: 6),
+            //       Text(
+            //         'Refresh',
+            //         style: TextStyle(
+            //           color: Colors.black,
+            //           fontSize: 12,
+            //           fontWeight: FontWeight.normal,
+            //         ),
+            //       ),
+            //     ],
+            //   ),
+            // ),
           ],
         ),
       );
@@ -2788,42 +1964,42 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       controller: _scrollController,
       reverse: true, // Start from bottom (newest messages)
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: _messages.length + (_isLoadingMore ? 1 : 0),
+      itemCount: _messages.length,
+      physics: const ClampingScrollPhysics(),
       cacheExtent: 500, // Cache more items for smoother scrolling
       addAutomaticKeepAlives: true, // Keep message widgets alive
       addRepaintBoundaries: true, // Optimize repainting
       itemBuilder: (context, index) {
-        if (index == 0 && _isLoadingMore) {
-          return Container(
-            padding: const EdgeInsets.all(16),
-            alignment: Alignment.center,
-            child: SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.teal[300]!),
-              ),
-            ),
-          );
-        }
+        // if (index == 0 && _isLoadingMore) {
+        //   return Container(
+        //     padding: const EdgeInsets.all(16),
+        //     alignment: Alignment.center,
+        //     child: SizedBox(
+        //       width: 20,
+        //       height: 20,
+        //       child: CircularProgressIndicator(
+        //         strokeWidth: 2,
+        //         valueColor: AlwaysStoppedAnimation<Color>(Colors.teal[300]!),
+        //       ),
+        //     ),
+        //   );
+        // }
 
         // Adjust index for loading indicator
-        final messageIndex = _isLoadingMore ? index - 1 : index;
+        final messageIndex = index;
         final message =
             _messages[_messages.length -
                 1 -
                 messageIndex]; // Show newest at bottom
 
         // Debug: Check user ID comparison
-        final isMyMessage =
-            _currentUserId != null && message.senderId == _currentUserId;
+        final isMyMessage = message.senderId == _currentUserDetails?.id;
 
         return Column(
           children: [
             // Date separator - show the date for the group of messages that starts here
             if (ChatHelpers.shouldShowDateSeparator(_messages, messageIndex))
-              DateSeparator(dateTimeString: message.createdAt),
+              DateSeparator(dateTimeString: message.sentAt),
             // Message bubble with long press
             _buildMessageWithActions(message, isMyMessage),
           ],
@@ -2834,13 +2010,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   Widget _buildMessageWithActions(MessageModel message, bool isMyMessage) {
     final isSelected = _selectedMessages.contains(message.id);
-    final isPinned = _pinnedMessageId == message.id;
+    final isPinned = _pinnedMessage?.canonicalId == message.id;
     final isStarred = _starredMessages.contains(message.id);
 
     return GestureDetector(
       onLongPress: () => _showMessageActions(message, isMyMessage),
-      onTap: _isSelectionMode
-          ? () => _toggleMessageSelection(message.id)
+      onTap: _selectedMessages.isNotEmpty
+          ? () => _toggleMessageSelection(message.canonicalId!)
           : null,
       onPanStart: (details) => _onSwipeStart(message, details),
       onPanUpdate: (details) => _onSwipeUpdate(message, details, isMyMessage),
@@ -2855,7 +2031,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
               isPinned,
               isStarred,
             ),
-            if (_isSelectionMode)
+            if (_selectedMessages.isNotEmpty)
               Positioned(
                 left: isMyMessage ? 8 : null,
                 right: isMyMessage ? null : 8,
@@ -2908,8 +2084,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     DragUpdateDetails details,
     bool isMyMessage,
   ) {
-    if (_isSelectionMode || _swipeStartPosition == null || _isScrolling) return;
-
+    if (_selectedMessages.isNotEmpty ||
+        _swipeStartPosition == null ||
+        _isScrolling) {
+      return;
+    }
     // Calculate total distance moved from start position
     final currentPosition = details.globalPosition;
     final horizontalDistance = currentPosition.dx - _swipeStartPosition!.dx;
@@ -3040,7 +2219,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     bool isStarred,
   ) {
     // Pre-calculate values for better performance
-    final messageTime = ChatHelpers.formatMessageTime(message.createdAt);
+    final messageTime = ChatHelpers.formatMessageTime(message.sentAt);
 
     // Check if this message should be animated
     final shouldAnimate = _messageAnimationControllers.containsKey(message.id);
@@ -3069,8 +2248,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         nonMyMessageBackgroundColor: Colors.grey[100]!,
         useIntrinsicWidth: false,
         useStackContainer: false,
-        currentUserId: _currentUserId,
+        currentUserId: _currentUserDetails!.id,
         onReplyTap: _scrollToMessage,
+        messagesRepo: _messagesRepo,
+        userRepo: _userRepo,
       ),
     );
   }
@@ -3097,7 +2278,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
 
     // Fallback to original type-based handling
-    switch (message.type.toLowerCase()) {
+    switch (message.type.value.toLowerCase()) {
       case 'image':
         return _buildImageMessage(message, isMyMessage);
       case 'video':
@@ -3109,7 +2290,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       case 'reply':
         // Reply messages show the reply UI with quoted message
         return Text(
-          message.body,
+          message.body ?? '',
           style: TextStyle(
             color: isMyMessage ? Colors.white : Colors.black87,
             fontSize: 16,
@@ -3120,7 +2301,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       case 'forwarded':
         // Forwarded messages show forwarded indicator
         return Text(
-          message.body,
+          message.body ?? '',
           style: TextStyle(
             color: isMyMessage ? Colors.white : Colors.black87,
             fontSize: 16,
@@ -3137,7 +2318,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       case 'text':
       default:
         return Text(
-          message.body,
+          message.body ?? '',
           style: TextStyle(
             color: isMyMessage ? Colors.white : Colors.black87,
             fontSize: 16,
@@ -3149,40 +2330,40 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   bool _isMediaMessage(MessageModel message) {
-    return isMediaMessage(message);
+    return ChatHelpers.isMediaMessage(message);
   }
 
   /// Handle media upload failure
   /// Handle media upload failure - update only metadata to mark as failed
-  void _handleMediaUploadFailure(MessageModel loadingMessage, String error) {
-    if (!mounted) return;
+  // void _handleMediaUploadFailure(MessageModel loadingMessage, String error) {
+  //   if (!mounted) return;
 
-    // Find the message and update only metadata
-    final index = _messages.indexWhere((msg) => msg.id == loadingMessage.id);
-    if (index != -1) {
-      final failedMessage = _messages[index];
-      final updatedMetadata = Map<String, dynamic>.from(
-        failedMessage.metadata ?? {},
-      );
-      updatedMetadata['is_uploading'] = false;
-      updatedMetadata['upload_failed'] = true;
+  //   // Find the message and update only metadata
+  //   final index = _messages.indexWhere((msg) => msg.id == loadingMessage.id);
+  //   if (index != -1) {
+  //     final failedMessage = _messages[index];
+  //     final updatedMetadata = Map<String, dynamic>.from(
+  //       failedMessage.metadata ?? {},
+  //     );
+  //     updatedMetadata['is_uploading'] = false;
+  //     updatedMetadata['upload_failed'] = true;
 
-      setState(() {
-        // Use copyWith to update only metadata, explicitly preserve attachments
-        _messages[index] = failedMessage.copyWith(
-          metadata: updatedMetadata,
-          attachments:
-              failedMessage.attachments, // Explicitly preserve attachments
-        );
-      });
-    }
-  }
+  //     setState(() {
+  //       // Use copyWith to update only metadata, explicitly preserve attachments
+  //       _messages[index] = failedMessage.copyWith(
+  //         metadata: updatedMetadata,
+  //         attachments:
+  //             failedMessage.attachments, // Explicitly preserve attachments
+  //       );
+  //     });
+  //   }
+  // }
 
   Future<void> _showMessageActions(
     MessageModel message,
     bool isMyMessage,
   ) async {
-    final isPinned = _pinnedMessageId == message.id;
+    final isPinned = _pinnedMessage?.canonicalId == message.id;
     final isStarred = _starredMessages.contains(message.id);
 
     // Check if the current user is group admin or user role = staff
@@ -3197,8 +2378,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     } else {
       // Check if user role is 'staff'
       try {
-        final currentUser = await _userRepo.getFirstUser();
-        if (currentUser != null && currentUser.role == 'staff') {
+        if (_currentUserDetails != null &&
+            _currentUserDetails!.role == 'staff') {
           isAdmin = true;
           setState(() {
             _isAdminOrStaff = true;
@@ -3222,7 +2403,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         isAdmin: isAdmin,
         showReadBy: true,
         onReply: () => _replyToMessage(message),
-        onPin: () => _togglePinMessage(message.id),
+        onPin: () => _togglePinMessage(message),
         onStar: () => _toggleStarMessage(message.id),
         onForward: () => _forwardMessage(message),
         onSelect: () => _enterSelectionMode(message.id),
@@ -3253,7 +2434,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       imagePicker: _imagePicker,
       context: context,
       onImageSelected: (imageFile, source) {
-        _sendImageMessage(imageFile, source);
+        _sendMediaMessageToServer(imageFile, MessageType.image);
       },
       onError: (message) {
         _showErrorDialog(message);
@@ -3268,10 +2449,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     await handleGalleryAttachment(
       context: context,
       onImageSelected: (imageFile, source) {
-        _sendImageMessage(imageFile, source);
+        _sendMediaMessageToServer(imageFile, MessageType.image);
       },
       onVideoSelected: (videoFile, source) {
-        _sendVideoMessage(videoFile, source);
+        _sendMediaMessageToServer(videoFile, MessageType.video);
       },
       onError: (message) {
         _showErrorDialog(message);
@@ -3283,7 +2464,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     await handleDocumentAttachment(
       context: context,
       onDocumentSelected: (documentFile, fileName, extension) {
-        _sendDocumentMessage(documentFile, fileName, extension);
+        _sendMediaMessageToServer(documentFile, MessageType.document);
       },
       onError: (message) {
         _showErrorDialog(message);
@@ -3309,16 +2490,16 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     );
   }
 
-  Widget _buildMessageStatusTicks(MessageModel message) {
-    // For group chats, show delivery status based on isDelivered
-    if (message.isDelivered) {
-      // Double tick - message is delivered
-      return Icon(Icons.done_all, size: 16, color: Colors.white70);
-    } else {
-      // Single tick - message is sent but not delivered
-      return Icon(Icons.done, size: 16, color: Colors.white70);
-    }
-  }
+  // Widget _buildMessageStatusTicks(MessageModel message) {
+  //   // For group chats, show delivery status based on isDelivered
+  //   if (message.isDelivered) {
+  //     // Double tick - message is delivered
+  //     return Icon(Icons.done_all, size: 16, color: Colors.white70);
+  //   } else {
+  //     // Single tick - message is sent but not delivered
+  //     return Icon(Icons.done, size: 16, color: Colors.white70);
+  //   }
+  // }
 
   MediaMessageConfig _buildMediaMessageConfig(
     MessageModel message,
@@ -3331,15 +2512,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       mounted: () => mounted,
       setState: () => setState(() {}),
       showErrorDialog: _showErrorDialog,
-      buildMessageStatusTicks: _buildMessageStatusTicks,
       onImagePreview: (url, caption) => _openImagePreview(url, caption),
       onRetryImage: (file, source, {MessageModel? failedMessage}) =>
-          _sendImageMessage(file, source, failedMessage: failedMessage),
+          _sendMediaMessageToServer(file, MessageType.image),
       onCacheImage: (url, id) {
         ChatHelpers.cacheMediaForMessage(
           url: url,
           messageId: id,
-          messagesRepo: _messagesRepo,
           mediaCacheService: _mediaCacheService,
           checkExistingCache: false,
           debugPrefix: 'group message',
@@ -3348,22 +2527,20 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       onVideoPreview: (url, caption, fileName) =>
           _openVideoPreview(url, caption, fileName),
       onRetryVideo: (file, source, {MessageModel? failedMessage}) =>
-          _sendVideoMessage(file, source, failedMessage: failedMessage),
+          _sendMediaMessageToServer(file, MessageType.video),
       videoThumbnailCache: _videoThumbnailCache,
       videoThumbnailFutures: _videoThumbnailFutures,
       onDocumentPreview: (url, fileName, caption, fileSize) =>
           _openDocumentPreview(url, fileName, caption, fileSize),
       onRetryDocument:
           (file, fileName, extension, {MessageModel? failedMessage}) =>
-              _sendDocumentMessage(
-                file,
-                fileName,
-                extension,
-                failedMessage: failedMessage,
-              ),
+              _sendMediaMessageToServer(file, MessageType.document),
       audioPlaybackManager: _audioPlaybackManager,
       onRetryAudio: ({MessageModel? failedMessage}) =>
-          _sendRecordedVoice(failedMessage: failedMessage),
+          _sendMediaMessageToServer(
+            File(failedMessage?.attachments?['url'] ?? ''),
+            MessageType.audio,
+          ),
     );
   }
 
@@ -3397,129 +2574,130 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
   }
 
-  // Media sending methods
-  void _sendImageMessage(
-    File imageFile,
-    String source, {
-    MessageModel? failedMessage,
-  }) async {
-    await sendImageMessage(
-      SendMediaMessageConfig(
-        mediaFile: imageFile,
-        conversationId: widget.group.conversationId,
-        currentUserId: _currentUserId,
-        optimisticMessageId: _optimisticMessageId,
-        replyToMessage: _replyToMessageData,
-        replyToMessageId: _replyToMessageData?.id,
-        failedMessage: failedMessage,
-        messageType: 'image',
-        messages: _messages,
-        optimisticMessageIds: _optimisticMessageIds,
-        conversationMeta: _conversationMeta,
-        messagesRepo: _messagesRepo,
-        chatsServices: _chatsServices,
-        websocketService: _websocketService,
-        mounted: () => mounted,
-        setState: setState,
-        handleMediaUploadFailure: _handleMediaUploadFailure,
-        animateNewMessage: _animateNewMessage,
-        scrollToBottom: _scrollToBottom,
-        cancelReply: _cancelReply,
-        isReplying: _isReplying,
-      ),
-    );
+  // // Media sending methods
+  // void _sendImageMessage(
+  //   File imageFile,
+  //   String source, {
+  //   MessageModel? failedMessage,
+  // }) async {
+  //   await sendImageMessage(
+  //     SendMediaMessageConfig(
+  //       mediaFile: imageFile,
+  //       conversationId: widget.group.conversationId,
+  //       currentUserId: _currentUserId,
+  //       optimisticMessageId: _optimisticMessageId,
+  //       replyToMessage: _replyToMessageData,
+  //       replyToMessageId: _replyToMessageData?.id,
+  //       failedMessage: failedMessage,
+  //       messageType: 'image',
+  //       messages: _messages,
+  //       optimisticMessageIds: _optimisticMessageIds,
+  //       conversationMeta: _conversationMeta,
+  //       messagesRepo: _messagesRepo,
+  //       chatsServices: _chatsServices,
+  //       websocketService: _websocketService,
+  //       mounted: () => mounted,
+  //       setState: setState,
+  //       handleMediaUploadFailure: _handleMediaUploadFailure,
+  //       animateNewMessage: _animateNewMessage,
+  //       scrollToBottom: _scrollToBottom,
+  //       cancelReply: _cancelReply,
+  //       isReplying: _isReplying,
+  //     ),
+  //   );
 
-    // Only decrement optimistic ID if this was a new message (not a retry)
-    if (failedMessage == null) {
-      _optimisticMessageId--;
-    }
-  }
+  //   // Only decrement optimistic ID if this was a new message (not a retry)
+  //   if (failedMessage == null) {
+  //     _optimisticMessageId--;
+  //   }
+  // }
 
-  void _sendVideoMessage(
-    File videoFile,
-    String source, {
-    MessageModel? failedMessage,
-  }) async {
-    await sendVideoMessage(
-      SendMediaMessageConfig(
-        mediaFile: videoFile,
-        conversationId: widget.group.conversationId,
-        currentUserId: _currentUserId,
-        optimisticMessageId: _optimisticMessageId,
-        replyToMessage: _replyToMessageData,
-        replyToMessageId: _replyToMessageData?.id,
-        failedMessage: failedMessage,
-        messageType: 'video',
-        messages: _messages,
-        optimisticMessageIds: _optimisticMessageIds,
-        conversationMeta: _conversationMeta,
-        messagesRepo: _messagesRepo,
-        chatsServices: _chatsServices,
-        websocketService: _websocketService,
-        mounted: () => mounted,
-        setState: setState,
-        handleMediaUploadFailure: _handleMediaUploadFailure,
-        animateNewMessage: _animateNewMessage,
-        scrollToBottom: _scrollToBottom,
-        cancelReply: _cancelReply,
-        isReplying: _isReplying,
-      ),
-    );
+  // void _sendVideoMessage(
+  //   File videoFile,
+  //   String source, {
+  //   MessageModel? failedMessage,
+  // }) async {
+  //   await sendVideoMessage(
+  //     SendMediaMessageConfig(
+  //       mediaFile: videoFile,
+  //       conversationId: widget.group.conversationId,
+  //       currentUserId: _currentUserId,
+  //       optimisticMessageId: _optimisticMessageId,
+  //       replyToMessage: _replyToMessageData,
+  //       replyToMessageId: _replyToMessageData?.id,
+  //       failedMessage: failedMessage,
+  //       messageType: 'video',
+  //       messages: _messages,
+  //       optimisticMessageIds: _optimisticMessageIds,
+  //       conversationMeta: _conversationMeta,
+  //       messagesRepo: _messagesRepo,
+  //       chatsServices: _chatsServices,
+  //       websocketService: _websocketService,
+  //       mounted: () => mounted,
+  //       setState: setState,
+  //       handleMediaUploadFailure: _handleMediaUploadFailure,
+  //       animateNewMessage: _animateNewMessage,
+  //       scrollToBottom: _scrollToBottom,
+  //       cancelReply: _cancelReply,
+  //       isReplying: _isReplying,
+  //     ),
+  //   );
 
-    // Only decrement optimistic ID if this was a new message (not a retry)
-    if (failedMessage == null) {
-      _optimisticMessageId--;
-    }
-  }
+  //   // Only decrement optimistic ID if this was a new message (not a retry)
+  //   if (failedMessage == null) {
+  //     _optimisticMessageId--;
+  //   }
+  // }
 
-  void _sendDocumentMessage(
-    File documentFile,
-    String fileName,
-    String extension, {
-    MessageModel? failedMessage,
-  }) async {
-    await sendDocumentMessage(
-      SendMediaMessageConfig(
-        mediaFile: documentFile,
-        conversationId: widget.group.conversationId,
-        currentUserId: _currentUserId,
-        optimisticMessageId: _optimisticMessageId,
-        replyToMessage: _replyToMessageData,
-        replyToMessageId: _replyToMessageData?.id,
-        failedMessage: failedMessage,
-        messageType: 'document',
-        fileName: fileName,
-        extension: extension,
-        messages: _messages,
-        optimisticMessageIds: _optimisticMessageIds,
-        conversationMeta: _conversationMeta,
-        messagesRepo: _messagesRepo,
-        chatsServices: _chatsServices,
-        websocketService: _websocketService,
-        mounted: () => mounted,
-        setState: setState,
-        handleMediaUploadFailure: _handleMediaUploadFailure,
-        animateNewMessage: _animateNewMessage,
-        scrollToBottom: _scrollToBottom,
-        cancelReply: _cancelReply,
-        isReplying: _isReplying,
-      ),
-    );
+  // void _sendDocumentMessage(
+  //   File documentFile,
+  //   String fileName,
+  //   String extension, {
+  //   MessageModel? failedMessage,
+  // }) async {
+  //   await sendDocumentMessage(
+  //     SendMediaMessageConfig(
+  //       mediaFile: documentFile,
+  //       conversationId: widget.group.conversationId,
+  //       currentUserId: _currentUserId,
+  //       optimisticMessageId: _optimisticMessageId,
+  //       replyToMessage: _replyToMessageData,
+  //       replyToMessageId: _replyToMessageData?.id,
+  //       failedMessage: failedMessage,
+  //       messageType: 'document',
+  //       fileName: fileName,
+  //       extension: extension,
+  //       messages: _messages,
+  //       optimisticMessageIds: _optimisticMessageIds,
+  //       conversationMeta: _conversationMeta,
+  //       messagesRepo: _messagesRepo,
+  //       chatsServices: _chatsServices,
+  //       websocketService: _websocketService,
+  //       mounted: () => mounted,
+  //       setState: setState,
+  //       handleMediaUploadFailure: _handleMediaUploadFailure,
+  //       animateNewMessage: _animateNewMessage,
+  //       scrollToBottom: _scrollToBottom,
+  //       cancelReply: _cancelReply,
+  //       isReplying: _isReplying,
+  //     ),
+  //   );
 
-    // Only decrement optimistic ID if this was a new message (not a retry)
-    if (failedMessage == null) {
-      _optimisticMessageId--;
-    }
-  }
+  //   // Only decrement optimistic ID if this was a new message (not a retry)
+  //   if (failedMessage == null) {
+  //     _optimisticMessageId--;
+  //   }
+  // }
 
   // Message action methods
   void _toggleMessageSelection(int messageId) {
-    ChatHelpers.toggleMessageSelection(
-      messageId: messageId,
-      selectedMessages: _selectedMessages,
-      setIsSelectionMode: (value) => _isSelectionMode = value,
-      setState: setState,
-    );
+    setState(() {
+      if (_selectedMessages.contains(messageId)) {
+        _selectedMessages.remove(messageId);
+      } else {
+        _selectedMessages.add(messageId);
+      }
+    });
   }
 
   /// Build selection mode actions with conditional delete button
@@ -3557,28 +2735,22 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   void _exitSelectionMode() {
     setState(() {
       _selectedMessages.clear();
-      _isSelectionMode = false;
     });
   }
 
   void _enterSelectionMode(int messageId) {
-    ChatHelpers.enterSelectionMode(
-      messageId: messageId,
-      selectedMessages: _selectedMessages,
-      setIsSelectionMode: (value) => _isSelectionMode = value,
-      setState: setState,
-    );
+    setState(() {
+      _selectedMessages.add(messageId);
+    });
   }
 
-  void _togglePinMessage(int messageId) async {
+  void _togglePinMessage(MessageModel message) async {
     await ChatHelpers.togglePinMessage(
-      messageId: messageId,
+      message: message,
       conversationId: widget.group.conversationId,
-      getPinnedMessageId: () => _pinnedMessageId,
-      setPinnedMessageId: (value) => _pinnedMessageId = value,
-      currentUserId: _currentUserId,
-      messagesRepo: _messagesRepo,
-      websocketService: _websocketService,
+      currentPinnedMessageId: _pinnedMessage?.canonicalId,
+      setPinnedMessageId: (value) => _pinnedMessage = value,
+      currentUserId: _currentUserDetails?.id,
       setState: setState,
     );
   }
@@ -3588,9 +2760,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       messageId: messageId,
       conversationId: widget.group.conversationId,
       starredMessages: _starredMessages,
-      currentUserId: _currentUserId,
-      messagesRepo: _messagesRepo,
-      websocketService: _websocketService,
+      currentUserId: _currentUserDetails?.id,
       setState: setState,
     );
   }
@@ -3607,9 +2777,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           (message) => _selectedMessages.contains(message.id),
         );
       });
-      await _messagesRepo.removeMessageFromCache(
-        conversationId: widget.group.conversationId,
-        messageIds: _selectedMessages.map((id) => id).toList(),
+      await _messagesRepo.deleteMessages(
+        _selectedMessages.map((id) => id).toList(),
       );
     } else {
       debugPrint(
@@ -3659,7 +2828,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   Future<void> _showForwardModal() async {
-    await _loadAvailableConversations();
+    final dmList = await ConversationRepository().getAllDmsWithRecipientInfo();
+    final groupList = await ConversationRepository()
+        .getGroupListWithoutMembers();
 
     if (!mounted) return;
 
@@ -3670,32 +2841,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       enableDrag: true,
       builder: (context) => ForwardMessageModal(
         messagesToForward: _messagesToForward,
-        availableConversations: _availableConversations,
+        dmList: dmList,
+        groupList: groupList,
         isLoading: _isLoadingConversations,
         onForward: _handleForwardToConversations,
         currentConversationId: widget.group.conversationId,
-      ),
-    );
-  }
-
-  Future<void> _loadAvailableConversations() async {
-    await loadAvailableConversations(
-      LoadAvailableConversationsConfig(
-        userService: _userService,
-        currentConversationId: widget.group.conversationId,
-        setIsLoading: (isLoading) {
-          setState(() {
-            _isLoadingConversations = isLoading;
-          });
-        },
-        setAvailableConversations: (conversations) {
-          setState(() {
-            _availableConversations = conversations;
-          });
-        },
-        mounted: mounted,
-        showErrorDialog: _showErrorDialog,
-        debugPrefix: 'group',
       ),
     );
   }
@@ -3707,8 +2857,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       HandleForwardToConversationsConfig(
         messagesToForward: _messagesToForward,
         selectedConversationIds: selectedConversationIds,
-        websocketService: _websocketService,
-        currentUserId: _currentUserId!,
+        currentUserId: _currentUserDetails?.id ?? 0,
         sourceConversationId: widget.group.conversationId,
         context: context,
         mounted: mounted,
@@ -3726,17 +2875,15 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   void _cancelReply() {
     setState(() {
       _replyToMessageData = null;
-      _isReplying = false;
     });
   }
 
   void _forwardMessage(MessageModel message) async {
-    await ChatHelpers.forwardMessage(
-      messageId: message.id,
-      messagesToForward: _messagesToForward,
-      setState: setState,
-      showForwardModal: _showForwardModal,
-    );
+    setState(() {
+      _messagesToForward.clear();
+      _messagesToForward.add(message.canonicalId!);
+    });
+    await _showForwardModal();
   }
 
   void _deleteMessage(int messageId) async {
@@ -3756,9 +2903,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       conversationId: widget.group.conversationId,
       selectedMessages: _selectedMessages,
       starredMessages: _starredMessages,
-      currentUserId: _currentUserId,
-      messagesRepo: _messagesRepo,
-      websocketService: _websocketService,
+      currentUserId: _currentUserDetails?.id ?? 0,
       setState: setState,
       exitSelectionMode: _exitSelectionMode,
     );
@@ -3779,10 +2924,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       messageController: _messageController,
       isOtherTypingNotifier: _isOtherTypingNotifier,
       typingIndicator: _buildTypingIndicator(),
-      isReplying: _isReplying,
+      isReplying: _replyToMessageData != null,
       replyToMessageData: _replyToMessageData,
-      currentUserId: _currentUserId,
-      onSendMessage: _sendMessage,
+      currentUserId: _currentUserDetails?.id ?? 0,
+      onSendMessage: (messageType) => _sendMessage(messageType),
       onSendVoiceNote: _sendVoiceNote,
       onAttachmentTap: _showAttachmentModal,
       onTyping: _handleTyping,
@@ -3942,44 +3087,151 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
         duration = _voiceRecordingManager.recordingDuration.inSeconds;
       }
+      await _sendMediaMessageToServer(voiceFile, MessageType.audio);
 
-      await sendRecordedVoice(
-        SendMediaMessageConfig(
-          mediaFile: voiceFile,
-          conversationId: widget.group.conversationId,
-          currentUserId: _currentUserId,
-          optimisticMessageId: _optimisticMessageId,
-          replyToMessage: _replyToMessageData,
-          replyToMessageId: _replyToMessageData?.id,
-          failedMessage: failedMessage,
-          messageType: 'audio',
-          duration: duration,
-          messages: _messages,
-          optimisticMessageIds: _optimisticMessageIds,
-          conversationMeta: _conversationMeta,
-          messagesRepo: _messagesRepo,
-          chatsServices: _chatsServices,
-          websocketService: _websocketService,
-          mounted: () => mounted,
-          setState: setState,
-          handleMediaUploadFailure: _handleMediaUploadFailure,
-          animateNewMessage: _animateNewMessage,
-          scrollToBottom: _scrollToBottom,
-          cancelReply: _cancelReply,
-          isReplying: _isReplying,
-          context: context,
-          closeModal: failedMessage == null
-              ? () => Navigator.of(context).pop()
-              : null,
-        ),
-      );
+      // await sendRecordedVoice(
+      //   SendMediaMessageConfig(
+      //     mediaFile: voiceFile,
+      //     conversationId: widget.group.conversationId,
+      //     currentUserId: _currentUserId,
+      //     optimisticMessageId: _optimisticMessageId,
+      //     replyToMessage: _replyToMessageData,
+      //     replyToMessageId: _replyToMessageData?.id,
+      //     failedMessage: failedMessage,
+      //     messageType: 'audio',
+      //     duration: duration,
+      //     messages: _messages,
+      //     optimisticMessageIds: _optimisticMessageIds,
+      //     conversationMeta: _conversationMeta,
+      //     messagesRepo: _messagesRepo,
+      //     chatsServices: _chatsServices,
+      //     websocketService: _websocketService,
+      //     mounted: () => mounted,
+      //     setState: setState,
+      //     handleMediaUploadFailure: _handleMediaUploadFailure,
+      //     animateNewMessage: _animateNewMessage,
+      //     scrollToBottom: _scrollToBottom,
+      //     cancelReply: _cancelReply,
+      //     isReplying: _isReplying,
+      //     context: context,
+      //     closeModal: failedMessage == null
+      //         ? () => Navigator.of(context).pop()
+      //         : null,
+      //   ),
+      // );
 
       // Only decrement optimistic ID if this was a new message (not a retry)
-      if (failedMessage == null) {
-        _optimisticMessageId--;
-      }
+      // if (failedMessage == null) {
+      //   _optimisticMessageId--;
+      // }
     } catch (e) {
       _showErrorDialog('Failed to send voice note. Please try again.');
     }
+  }
+
+  @override
+  void deactivate() {
+    // Send inactive message when user navigates away from the page
+    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    final joinConvPayload = JoinLeavePayload(
+      convId: widget.group.conversationId,
+      convType: ChatType.group,
+      userId: _currentUserDetails?.id ?? 0,
+      userName: _currentUserDetails?.name ?? '',
+    ).toJson();
+
+    final wsmsg = WSMessage(
+      type: WSMessageType.conversationLeave,
+      payload: joinConvPayload,
+      wsTimestamp: DateTime.now(),
+    ).toJson();
+
+    _webSocket.sendMessage(wsmsg).catchError((e) {
+      debugPrint('❌ Error sending conversation:leave in deactivate: $e');
+    });
+    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    super.deactivate();
+  }
+
+  @override
+  void dispose() {
+    if (_isDisposed) return; // Prevent multiple dispose calls
+    _isDisposed = true;
+
+    _scrollController.dispose();
+    _messageController.dispose();
+    _isOtherTypingNotifier.dispose();
+    _messageAckSubscription?.cancel();
+    _messageSubscription?.cancel();
+    _typingSubscription?.cancel();
+    _messagePinSubscription?.cancel();
+    _messageDeleteSubscription?.cancel();
+    _typingAnimationController.dispose();
+    _typingTimeout?.cancel();
+    _scrollDebounceTimer?.cancel();
+    _highlightTimer?.cancel();
+    _draftSaveTimer?.cancel();
+
+    // Save draft before disposing
+    if (_messageController.text.isNotEmpty) {
+      final draftNotifier = ref.read(draftMessagesProvider.notifier);
+      draftNotifier.saveDraft(
+        widget.group.conversationId,
+        _messageController.text,
+      );
+    }
+
+    // Remove listener
+    _messageController.removeListener(_onMessageTextChanged);
+
+    // Dispose message animation controllers
+    for (final controller in _messageAnimationControllers.values) {
+      controller.dispose();
+    }
+    _messageAnimationControllers.clear();
+    _messageSlideAnimations.clear();
+    _messageFadeAnimations.clear();
+    _animatedMessages.clear();
+
+    // Dispose swipe animation controllers
+    for (final controller in _swipeAnimationControllers.values) {
+      controller.dispose();
+    }
+    _swipeAnimationControllers.clear();
+    _swipeAnimations.clear();
+
+    // Dispose audio playback manager
+    _audioPlaybackManager.dispose();
+
+    // Dispose voice recording manager
+    _voiceRecordingManager.dispose();
+
+    // Dispose voice recording controllers
+    _voiceModalAnimationController.dispose();
+    _zigzagAnimationController.dispose();
+    _timerStreamController.close();
+
+    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    // Send inactive message when user navigates away from the page
+    final joinConvPayload = JoinLeavePayload(
+      convId: widget.group.conversationId,
+      convType: ChatType.group,
+      userId: _currentUserDetails?.id ?? 0,
+      userName: _currentUserDetails?.name ?? '',
+    ).toJson();
+
+    final wsmsg = WSMessage(
+      type: WSMessageType.conversationLeave,
+      payload: joinConvPayload,
+      wsTimestamp: DateTime.now(),
+    ).toJson();
+
+    _webSocket.sendMessage(wsmsg).catchError((e) {
+      debugPrint('❌ Error sending conversation:leave in deactivate: $e');
+    });
+    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    super.dispose();
   }
 }

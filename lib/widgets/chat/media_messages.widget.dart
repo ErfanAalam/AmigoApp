@@ -1,7 +1,7 @@
 import 'dart:io';
+import 'package:amigo/models/message.model.dart';
+import 'package:amigo/utils/chat/chat_helpers.utils.dart';
 import 'package:flutter/material.dart';
-import '../../models/message_model.dart';
-import '../../utils/chat/chat_helpers.dart';
 import '../../utils/chat/cachedImage_widget.dart';
 import '../../utils/chat/preview_media.utils.dart';
 import '../../utils/chat/audio_playback.utils.dart';
@@ -16,7 +16,7 @@ class MediaMessageConfig {
   final bool Function() mounted;
   final void Function() setState;
   final void Function(String) showErrorDialog;
-  final Widget Function(MessageModel) buildMessageStatusTicks;
+  final Widget Function(MessageModel)? buildMessageStatusTicks;
 
   // Image-specific
   final void Function(String, String?) onImagePreview;
@@ -45,7 +45,7 @@ class MediaMessageConfig {
     required this.mounted,
     required this.setState,
     required this.showErrorDialog,
-    required this.buildMessageStatusTicks,
+    this.buildMessageStatusTicks = null,
     required this.onImagePreview,
     required this.onRetryImage,
     required this.onCacheImage,
@@ -168,7 +168,8 @@ Widget buildImageMessage(MediaMessageConfig config) {
                   ),
                 ),
               ),
-              if (config.message.body.isNotEmpty)
+              if (config.message.body != null &&
+                  config.message.body!.isNotEmpty)
                 Container(
                   width: 200,
                   padding: const EdgeInsets.only(
@@ -178,7 +179,7 @@ Widget buildImageMessage(MediaMessageConfig config) {
                     top: 4.0,
                   ),
                   child: Text(
-                    config.message.body,
+                    config.message.body!,
                     style: TextStyle(
                       color: Colors.black87,
                       fontSize: 14,
@@ -232,7 +233,7 @@ Widget buildImageMessage(MediaMessageConfig config) {
                     )
                   else ...[
                     Text(
-                      ChatHelpers.formatMessageTime(config.message.createdAt),
+                      ChatHelpers.formatMessageTime(config.message.sentAt),
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 11,
@@ -241,7 +242,8 @@ Widget buildImageMessage(MediaMessageConfig config) {
                     ),
                     if (config.isMyMessage) ...[
                       const SizedBox(width: 4),
-                      config.buildMessageStatusTicks(config.message),
+                      config.buildMessageStatusTicks?.call(config.message) ??
+                          const SizedBox.shrink(),
                     ],
                   ],
                 ],
@@ -443,7 +445,8 @@ Widget buildVideoMessage(MediaMessageConfig config) {
                   ),
                 ),
               ),
-              if (config.message.body.isNotEmpty)
+              if (config.message.body != null &&
+                  config.message.body!.isNotEmpty)
                 Container(
                   width: 200,
                   padding: const EdgeInsets.only(
@@ -453,7 +456,7 @@ Widget buildVideoMessage(MediaMessageConfig config) {
                     top: 4.0,
                   ),
                   child: Text(
-                    config.message.body,
+                    config.message.body!,
                     style: TextStyle(
                       color: Colors.black87,
                       fontSize: 14,
@@ -507,7 +510,7 @@ Widget buildVideoMessage(MediaMessageConfig config) {
                     )
                   else ...[
                     Text(
-                      ChatHelpers.formatMessageTime(config.message.createdAt),
+                      ChatHelpers.formatMessageTime(config.message.sentAt),
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 11,
@@ -516,7 +519,8 @@ Widget buildVideoMessage(MediaMessageConfig config) {
                     ),
                     if (config.isMyMessage) ...[
                       const SizedBox(width: 4),
-                      config.buildMessageStatusTicks(config.message),
+                      config.buildMessageStatusTicks?.call(config.message) ??
+                          const SizedBox.shrink(),
                     ],
                   ],
                 ],
@@ -813,7 +817,7 @@ Widget buildDocumentMessage(MediaMessageConfig config) {
                       )
                     else if (isFailed && config.isMyMessage)
                       Text(
-                        ChatHelpers.formatMessageTime(config.message.createdAt),
+                        ChatHelpers.formatMessageTime(config.message.sentAt),
                         style: TextStyle(
                           color: config.isMyMessage
                               ? Colors.white
@@ -824,7 +828,7 @@ Widget buildDocumentMessage(MediaMessageConfig config) {
                       )
                     else ...[
                       Text(
-                        ChatHelpers.formatMessageTime(config.message.createdAt),
+                        ChatHelpers.formatMessageTime(config.message.sentAt),
                         style: TextStyle(
                           color: config.isMyMessage
                               ? Colors.white
@@ -835,7 +839,8 @@ Widget buildDocumentMessage(MediaMessageConfig config) {
                       ),
                       if (config.isMyMessage) ...[
                         const SizedBox(width: 4),
-                        config.buildMessageStatusTicks(config.message),
+                        config.buildMessageStatusTicks?.call(config.message) ??
+                            const SizedBox.shrink(),
                       ],
                     ],
                   ],
@@ -866,10 +871,10 @@ Widget buildDocumentMessage(MediaMessageConfig config) {
           ],
         ),
       ),
-      if (config.message.body.isNotEmpty) ...[
+      if (config.message.body != null && config.message.body!.isNotEmpty) ...[
         const SizedBox(height: 8),
         Text(
-          config.message.body,
+          config.message.body!,
           style: TextStyle(
             color: config.isMyMessage ? Colors.white : Colors.black87,
             fontSize: 16,
@@ -1129,7 +1134,7 @@ Widget buildAudioMessage(MediaMessageConfig config) {
                           if (!isUploading && !isFailed) ...[
                             Text(
                               ChatHelpers.formatMessageTime(
-                                config.message.createdAt,
+                                config.message.sentAt,
                               ),
                               style: TextStyle(
                                 color: config.isMyMessage
@@ -1140,7 +1145,10 @@ Widget buildAudioMessage(MediaMessageConfig config) {
                             ),
                             if (config.isMyMessage) ...[
                               const SizedBox(width: 4),
-                              config.buildMessageStatusTicks(config.message),
+                              config.buildMessageStatusTicks?.call(
+                                    config.message,
+                                  ) ??
+                                  const SizedBox.shrink(),
                             ],
                           ],
                         ],
@@ -1151,10 +1159,11 @@ Widget buildAudioMessage(MediaMessageConfig config) {
               ],
             ),
           ),
-          if (config.message.body.isNotEmpty) ...[
+          if (config.message.body != null &&
+              config.message.body!.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
-              config.message.body,
+              config.message.body!,
               style: TextStyle(
                 color: config.isMyMessage ? Colors.white : Colors.black87,
                 fontSize: 16,

@@ -1,11 +1,13 @@
+import 'package:amigo/models/conversations.model.dart';
+import 'package:amigo/models/group_model.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../../models/conversation_model.dart';
 
 /// Forward Message Modal widget for both DM and group chats
 class ForwardMessageModal extends StatefulWidget {
   final Set<int> messagesToForward;
-  final List<ConversationModel> availableConversations;
+  final List<DmModel>? dmList;
+  final List<GroupModel>? groupList;
   final bool isLoading;
   final Function(List<int>) onForward;
   final int currentConversationId;
@@ -13,7 +15,8 @@ class ForwardMessageModal extends StatefulWidget {
   const ForwardMessageModal({
     super.key,
     required this.messagesToForward,
-    required this.availableConversations,
+    this.dmList,
+    this.groupList,
     required this.isLoading,
     required this.onForward,
     required this.currentConversationId,
@@ -32,7 +35,8 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
 
   final TextEditingController _searchController = TextEditingController();
   final Set<int> _selectedConversations = {};
-  List<ConversationModel> _filteredConversations = [];
+  List<DmModel> _filteredDmList = [];
+  List<GroupModel> _filteredGroupList = [];
   String _searchQuery = '';
 
   @override
@@ -60,8 +64,8 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
       end: 1.0,
     ).animate(CurvedAnimation(parent: _fadeController, curve: Curves.easeOut));
 
-    // Initialize filtered conversations
-    _filteredConversations = widget.availableConversations;
+    // Initialize filtered lists
+    _updateFilteredLists();
 
     // Start animations
     _slideController.forward();
@@ -76,19 +80,43 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
     super.dispose();
   }
 
+  void _updateFilteredLists() {
+    setState(() {
+      // Filter DM list - exclude current conversation
+      final dmList = widget.dmList ?? [];
+      _filteredDmList = dmList
+          .where((dm) => dm.conversationId != widget.currentConversationId)
+          .toList();
+
+      // Filter Group list - exclude current conversation
+      final groupList = widget.groupList ?? [];
+      _filteredGroupList = groupList
+          .where(
+            (group) => group.conversationId != widget.currentConversationId,
+          )
+          .toList();
+
+      // Apply search filter if query exists
+      if (_searchQuery.isNotEmpty) {
+        final query = _searchQuery.toLowerCase();
+        _filteredDmList = _filteredDmList
+            .where(
+              (dm) =>
+                  dm.recipientName.toLowerCase().contains(query) ||
+                  dm.recipientPhone.toLowerCase().contains(query),
+            )
+            .toList();
+        _filteredGroupList = _filteredGroupList
+            .where((group) => group.title.toLowerCase().contains(query))
+            .toList();
+      }
+    });
+  }
+
   void _filterConversations(String query) {
     setState(() {
       _searchQuery = query;
-      if (query.isEmpty) {
-        _filteredConversations = widget.availableConversations;
-      } else {
-        _filteredConversations = widget.availableConversations
-            .where(
-              (conv) =>
-                  conv.displayName.toLowerCase().contains(query.toLowerCase()),
-            )
-            .toList();
-      }
+      _updateFilteredLists();
     });
   }
 
@@ -142,34 +170,32 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
     return '?';
   }
 
-  Widget _buildConversationAvatar(ConversationModel conversation) {
-    if (conversation.isGroup) {
-      // Group conversation - show group icon
-      return CircleAvatar(
-        radius: 25,
-        backgroundColor: Colors.orange[100],
-        child: Icon(Icons.group, color: Colors.orange[700], size: 28),
-      );
-    } else {
-      // DM conversation - show user avatar or initials
-      return CircleAvatar(
-        radius: 25,
-        backgroundColor: Colors.teal[100],
-        backgroundImage: conversation.displayAvatar != null
-            ? CachedNetworkImageProvider(conversation.displayAvatar!)
-            : null,
-        child: conversation.displayAvatar == null
-            ? Text(
-                _getInitials(conversation.displayName),
-                style: const TextStyle(
-                  color: Colors.teal,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
-              )
-            : null,
-      );
-    }
+  Widget _buildDmAvatar(DmModel dm) {
+    return CircleAvatar(
+      radius: 25,
+      backgroundColor: Colors.teal[100],
+      backgroundImage: dm.recipientProfilePic != null
+          ? CachedNetworkImageProvider(dm.recipientProfilePic!)
+          : null,
+      child: dm.recipientProfilePic == null
+          ? Text(
+              _getInitials(dm.recipientName),
+              style: const TextStyle(
+                color: Colors.teal,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            )
+          : null,
+    );
+  }
+
+  Widget _buildGroupAvatar(GroupModel group) {
+    return CircleAvatar(
+      radius: 25,
+      backgroundColor: Colors.orange[100],
+      child: Icon(Icons.group, color: Colors.orange[700], size: 28),
+    );
   }
 
   @override
@@ -323,7 +349,8 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                   ],
                                 ),
                               )
-                            : _filteredConversations.isEmpty
+                            : _filteredDmList.isEmpty &&
+                                  _filteredGroupList.isEmpty
                             ? Center(
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
@@ -351,55 +378,122 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                 physics: const ClampingScrollPhysics(),
                                 addAutomaticKeepAlives: false,
                                 addRepaintBoundaries: true,
-                                itemCount: _filteredConversations.length,
+                                itemCount:
+                                    _filteredDmList.length +
+                                    _filteredGroupList.length +
+                                    (_filteredDmList.isNotEmpty &&
+                                            _filteredGroupList.isNotEmpty
+                                        ? 2
+                                        : 0),
                                 itemBuilder: (context, index) {
-                                  final conversation =
-                                      _filteredConversations[index];
-                                  final isSelected = _selectedConversations
-                                      .contains(conversation.id);
+                                  // Section headers
+                                  if (_filteredDmList.isNotEmpty &&
+                                      _filteredGroupList.isNotEmpty) {
+                                    if (index == 0) {
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 20,
+                                          vertical: 8,
+                                        ),
+                                        child: Text(
+                                          'Direct Messages',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.grey[700],
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                    if (index == _filteredDmList.length + 1) {
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 20,
+                                          vertical: 8,
+                                        ),
+                                        child: Text(
+                                          'Groups',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.grey[700],
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  }
 
-                                  return AnimatedContainer(
-                                    duration: const Duration(milliseconds: 200),
-                                    margin: const EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: isSelected
-                                          ? Colors.teal.withOpacity(0.1)
-                                          : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
+                                  // Calculate actual item index
+                                  int actualIndex;
+                                  bool isGroup;
+                                  if (_filteredDmList.isNotEmpty &&
+                                      _filteredGroupList.isNotEmpty) {
+                                    if (index <= _filteredDmList.length) {
+                                      actualIndex = index - 1;
+                                      isGroup = false;
+                                    } else {
+                                      actualIndex =
+                                          index - _filteredDmList.length - 2;
+                                      isGroup = true;
+                                    }
+                                  } else if (_filteredDmList.isNotEmpty) {
+                                    actualIndex = index;
+                                    isGroup = false;
+                                  } else {
+                                    actualIndex = index;
+                                    isGroup = true;
+                                  }
+
+                                  if (isGroup) {
+                                    final group =
+                                        _filteredGroupList[actualIndex];
+                                    final isSelected = _selectedConversations
+                                        .contains(group.conversationId);
+
+                                    return AnimatedContainer(
+                                      duration: const Duration(
+                                        milliseconds: 200,
+                                      ),
+                                      margin: const EdgeInsets.symmetric(
+                                        horizontal: 20,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
                                         color: isSelected
-                                            ? Colors.teal.withOpacity(0.3)
+                                            ? Colors.teal.withOpacity(0.1)
                                             : Colors.transparent,
-                                        width: 1,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: isSelected
+                                              ? Colors.teal.withOpacity(0.3)
+                                              : Colors.transparent,
+                                          width: 1,
+                                        ),
                                       ),
-                                    ),
-                                    child: ListTile(
-                                      onTap: () => _toggleConversationSelection(
-                                        conversation.id,
-                                      ),
-                                      leading: _buildConversationAvatar(
-                                        conversation,
-                                      ),
-                                      title: Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              conversation.displayName,
-                                              style: TextStyle(
-                                                fontWeight: isSelected
-                                                    ? FontWeight.bold
-                                                    : FontWeight.w500,
-                                                fontSize: 16,
-                                                color: isSelected
-                                                    ? Colors.teal[700]
-                                                    : Colors.black87,
+                                      child: ListTile(
+                                        onTap: () =>
+                                            _toggleConversationSelection(
+                                              group.conversationId,
+                                            ),
+                                        leading: _buildGroupAvatar(group),
+                                        title: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                group.title,
+                                                style: TextStyle(
+                                                  fontWeight: isSelected
+                                                      ? FontWeight.bold
+                                                      : FontWeight.w500,
+                                                  fontSize: 16,
+                                                  color: isSelected
+                                                      ? Colors.teal[700]
+                                                      : Colors.black87,
+                                                ),
                                               ),
                                             ),
-                                          ),
-                                          if (conversation.isGroup)
                                             Container(
                                               padding:
                                                   const EdgeInsets.symmetric(
@@ -424,55 +518,130 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                                 ),
                                               ),
                                             ),
-                                        ],
-                                      ),
-                                      subtitle:
-                                          conversation
-                                                  .metadata
-                                                  ?.lastMessage
-                                                  .body !=
-                                              null
-                                          ? Text(
-                                              conversation
-                                                  .metadata!
-                                                  .lastMessage
-                                                  .body,
-                                              style: TextStyle(
-                                                color: Colors.grey[600],
-                                                fontSize: 14,
-                                              ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            )
-                                          : null,
-                                      trailing: AnimatedContainer(
-                                        duration: const Duration(
-                                          milliseconds: 200,
+                                          ],
                                         ),
-                                        width: 24,
-                                        height: 24,
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: isSelected
-                                              ? Colors.teal
-                                              : Colors.transparent,
-                                          border: Border.all(
-                                            color: isSelected
-                                                ? Colors.teal
-                                                : Colors.grey[400]!,
-                                            width: 2,
-                                          ),
-                                        ),
-                                        child: isSelected
-                                            ? const Icon(
-                                                Icons.check,
-                                                size: 16,
-                                                color: Colors.white,
+                                        subtitle: group.lastMessageBody != null
+                                            ? Text(
+                                                group.lastMessageBody!,
+                                                style: TextStyle(
+                                                  color: Colors.grey[600],
+                                                  fontSize: 14,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
                                               )
                                             : null,
+                                        trailing: AnimatedContainer(
+                                          duration: const Duration(
+                                            milliseconds: 200,
+                                          ),
+                                          width: 24,
+                                          height: 24,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: isSelected
+                                                ? Colors.teal
+                                                : Colors.transparent,
+                                            border: Border.all(
+                                              color: isSelected
+                                                  ? Colors.teal
+                                                  : Colors.grey[400]!,
+                                              width: 2,
+                                            ),
+                                          ),
+                                          child: isSelected
+                                              ? const Icon(
+                                                  Icons.check,
+                                                  size: 16,
+                                                  color: Colors.white,
+                                                )
+                                              : null,
+                                        ),
                                       ),
-                                    ),
-                                  );
+                                    );
+                                  } else {
+                                    final dm = _filteredDmList[actualIndex];
+                                    final isSelected = _selectedConversations
+                                        .contains(dm.conversationId);
+
+                                    return AnimatedContainer(
+                                      duration: const Duration(
+                                        milliseconds: 200,
+                                      ),
+                                      margin: const EdgeInsets.symmetric(
+                                        horizontal: 20,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: isSelected
+                                            ? Colors.teal.withOpacity(0.1)
+                                            : Colors.transparent,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: isSelected
+                                              ? Colors.teal.withOpacity(0.3)
+                                              : Colors.transparent,
+                                          width: 1,
+                                        ),
+                                      ),
+                                      child: ListTile(
+                                        onTap: () =>
+                                            _toggleConversationSelection(
+                                              dm.conversationId,
+                                            ),
+                                        leading: _buildDmAvatar(dm),
+                                        title: Text(
+                                          dm.recipientName,
+                                          style: TextStyle(
+                                            fontWeight: isSelected
+                                                ? FontWeight.bold
+                                                : FontWeight.w500,
+                                            fontSize: 16,
+                                            color: isSelected
+                                                ? Colors.teal[700]
+                                                : Colors.black87,
+                                          ),
+                                        ),
+                                        subtitle: dm.lastMessageBody != null
+                                            ? Text(
+                                                dm.lastMessageBody!,
+                                                style: TextStyle(
+                                                  color: Colors.grey[600],
+                                                  fontSize: 14,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              )
+                                            : null,
+                                        trailing: AnimatedContainer(
+                                          duration: const Duration(
+                                            milliseconds: 200,
+                                          ),
+                                          width: 24,
+                                          height: 24,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: isSelected
+                                                ? Colors.teal
+                                                : Colors.transparent,
+                                            border: Border.all(
+                                              color: isSelected
+                                                  ? Colors.teal
+                                                  : Colors.grey[400]!,
+                                              width: 2,
+                                            ),
+                                          ),
+                                          child: isSelected
+                                              ? const Icon(
+                                                  Icons.check,
+                                                  size: 16,
+                                                  color: Colors.white,
+                                                )
+                                              : null,
+                                        ),
+                                      ),
+                                    );
+                                  }
                                 },
                               ),
                       ),
