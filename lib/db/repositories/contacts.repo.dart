@@ -11,11 +11,21 @@ class ContactsRepository {
     final db = sqliteDatabase.database;
 
     for (final contact in contacts) {
+      // Check if contact already exists to preserve existing values
+      final existingContact = await (db.select(
+        db.contacts,
+      )..where((t) => t.id.equals(contact.id))).getSingleOrNull();
+
+      // For required fields (name, phone), preserve if new value is empty
       final contactCompanion = ContactsCompanion.insert(
         id: Value(contact.id),
-        name: contact.name,
-        phone: contact.phone,
-        profilePic: Value(contact.profilePic),
+        name: contact.name.isEmpty && existingContact != null
+            ? existingContact.name
+            : contact.name,
+        phone: contact.phone.isEmpty && existingContact != null
+            ? existingContact.phone
+            : contact.phone,
+        profilePic: Value(contact.profilePic ?? existingContact?.profilePic),
       );
       await db.into(db.contacts).insertOnConflictUpdate(contactCompanion);
     }

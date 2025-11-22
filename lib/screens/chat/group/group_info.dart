@@ -1,11 +1,10 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:amigo/db/repositories/conversation_member.repo.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
+import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../../models/group_model.dart';
 import '../../../models/user_model.dart';
 import '../../../api/groups.services.dart';
@@ -31,12 +30,13 @@ class _GroupInfoPageState extends State<GroupInfoPage>
       ConversationRepository();
   final ConversationMemberRepository _conversationMemberRepository =
       ConversationMemberRepository();
+  final UserRepository _userRepository = UserRepository();
 
   final UserUtils _userUtils = UserUtils();
 
   Map<String, dynamic>? _groupInfo;
   List<UserModel> _availableUsers = [];
-  Set<int> _selectedUserIds = {};
+  final Set<int> _selectedUserIds = {};
   bool _isLoading = true;
   bool _isUpdatingTitle = false;
   bool _isRefreshingContacts = false;
@@ -127,15 +127,79 @@ class _GroupInfoPageState extends State<GroupInfoPage>
 
   /// Load group info from local DB first for instant display
   Future<void> _loadGroupInfoFromLocal() async {
-    final groupInfo = await _conversationRepository.getGroupWithMembersByConvId(
-      widget.group.conversationId,
-    );
-    if (groupInfo != null) {
+    try {
+      final groupInfo = await _conversationRepository
+          .getGroupWithMembersByConvId(widget.group.conversationId);
+      if (groupInfo != null) {
+        // Get conversation to access createrId
+        final conv = await _conversationRepository.getConversationById(
+          widget.group.conversationId,
+        );
+
+        final groupInfoMap = groupInfo.toJson();
+
+        // Add creator information if available
+        if (conv != null) {
+          groupInfoMap['createrId'] = conv.createrId;
+          // Find creator name from members list first
+          String? creatorName;
+          if (groupInfo.members != null && groupInfo.members!.isNotEmpty) {
+            try {
+              final creatorMember = groupInfo.members!.firstWhere(
+                (member) => member.userId == conv.createrId,
+              );
+              creatorName = creatorMember.name;
+            } catch (e) {
+              // Creator not found in members list, try to get from users table
+              debugPrint(
+                'Creator not found in members list, fetching from users table',
+              );
+            }
+          }
+
+          // If creator name not found in members, try to get from users table
+          if (creatorName == null || creatorName.isEmpty) {
+            final creatorUser = await _userRepository.getUserById(
+              conv.createrId,
+            );
+            creatorName = creatorUser?.name ?? 'Unknown';
+          }
+
+          groupInfoMap['createrName'] = creatorName;
+        }
+
+        setState(() {
+          _groupInfo = groupInfoMap;
+          _isLoading = false;
+          _errorMessage = null;
+        });
+        // Start animation after data is loaded
+        _animationController.forward();
+      } else {
+        // If no data found, set loading to false and show error
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Group information not found';
+        });
+        // Start animation to show error message
+        _animationController.forward();
+      }
+    } catch (e) {
+      debugPrint('Error loading group info: $e');
       setState(() {
-        _groupInfo = groupInfo.toJson();
         _isLoading = false;
+        _errorMessage = 'Error loading group information: $e';
       });
+      // Start animation to show error message
+      _animationController.forward();
     }
+
+    // print(
+    //   '######################groupInfo: ${_groupInfo?['group']['title']} ######################',
+    // );
+    print(
+      '######################groupInfo: $_groupInfo ######################',
+    );
   }
 
   Future<void> _loadAvailableUsers({bool forceRefresh = false}) async {
@@ -240,7 +304,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
     }
 
     final TextEditingController controller = TextEditingController(
-      text: _groupInfo?['group']?['title'] ?? '',
+      text: _groupInfo?['title'] ?? '',
     );
 
     return showDialog(
@@ -271,8 +335,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
           ElevatedButton(
             onPressed: () async {
               final newTitle = controller.text.trim();
-              if (newTitle.isNotEmpty &&
-                  newTitle != _groupInfo?['group']?['title']) {
+              if (newTitle.isNotEmpty && newTitle != _groupInfo?['title']) {
                 Navigator.pop(context);
                 await _updateGroupTitle(newTitle);
               }
@@ -305,7 +368,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
       if (response['success'] == true) {
         setState(() {
           if (_groupInfo != null) {
-            _groupInfo!['group']['title'] = newTitle;
+            _groupInfo?['title'] = newTitle;
           }
         });
         _showSnackBar('Group title updated successfully');
@@ -1073,8 +1136,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
 
   bool _isGroupCreator(int userId) {
     // Check if the user is the creator of the group
-    final creatorId =
-        _groupInfo?['group']?['createrId'] ?? _groupInfo?['created_by'];
+    final creatorId = _groupInfo?['createrId'] ?? _groupInfo?['created_by'];
     return userId == creatorId;
   }
 
@@ -1668,7 +1730,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
   }
 
   Future<void> _showDeleteGroupDialog() async {
-    final groupTitle = _groupInfo?['group']?['title'] ?? 'this group';
+    final groupTitle = _groupInfo?['title'] ?? 'this group';
 
     final bool? confirmed = await showGeneralDialog<bool>(
       context: context,
@@ -1990,7 +2052,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                           child: Column(
                             children: [
                               _buildGroupAvatar(
-                                _groupInfo?['group']?['title'] ?? 'Group',
+                                _groupInfo?['title'] ?? 'Group',
                                 radius: 50,
                               ),
                               const SizedBox(height: 16),
@@ -2000,8 +2062,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                   Expanded(
                                     child: Text(
                                       _capitalizeFirstLetter(
-                                        _groupInfo?['group']?['title'] ??
-                                            'Group',
+                                        _groupInfo?['title'] ?? 'Group',
                                       ),
                                       style: const TextStyle(
                                         fontSize: 24,
@@ -2034,7 +2095,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                'Created by ${_groupInfo?['group']?['createrName'] ?? 'Unknown'}',
+                                'Created by ${_groupInfo?['createrName'] ?? 'Unknown'}',
                                 style: TextStyle(
                                   fontSize: 14,
                                   color: Colors.grey[600],
@@ -2208,7 +2269,10 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                                 ? Colors.amber.shade100
                                                 : Colors.teal.shade100,
                                             child: Text(
-                                              (member['userName'] ?? '?')[0]
+                                              ((member['userName'] ??
+                                                          member['name'] ??
+                                                          '?')
+                                                      as String)[0]
                                                   .toUpperCase(),
                                               style: TextStyle(
                                                 color: isAdmin
@@ -2228,6 +2292,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                                   children: [
                                                     Text(
                                                       member['userName'] ??
+                                                          member['name'] ??
                                                           'Unknown',
                                                       style: const TextStyle(
                                                         fontWeight:
@@ -2393,12 +2458,12 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                                             BorderRadius.circular(
                                                               8,
                                                             ),
-                                                        onTap: () =>
-                                                            _promoteToAdmin(
-                                                              member['userId'],
-                                                              member['userName'] ??
-                                                                  'Unknown',
-                                                            ),
+                                                        onTap: () => _promoteToAdmin(
+                                                          member['userId'],
+                                                          member['userName'] ??
+                                                              member['name'] ??
+                                                              'Unknown',
+                                                        ),
                                                         child: Padding(
                                                           padding:
                                                               const EdgeInsets.all(
@@ -2438,12 +2503,12 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                                             BorderRadius.circular(
                                                               8,
                                                             ),
-                                                        onTap: () =>
-                                                            _demoteToMember(
-                                                              member['userId'],
-                                                              member['userName'] ??
-                                                                  'Unknown',
-                                                            ),
+                                                        onTap: () => _demoteToMember(
+                                                          member['userId'],
+                                                          member['userName'] ??
+                                                              member['name'] ??
+                                                              'Unknown',
+                                                        ),
                                                         child: Padding(
                                                           padding:
                                                               const EdgeInsets.all(
@@ -2466,6 +2531,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                                       _removeMember(
                                                         member['userId'],
                                                         member['userName'] ??
+                                                            member['name'] ??
                                                             'Unknown',
                                                       ),
                                                   icon: const Icon(

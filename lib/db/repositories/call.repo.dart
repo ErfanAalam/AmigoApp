@@ -16,9 +16,9 @@ class CallRepository {
     final otherUserId = isIncoming ? call.callerId : call.calleeId;
 
     // Try to get contact info from Contacts table first
-    Contact? contact = await (db.select(db.contacts)
-          ..where((t) => t.id.equals(otherUserId)))
-        .getSingleOrNull();
+    Contact? contact = await (db.select(
+      db.contacts,
+    )..where((t) => t.id.equals(otherUserId))).getSingleOrNull();
 
     // If not found in contacts, try Users table
     String contactName = 'Unknown';
@@ -30,9 +30,9 @@ class CallRepository {
       contactProfilePic = contact.profilePic;
       contactId = contact.id;
     } else {
-      final user = await (db.select(db.users)
-            ..where((t) => t.id.equals(otherUserId)))
-          .getSingleOrNull();
+      final user = await (db.select(
+        db.users,
+      )..where((t) => t.id.equals(otherUserId))).getSingleOrNull();
       if (user != null) {
         contactName = user.name;
         contactProfilePic = user.profilePic;
@@ -91,23 +91,25 @@ class CallRepository {
     );
   }
 
-  /// Helper method to convert CallModel to CallsCompanion for insertion
-  CallsCompanion _modelToCompanion(CallModel call) {
-    return CallsCompanion.insert(
+  /// Insert a single call
+  Future<void> insertCall(CallModel call) async {
+    final db = sqliteDatabase.database;
+
+    // Check if call already exists to preserve existing values
+    final existingCall = await (db.select(
+      db.calls,
+    )..where((t) => t.id.equals(call.id))).getSingleOrNull();
+
+    // Preserve existing values if call exists and new values are not provided
+    final companion = CallsCompanion.insert(
       id: Value(call.id),
       callerId: call.callerId,
       calleeId: call.calleeId,
       startedAt: call.startedAt.toIso8601String(),
-      endedAt: Value(call.endedAt?.toIso8601String()),
+      endedAt: Value(call.endedAt?.toIso8601String() ?? existingCall?.endedAt),
       status: call.status.value,
       callType: call.callType == CallType.incoming ? 'incoming' : 'outgoing',
     );
-  }
-
-  /// Insert a single call
-  Future<void> insertCall(CallModel call) async {
-    final db = sqliteDatabase.database;
-    final companion = _modelToCompanion(call);
     await db.into(db.calls).insertOnConflictUpdate(companion);
   }
 
@@ -118,7 +120,25 @@ class CallRepository {
     final db = sqliteDatabase.database;
     await db.transaction(() async {
       for (final call in calls) {
-        final companion = _modelToCompanion(call);
+        // Check if call already exists to preserve existing values
+        final existingCall = await (db.select(
+          db.calls,
+        )..where((t) => t.id.equals(call.id))).getSingleOrNull();
+
+        // Preserve existing values if call exists and new values are not provided
+        final companion = CallsCompanion.insert(
+          id: Value(call.id),
+          callerId: call.callerId,
+          calleeId: call.calleeId,
+          startedAt: call.startedAt.toIso8601String(),
+          endedAt: Value(
+            call.endedAt?.toIso8601String() ?? existingCall?.endedAt,
+          ),
+          status: call.status.value,
+          callType: call.callType == CallType.incoming
+              ? 'incoming'
+              : 'outgoing',
+        );
         await db.into(db.calls).insertOnConflictUpdate(companion);
       }
     });
@@ -127,17 +147,18 @@ class CallRepository {
   /// Get all calls for a user
   Future<List<CallModel>> getAllCalls(int userId) async {
     final db = sqliteDatabase.database;
-    final calls = await (db.select(db.calls)
-          ..where(
-            (t) => t.callerId.equals(userId) | t.calleeId.equals(userId),
-          )
-          ..orderBy([
-            (t) => OrderingTerm(
-              expression: t.startedAt,
-              mode: OrderingMode.desc,
-            ),
-          ]))
-        .get();
+    final calls =
+        await (db.select(db.calls)
+              ..where(
+                (t) => t.callerId.equals(userId) | t.calleeId.equals(userId),
+              )
+              ..orderBy([
+                (t) => OrderingTerm(
+                  expression: t.startedAt,
+                  mode: OrderingMode.desc,
+                ),
+              ]))
+            .get();
 
     final results = <CallModel>[];
     for (final call in calls) {
@@ -149,9 +170,9 @@ class CallRepository {
   /// Get calls by ID
   Future<CallModel?> getCallById(int callId, int currentUserId) async {
     final db = sqliteDatabase.database;
-    final call = await (db.select(db.calls)
-          ..where((t) => t.id.equals(callId)))
-        .getSingleOrNull();
+    final call = await (db.select(
+      db.calls,
+    )..where((t) => t.id.equals(callId))).getSingleOrNull();
 
     if (call == null) return null;
     return await _callToModel(call, currentUserId);
@@ -163,19 +184,20 @@ class CallRepository {
     int userId,
   ) async {
     final db = sqliteDatabase.database;
-    final calls = await (db.select(db.calls)
-          ..where(
-            (t) =>
-                (t.callerId.equals(userId) | t.calleeId.equals(userId)) &
-                t.status.equals(status.value),
-          )
-          ..orderBy([
-            (t) => OrderingTerm(
-              expression: t.startedAt,
-              mode: OrderingMode.desc,
-            ),
-          ]))
-        .get();
+    final calls =
+        await (db.select(db.calls)
+              ..where(
+                (t) =>
+                    (t.callerId.equals(userId) | t.calleeId.equals(userId)) &
+                    t.status.equals(status.value),
+              )
+              ..orderBy([
+                (t) => OrderingTerm(
+                  expression: t.startedAt,
+                  mode: OrderingMode.desc,
+                ),
+              ]))
+            .get();
 
     final results = <CallModel>[];
     for (final call in calls) {
@@ -185,10 +207,7 @@ class CallRepository {
   }
 
   /// Get calls by type (incoming/outgoing)
-  Future<List<CallModel>> getCallsByType(
-    CallType type,
-    int userId,
-  ) async {
+  Future<List<CallModel>> getCallsByType(CallType type, int userId) async {
     final db = sqliteDatabase.database;
     final callTypeStr = type == CallType.incoming ? 'incoming' : 'outgoing';
 
@@ -203,10 +222,7 @@ class CallRepository {
     query
       ..where((t) => t.callType.equals(callTypeStr))
       ..orderBy([
-        (t) => OrderingTerm(
-          expression: t.startedAt,
-          mode: OrderingMode.desc,
-        ),
+        (t) => OrderingTerm(expression: t.startedAt, mode: OrderingMode.desc),
       ]);
 
     final calls = await query.get();
@@ -219,24 +235,24 @@ class CallRepository {
   }
 
   /// Get calls with a specific user
-  Future<List<CallModel>> getCallsWithUser(
-    int userId,
-    int otherUserId,
-  ) async {
+  Future<List<CallModel>> getCallsWithUser(int userId, int otherUserId) async {
     final db = sqliteDatabase.database;
-    final calls = await (db.select(db.calls)
-          ..where(
-            (t) =>
-                (t.callerId.equals(userId) & t.calleeId.equals(otherUserId)) |
-                (t.callerId.equals(otherUserId) & t.calleeId.equals(userId)),
-          )
-          ..orderBy([
-            (t) => OrderingTerm(
-              expression: t.startedAt,
-              mode: OrderingMode.desc,
-            ),
-          ]))
-        .get();
+    final calls =
+        await (db.select(db.calls)
+              ..where(
+                (t) =>
+                    (t.callerId.equals(userId) &
+                        t.calleeId.equals(otherUserId)) |
+                    (t.callerId.equals(otherUserId) &
+                        t.calleeId.equals(userId)),
+              )
+              ..orderBy([
+                (t) => OrderingTerm(
+                  expression: t.startedAt,
+                  mode: OrderingMode.desc,
+                ),
+              ]))
+            .get();
 
     final results = <CallModel>[];
     for (final call in calls) {
@@ -256,23 +272,21 @@ class CallRepository {
   }
 
   /// Get recent calls (last N calls)
-  Future<List<CallModel>> getRecentCalls(
-    int userId, {
-    int limit = 20,
-  }) async {
+  Future<List<CallModel>> getRecentCalls(int userId, {int limit = 20}) async {
     final db = sqliteDatabase.database;
-    final calls = await (db.select(db.calls)
-          ..where(
-            (t) => t.callerId.equals(userId) | t.calleeId.equals(userId),
-          )
-          ..orderBy([
-            (t) => OrderingTerm(
-              expression: t.startedAt,
-              mode: OrderingMode.desc,
-            ),
-          ])
-          ..limit(limit))
-        .get();
+    final calls =
+        await (db.select(db.calls)
+              ..where(
+                (t) => t.callerId.equals(userId) | t.calleeId.equals(userId),
+              )
+              ..orderBy([
+                (t) => OrderingTerm(
+                  expression: t.startedAt,
+                  mode: OrderingMode.desc,
+                ),
+              ])
+              ..limit(limit))
+            .get();
 
     final results = <CallModel>[];
     for (final call in calls) {
@@ -291,20 +305,21 @@ class CallRepository {
     final startStr = startDate.toIso8601String();
     final endStr = endDate.toIso8601String();
 
-    final calls = await (db.select(db.calls)
-          ..where(
-            (t) =>
-                (t.callerId.equals(userId) | t.calleeId.equals(userId)) &
-                t.startedAt.isBiggerOrEqualValue(startStr) &
-                t.startedAt.isSmallerOrEqualValue(endStr),
-          )
-          ..orderBy([
-            (t) => OrderingTerm(
-              expression: t.startedAt,
-              mode: OrderingMode.desc,
-            ),
-          ]))
-        .get();
+    final calls =
+        await (db.select(db.calls)
+              ..where(
+                (t) =>
+                    (t.callerId.equals(userId) | t.calleeId.equals(userId)) &
+                    t.startedAt.isBiggerOrEqualValue(startStr) &
+                    t.startedAt.isSmallerOrEqualValue(endStr),
+              )
+              ..orderBy([
+                (t) => OrderingTerm(
+                  expression: t.startedAt,
+                  mode: OrderingMode.desc,
+                ),
+              ]))
+            .get();
 
     final results = <CallModel>[];
     for (final call in calls) {
@@ -348,21 +363,15 @@ class CallRepository {
   /// Update call status
   Future<void> updateCallStatus(int callId, CallStatus status) async {
     final db = sqliteDatabase.database;
-    await (db.update(db.calls)
-          ..where((t) => t.id.equals(callId)))
-        .write(CallsCompanion(status: Value(status.value)));
+    await (db.update(db.calls)..where((t) => t.id.equals(callId))).write(
+      CallsCompanion(status: Value(status.value)),
+    );
   }
 
   /// Update call end time and status
-  Future<void> endCall(
-    int callId,
-    CallStatus status,
-    DateTime? endedAt,
-  ) async {
+  Future<void> endCall(int callId, CallStatus status, DateTime? endedAt) async {
     final db = sqliteDatabase.database;
-    await (db.update(db.calls)
-          ..where((t) => t.id.equals(callId)))
-        .write(
+    await (db.update(db.calls)..where((t) => t.id.equals(callId))).write(
       CallsCompanion(
         status: Value(status.value),
         endedAt: Value(endedAt?.toIso8601String()),
@@ -376,8 +385,7 @@ class CallRepository {
     final query = db.selectOnly(db.calls)
       ..addColumns([db.calls.id.count()])
       ..where(
-        db.calls.callerId.equals(userId) |
-            db.calls.calleeId.equals(userId),
+        db.calls.callerId.equals(userId) | db.calls.calleeId.equals(userId),
       );
 
     final result = await query.getSingle();
@@ -390,8 +398,7 @@ class CallRepository {
     final query = db.selectOnly(db.calls)
       ..addColumns([db.calls.id.count()])
       ..where(
-        (db.calls.callerId.equals(userId) |
-            db.calls.calleeId.equals(userId)) &
+        (db.calls.callerId.equals(userId) | db.calls.calleeId.equals(userId)) &
             db.calls.status.equals(status.value),
       );
 
@@ -404,8 +411,7 @@ class CallRepository {
     final db = sqliteDatabase.database;
     final callTypeStr = type == CallType.incoming ? 'incoming' : 'outgoing';
 
-    final query = db.selectOnly(db.calls)
-      ..addColumns([db.calls.id.count()]);
+    final query = db.selectOnly(db.calls)..addColumns([db.calls.id.count()]);
 
     if (type == CallType.incoming) {
       query.where(
@@ -431,9 +437,9 @@ class CallRepository {
   /// Delete a call
   Future<bool> deleteCall(int callId) async {
     final db = sqliteDatabase.database;
-    final deleted = await (db.delete(db.calls)
-          ..where((t) => t.id.equals(callId)))
-        .go();
+    final deleted = await (db.delete(
+      db.calls,
+    )..where((t) => t.id.equals(callId))).go();
     return deleted > 0;
   }
 
@@ -442,9 +448,9 @@ class CallRepository {
     if (callIds.isEmpty) return 0;
 
     final db = sqliteDatabase.database;
-    final deleted = await (db.delete(db.calls)
-          ..where((t) => t.id.isIn(callIds)))
-        .go();
+    final deleted = await (db.delete(
+      db.calls,
+    )..where((t) => t.id.isIn(callIds))).go();
     return deleted;
   }
 
@@ -452,22 +458,20 @@ class CallRepository {
   Future<void> deleteAllCalls(int userId) async {
     final db = sqliteDatabase.database;
     await (db.delete(db.calls)
-          ..where(
-            (t) => t.callerId.equals(userId) | t.calleeId.equals(userId),
-          ))
+          ..where((t) => t.callerId.equals(userId) | t.calleeId.equals(userId)))
         .go();
   }
 
   /// Delete calls by status
   Future<int> deleteCallsByStatus(int userId, CallStatus status) async {
     final db = sqliteDatabase.database;
-    final deleted = await (db.delete(db.calls)
-          ..where(
-            (t) =>
-                (t.callerId.equals(userId) | t.calleeId.equals(userId)) &
-                t.status.equals(status.value),
-          ))
-        .go();
+    final deleted =
+        await (db.delete(db.calls)..where(
+              (t) =>
+                  (t.callerId.equals(userId) | t.calleeId.equals(userId)) &
+                  t.status.equals(status.value),
+            ))
+            .go();
     return deleted;
   }
 
@@ -477,45 +481,45 @@ class CallRepository {
     final cutoffDate = DateTime.now().subtract(Duration(days: daysOld));
     final cutoffStr = cutoffDate.toIso8601String();
 
-    final deleted = await (db.delete(db.calls)
-          ..where(
-            (t) =>
-                (t.callerId.equals(userId) | t.calleeId.equals(userId)) &
-                t.startedAt.isSmallerThanValue(cutoffStr),
-          ))
-        .go();
+    final deleted =
+        await (db.delete(db.calls)..where(
+              (t) =>
+                  (t.callerId.equals(userId) | t.calleeId.equals(userId)) &
+                  t.startedAt.isSmallerThanValue(cutoffStr),
+            ))
+            .go();
     return deleted;
   }
 
   /// Check if call exists
   Future<bool> callExists(int callId) async {
     final db = sqliteDatabase.database;
-    final call = await (db.select(db.calls)
-          ..where((t) => t.id.equals(callId)))
-        .getSingleOrNull();
+    final call = await (db.select(
+      db.calls,
+    )..where((t) => t.id.equals(callId))).getSingleOrNull();
     return call != null;
   }
 
   /// Get last call with a user
-  Future<CallModel?> getLastCallWithUser(
-    int userId,
-    int otherUserId,
-  ) async {
+  Future<CallModel?> getLastCallWithUser(int userId, int otherUserId) async {
     final db = sqliteDatabase.database;
-    final call = await (db.select(db.calls)
-          ..where(
-            (t) =>
-                (t.callerId.equals(userId) & t.calleeId.equals(otherUserId)) |
-                (t.callerId.equals(otherUserId) & t.calleeId.equals(userId)),
-          )
-          ..orderBy([
-            (t) => OrderingTerm(
-              expression: t.startedAt,
-              mode: OrderingMode.desc,
-            ),
-          ])
-          ..limit(1))
-        .getSingleOrNull();
+    final call =
+        await (db.select(db.calls)
+              ..where(
+                (t) =>
+                    (t.callerId.equals(userId) &
+                        t.calleeId.equals(otherUserId)) |
+                    (t.callerId.equals(otherUserId) &
+                        t.calleeId.equals(userId)),
+              )
+              ..orderBy([
+                (t) => OrderingTerm(
+                  expression: t.startedAt,
+                  mode: OrderingMode.desc,
+                ),
+              ])
+              ..limit(1))
+            .getSingleOrNull();
 
     if (call == null) return null;
     return await _callToModel(call, userId);
@@ -529,8 +533,7 @@ class CallRepository {
     final totalQuery = db.selectOnly(db.calls)
       ..addColumns([db.calls.id.count()])
       ..where(
-        db.calls.callerId.equals(userId) |
-            db.calls.calleeId.equals(userId),
+        db.calls.callerId.equals(userId) | db.calls.calleeId.equals(userId),
       );
     final totalResult = await totalQuery.getSingle();
     final total = totalResult.read(db.calls.id.count()) ?? 0;
@@ -539,8 +542,7 @@ class CallRepository {
     final incomingQuery = db.selectOnly(db.calls)
       ..addColumns([db.calls.id.count()])
       ..where(
-        db.calls.calleeId.equals(userId) &
-            db.calls.callType.equals('incoming'),
+        db.calls.calleeId.equals(userId) & db.calls.callType.equals('incoming'),
       );
     final incomingResult = await incomingQuery.getSingle();
     final incoming = incomingResult.read(db.calls.id.count()) ?? 0;
@@ -549,8 +551,7 @@ class CallRepository {
     final outgoingQuery = db.selectOnly(db.calls)
       ..addColumns([db.calls.id.count()])
       ..where(
-        db.calls.callerId.equals(userId) &
-            db.calls.callType.equals('outgoing'),
+        db.calls.callerId.equals(userId) & db.calls.callType.equals('outgoing'),
       );
     final outgoingResult = await outgoingQuery.getSingle();
     final outgoing = outgoingResult.read(db.calls.id.count()) ?? 0;
@@ -559,8 +560,7 @@ class CallRepository {
     final missedQuery = db.selectOnly(db.calls)
       ..addColumns([db.calls.id.count()])
       ..where(
-        (db.calls.callerId.equals(userId) |
-            db.calls.calleeId.equals(userId)) &
+        (db.calls.callerId.equals(userId) | db.calls.calleeId.equals(userId)) &
             db.calls.status.equals(CallStatus.missed.value),
       );
     final missedResult = await missedQuery.getSingle();
@@ -570,8 +570,7 @@ class CallRepository {
     final declinedQuery = db.selectOnly(db.calls)
       ..addColumns([db.calls.id.count()])
       ..where(
-        (db.calls.callerId.equals(userId) |
-            db.calls.calleeId.equals(userId)) &
+        (db.calls.callerId.equals(userId) | db.calls.calleeId.equals(userId)) &
             db.calls.status.equals(CallStatus.declined.value),
       );
     final declinedResult = await declinedQuery.getSingle();
@@ -581,8 +580,7 @@ class CallRepository {
     final answeredQuery = db.selectOnly(db.calls)
       ..addColumns([db.calls.id.count()])
       ..where(
-        (db.calls.callerId.equals(userId) |
-            db.calls.calleeId.equals(userId)) &
+        (db.calls.callerId.equals(userId) | db.calls.calleeId.equals(userId)) &
             db.calls.status.equals(CallStatus.answered.value),
       );
     final answeredResult = await answeredQuery.getSingle();
@@ -613,10 +611,7 @@ class CallRepository {
   }
 
   /// Get total call duration with a specific user (in seconds)
-  Future<int> getTotalCallDurationWithUser(
-    int userId,
-    int otherUserId,
-  ) async {
+  Future<int> getTotalCallDurationWithUser(int userId, int otherUserId) async {
     final calls = await getCallsWithUser(userId, otherUserId);
     int totalDuration = 0;
 
@@ -632,19 +627,20 @@ class CallRepository {
   /// Get active/ongoing calls (calls without endedAt)
   Future<List<CallModel>> getActiveCalls(int userId) async {
     final db = sqliteDatabase.database;
-    final calls = await (db.select(db.calls)
-          ..where(
-            (t) =>
-                (t.callerId.equals(userId) | t.calleeId.equals(userId)) &
-                t.endedAt.isNull(),
-          )
-          ..orderBy([
-            (t) => OrderingTerm(
-              expression: t.startedAt,
-              mode: OrderingMode.desc,
-            ),
-          ]))
-        .get();
+    final calls =
+        await (db.select(db.calls)
+              ..where(
+                (t) =>
+                    (t.callerId.equals(userId) | t.calleeId.equals(userId)) &
+                    t.endedAt.isNull(),
+              )
+              ..orderBy([
+                (t) => OrderingTerm(
+                  expression: t.startedAt,
+                  mode: OrderingMode.desc,
+                ),
+              ]))
+            .get();
 
     final results = <CallModel>[];
     for (final call in calls) {
@@ -660,23 +656,21 @@ class CallRepository {
   }
 
   /// Search calls by contact name
-  Future<List<CallModel>> searchCalls(
-    int userId,
-    String searchQuery,
-  ) async {
+  Future<List<CallModel>> searchCalls(int userId, String searchQuery) async {
     final allCalls = await getAllCalls(userId);
 
     // Filter calls where contact name contains search query
     return allCalls
-        .where((call) =>
-            call.contactName.toLowerCase().contains(searchQuery.toLowerCase()))
+        .where(
+          (call) => call.contactName.toLowerCase().contains(
+            searchQuery.toLowerCase(),
+          ),
+        )
         .toList();
   }
 
   /// Get calls grouped by contact
-  Future<Map<int, List<CallModel>>> getCallsGroupedByContact(
-    int userId,
-  ) async {
+  Future<Map<int, List<CallModel>>> getCallsGroupedByContact(int userId) async {
     final calls = await getAllCalls(userId);
     final grouped = <int, List<CallModel>>{};
 
@@ -715,11 +709,10 @@ class CallRepository {
     }
 
     // Sort by call count descending
-    contactStats.sort((a, b) => (b['callCount'] as int).compareTo(
-          a['callCount'] as int,
-        ));
+    contactStats.sort(
+      (a, b) => (b['callCount'] as int).compareTo(a['callCount'] as int),
+    );
 
     return contactStats.take(limit).toList();
   }
 }
-

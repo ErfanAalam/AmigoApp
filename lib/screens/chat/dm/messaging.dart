@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
+import 'package:amigo/db/repositories/messageStatus.repo.dart';
 import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/message.model.dart';
@@ -54,7 +55,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     with TickerProviderStateMixin {
   final ChatsServices _chatsServices = ChatsServices();
   // final UserService _userService = UserService();
+  final ConversationRepository _conversationsRepo = ConversationRepository();
   final MessageRepository _messagesRepo = MessageRepository();
+  final MessageStatusRepository _messageStatusRepo = MessageStatusRepository();
   final UserRepository _userRepo = UserRepository();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _messageController = TextEditingController();
@@ -62,7 +65,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   final WebSocketMessageHandler _wsMessageHandler = WebSocketMessageHandler();
   final ImagePicker _imagePicker = ImagePicker();
   final MediaCacheService _mediaCacheService = MediaCacheService();
-  final ConversationRepository _conversationsRepo = ConversationRepository();
   final UserUtils _userUtils = UserUtils();
 
   // stream subscriptions
@@ -340,16 +342,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       });
     }
 
-    // load pinned message from prefs and then DB
-    if (widget.dm.pinnedMessageId != null) {
-      final pinnedMessage = await _messagesRepo.getMessageById(
-        widget.dm.pinnedMessageId!,
-      );
-      setState(() {
-        _pinnedMessage = pinnedMessage;
-      });
-    }
-
     final messaagesFromLocal = await _messagesRepo.getMessagesByConversation(
       widget.dm.conversationId,
       limit: 100,
@@ -361,6 +353,16 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       _sortMessagesBySentAt();
       _isLoading = false;
     });
+
+    // load pinned message from prefs and then DB
+    if (widget.dm.pinnedMessageId != null) {
+      final pinnedMessage = await _messagesRepo.getMessageById(
+        widget.dm.pinnedMessageId!,
+      );
+      setState(() {
+        _pinnedMessage = pinnedMessage;
+      });
+    }
 
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     // Send WebSocket messages in background (non-blocking, non-critical)
@@ -405,7 +407,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     final needSync = await _conversationsRepo.getNeedSyncStatus(
       widget.dm.conversationId,
     );
-    if (!needSync) return;
+    print('######################needSync: $needSync ######################');
+    if (needSync == false) return;
 
     // Start syncing
     if (mounted) {
@@ -845,12 +848,26 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     // Create optimistic message for immediate display with current UTC time
     final nowUTC = DateTime.now().toUtc();
+
+    // Structure metadata properly for reply messages
+    Map<String, dynamic>? replyMetadata;
+    if (_replyToMessageData != null) {
+      replyMetadata = {
+        'reply_to': {
+          'message_id': _replyToMessageData!.id,
+          'sender_id': _replyToMessageData!.senderId,
+          'sender_name': _replyToMessageData!.senderName,
+        },
+      };
+    }
+
     final newMsg = MessageModel(
       optimisticId: optimisticMessageId,
       conversationId: widget.dm.conversationId,
       senderId: _currentUserDetails!.id,
       senderName: _currentUserDetails!.name,
       senderProfilePic: _currentUserDetails!.profilePic,
+      metadata: replyMetadata,
       attachments: mediaResponse?.toJson(),
       type: messageType,
       body: messageText,
@@ -901,12 +918,23 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
+      // storing the message into the local database
+      _messagesRepo.insertMessage(newMsg);
+
+      // updating the last message on sending own message
       ref
           .read(chatProvider.notifier)
           .updateLastMessageOnSendingOwnMessage(
             widget.dm.conversationId,
             newMsg,
           );
+
+      // store that message in the message status table
+      await _messageStatusRepo.insertMessageStatusesWithMultipleUserIds(
+        messageId: newMsg.id,
+        conversationId: widget.dm.conversationId,
+        userIds: [widget.dm.recipientId],
+      );
     } catch (e) {
       debugPrint('Error sending message');
     }
@@ -2569,6 +2597,14 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       }
 
       await _sendMediaMessageToServer(voiceFile, MessageType.audio);
+
+      // Stop recording and close modal after successful send
+      await _stopRecording();
+
+      // Close the voice recording modal
+      if (mounted && failedMessage == null) {
+        Navigator.of(context).pop();
+      }
 
       // await sendRecordedVoice(
       //   SendMediaMessageConfig(

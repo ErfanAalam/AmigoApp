@@ -39,7 +39,10 @@ class WebSocketMessageHandler {
   final StreamController<DeleteMessagePayload> _messageDeleteController =
       StreamController<DeleteMessagePayload>.broadcast();
 
-  final StreamController<JoinLeavePayload> _joinLeaveConversationController =
+  final StreamController<JoinLeavePayload> _joinConversationController =
+      StreamController<JoinLeavePayload>.broadcast();
+
+  final StreamController<JoinLeavePayload> _leaveConversationController =
       StreamController<JoinLeavePayload>.broadcast();
 
   bool _isInitialized = false;
@@ -72,8 +75,12 @@ class WebSocketMessageHandler {
       _messageDeleteController.stream;
 
   /// Get stream for conversation join/leave events (type: 'conversation:join')
-  Stream<JoinLeavePayload> get joinLeaveConversationStream =>
-      _joinLeaveConversationController.stream;
+  Stream<JoinLeavePayload> get joinConversationStream =>
+      _joinConversationController.stream;
+
+  /// Get stream for conversation leave events (type: 'conversation:leave')
+  Stream<JoinLeavePayload> get leaveConversationStream =>
+      _leaveConversationController.stream;
 
   /// Initialize the handler - call this once when app starts
   void initialize() {
@@ -157,7 +164,14 @@ class WebSocketMessageHandler {
         case WSMessageType.conversationJoin:
           final payload = message.joinLeavePayload;
           if (payload != null) {
-            _joinLeaveConversationController.add(payload);
+            _joinConversationController.add(payload);
+          }
+          break;
+
+        case WSMessageType.conversationLeave:
+          final payload = message.joinLeavePayload;
+          if (payload != null) {
+            _joinConversationController.add(payload);
           }
           break;
 
@@ -184,12 +198,6 @@ class WebSocketMessageHandler {
         case WSMessageType.callMissed:
           // Call messages are handled by call service
           debugPrint('📞 Call message received: ${message.type.value}');
-          break;
-
-        case WSMessageType.conversationJoin:
-        case WSMessageType.conversationLeave:
-          // Join/leave messages can be handled if needed
-          debugPrint('👥 Conversation join/leave: ${message.type.value}');
           break;
 
         case WSMessageType.messageForward:
@@ -246,8 +254,8 @@ class WebSocketMessageHandler {
   }
 
   /// Get a filtered stream for conversation join/leave events in a specific conversation
-  Stream<JoinLeavePayload> joinLeaveForConversation(int conversationId) {
-    return joinLeaveConversationStream.where(
+  Stream<JoinLeavePayload> joinConversation(int conversationId) {
+    return joinConversationStream.where(
       (payload) => payload.convId == conversationId,
     );
   }

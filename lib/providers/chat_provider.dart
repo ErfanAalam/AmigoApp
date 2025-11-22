@@ -156,7 +156,7 @@ class ChatNotifier extends Notifier<ChatState> {
   StreamSubscription<MessagePinPayload>? _pinSubscription;
   StreamSubscription<NewConversationPayload>? _conversationAddedSubscription;
   StreamSubscription<DeleteMessagePayload>? _messageDeleteSubscription;
-  StreamSubscription<JoinLeavePayload>? _joinLeaveSubscription;
+  StreamSubscription<JoinLeavePayload>? _joinConvSubscription;
 
   final Map<int, Timer?> _typingTimers = {};
 
@@ -212,7 +212,7 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   /// Load conversations from server
-  Future<void> loadConvsFromServer({bool silent = false}) async {
+  Future<void> loadConvsFromServer({bool silent = true}) async {
     if (!silent) {
       state = state.copyWith(isLoading: true);
     }
@@ -316,8 +316,6 @@ class ChatNotifier extends Notifier<ChatState> {
           favoriteChats: currentFavoriteChats,
           deletedChats: currentDeletedChats,
         );
-      } else {
-        state = state.copyWith(dmList: [], isLoading: false);
       }
     }
 
@@ -419,8 +417,6 @@ class ChatNotifier extends Notifier<ChatState> {
         favoriteChats: currentFavoriteChats,
         deletedChats: currentDeletedChats,
       );
-    } else {
-      state = state.copyWith(dmList: [], isLoading: false);
     }
   }
 
@@ -814,8 +810,8 @@ class ChatNotifier extends Notifier<ChatState> {
       },
     );
 
-    _joinLeaveSubscription = _messageHandler.joinLeaveConversationStream.listen(
-      _handleConversationJoinLeave,
+    _joinConvSubscription = _messageHandler.joinConversationStream.listen(
+      _handleConversationJoin,
       onError: (error) {
         debugPrint('❌ Conversation join/leave stream error: $error');
       },
@@ -1003,6 +999,11 @@ class ChatNotifier extends Notifier<ChatState> {
         payload.canonicalId,
       );
 
+      await _messageStatusRepo.updateMessageId(
+        payload.optimisticId,
+        payload.canonicalId,
+      );
+
       // update the sended message in the status table with deliveredAt timestamp
       await _messageStatusRepo.updateDeliveredAt(
         messageId: payload.canonicalId,
@@ -1019,14 +1020,23 @@ class ChatNotifier extends Notifier<ChatState> {
     MessageModel lastMessage,
   ) async {
     try {
-      await _conversationsRepo.updateLastMessage(
-        conversationId,
-        lastMessage.id,
-      );
+      // Ensure we have a valid message ID (use optimistic ID if canonical is not available yet)
+      final messageId = lastMessage.canonicalId ?? lastMessage.optimisticId;
+
+      if (messageId == null) {
+        return;
+      }
+
+      // Update database with the message ID
+      await _conversationsRepo.updateLastMessage(conversationId, messageId);
 
       final convType = await _conversationsRepo.getConversationTypeById(
         conversationId,
       );
+
+      if (convType == null) {
+        return;
+      }
 
       if (convType == ChatType.dm.value) {
         final convIndex = state.dmList.indexWhere(
@@ -1035,14 +1045,28 @@ class ChatNotifier extends Notifier<ChatState> {
         if (convIndex != -1) {
           final dm = state.dmList[convIndex];
           final updatedDm = dm.copyWith(
-            lastMessageId: lastMessage.id,
+            lastMessageId: messageId,
             lastMessageType: lastMessage.type.value,
             lastMessageBody: lastMessage.body,
             lastMessageAt: lastMessage.sentAt,
           );
           final updatedDmList = List<DmModel>.from(state.dmList);
           updatedDmList[convIndex] = updatedDm;
-          state = state.copyWith(dmList: updatedDmList);
+
+          // Sort conversations after updating last message
+          final sortedConversations = await _filterAndSortConversations(
+            updatedDmList,
+          );
+
+          // Update state - wrap in try-catch to handle defunct widget errors gracefully
+          try {
+            state = state.copyWith(dmList: sortedConversations);
+          } catch (e) {
+            // Still update state even if there's an error - the state should be correct
+            state = state.copyWith(dmList: sortedConversations);
+          }
+        } else {
+          debugPrint('❌ DM conversation not found in list: $conversationId');
         }
       } else if (convType == ChatType.group.value) {
         final convIndex = state.groupList.indexWhere(
@@ -1050,16 +1074,59 @@ class ChatNotifier extends Notifier<ChatState> {
         );
         if (convIndex != -1) {
           final group = state.groupList[convIndex];
+
+          // Update metadata.lastMessage as well (UI reads from this)
+          GroupMetadata? updatedMetadata;
+          final updatedLastMessage = GroupLastMessage(
+            id: messageId,
+            body: lastMessage.body ?? '',
+            type: lastMessage.type.value,
+            senderId: lastMessage.senderId,
+            senderName: lastMessage.senderName ?? 'You',
+            createdAt: lastMessage.sentAt,
+            conversationId: conversationId,
+            attachmentData: lastMessage.attachments,
+          );
+
+          if (group.metadata != null) {
+            // Preserve existing metadata values
+            updatedMetadata = group.metadata!.copyWith(
+              lastMessage: updatedLastMessage,
+            );
+          } else {
+            // Create new metadata if it doesn't exist
+            updatedMetadata = GroupMetadata(
+              lastMessage: updatedLastMessage,
+              totalMessages: 0,
+              createdBy: 0,
+            );
+          }
+
           final updatedGroup = group.copyWith(
-            lastMessageId: lastMessage.id,
+            lastMessageId: messageId,
             lastMessageType: lastMessage.type.value,
-            lastMessageBody: lastMessage.body,
+            lastMessageBody: lastMessage.body ?? '',
             lastMessageAt: lastMessage.sentAt,
+            metadata: updatedMetadata,
           );
 
           final updatedGroups = List<GroupModel>.from(state.groupList);
           updatedGroups[convIndex] = updatedGroup;
-          state = state.copyWith(groupList: updatedGroups);
+
+          // Sort groups after updating last message
+          final sortedGroups = await _filterAndSortGroupConversations(
+            updatedGroups,
+          );
+
+          // Update state - wrap in try-catch to handle defunct widget errors gracefully
+          try {
+            state = state.copyWith(groupList: sortedGroups);
+          } catch (e) {
+            // Still update state even if there's an error - the state should be correct
+            state = state.copyWith(groupList: sortedGroups);
+          }
+        } else {
+          debugPrint('❌ Group conversation not found in list: $conversationId');
         }
       }
     } catch (e) {
@@ -1326,7 +1393,7 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   /// Handle conversation join/leave events
-  Future<void> _handleConversationJoinLeave(JoinLeavePayload payload) async {
+  Future<void> _handleConversationJoin(JoinLeavePayload payload) async {
     try {
       await _messageStatusRepo.markAllAsReadByConversationAndUser(
         conversationId: payload.convId,
@@ -1343,6 +1410,7 @@ class ChatNotifier extends Notifier<ChatState> {
     _messageSubscription?.cancel();
     _messageAckSubscription?.cancel();
     _pinSubscription?.cancel();
+    _joinConvSubscription?.cancel();
     _conversationAddedSubscription?.cancel();
     _messageDeleteSubscription?.cancel();
     _onlineStatusSubscription?.cancel();

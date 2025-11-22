@@ -543,6 +543,10 @@ class VoiceRecordingManager {
   /// Stop voice recording
   Future<void> stopRecording() async {
     try {
+      // Always cancel timer first to prevent it from continuing
+      _recordingTimer?.cancel();
+      _recordingTimer = null;
+
       if (!_isRecording) {
         return;
       }
@@ -560,7 +564,6 @@ class VoiceRecordingManager {
       await Future.delayed(const Duration(milliseconds: 100));
 
       final recordingPath = await _recorder.stopRecorder();
-      _recordingTimer?.cancel();
       _zigzagAnimationController.stop();
       // Wait a moment for file to be written completely
       await Future.delayed(const Duration(milliseconds: 200));

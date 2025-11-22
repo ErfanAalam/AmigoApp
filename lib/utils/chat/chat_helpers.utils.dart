@@ -230,8 +230,8 @@ class ChatHelpers {
       // If the date differs, current is the first message of its day group.
       final previousMessage = messages[messages.length - 1 - (index + 1)];
 
-      final currentDateTime = convertToLocalTime(currentMessage.createdAt);
-      final previousDateTime = convertToLocalTime(previousMessage.createdAt);
+      final currentDateTime = convertToLocalTime(currentMessage.sentAt);
+      final previousDateTime = convertToLocalTime(previousMessage.sentAt);
 
       final currentDate = DateTime(
         currentDateTime.year,
@@ -259,12 +259,12 @@ class ChatHelpers {
   static void debugMessageDates(List messages) {
     for (int i = 0; i < messages.length; i++) {
       final message = messages[messages.length - 1 - i];
-      final dateTime = convertToLocalTime(message.createdAt);
+      final dateTime = convertToLocalTime(message.sentAt);
       final dateStr =
           '${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}';
       final shouldShowSeparator = shouldShowDateSeparator(messages, i);
       debugPrint(
-        '   Index $i: ${message.createdAt} -> $dateStr ${shouldShowSeparator ? '📅 SEPARATOR' : ''}',
+        '   Index $i: ${message.sentAt} -> $dateStr ${shouldShowSeparator ? '📅 SEPARATOR' : ''}',
       );
     }
   }

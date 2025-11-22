@@ -136,17 +136,33 @@ class WebSocketService {
   void _handleMessage(dynamic message) {
     try {
       final WSMessage data;
+      Map<String, dynamic>? jsonMap;
 
-      if (message is Map<String, dynamic>) {
-        data = WSMessage.fromJson(message);
+      // Handle string messages (JSON strings from WebSocket)
+      if (message is String) {
+        try {
+          jsonMap = json.decode(message) as Map<String, dynamic>;
+        } catch (e) {
+          debugPrint('⚠️ Failed to parse JSON string: $message');
+          debugPrint('❌ JSON decode error: $e');
+          return;
+        }
+      } else if (message is Map<String, dynamic>) {
+        jsonMap = message;
       } else {
-        debugPrint('⚠️ Received unexpected websocket message: $message');
+        debugPrint(
+          '⚠️ Received unexpected websocket message type: ${message.runtimeType}',
+        );
+        debugPrint('⚠️ Message content: $message');
         return;
       }
 
+      // Parse the JSON map into WSMessage
+      data = WSMessage.fromJson(jsonMap);
       _messageController.add(data);
-    } catch (e) {
-      debugPrint('❌ Error parsing WebSocket message');
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error parsing WebSocket message: $e');
+      debugPrint('❌ Stack trace: $stackTrace');
       _errorController.add('Error parsing message: $e');
     }
   }

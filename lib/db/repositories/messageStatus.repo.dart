@@ -27,12 +27,19 @@ class MessageStatusRepository {
     String? readAt,
   }) async {
     final db = sqliteDatabase.database;
+
+    // Check if status already exists to preserve existing values
+    final existingStatus = await getMessageStatusByMessageAndUser(
+      messageId,
+      userId,
+    );
+
     final companion = MessageStatusModelCompanion.insert(
       conversationId: conversationId,
       messageId: messageId,
       userId: userId,
-      deliveredAt: Value(deliveredAt),
-      readAt: Value(readAt),
+      deliveredAt: Value(deliveredAt ?? existingStatus?.deliveredAt),
+      readAt: Value(readAt ?? existingStatus?.readAt),
     );
     await db.into(db.messageStatusModel).insertOnConflictUpdate(companion);
   }
@@ -46,12 +53,25 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     await db.transaction(() async {
       for (final status in statuses) {
+        final messageId = status['messageId'] as int;
+        final userId = status['userId'] as int;
+
+        // Check if status already exists to preserve existing values
+        final existingStatus = await getMessageStatusByMessageAndUser(
+          messageId,
+          userId,
+        );
+
         final companion = MessageStatusModelCompanion.insert(
           conversationId: status['conversationId'] as int,
-          messageId: status['messageId'] as int,
-          userId: status['userId'] as int,
-          deliveredAt: Value(status['deliveredAt'] as String?),
-          readAt: Value(status['readAt'] as String?),
+          messageId: messageId,
+          userId: userId,
+          deliveredAt: Value(
+            (status['deliveredAt'] as String?) ?? existingStatus?.deliveredAt,
+          ),
+          readAt: Value(
+            (status['readAt'] as String?) ?? existingStatus?.readAt,
+          ),
         );
         await db.into(db.messageStatusModel).insertOnConflictUpdate(companion);
       }
@@ -514,6 +534,14 @@ class MessageStatusRepository {
   Future<bool> isDeliveredToUser(int messageId, int userId) async {
     final status = await getMessageStatusByMessageAndUser(messageId, userId);
     return status != null && status.deliveredAt != null;
+  }
+
+  // update the message id in the message status table
+  Future<void> updateMessageId(int optimisticId, int canonicalId) async {
+    final db = sqliteDatabase.database;
+    await (db.update(db.messageStatusModel)
+          ..where((t) => t.messageId.equals(optimisticId)))
+        .write(MessageStatusModelCompanion(messageId: Value(canonicalId)));
   }
 
   /// Mark all messages in a conversation as read for a user

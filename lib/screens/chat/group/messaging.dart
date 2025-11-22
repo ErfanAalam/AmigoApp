@@ -308,6 +308,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     super.initState();
     _scrollController.addListener(_onScroll);
 
+    debugPrint('-------initializing the chat-------');
+
     // _websocketService.connect(widget.group.conversationId);
 
     getAllConversationMembers();
@@ -340,6 +342,12 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     setState(() {
       _conversationMembers = members;
     });
+    debugPrint(
+      '-------conversation members: ${_conversationMembers.length}-------',
+    );
+    debugPrint(
+      '-------conversation members: ${widget.group.conversationId}-------',
+    );
   }
 
   /// Load draft message when opening conversation
@@ -440,6 +448,20 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       });
     }
 
+    // Load messages from local storage first
+    final messaagesFromLocal = await _messagesRepo
+        .getMessagesByConversationWithSenderDetails(
+          widget.group.conversationId,
+          limit: 100,
+          offset: 0,
+        );
+
+    setState(() {
+      _messages = messaagesFromLocal;
+      _sortMessagesBySentAt();
+      _isLoading = false;
+    });
+
     // load pinned message from prefs and then DB
     if (widget.group.pinnedMessageId != null) {
       final pinnedMessage = await _messagesRepo.getMessageById(
@@ -447,19 +469,6 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       );
       setState(() {
         _pinnedMessage = pinnedMessage;
-      });
-
-      final messaagesFromLocal = await _messagesRepo
-          .getMessagesByConversationWithSenderDetails(
-            widget.group.conversationId,
-            limit: 100,
-            offset: 0,
-          );
-
-      setState(() {
-        _messages = messaagesFromLocal;
-        _sortMessagesBySentAt();
-        _isLoading = false;
       });
     }
 
@@ -506,7 +515,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     final needSync = await _conversationRepo.getNeedSyncStatus(
       widget.group.conversationId,
     );
-    if (!needSync) return;
+    if (needSync == false) return;
 
     // Start syncing
     if (mounted) {
@@ -547,6 +556,40 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       final firstPageHistory = ConversationHistoryResponse.fromJson(
         firstPageResponse['data'],
       );
+
+      final List<ConversationMemberModel> membersOfConversation =
+          firstPageHistory.members
+              .map(
+                (e) => ConversationMemberModel(
+                  conversationId: widget.group.conversationId,
+                  userId: e['user_id'],
+                  role: e['group_role'],
+                  unreadCount: e['unread_count'] ?? 0,
+                  joinedAt: e['joined_at'],
+                  removedAt: e['removed_at'],
+                ),
+              )
+              .toList();
+
+      await _conversationMemberRepo.insertConversationMembers(
+        membersOfConversation,
+      );
+
+      await _userRepo.insertUsers(
+        firstPageHistory.members
+            .map(
+              (e) => UserModel(
+                id: e['user_id'],
+                name: e['name'],
+                profilePic: e['profile_pic'],
+                phone: e['phone'],
+                isOnline: e['is_online'] ?? false,
+                role: e['user_role'],
+              ),
+            )
+            .toList(),
+      );
+
       _totalMessageCount = firstPageHistory.totalCount;
 
       if (_totalMessageCount == 0) {
@@ -1433,12 +1476,26 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     // Create optimistic message for immediate display with current UTC time
     final nowUTC = DateTime.now().toUtc();
+
+    // Structure metadata properly for reply messages
+    Map<String, dynamic>? replyMetadata;
+    if (_replyToMessageData != null) {
+      replyMetadata = {
+        'reply_to': {
+          'message_id': _replyToMessageData!.id,
+          'sender_id': _replyToMessageData!.senderId,
+          'sender_name': _replyToMessageData!.senderName,
+        },
+      };
+    }
+
     final newMsg = MessageModel(
       optimisticId: optimisticMessageId,
       conversationId: widget.group.conversationId,
       senderId: _currentUserDetails!.id,
       senderName: _currentUserDetails!.name,
       senderProfilePic: _currentUserDetails!.profilePic,
+      metadata: replyMetadata,
       attachments: mediaResponse?.toJson(),
       type: messageType,
       body: messageText,
@@ -1488,6 +1545,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       });
 
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+      _messagesRepo.insertMessage(newMsg);
 
       ref
           .read(chatProvider.notifier)
@@ -3088,6 +3147,14 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         duration = _voiceRecordingManager.recordingDuration.inSeconds;
       }
       await _sendMediaMessageToServer(voiceFile, MessageType.audio);
+
+      // Stop recording and close modal after successful send
+      await _stopRecording();
+
+      // Close the voice recording modal
+      if (mounted && failedMessage == null) {
+        Navigator.of(context).pop();
+      }
 
       // await sendRecordedVoice(
       //   SendMediaMessageConfig(

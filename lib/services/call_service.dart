@@ -20,6 +20,7 @@ import 'socket/websocket_service.dart';
 import '../services/call_foreground_service.dart';
 import '../api/user.service.dart';
 import '../utils/ringing_tone.dart';
+import '../types/socket.type.dart';
 
 class CallService extends ChangeNotifier {
   static final CallService _instance = CallService._internal();
@@ -603,28 +604,55 @@ class CallService extends ChangeNotifier {
   }
 
   /// Handle WebSocket messages
-  void handleWebSocketMessage(message) async {
-    final type = message['type'] as String?;
-    if (type == null) {
-      return;
-    }
+  void handleWebSocketMessage(WSMessage message) async {
+    final type = message.type.value;
 
     // if (!type.startsWith('call:')) {
     //   // Not a call-related message - ignore silently
     //   return;
     // }
 
+    // Helper to convert payload to Map
+    Map<String, dynamic>? _payloadToMap(dynamic payload) {
+      if (payload == null) return null;
+      if (payload is Map<String, dynamic>) return payload;
+      if (payload is Map) {
+        return Map<String, dynamic>.from(payload);
+      }
+      // If it's a typed payload object, try to convert to JSON
+      try {
+        return payload.toJson() as Map<String, dynamic>?;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // Helper to create message map for methods that expect it
+    Map<String, dynamic> _createMessageMap() {
+      final payloadMap = _payloadToMap(message.payload);
+      return {
+        'type': type,
+        'payload': payloadMap ?? {},
+        if (payloadMap != null) ...payloadMap,
+      };
+    }
+
     switch (type) {
       case 'call:init':
         // Acknowledgment from server with callId
-        if (message['data']?['success'] == true) {
-          final callId = message['data']['callId'];
-          _activeCall = _activeCall?.copyWith(callId: callId);
+        final payloadMap = _payloadToMap(message.payload);
+        if (payloadMap?['success'] == true ||
+            payloadMap?['data']?['success'] == true) {
+          final callId =
+              payloadMap?['callId'] ?? payloadMap?['data']?['callId'];
+          if (callId != null) {
+            _activeCall = _activeCall?.copyWith(callId: callId);
 
-          // Start status polling as fallback when WebSocket might not be reliable
-          _startStatusPolling(callId);
+            // Start status polling as fallback when WebSocket might not be reliable
+            _startStatusPolling(callId);
 
-          notifyListeners();
+            notifyListeners();
+          }
         } else {
           _cleanup();
         }
@@ -632,7 +660,17 @@ class CallService extends ChangeNotifier {
 
       case 'call:ringing':
         // Incoming call notification
-        _handleIncomingCall(message);
+        final payloadMap = _payloadToMap(message.payload);
+        if (payloadMap != null) {
+          _handleIncomingCall({
+            'callId': payloadMap['callId'] ?? payloadMap['call_id'],
+            'from':
+                payloadMap['from'] ??
+                payloadMap['from_id'] ??
+                payloadMap['sender_id'],
+            'payload': payloadMap,
+          });
+        }
         break;
 
       case 'call:accept':
@@ -669,15 +707,24 @@ class CallService extends ChangeNotifier {
         break;
 
       case 'call:offer':
-        _handleOffer(message['payload']);
+        final offerPayload = _payloadToMap(message.payload);
+        if (offerPayload != null) {
+          _handleOffer(offerPayload);
+        }
         break;
 
       case 'call:answer':
-        _handleAnswer(message['payload']);
+        final answerPayload = _payloadToMap(message.payload);
+        if (answerPayload != null) {
+          _handleAnswer(answerPayload);
+        }
         break;
 
       case 'call:ice':
-        _handleIceCandidate(message['payload']);
+        final icePayload = _payloadToMap(message.payload);
+        if (icePayload != null) {
+          _handleIceCandidate(icePayload);
+        }
         break;
 
       case 'call:decline':
@@ -686,7 +733,7 @@ class CallService extends ChangeNotifier {
         _callStartedTimer = null;
         // Stop status polling since call is being declined
         _stopStatusPolling();
-        _handleCallDeclined(message);
+        _handleCallDeclined(_createMessageMap());
         await FlutterCallkitIncoming.endAllCalls();
         break;
 
@@ -696,7 +743,7 @@ class CallService extends ChangeNotifier {
         _callStartedTimer = null;
         // Stop status polling since call is ending
         _stopStatusPolling();
-        _handleCallEnded(message);
+        _handleCallEnded(_createMessageMap());
         await FlutterCallkitIncoming.endAllCalls();
         break;
 
@@ -706,7 +753,7 @@ class CallService extends ChangeNotifier {
         _callStartedTimer = null;
         // Stop status polling since call is missed
         _stopStatusPolling();
-        _handleCallMissed(message);
+        _handleCallMissed(_createMessageMap());
         await FlutterCallkitIncoming.endAllCalls();
         break;
 

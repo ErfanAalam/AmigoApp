@@ -310,6 +310,17 @@ class _ContactsPageState extends State<ContactsPage>
 
         // Create ConversationModel from the response
         final conversationData = response['data'];
+        if (conversationData['existing'] == true) {
+          final dm = await _conversationRepository.getDmByConversationId(
+            conversationData['id'],
+          );
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => InnerChatPage(dm: dm!)),
+          );
+          return;
+        }
+
         final dm = DmModel(
           conversationId: conversationData['id'],
           recipientId: user.id,

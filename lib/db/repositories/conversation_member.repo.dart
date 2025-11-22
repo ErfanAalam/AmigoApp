@@ -33,15 +33,28 @@ class ConversationMemberRepository {
     final db = sqliteDatabase.database;
 
     for (final member in members) {
+      // Check if member already exists to preserve existing values
+      final existingMember = await getMemberByConversationAndUser(
+        member.conversationId,
+        member.userId,
+      );
+
       final memberCompanion = ConversationMembersCompanion.insert(
         conversationId: member.conversationId,
         userId: member.userId,
-        role: member.role,
-        unreadCount: Value(member.unreadCount ?? 0),
-        joinedAt: Value(member.joinedAt),
-        removedAt: Value(member.removedAt),
-        lastReadMessageId: Value(member.lastReadMessageId),
-        lastDeliveredMessageId: Value(member.lastDeliveredMessageId),
+        role: member.role, // role is required (non-nullable)
+        unreadCount: Value(
+          member.unreadCount ?? existingMember?.unreadCount ?? 0,
+        ),
+        joinedAt: Value(member.joinedAt ?? existingMember?.joinedAt),
+        removedAt: Value(member.removedAt ?? existingMember?.removedAt),
+        lastReadMessageId: Value(
+          member.lastReadMessageId ?? existingMember?.lastReadMessageId,
+        ),
+        lastDeliveredMessageId: Value(
+          member.lastDeliveredMessageId ??
+              existingMember?.lastDeliveredMessageId,
+        ),
       );
       await db
           .into(db.conversationMembers)
@@ -73,18 +86,36 @@ class ConversationMemberRepository {
   Future<void> updateConversationMember(ConversationMemberModel member) async {
     final db = sqliteDatabase.database;
 
+    // role is required (non-nullable), so always update it
+    // For nullable fields, only update if provided, otherwise preserve existing using Value.absent()
     final companion = ConversationMembersCompanion(
       conversationId: Value(member.conversationId),
       userId: Value(member.userId),
       role: Value(member.role),
-      unreadCount: Value(member.unreadCount ?? 0),
-      joinedAt: Value(member.joinedAt),
-      removedAt: Value(member.removedAt),
-      lastReadMessageId: Value(member.lastReadMessageId),
-      lastDeliveredMessageId: Value(member.lastDeliveredMessageId),
+      unreadCount: member.unreadCount != null
+          ? Value(member.unreadCount!)
+          : const Value.absent(),
+      joinedAt: member.joinedAt != null
+          ? Value(member.joinedAt!)
+          : const Value.absent(),
+      removedAt: member.removedAt != null
+          ? Value(member.removedAt!)
+          : const Value.absent(),
+      lastReadMessageId: member.lastReadMessageId != null
+          ? Value(member.lastReadMessageId!)
+          : const Value.absent(),
+      lastDeliveredMessageId: member.lastDeliveredMessageId != null
+          ? Value(member.lastDeliveredMessageId!)
+          : const Value.absent(),
     );
 
-    await db.update(db.conversationMembers).replace(companion);
+    // Use update instead of replace to preserve existing values
+    await (db.update(db.conversationMembers)..where(
+          (t) =>
+              t.conversationId.equals(member.conversationId) &
+              t.userId.equals(member.userId),
+        ))
+        .write(companion);
   }
 
   /// Get a conversation member by ID
@@ -297,17 +328,23 @@ class ConversationMemberRepository {
   ) async {
     final db = sqliteDatabase.database;
 
-    final member =
-        await (db.select(db.conversationMembers)..where(
-              (t) =>
-                  t.conversationId.equals(conversationId) &
-                  t.userId.equals(userId),
-            ))
-            .getSingleOrNull();
+    final members =
+        await (db.select(db.conversationMembers)
+              ..where(
+                (t) =>
+                    t.conversationId.equals(conversationId) &
+                    t.userId.equals(userId) &
+                    t.removedAt.isNull(), // Only get active members
+              )
+              ..orderBy([
+                (t) => OrderingTerm(expression: t.id, mode: OrderingMode.desc),
+              ])
+              ..limit(1))
+            .get();
 
-    if (member == null) return null;
+    if (members.isEmpty) return null;
 
-    return _conversationMemberToModel(member);
+    return _conversationMemberToModel(members.first);
   }
 
   /// Delete all members of a conversation

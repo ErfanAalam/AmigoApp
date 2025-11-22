@@ -1,4 +1,5 @@
 import 'package:amigo/api/api_service.dart';
+import 'package:amigo/db/sqlite.db.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -172,7 +173,30 @@ class AuthService {
       // 13. Clear current_user_name
       await prefs.remove('current_user_name');
 
-      // 14. Restart the app
+      // 14. Clear the local database completely
+      try {
+        // Try to clear all data from tables first
+        // If this fails (e.g., read-only), we'll just delete the file
+        await SqliteDatabase.instance.clearAllData();
+      } catch (e) {
+        debugPrint('⚠️ Could not clear database tables: $e');
+        // Continue to delete the file anyway
+      }
+
+      try {
+        // Delete the database file entirely to ensure no data remains
+        // This will work even if clearing tables failed
+        await SqliteDatabase.instance.deleteDatabaseFile();
+        debugPrint('✅ Database file deletion attempted');
+      } catch (e) {
+        debugPrint('⚠️ Error deleting database file: $e');
+        // Still try to close the database
+        try {
+          await SqliteDatabase.instance.close();
+        } catch (_) {}
+      }
+
+      // 15. Restart the app
       if (NavigationHelper.navigatorKey.currentContext != null) {
         Navigator.pushAndRemoveUntil(
           NavigationHelper.navigatorKey.currentContext!,

@@ -23,14 +23,23 @@ class UserRepository {
   Future<void> insertUser(UserModel user) async {
     final db = sqliteDatabase.database;
 
+    // Check if user already exists to preserve existing values
+    final existingUser = await getUserById(user.id);
+
+    // For required fields (name, phone), preserve if new value is empty
+    // For optional fields, preserve if new value is null
     final userCompanion = UsersCompanion.insert(
       id: Value(user.id),
-      name: user.name,
-      phone: user.phone,
-      role: Value(user.role),
-      profilePic: Value(user.profilePic),
-      isOnline: user.isOnline,
-      callAccess: Value(user.callAccess),
+      name: user.name.isEmpty && existingUser != null
+          ? existingUser.name
+          : user.name,
+      phone: user.phone.isEmpty && existingUser != null
+          ? existingUser.phone
+          : user.phone,
+      role: Value(user.role ?? existingUser?.role),
+      profilePic: Value(user.profilePic ?? existingUser?.profilePic),
+      isOnline: existingUser != null ? existingUser.isOnline : user.isOnline,
+      callAccess: Value(user.callAccess ?? existingUser?.callAccess ?? false),
     );
 
     await db.into(db.users).insertOnConflictUpdate(userCompanion);
@@ -41,14 +50,23 @@ class UserRepository {
     final db = sqliteDatabase.database;
 
     for (final user in users) {
+      // Check if user already exists to preserve existing values
+      final existingUser = await getUserById(user.id);
+
+      // For required fields (name, phone), preserve if new value is empty
+      // For optional fields, preserve if new value is null
       final userCompanion = UsersCompanion.insert(
         id: Value(user.id),
-        name: user.name,
-        phone: user.phone,
-        role: Value(user.role),
-        profilePic: Value(user.profilePic),
-        isOnline: user.isOnline,
-        callAccess: Value(user.callAccess),
+        name: user.name.isEmpty && existingUser != null
+            ? existingUser.name
+            : user.name,
+        phone: user.phone.isEmpty && existingUser != null
+            ? existingUser.phone
+            : user.phone,
+        role: Value(user.role ?? existingUser?.role),
+        profilePic: Value(user.profilePic ?? existingUser?.profilePic),
+        isOnline: existingUser != null ? existingUser.isOnline : user.isOnline,
+        callAccess: Value(user.callAccess ?? existingUser?.callAccess ?? false),
       );
       await db.into(db.users).insertOnConflictUpdate(userCompanion);
     }
@@ -171,15 +189,29 @@ class UserRepository {
   Future<void> updateUser(UserModel user) async {
     final db = sqliteDatabase.database;
 
+    // Get existing user to preserve values not provided
+    final existingUser = await getUserById(user.id);
+    if (existingUser == null) return;
+
+    // Only update fields that are explicitly provided (non-empty for required fields)
     final companion = UsersCompanion(
       id: Value(user.id),
-      name: Value(user.name),
-      phone: Value(user.phone),
-      role: Value(user.role),
-      profilePic: Value(user.profilePic),
+      name: user.name.isNotEmpty ? Value(user.name) : const Value.absent(),
+      phone: user.phone.isNotEmpty ? Value(user.phone) : const Value.absent(),
+      role: user.role != null ? Value(user.role) : const Value.absent(),
+      profilePic: user.profilePic != null
+          ? Value(user.profilePic)
+          : const Value.absent(),
+      isOnline: const Value.absent(), // Preserve existing isOnline
+      callAccess: user.callAccess != null
+          ? Value(user.callAccess)
+          : const Value.absent(),
     );
 
-    await db.update(db.users).replace(companion);
+    // Use update instead of replace to preserve existing values
+    await (db.update(
+      db.users,
+    )..where((t) => t.id.equals(user.id))).write(companion);
   }
 
   /// Update user's name

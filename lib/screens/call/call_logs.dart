@@ -17,29 +17,45 @@ class CallsPage extends StatefulWidget {
 class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
   final ApiService _apiService = ApiService();
   List<CallHistoryItem> _callHistory = [];
-  bool _isLoading = true;
+  bool _isLoading =
+      false; // Start with false, will be set to true only if needed
   String? _error;
   Timer? _debounceTimer;
+  bool _isLoadingInProgress = false;
+  CallService? _callService;
+  bool _hasLoadedOnce = false; // Track if we've loaded at least once
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadCallHistory();
 
-    // Add a post-frame callback to ensure the page is fully loaded
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _loadCallHistory(showLoading: false);
-      }
-    });
+    // Listen to CallService changes to refresh when calls end
+    _callService = Provider.of<CallService>(context, listen: false);
+    _callService?.addListener(_onCallServiceChanged);
+
+    // Load call history once on init (without showing loading if we have local data)
+    _loadCallHistory(showLoading: false);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _debounceTimer?.cancel();
+    _callService?.removeListener(_onCallServiceChanged);
     super.dispose();
+  }
+
+  void _onCallServiceChanged() {
+    // Refresh call history when call service state changes (e.g., call ends)
+    // Use debouncing to avoid too many refreshes
+    // Add a delay to allow server to update call status
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted && !_isLoadingInProgress) {
+        _loadCallHistory(showLoading: false);
+      }
+    });
   }
 
   @override
@@ -47,7 +63,13 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
       // Reload call history when app comes back to foreground
-      _loadCallHistory();
+      // Use debouncing to avoid immediate refresh
+      _debounceTimer?.cancel();
+      _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+        if (mounted && !_isLoadingInProgress) {
+          _loadCallHistory(showLoading: false);
+        }
+      });
     }
   }
 
@@ -58,7 +80,7 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
 
     // Set a new debounce timer to avoid too many API calls
     _debounceTimer = Timer(const Duration(milliseconds: 300), () {
-      if (mounted && !_isLoading) {
+      if (mounted && !_isLoadingInProgress) {
         _loadCallHistory(showLoading: false);
       }
     });
@@ -101,10 +123,14 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
   // }
 
   Future<void> _loadCallHistory({bool showLoading = true}) async {
+    // Prevent multiple simultaneous loads
+    if (_isLoadingInProgress) return;
+
+    // _isLoadingInProgress = true;
     final callRepo = CallRepository();
     final currentUser = await UserUtils().getUserDetails();
 
-    // Step 1: Load from local DB immediately (no loading spinner)
+    // Step 1: Load from local DB immediately (no loading spinner if we have data)
     try {
       final List<CallModel> localCalls = await callRepo.getAllCalls(
         currentUser?.id ?? 0,
@@ -112,15 +138,17 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
       if (mounted) {
         setState(() {
           _callHistory = localCalls.map(_mapCallModelToHistoryItem).toList();
-          _isLoading = false;
+          // Only show loading if explicitly requested AND we have no local data AND haven't loaded before
+          _isLoading = showLoading && localCalls.isEmpty && !_hasLoadedOnce;
           _error = null;
         });
+        _hasLoadedOnce = true;
       }
     } catch (e) {
-      // If local DB fails, show loading
-      if (mounted) {
+      // If local DB fails, show loading only if we don't have data and haven't loaded before
+      if (mounted && _callHistory.isEmpty && !_hasLoadedOnce) {
         setState(() {
-          _isLoading = true;
+          _isLoading = showLoading;
           _error = null;
         });
       }
@@ -142,13 +170,28 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
         // Save to local DB
         await callRepo.insertCalls(calls);
 
-        // Update UI with fresh data from server
+        // Update UI with fresh data from server, preserving duration if it exists
         if (mounted) {
-          setState(() {
-            _callHistory = calls.map(_mapCallModelToHistoryItem).toList();
-            _isLoading = false;
-            _error = null;
-          });
+          final newHistory = calls.map(_mapCallModelToHistoryItem).toList();
+
+          // Merge with existing data to preserve durationSeconds if server data has 0
+          final mergedHistory = _mergeCallHistory(_callHistory, newHistory);
+
+          // Only update if the data actually changed to prevent unnecessary rebuilds
+          if (_hasDataChanged(_callHistory, mergedHistory)) {
+            setState(() {
+              _callHistory = mergedHistory;
+              _isLoading = false;
+              _error = null;
+            });
+          } else {
+            // Still update loading state even if data didn't change
+            if (_isLoading) {
+              setState(() {
+                _isLoading = false;
+              });
+            }
+          }
         }
       } else {
         if (mounted && _callHistory.isEmpty) {
@@ -156,34 +199,93 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
             _error = data['message'] ?? 'Failed to load call history';
             _isLoading = false;
           });
+        } else if (mounted && _isLoading) {
+          setState(() {
+            _isLoading = false;
+          });
         }
       }
     } catch (e) {
       // Server fetch failed, but we already showed local data
       // Only show error if we have no data at all
-      if (mounted && _callHistory.isEmpty) {
+      if (mounted && _callHistory.isEmpty && !_hasLoadedOnce) {
         setState(() {
           _error = 'Failed to load call history';
           _isLoading = false;
         });
+      } else if (mounted && _isLoading) {
+        setState(() {
+          _isLoading = false;
+        });
       }
       // If we have local data, silently fail the background update
+    } finally {
+      _isLoadingInProgress = false;
     }
+  }
+
+  // Helper method to merge call history, preserving duration from old data if new data has 0
+  List<CallHistoryItem> _mergeCallHistory(
+    List<CallHistoryItem> oldList,
+    List<CallHistoryItem> newList,
+  ) {
+    // Create a map of old calls by ID for quick lookup
+    final oldMap = <int, CallHistoryItem>{};
+    for (final call in oldList) {
+      oldMap[call.id] = call;
+    }
+
+    // Merge new calls with old data, preserving duration if new has 0
+    return newList.map((newCall) {
+      final oldCall = oldMap[newCall.id];
+      if (oldCall != null &&
+          newCall.durationSeconds == 0 &&
+          oldCall.durationSeconds > 0) {
+        // Preserve duration from old data
+        return CallHistoryItem(
+          id: newCall.id,
+          callerId: newCall.callerId,
+          calleeId: newCall.calleeId,
+          contactId: newCall.contactId,
+          contactName: newCall.contactName,
+          startedAt: newCall.startedAt,
+          answeredAt: newCall.answeredAt,
+          endedAt: newCall.endedAt,
+          durationSeconds: oldCall.durationSeconds, // Preserve old duration
+          status: newCall.status,
+          reason: newCall.reason,
+          type: newCall.type,
+        );
+      }
+      return newCall;
+    }).toList();
+  }
+
+  // Helper method to check if call history data has changed
+  bool _hasDataChanged(
+    List<CallHistoryItem> oldList,
+    List<CallHistoryItem> newList,
+  ) {
+    if (oldList.length != newList.length) return true;
+
+    for (int i = 0; i < oldList.length; i++) {
+      final old = oldList[i];
+      final new_ = newList[i];
+      if (old.id != new_.id ||
+          old.status != new_.status ||
+          old.durationSeconds != new_.durationSeconds ||
+          old.startedAt != new_.startedAt) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   @override
   Widget build(BuildContext context) {
-    // Trigger refresh when the page is built (becomes visible) with debouncing
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _debounceTimer?.cancel();
-        _debounceTimer = Timer(const Duration(milliseconds: 200), () {
-          if (mounted && !_isLoading) {
-            _loadCallHistory(showLoading: false);
-          }
-        });
-      }
-    });
+    // Remove the post-frame callback from build() to prevent flickering
+    // The page will refresh when CallService notifies changes or when user manually refreshes
 
     return Scaffold(
       backgroundColor: Color(0xFFF8FAFB),
@@ -234,14 +336,17 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
                     size: 20,
                   ),
                 ),
-                onPressed: _loadCallHistory,
+                onPressed: () => _loadCallHistory(showLoading: false),
               ),
             ),
           ],
         ),
       ),
 
-      body: RefreshIndicator(onRefresh: _loadCallHistory, child: _buildBody()),
+      body: RefreshIndicator(
+        onRefresh: () => _loadCallHistory(showLoading: false),
+        child: _buildBody(),
+      ),
     );
   }
 

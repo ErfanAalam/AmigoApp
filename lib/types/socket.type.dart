@@ -271,7 +271,8 @@ class ChatMessageAckPayload {
   factory ChatMessageAckPayload.fromJson(Map<String, dynamic> json) {
     DateTime deliveredAt;
     try {
-      final deliveredAtData = json['delivered_at'];
+      // Try delivered_at first, then sent_at as fallback, then use current time
+      final deliveredAtData = json['delivered_at'] ?? json['sent_at'];
       if (deliveredAtData is String) {
         deliveredAt = DateTime.parse(deliveredAtData);
       } else if (deliveredAtData is DateTime) {

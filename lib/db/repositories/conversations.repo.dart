@@ -7,6 +7,58 @@ import '../sqlite.db.dart';
 import '../sqlite.schema.dart';
 import 'conversation_member.repo.dart';
 
+/// Helper function to get preview text for media messages
+String _getMessagePreviewText(
+  String? messageType,
+  String? body,
+  Map<String, dynamic>? attachments,
+) {
+  // If body exists and is not empty, use it
+  if (body != null && body.isNotEmpty) {
+    return body;
+  }
+
+  // Generate preview text based on message type
+  if (messageType != null && messageType.isNotEmpty) {
+    switch (messageType) {
+      case 'image':
+        return '📷 Photo';
+      case 'video':
+        return '🎥 Video';
+      case 'audio':
+        return '🎵 Audio';
+      case 'document':
+        return '📄 Document';
+      case 'attachment':
+        return '📎 Attachment';
+      case 'reply':
+        return '↩️ Reply';
+      case 'forwarded':
+        return '↪️ Forwarded';
+      default:
+        break;
+    }
+  }
+
+  // Fallback: check attachments to determine media type
+  if (attachments != null && attachments.isNotEmpty) {
+    final attachmentType =
+        attachments['type']?.toString().toLowerCase() ??
+        attachments['mimeType']?.toString().toLowerCase() ??
+        '';
+
+    if (attachmentType.contains('image')) return '📷 Photo';
+    if (attachmentType.contains('video')) return '🎥 Video';
+    if (attachmentType.contains('audio')) return '🎵 Audio';
+    if (attachmentType.contains('pdf') || attachmentType.contains('document')) {
+      return '📄 Document';
+    }
+    return '📎 Attachment';
+  }
+
+  return '';
+}
+
 class ConversationRepository {
   final sqliteDatabase = SqliteDatabase.instance;
 
@@ -61,13 +113,28 @@ class ConversationRepository {
     final db = sqliteDatabase.database;
 
     for (final conv in conversations) {
+      // Check if conversation already exists to preserve needSync value
+      final existingConv = await getConversationById(conv.id);
+
+      // Preserve existing needSync value if conversation exists, otherwise use provided value or default to true for new conversations
+      final needSyncValue = existingConv != null
+          ? (conv.needSync ?? existingConv.needSync ?? true)
+          : (conv.needSync ?? true);
+
+      final lastmessageidvalue = existingConv != null
+          ? (conv.lastMessageId ?? existingConv.lastMessageId)
+          : (conv.lastMessageId);
+      final pinnedmessageidvalue = existingConv != null
+          ? (conv.pinnedMessageId ?? existingConv.pinnedMessageId)
+          : (conv.pinnedMessageId);
+
       final convCompanion = ConversationsCompanion.insert(
         id: Value(conv.id),
         type: conv.type,
         title: Value(conv.title),
         createrId: conv.createrId,
-        lastMessageId: Value(conv.lastMessageId),
-        pinnedMessageId: Value(conv.pinnedMessageId),
+        lastMessageId: Value(lastmessageidvalue),
+        pinnedMessageId: Value(pinnedmessageidvalue),
         unreadCount: Value(conv.unreadCount ?? 0),
         createdAt: Value(conv.createdAt),
         isDeleted: Value(conv.isDeleted ?? false),
@@ -75,7 +142,7 @@ class ConversationRepository {
         isMuted: Value(conv.isMuted ?? false),
         isFavorite: Value(conv.isFavorite ?? false),
         updatedAt: Value(conv.updatedAt),
-        needSync: Value(conv.needSync ?? true),
+        needSync: Value(needSyncValue),
       );
       await db.into(db.conversations).insertOnConflictUpdate(convCompanion);
     }
@@ -131,7 +198,7 @@ class ConversationRepository {
       updatedAt: Value(
         conversation.updatedAt ?? DateTime.now().toIso8601String(),
       ),
-      needSync: Value(conversation.needSync ?? true),
+      needSync: Value(conversation.needSync ?? false),
     );
 
     await db.update(db.conversations).replace(companion);
@@ -495,7 +562,12 @@ class ConversationRepository {
 
         if (lastMessage != null) {
           lastMessageType = lastMessage.type;
-          lastMessageBody = lastMessage.body;
+          // Use helper to get preview text - handles media messages with empty body
+          lastMessageBody = _getMessagePreviewText(
+            lastMessage.type,
+            lastMessage.body,
+            lastMessage.attachments,
+          );
           lastMessageAt = lastMessage.sentAt;
           lastMessageId = lastMessage.id.toInt();
         }
@@ -576,7 +648,11 @@ class ConversationRepository {
 
       if (lastMessage != null) {
         lastMessageType = lastMessage.type;
-        lastMessageBody = lastMessage.body;
+        lastMessageBody = _getMessagePreviewText(
+          lastMessage.type,
+          lastMessage.body,
+          lastMessage.attachments,
+        );
         lastMessageAt = lastMessage.sentAt;
         lastMessageId = lastMessage.id.toInt();
       }
@@ -643,7 +719,12 @@ class ConversationRepository {
 
         if (lastMessage != null) {
           lastMessageType = lastMessage.type;
-          lastMessageBody = lastMessage.body;
+          // Use helper to get preview text - handles media messages with empty body
+          lastMessageBody = _getMessagePreviewText(
+            lastMessage.type,
+            lastMessage.body,
+            lastMessage.attachments,
+          );
           lastMessageAt = lastMessage.sentAt;
           lastMessageId = lastMessage.id.toInt();
         }
@@ -708,7 +789,11 @@ class ConversationRepository {
 
       if (lastMessage != null) {
         lastMessageType = lastMessage.type;
-        lastMessageBody = lastMessage.body;
+        lastMessageBody = _getMessagePreviewText(
+          lastMessage.type,
+          lastMessage.body,
+          lastMessage.attachments,
+        );
         lastMessageAt = lastMessage.sentAt;
         lastMessageId = lastMessage.id.toInt();
       }
@@ -759,25 +844,32 @@ class ConversationRepository {
         .getActiveMembersByConversationId(conversationId);
 
     // Build GroupMember list with user details
-    final members = <GroupMember>[];
+    // Use a Map to deduplicate by userId (keep the first occurrence)
+    final membersMap = <int, GroupMember>{};
     for (final member in conversationMembers) {
+      // Skip if we already have this user (deduplicate)
+      if (membersMap.containsKey(member.userId)) {
+        continue;
+      }
+
       // Get user info from users table
       final user = await (db.select(
         db.users,
       )..where((t) => t.id.equals(member.userId))).getSingleOrNull();
 
       if (user != null) {
-        members.add(
-          GroupMember(
-            userId: user.id,
-            name: user.name,
-            profilePic: user.profilePic,
-            role: member.role,
-            joinedAt: member.joinedAt,
-          ),
+        membersMap[member.userId] = GroupMember(
+          userId: user.id,
+          name: user.name,
+          profilePic: user.profilePic,
+          role: member.role,
+          joinedAt: member.joinedAt,
         );
       }
     }
+
+    // Convert map values to list
+    final members = membersMap.values.toList();
 
     // Get last message details if lastMessageId exists
     String? lastMessageType;
@@ -793,7 +885,11 @@ class ConversationRepository {
 
       if (lastMessage != null) {
         lastMessageType = lastMessage.type;
-        lastMessageBody = lastMessage.body;
+        lastMessageBody = _getMessagePreviewText(
+          lastMessage.type,
+          lastMessage.body,
+          lastMessage.attachments,
+        );
         lastMessageAt = lastMessage.sentAt;
         lastMessageId = lastMessage.id.toInt();
       }
