@@ -13,20 +13,15 @@ import 'package:amigo/utils/chat/chat_helpers.utils.dart';
 import 'package:amigo/utils/snowflake.util.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../../models/group_model.dart';
 import '../../../models/community_model.dart';
 import '../../../models/user_model.dart';
-import '../../../api/groups.services.dart';
-import '../../../api/user.service.dart';
 import '../../../api/chats.services.dart';
 import '../../../services/socket/websocket_service.dart';
 import '../../../services/socket/websocket_message_handler.dart';
 import '../../../types/socket.type.dart';
-import '../../../widgets/loading_dots_animation.dart';
 import '../../../services/media_cache_service.dart';
 import '../../../utils/animations.utils.dart';
 import '../../../widgets/chat/attachment_action_sheet.dart';
@@ -308,7 +303,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     super.initState();
     _scrollController.addListener(_onScroll);
 
-    debugPrint('-------initializing the chat-------');
+    debugPrint('-------initializing the group-------');
 
     // _websocketService.connect(widget.group.conversationId);
 
@@ -449,12 +444,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
 
     // Load messages from local storage first
-    final messaagesFromLocal = await _messagesRepo
-        .getMessagesByConversationWithSenderDetails(
-          widget.group.conversationId,
-          limit: 100,
-          offset: 0,
-        );
+    final messaagesFromLocal = await _messagesRepo.getMessagesByConversation(
+      widget.group.conversationId,
+      limit: 100,
+      offset: 0,
+    );
 
     setState(() {
       _messages = messaagesFromLocal;
@@ -522,7 +516,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       setState(() {
         _isSyncingMessages = true;
         _syncProgress = 0.0;
-        _syncStatus = 'Starting sync...';
+        _syncStatus = 'syncing messages';
         _syncedMessageCount = 0;
         _totalMessageCount = 0;
       });
@@ -664,12 +658,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
       // Reload messages from local DB after sync
       if (mounted && !_isDisposed) {
-        final syncedMessages = await _messagesRepo
-            .getMessagesByConversationWithSenderDetails(
-              widget.group.conversationId,
-              limit: 100,
-              offset: 0,
-            );
+        final syncedMessages = await _messagesRepo.getMessagesByConversation(
+          widget.group.conversationId,
+          limit: 100,
+          offset: 0,
+        );
 
         setState(() {
           _messages = syncedMessages;
@@ -1212,6 +1205,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         status: MessageStatusType.read,
         sentAt: payload.sentAt.toIso8601String(),
       );
+
       // Add message to UI immediately with animation
       if (mounted) {
         setState(() {
@@ -1294,7 +1288,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   /// Handle incoming message pin from WebSocket
   void _handleMessagePin(MessagePinPayload payload) async {
     // load pinned message from prefs and then DB
-    if (payload.isPinned) {
+    if (payload.pin) {
       final pinnedMessage = await _messagesRepo.getMessageById(
         payload.messageId,
       );
@@ -1504,9 +1498,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       sentAt: nowUTC.toIso8601String(),
     );
 
+    // storing the message into the local database
+    await _messagesRepo.insertMessage(newMsg);
+
     // Clear input and reply state immediately for better UX
     _messageController.clear();
-    _cancelReply();
 
     // Add message to UI immediately with animation
     if (mounted) {
@@ -1527,8 +1523,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         convId: widget.group.conversationId,
         senderId: _currentUserDetails!.id,
         senderName: _currentUserDetails!.name,
+        attachments: mediaResponse,
         convType: ChatType.group,
-        msgType: MessageType.text,
+        msgType: messageType,
         body: messageText,
         replyToMessageId: _replyToMessageData?.id,
         sentAt: nowUTC,
@@ -1546,8 +1543,6 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-      _messagesRepo.insertMessage(newMsg);
-
       ref
           .read(chatProvider.notifier)
           .updateLastMessageOnSendingOwnMessage(
@@ -1561,6 +1556,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         conversationId: widget.group.conversationId,
         userIds: _conversationMembers.map((member) => member.id).toList(),
       );
+      _cancelReply();
     } catch (e) {
       debugPrint('Error sending message');
     }
@@ -1696,7 +1692,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       ).toJson();
 
       await _webSocket.sendMessage(wsmsg).catchError((e) {
-        debugPrint('Error sending conversation:leave in deactivate');
+        debugPrint('Error sending typing indicator');
       });
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     }
@@ -3279,6 +3275,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     _zigzagAnimationController.dispose();
     _timerStreamController.close();
 
+    // Clear active conversation when leaving the messaging screen
+    ref.read(chatProvider.notifier).setActiveConversation(null, null);
+
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     // Send inactive message when user navigates away from the page
     final joinConvPayload = JoinLeavePayload(
@@ -3295,7 +3294,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     ).toJson();
 
     _webSocket.sendMessage(wsmsg).catchError((e) {
-      debugPrint('❌ Error sending conversation:leave in deactivate: $e');
+      debugPrint('❌ Error sending conversation:leave in dispose: $e');
     });
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 

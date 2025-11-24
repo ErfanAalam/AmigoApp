@@ -217,49 +217,6 @@ class MessageRepository {
     }).toList();
   }
 
-  /// Get messages by conversation ID with sender details and other details
-  /// This method uses SQL JOIN with the Users table to populate senderName and senderProfilePic
-  Future<List<MessageModel>> getMessagesByConversationWithSenderDetails(
-    int conversationId, {
-    int? limit,
-    int? offset,
-    bool includeDeleted = false,
-  }) async {
-    final db = sqliteDatabase.database;
-
-    // Create query with LEFT JOIN to Users table
-    final query = db.select(db.messages).join([
-      leftOuterJoin(db.users, db.users.id.equalsExp(db.messages.senderId)),
-    ])..where(db.messages.conversationId.equals(conversationId));
-
-    if (!includeDeleted) {
-      query.where(db.messages.isDeleted.equals(false));
-    }
-
-    query.orderBy([
-      OrderingTerm(expression: db.messages.sentAt, mode: OrderingMode.desc),
-    ]);
-
-    if (limit != null) {
-      query.limit(limit, offset: offset ?? 0);
-    }
-
-    // Execute query and map results
-    final results = await query.get();
-
-    return results.map((row) {
-      final message = row.readTable(db.messages);
-      final user = row.readTableOrNull(db.users);
-
-      final messageModel = _messageToModel(message);
-
-      return messageModel.copyWith(
-        senderName: user?.name,
-        senderProfilePic: user?.profilePic,
-      );
-    }).toList();
-  }
-
   /// Get a single message by ID
   Future<MessageModel?> getMessageById(int messageId) async {
     final db = sqliteDatabase.database;

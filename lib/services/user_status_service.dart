@@ -33,7 +33,7 @@ class UserStatusService {
   }
 
   /// Handle user_online WebSocket message
-  void handleUserOnlineMessage(OnlineStatusPayload payload) {
+  void handleUserOnlineMessage(ConnectionStatus payload) {
     try {
       setUserOnlineStatus(
         payload.senderId,

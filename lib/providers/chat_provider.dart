@@ -8,6 +8,7 @@ import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/group_model.dart';
 import 'package:amigo/models/community_model.dart';
 import 'package:amigo/models/message.model.dart';
+import 'package:amigo/types/chat.types.dart';
 import 'package:amigo/types/socket.type.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,6 +17,7 @@ import '../models/user_model.dart';
 import '../services/socket/websocket_message_handler.dart';
 import '../services/user_status_service.dart';
 import '../api/chats.services.dart';
+import '../api/groups.services.dart';
 
 /// State class for DM list
 class ChatState {
@@ -26,11 +28,12 @@ class ChatState {
   final bool isLoading;
   final int? activeConvId;
   final ChatType? activeConvType;
-  final Map<int, List<int>> typingConvUsers; // conversationId -> userIds[]
-  final Set<int> pinnedChats;
-  final Set<int> mutedChats;
-  final Set<int> favoriteChats;
-  final Set<int> deletedChats;
+  final Map<int, Set<TypingUser>>
+  typingConvUsers; // conversationId -> userIds[]
+  // final Set<int> pinnedChats;
+  // final Set<int> mutedChats;
+  // final Set<int> favoriteChats;
+  // final Set<int> deletedChats;
   final String searchQuery;
 
   ChatState({
@@ -41,17 +44,17 @@ class ChatState {
     this.isLoading = false,
     this.activeConvId,
     this.activeConvType,
-    Map<int, List<int>>? typingConvUsers,
-    Set<int>? pinnedChats,
-    Set<int>? mutedChats,
-    Set<int>? favoriteChats,
-    Set<int>? deletedChats,
+    Map<int, Set<TypingUser>>? typingConvUsers,
+    // Set<int>? pinnedChats,
+    // Set<int>? mutedChats,
+    // Set<int>? favoriteChats,
+    // Set<int>? deletedChats,
     this.searchQuery = '',
-  }) : typingConvUsers = typingConvUsers ?? {},
-       pinnedChats = pinnedChats ?? {},
-       mutedChats = mutedChats ?? {},
-       favoriteChats = favoriteChats ?? {},
-       deletedChats = deletedChats ?? {};
+  }) : typingConvUsers = typingConvUsers ?? {};
+  // pinnedChats = pinnedChats ?? {},
+  // mutedChats = mutedChats ?? {},
+  // favoriteChats = favoriteChats ?? {},
+  // deletedChats = deletedChats ?? {};
 
   ChatState copyWith({
     List<DmModel>? dmList,
@@ -59,13 +62,13 @@ class ChatState {
     List<CommunityModel>? communities,
     List<CommunityGroupModel>? commGroupList,
     bool? isLoading,
-    int? activeConversationId,
+    int? activeConvId,
     ChatType? activeConvType,
-    Map<int, List<int>>? typingConvUsers,
-    Set<int>? pinnedChats,
-    Set<int>? mutedChats,
-    Set<int>? favoriteChats,
-    Set<int>? deletedChats,
+    Map<int, Set<TypingUser>>? typingConvUsers,
+    // Set<int>? pinnedChats,
+    // Set<int>? mutedChats,
+    // Set<int>? favoriteChats,
+    // Set<int>? deletedChats,
     String? searchQuery,
     bool clearActiveConversation = false,
     bool clearTypingConvs = false,
@@ -78,21 +81,23 @@ class ChatState {
       isLoading: isLoading ?? this.isLoading,
       activeConvId: clearActiveConversation
           ? null
-          : (activeConversationId ?? this.activeConvId),
-      activeConvType: activeConvType ?? this.activeConvType,
+          : (activeConvId ?? this.activeConvId),
+      activeConvType: clearActiveConversation
+          ? null
+          : (activeConvType ?? this.activeConvType),
       typingConvUsers: clearTypingConvs
           ? {}
           : (typingConvUsers ?? this.typingConvUsers),
-      pinnedChats: pinnedChats ?? this.pinnedChats,
-      mutedChats: mutedChats ?? this.mutedChats,
-      favoriteChats: favoriteChats ?? this.favoriteChats,
-      deletedChats: deletedChats ?? this.deletedChats,
+      // pinnedChats: pinnedChats ?? this.pinnedChats,
+      // mutedChats: mutedChats ?? this.mutedChats,
+      // favoriteChats: favoriteChats ?? this.favoriteChats,
+      // deletedChats: deletedChats ?? this.deletedChats,
       searchQuery: searchQuery ?? this.searchQuery,
     );
   }
 
   /// Get filtered conversations based on search query
-  List<DmModel> get filteredConversations {
+  List<DmModel> get filteredDmList {
     if (searchQuery.isEmpty) {
       return dmList;
     }
@@ -114,10 +119,10 @@ class ChatState {
     }
     final query = searchQuery.toLowerCase();
     final filteredGroups = groupList.where((group) {
-      return group.title.toLowerCase().contains(query) ||
-          group.members!.any(
-            (member) => member.name.toLowerCase().contains(query),
-          );
+      return group.title.toLowerCase().contains(query);
+      // group.members!.any(
+      //   (member) => member.name.toLowerCase().contains(query),
+      // );
     }).toList();
 
     final filteredCommunities = communities.where((community) {
@@ -133,9 +138,6 @@ final chatProvider = NotifierProvider<ChatNotifier, ChatState>(
   () => ChatNotifier(),
 );
 
-/// Legacy alias for backward compatibility
-final dmListProvider = chatProvider;
-
 class ChatNotifier extends Notifier<ChatState> {
   final UserService _userService = UserService();
   final UserRepository _userRepo = UserRepository();
@@ -146,10 +148,11 @@ class ChatNotifier extends Notifier<ChatState> {
   final WebSocketMessageHandler _messageHandler = WebSocketMessageHandler();
   final UserStatusService _userStatusService = UserStatusService();
   final ChatsServices _chatsServices = ChatsServices();
+  final GroupsService _groupsService = GroupsService();
 
   final MessageStatusRepository _messageStatusRepo = MessageStatusRepository();
 
-  StreamSubscription<OnlineStatusPayload>? _onlineStatusSubscription;
+  StreamSubscription<ConnectionStatus>? _onlineStatusSubscription;
   StreamSubscription<TypingPayload>? _typingSubscription;
   StreamSubscription<ChatMessagePayload>? _messageSubscription;
   StreamSubscription<ChatMessageAckPayload>? _messageAckSubscription;
@@ -159,20 +162,28 @@ class ChatNotifier extends Notifier<ChatState> {
   StreamSubscription<JoinLeavePayload>? _joinConvSubscription;
 
   final Map<int, Timer?> _typingTimers = {};
+  bool _listenersSetup = false;
+  bool _isDisposed = false;
 
   @override
   ChatState build() {
-    // Initialize and load data
-    Future.microtask(() async {
-      await _loadConvsFromLocal();
-      await loadConvsFromServer();
+    // Initialize web socket listeners
+    if (!_listenersSetup) {
       _setupWebSocketListeners();
+      _listenersSetup = true;
+    }
+
+    // Load conversations from local DB and then from server
+    Future.microtask(() async {
+      await loadConvsFromLocal();
+      await loadConvsFromServer();
     });
+
     return ChatState();
   }
 
   /// Load conversations from local DB first
-  Future<void> _loadConvsFromLocal() async {
+  Future<void> loadConvsFromLocal() async {
     try {
       final localDMs = await _conversationsRepo.getAllDmsWithRecipientInfo();
       final localGroups = await _conversationsRepo.getGroupListWithoutMembers();
@@ -181,30 +192,33 @@ class ChatNotifier extends Notifier<ChatState> {
       // );
 
       // Initialize Sets from loaded conversations
-      final pinnedChats = <int>{};
-      final mutedChats = <int>{};
-      final favoriteChats = <int>{};
-      final deletedChats = <int>{};
-
-      for (final dm in localDMs) {
-        if (dm.isPinned == true) pinnedChats.add(dm.conversationId);
-        if (dm.isMuted == true) mutedChats.add(dm.conversationId);
-        if (dm.isFavorite == true) favoriteChats.add(dm.conversationId);
-        if (dm.isDeleted == true) deletedChats.add(dm.conversationId);
-      }
+      // final pinnedChats = <int>{};
+      // final mutedChats = <int>{};
+      // final favoriteChats = <int>{};
+      // final deletedChats = <int>{};
+      //
+      // for (final dm in localDMs) {
+      //   if (dm.isPinned == true) pinnedChats.add(dm.conversationId);
+      //   if (dm.isMuted == true) mutedChats.add(dm.conversationId);
+      //   if (dm.isFavorite == true) favoriteChats.add(dm.conversationId);
+      //   if (dm.isDeleted == true) deletedChats.add(dm.conversationId);
+      // }
 
       if (localDMs.isNotEmpty) {
+        final sortedDms = await filterAndSortConversations(localDMs);
         state = state.copyWith(
-          dmList: localDMs,
+          dmList: sortedDms,
           isLoading: false,
-          pinnedChats: pinnedChats,
-          mutedChats: mutedChats,
-          favoriteChats: favoriteChats,
-          deletedChats: deletedChats,
+          // pinnedChats: pinnedChats,
+          // mutedChats: mutedChats,
+          // favoriteChats: favoriteChats,
+          // deletedChats: deletedChats,
         );
       }
+
       if (localGroups.isNotEmpty) {
-        state = state.copyWith(groupList: localGroups, isLoading: false);
+        final sortedGroups = await filterAndSortGroupConversations(localGroups);
+        state = state.copyWith(groupList: sortedGroups, isLoading: false);
       }
     } catch (e) {
       debugPrint('❌ Error loading from local DB: $e');
@@ -269,154 +283,223 @@ class ChatNotifier extends Notifier<ChatState> {
         }
 
         // Merge with existing Sets to preserve group status
-        final currentPinnedChats = Set<int>.from(state.pinnedChats);
-        final currentMutedChats = Set<int>.from(state.mutedChats);
-        final currentFavoriteChats = Set<int>.from(state.favoriteChats);
-        final currentDeletedChats = Set<int>.from(state.deletedChats);
+        // final currentPinnedChats = Set<int>.from(state.pinnedChats);
+        // final currentMutedChats = Set<int>.from(state.mutedChats);
+        // final currentFavoriteChats = Set<int>.from(state.favoriteChats);
+        // final currentDeletedChats = Set<int>.from(state.deletedChats);
 
         // Populate Sets from local DB status for DMs
-        for (final dm in dmList) {
-          final conv = convStatusMap[dm.conversationId];
-          if (conv != null) {
-            if (conv.isPinned == true) {
-              currentPinnedChats.add(dm.conversationId);
-            } else {
-              currentPinnedChats.remove(dm.conversationId);
-            }
-            if (conv.isMuted == true) {
-              currentMutedChats.add(dm.conversationId);
-            } else {
-              currentMutedChats.remove(dm.conversationId);
-            }
-            if (conv.isFavorite == true) {
-              currentFavoriteChats.add(dm.conversationId);
-            } else {
-              currentFavoriteChats.remove(dm.conversationId);
-            }
-            if (conv.isDeleted == true) {
-              currentDeletedChats.add(dm.conversationId);
-            } else {
-              currentDeletedChats.remove(dm.conversationId);
-            }
-          } else {
-            // If conversation not found in DB, ensure it's not in Sets
-            currentPinnedChats.remove(dm.conversationId);
-            currentMutedChats.remove(dm.conversationId);
-            currentFavoriteChats.remove(dm.conversationId);
-            currentDeletedChats.remove(dm.conversationId);
-          }
-        }
+        // for (final dm in dmList) {
+        //   final conv = convStatusMap[dm.conversationId];
+        //   if (conv != null) {
+        //     if (conv.isPinned == true) {
+        //       currentPinnedChats.add(dm.conversationId);
+        //     } else {
+        //       currentPinnedChats.remove(dm.conversationId);
+        //     }
+        //     if (conv.isMuted == true) {
+        //       currentMutedChats.add(dm.conversationId);
+        //     } else {
+        //       currentMutedChats.remove(dm.conversationId);
+        //     }
+        //     if (conv.isFavorite == true) {
+        //       currentFavoriteChats.add(dm.conversationId);
+        //     } else {
+        //       currentFavoriteChats.remove(dm.conversationId);
+        //     }
+        //     if (conv.isDeleted == true) {
+        //       currentDeletedChats.add(dm.conversationId);
+        //     } else {
+        //       currentDeletedChats.remove(dm.conversationId);
+        //     }
+        //   } else {
+        //     // If conversation not found in DB, ensure it's not in Sets
+        //     currentPinnedChats.remove(dm.conversationId);
+        //     currentMutedChats.remove(dm.conversationId);
+        //     currentFavoriteChats.remove(dm.conversationId);
+        //     currentDeletedChats.remove(dm.conversationId);
+        //   }
+        // }
 
         // Update Provider state
+        final sortedDms = await filterAndSortConversations(dmList);
         state = state.copyWith(
-          dmList: dmList,
+          dmList: sortedDms,
           isLoading: false,
-          pinnedChats: currentPinnedChats,
-          mutedChats: currentMutedChats,
-          favoriteChats: currentFavoriteChats,
-          deletedChats: currentDeletedChats,
+          // pinnedChats: currentPinnedChats,
+          // mutedChats: currentMutedChats,
+          // favoriteChats: currentFavoriteChats,
+          // deletedChats: currentDeletedChats,
         );
       }
+      // else {
+      //   state = state.copyWith(dmList: [], isLoading: false);
+      // }
     }
 
     // Load groups
-    final groupResponse = await _userService.getChatList('group');
-    if (groupResponse['success']) {
-      final List<dynamic> groupsList = groupResponse['data'] is List
-          ? groupResponse['data']
-          : [];
+    try {
+      debugPrint('🔄 Loading groups from server...');
+      final groupResponse = await _userService.getChatList('group');
+      debugPrint('📦 Group response success: ${groupResponse['success']}');
 
-      List<GroupModel> groups = [];
-      List<ConversationModel> convs = [];
+      if (groupResponse['success']) {
+        final List<dynamic> groupsList = groupResponse['data'] is List
+            ? groupResponse['data']
+            : [];
 
-      for (final group in groupsList) {
+        debugPrint('📊 Groups list length: ${groupsList.length}');
+
+        List<GroupModel> groups = [];
+        List<ConversationModel> convs = [];
+
+        for (final group in groupsList) {
+          try {
+            if (group is Map<String, dynamic>) {
+              final groupModel = GroupModel.fromJson(group);
+              groups.add(groupModel);
+
+              if (groupModel.lastMessageId != null) {
+                final metadataLastMsg = groupModel.metadata?.lastMessage!;
+                // ------------------------------------------------------------------------------------
+                // TODO: temporary type casting going on in here
+                // ------------------------------------------------------------------------------------
+                final msg = MessageModel(
+                  conversationId: metadataLastMsg?.conversationId ?? 0,
+                  canonicalId: metadataLastMsg?.id,
+                  senderId: metadataLastMsg?.senderId ?? 0,
+                  senderName: metadataLastMsg?.senderName,
+                  type:
+                      MessageType.fromString(metadataLastMsg?.type) ??
+                      MessageType.text,
+                  body: metadataLastMsg?.body ?? '',
+                  attachments: metadataLastMsg?.attachmentData,
+                  status: MessageStatusType.sent, // temp default value
+                  sentAt:
+                      metadataLastMsg?.createdAt ??
+                      groupModel.joinedAt, // temp fall back
+                );
+                _messageRepo
+                    .insertMessage(msg)
+                    .catchError(
+                      (e) => debugPrint('❌ Error inserting last message: $e'),
+                    );
+              }
+
+              final convModel = ConversationModel(
+                id: groupModel.conversationId,
+                type: "group",
+                title: groupModel.title,
+                createrId: group['createrId'] ?? 0,
+                unreadCount: groupModel.unreadCount,
+                lastMessageId: groupModel.lastMessageId,
+                pinnedMessageId: groupModel.pinnedMessageId,
+                isDeleted: false,
+                isPinned: false,
+                isFavorite: false,
+                isMuted: false,
+                createdAt: groupModel.joinedAt,
+              );
+              convs.add(convModel);
+            }
+          } catch (e) {
+            debugPrint('❌ Error processing group conversation: $e');
+          }
+        }
+
+        // Store group conversations in local DB
         try {
-          if (group is Map<String, dynamic>) {
-            final groupModel = GroupModel.fromJson(group);
-            groups.add(groupModel);
-
-            final convModel = ConversationModel(
-              id: groupModel.conversationId,
-              type: "group",
-              title: groupModel.title,
-              createrId: group['createrId'] ?? 0,
-              unreadCount: groupModel.unreadCount,
-              lastMessageId: groupModel.lastMessageId,
-              pinnedMessageId: groupModel.pinnedMessageId,
-              isDeleted: false,
-              isPinned: false,
-              isFavorite: false,
-              isMuted: false,
-              createdAt: groupModel.joinedAt,
-            );
-            convs.add(convModel);
-          }
+          await _conversationsRepo.insertConversations(convs);
         } catch (e) {
-          debugPrint('❌ Error processing group conversation: $e');
+          debugPrint('❌ Error inserting group conversations to DB: $e');
+          // Continue even if DB insert fails - we can still show groups from server
         }
-      }
 
-      // Store group conversations in local DB
-      await _conversationsRepo.insertConversations(convs);
-
-      // Load pin/mute/favorite status from local DB for groups (these are local-only, not from server)
-      final localGroupConvs = await _conversationsRepo.getConversationsByType(
-        ChatType.group,
-      );
-      final groupConvStatusMap = <int, ConversationModel>{};
-      for (final conv in localGroupConvs) {
-        groupConvStatusMap[conv.id] = conv;
-      }
-
-      // Update pinned/muted/favorite Sets with group status
-      final currentPinnedChats = Set<int>.from(state.pinnedChats);
-      final currentMutedChats = Set<int>.from(state.mutedChats);
-      final currentFavoriteChats = Set<int>.from(state.favoriteChats);
-      final currentDeletedChats = Set<int>.from(state.deletedChats);
-
-      for (final group in groups) {
-        final conv = groupConvStatusMap[group.conversationId];
-        if (conv != null) {
-          if (conv.isPinned == true) {
-            currentPinnedChats.add(group.conversationId);
-          } else {
-            currentPinnedChats.remove(group.conversationId);
-          }
-          if (conv.isMuted == true) {
-            currentMutedChats.add(group.conversationId);
-          } else {
-            currentMutedChats.remove(group.conversationId);
-          }
-          if (conv.isFavorite == true) {
-            currentFavoriteChats.add(group.conversationId);
-          } else {
-            currentFavoriteChats.remove(group.conversationId);
-          }
-          if (conv.isDeleted == true) {
-            currentDeletedChats.add(group.conversationId);
-          } else {
-            currentDeletedChats.remove(group.conversationId);
-          }
-        } else {
-          // If conversation not found in DB, ensure it's not in Sets
-          currentPinnedChats.remove(group.conversationId);
-          currentMutedChats.remove(group.conversationId);
-          currentFavoriteChats.remove(group.conversationId);
-          currentDeletedChats.remove(group.conversationId);
+        // Load pin/mute/favorite status from local DB for groups (these are local-only, not from server)
+        final localGroupConvs = await _conversationsRepo.getConversationsByType(
+          ChatType.group,
+        );
+        final groupConvStatusMap = <int, ConversationModel>{};
+        for (final conv in localGroupConvs) {
+          groupConvStatusMap[conv.id] = conv;
         }
-      }
 
-      // Storing group members and metadata can be added here if needed
-      // Sort groups
-      final sortedGroups = await _filterAndSortGroupConversations(groups);
-      state = state.copyWith(
-        groupList: sortedGroups,
-        isLoading: false,
-        pinnedChats: currentPinnedChats,
-        mutedChats: currentMutedChats,
-        favoriteChats: currentFavoriteChats,
-        deletedChats: currentDeletedChats,
-      );
+        // Update groups with local status (pinned, muted, favorite)
+        groups = groups.map((group) {
+          final conv = groupConvStatusMap[group.conversationId];
+          if (conv != null) {
+            return group.copyWith(
+              isPinned: conv.isPinned,
+              isMuted: conv.isMuted,
+              isFavorite: conv.isFavorite,
+            );
+          }
+          return group;
+        }).toList();
+
+        // Update pinned/muted/favorite Sets with group status
+        // final currentPinnedChats = Set<int>.from(state.pinnedChats);
+        // final currentMutedChats = Set<int>.from(state.mutedChats);
+        // final currentFavoriteChats = Set<int>.from(state.favoriteChats);
+        // final currentDeletedChats = Set<int>.from(state.deletedChats);
+
+        // for (final group in groups) {
+        //   final conv = groupConvStatusMap[group.conversationId];
+        //   if (conv != null) {
+        //     if (conv.isPinned == true) {
+        //       currentPinnedChats.add(group.conversationId);
+        //     } else {
+        //       currentPinnedChats.remove(group.conversationId);
+        //     }
+        //     if (conv.isMuted == true) {
+        //       currentMutedChats.add(group.conversationId);
+        //     } else {
+        //       currentMutedChats.remove(group.conversationId);
+        //     }
+        //     if (conv.isFavorite == true) {
+        //       currentFavoriteChats.add(group.conversationId);
+        //     } else {
+        //       currentFavoriteChats.remove(group.conversationId);
+        //     }
+        //     if (conv.isDeleted == true) {
+        //       currentDeletedChats.add(group.conversationId);
+        //     } else {
+        //       currentDeletedChats.remove(group.conversationId);
+        //     }
+        //   } else {
+        //     // If conversation not found in DB, ensure it's not in Sets
+        //     currentPinnedChats.remove(group.conversationId);
+        //     currentMutedChats.remove(group.conversationId);
+        //     currentFavoriteChats.remove(group.conversationId);
+        //     currentDeletedChats.remove(group.conversationId);
+        //   }
+        // }
+
+        // Storing group members and metadata can be added here if needed
+        // Sort groups
+        debugPrint('✅ Processed ${groups.length} groups, sorting...');
+        final sortedGroups = await filterAndSortGroupConversations(groups);
+        debugPrint('✅ Sorted ${sortedGroups.length} groups, updating state...');
+        state = state.copyWith(
+          groupList: sortedGroups,
+          isLoading: false,
+          // pinnedChats: currentPinnedChats,
+          // mutedChats: currentMutedChats,
+          // favoriteChats: currentFavoriteChats,
+          // deletedChats: currentDeletedChats,
+        );
+        debugPrint('✅ Groups state updated successfully');
+      } else {
+        // If group response failed, ensure loading state is cleared
+        debugPrint(
+          '❌ Failed to load groups: ${groupResponse['message'] ?? 'Unknown error'}',
+        );
+        state = state.copyWith(isLoading: false);
+      }
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error loading groups from server: $e');
+      debugPrint('❌ Stack trace: $stackTrace');
+      state = state.copyWith(isLoading: false);
     }
   }
 
@@ -444,6 +527,16 @@ class ChatNotifier extends Notifier<ChatState> {
                     recipientName == null ||
                     recipientName.toString().isEmpty) {
                   return null;
+                }
+
+                if (json['lastMessageId'] != null) {
+                  final metadataLastMsg = json['metadata']['last_message'];
+                  final msg = MessageModel.fromJson(metadataLastMsg);
+                  _messageRepo
+                      .insertMessage(msg)
+                      .catchError(
+                        (e) => debugPrint('❌ Error inserting last message: $e'),
+                      );
                 }
 
                 // mapping backend response to DmListModel
@@ -508,6 +601,16 @@ class ChatNotifier extends Notifier<ChatState> {
                   return null;
                 }
 
+                if (json['lastMessageId'] != null) {
+                  final metadataLastMsg = json['metadata']['last_message'];
+                  final msg = MessageModel.fromJson(metadataLastMsg);
+                  _messageRepo
+                      .insertMessage(msg)
+                      .catchError(
+                        (e) => debugPrint('❌ Error inserting last message: $e'),
+                      );
+                }
+
                 // mapping backend response to DmListModel
                 return ConversationModel(
                   id: convId,
@@ -547,16 +650,16 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   /// Filter and sort conversations
-  Future<List<DmModel>> _filterAndSortConversations(
+  Future<List<DmModel>> filterAndSortConversations(
     List<DmModel> conversations,
   ) async {
     final filteredConversations = conversations
-        .where((conv) => !state.deletedChats.contains(conv.conversationId))
+        .where((conv) => !(conv.isDeleted ?? false))
         .toList();
 
     filteredConversations.sort((a, b) {
-      final aPinned = state.pinnedChats.contains(a.conversationId);
-      final bPinned = state.pinnedChats.contains(b.conversationId);
+      final aPinned = a.isPinned ?? false;
+      final bPinned = b.isPinned ?? false;
 
       if (aPinned && !bPinned) return -1;
       if (!aPinned && bPinned) return 1;
@@ -566,34 +669,35 @@ class ChatNotifier extends Notifier<ChatState> {
       final bHasMessage =
           b.lastMessageAt != null && b.lastMessageAt!.isNotEmpty;
 
+      // Chats with messages should come before chats without messages
       if (aHasMessage && !bHasMessage) return -1;
       if (!aHasMessage && bHasMessage) return 1;
 
+      // Both have messages: sort by lastMessageAt (newest first)
       if (aHasMessage && bHasMessage) {
         return DateTime.parse(
           b.lastMessageAt!,
         ).compareTo(DateTime.parse(a.lastMessageAt!));
-      } else {
-        return DateTime.parse(
-          b.createdAt,
-        ).compareTo(DateTime.parse(a.createdAt));
       }
+
+      // Neither has messages: sort by createdAt (newest first)
+      return DateTime.parse(b.createdAt).compareTo(DateTime.parse(a.createdAt));
     });
 
     return filteredConversations;
   }
 
   /// Filter and sort group conversations
-  Future<List<GroupModel>> _filterAndSortGroupConversations(
+  Future<List<GroupModel>> filterAndSortGroupConversations(
     List<GroupModel> groups,
   ) async {
-    final filteredGroups = groups
-        .where((group) => !state.deletedChats.contains(group.conversationId))
-        .toList();
+    final filteredGroups = groups;
+    // .where((group) => !state.deletedChats.contains(group.conversationId))
+    // .toList();
 
     filteredGroups.sort((a, b) {
-      final aPinned = state.pinnedChats.contains(a.conversationId);
-      final bPinned = state.pinnedChats.contains(b.conversationId);
+      final aPinned = a.isPinned ?? false;
+      final bPinned = b.isPinned ?? false;
 
       if (aPinned && !bPinned) return -1;
       if (!aPinned && bPinned) return 1;
@@ -610,9 +714,9 @@ class ChatNotifier extends Notifier<ChatState> {
         return DateTime.parse(
           b.lastMessageAt!,
         ).compareTo(DateTime.parse(a.lastMessageAt!));
-      } else {
-        return DateTime.parse(b.joinedAt).compareTo(DateTime.parse(a.joinedAt));
       }
+
+      return DateTime.parse(b.joinedAt).compareTo(DateTime.parse(a.joinedAt));
     });
 
     return filteredGroups;
@@ -620,9 +724,11 @@ class ChatNotifier extends Notifier<ChatState> {
 
   /// Set active conversation
   void setActiveConversation(int? conversationId, ChatType? convType) {
+    final shouldClear = conversationId == null;
     state = state.copyWith(
-      activeConversationId: conversationId,
-      activeConvType: convType,
+      activeConvId: conversationId,
+      activeConvType: shouldClear ? null : convType,
+      clearActiveConversation: shouldClear,
     );
     if (conversationId != null) {
       clearUnreadCount(conversationId, convType);
@@ -655,16 +761,7 @@ class ChatNotifier extends Notifier<ChatState> {
       if (convIndex != -1) {
         final group = state.groupList[convIndex];
         if (group.unreadCount > 0) {
-          final updatedGroup = GroupModel(
-            conversationId: group.conversationId,
-            title: group.title,
-            members: group.members,
-            metadata: group.metadata,
-            lastMessageAt: group.lastMessageAt,
-            role: group.role ?? 'member',
-            unreadCount: 0,
-            joinedAt: group.joinedAt,
-          );
+          final updatedGroup = group.copyWith(unreadCount: 0);
           final updatedGroupList = List<GroupModel>.from(state.groupList);
           updatedGroupList[convIndex] = updatedGroup;
 
@@ -687,70 +784,186 @@ class ChatNotifier extends Notifier<ChatState> {
     ChatType convType,
   ) async {
     try {
-      switch (action) {
-        case 'pin':
-          await _conversationsRepo.togglePin(conversationId, true);
-          state = state.copyWith(
-            pinnedChats: {...state.pinnedChats, conversationId},
-          );
-          break;
-        case 'unpin':
-          await _conversationsRepo.togglePin(conversationId, false);
-          final newPinned = Set<int>.from(state.pinnedChats);
-          newPinned.remove(conversationId);
-          state = state.copyWith(pinnedChats: newPinned);
-          break;
-        case 'mute':
-          await _conversationsRepo.toggleMute(conversationId, true);
-          state = state.copyWith(
-            mutedChats: {...state.mutedChats, conversationId},
-          );
-          break;
-        case 'unmute':
-          await _conversationsRepo.toggleMute(conversationId, false);
-          final newMuted = Set<int>.from(state.mutedChats);
-          newMuted.remove(conversationId);
-          state = state.copyWith(mutedChats: newMuted);
-          break;
-        case 'favorite':
-          await _conversationsRepo.toggleFavorite(conversationId, true);
-          state = state.copyWith(
-            favoriteChats: {...state.favoriteChats, conversationId},
-          );
-          break;
-        case 'unfavorite':
-          await _conversationsRepo.toggleFavorite(conversationId, false);
-          final newFavorite = Set<int>.from(state.favoriteChats);
-          newFavorite.remove(conversationId);
-          state = state.copyWith(favoriteChats: newFavorite);
-          break;
-        case 'delete':
-          if (convType == ChatType.dm) {
+      if (convType == ChatType.dm) {
+        final convIndex = state.dmList.indexWhere(
+          (conv) => conv.conversationId == conversationId,
+        );
+        if (convIndex == -1) return;
+        final conv = state.dmList[convIndex];
+
+        DmModel? updatedConversation;
+
+        switch (action) {
+          case 'pin':
+            await _conversationsRepo.togglePin(conversationId, true);
+
+            updatedConversation = conv.copyWith(
+              isPinned: conv.isPinned != null ? !conv.isPinned! : true,
+            );
+
+            // state = state.copyWith(
+            //   pinnedChats: {...state.pinnedChats, conversationId},
+            // );
+            break;
+          case 'unpin':
+            await _conversationsRepo.togglePin(conversationId, false);
+            updatedConversation = conv.copyWith(
+              isPinned: conv.isPinned != null ? !conv.isPinned! : true,
+            );
+
+            // final newPinned = Set<int>.from(state.pinnedChats);
+            // newPinned.remove(conversationId);
+            // state = state.copyWith(pinnedChats: newPinned);
+            break;
+          case 'mute':
+            await _conversationsRepo.toggleMute(conversationId, true);
+
+            updatedConversation = conv.copyWith(
+              isMuted: conv.isMuted != null ? !conv.isMuted! : true,
+            );
+            // state = state.copyWith(
+            //   mutedChats: {...state.mutedChats, conversationId},
+            // );
+            break;
+          case 'unmute':
+            await _conversationsRepo.toggleMute(conversationId, false);
+
+            updatedConversation = conv.copyWith(
+              isMuted: conv.isMuted != null ? !conv.isMuted! : true,
+            );
+
+            // final newMuted = Set<int>.from(state.mutedChats);
+            // newMuted.remove(conversationId);
+            // state = state.copyWith(mutedChats: newMuted);
+            break;
+          case 'favorite':
+            await _conversationsRepo.toggleFavorite(conversationId, true);
+
+            updatedConversation = conv.copyWith(
+              isFavorite: conv.isFavorite != null ? !conv.isFavorite! : true,
+            );
+            // state = state.copyWith(
+            //   favoriteChats: {...state.favoriteChats, conversationId},
+            // );
+            break;
+          case 'unfavorite':
+            await _conversationsRepo.toggleFavorite(conversationId, false);
+
+            updatedConversation = conv.copyWith(
+              isFavorite: conv.isFavorite != null ? !conv.isFavorite! : true,
+            );
+            // final newFavorite = Set<int>.from(state.favoriteChats);
+            // newFavorite.remove(conversationId);
+            // state = state.copyWith(favoriteChats: newFavorite);
+            break;
+          case 'delete':
             final response = await _chatsServices.deleteDm(conversationId);
             if (response['success']) {
-              final newDeleted = Set<int>.from(state.deletedChats);
-              newDeleted.add(conversationId);
-              final updatedConversations = state.dmList
-                  .where((conv) => conv.conversationId != conversationId)
-                  .toList();
-              final newPinned = Set<int>.from(state.pinnedChats);
-              newPinned.remove(conversationId);
-              final newMuted = Set<int>.from(state.mutedChats);
-              newMuted.remove(conversationId);
-              final newFavorite = Set<int>.from(state.favoriteChats);
-              newFavorite.remove(conversationId);
-
-              state = state.copyWith(
-                dmList: updatedConversations,
-                deletedChats: newDeleted,
-                pinnedChats: newPinned,
-                mutedChats: newMuted,
-                favoriteChats: newFavorite,
-              );
+              // final newDeleted = Set<int>.from(state.deletedChats);
+              // newDeleted.add(conversationId);
+              // final updatedConversations = state.dmList
+              //     .where((conv) => conv.conversationId != conversationId)
+              //     .toList();
+              // final newPinned = Set<int>.from(state.pinnedChats);
+              // newPinned.remove(conversationId);
+              // final newMuted = Set<int>.from(state.mutedChats);
+              // newMuted.remove(conversationId);
+              // final newFavorite = Set<int>.from(state.favoriteChats);
+              // newFavorite.remove(conversationId);
+              //
+              // state = state.copyWith(
+              //   dmList: updatedConversations,
+              //   deletedChats: newDeleted,
+              //   pinnedChats: newPinned,
+              //   mutedChats: newMuted,
+              //   favoriteChats: newFavorite,
+              // );
               await _conversationsRepo.deleteConversation(conversationId);
             }
-          }
-          break;
+            break;
+        }
+        // update the provider with the approapriate action update
+        if (updatedConversation != null) {
+          final updatedConversations = List<DmModel>.from(state.dmList);
+          updatedConversations[convIndex] = updatedConversation;
+
+          // Sort conversations
+          final sortedConversations = await filterAndSortConversations(
+            updatedConversations,
+          );
+
+          state = state.copyWith(dmList: sortedConversations);
+        }
+      } else if (convType == ChatType.group) {
+        final convIndex = state.groupList.indexWhere(
+          (group) => group.conversationId == conversationId,
+        );
+        if (convIndex == -1) return;
+        final group = state.groupList[convIndex];
+
+        GroupModel? updatedGroup;
+
+        switch (action) {
+          case 'pin':
+            await _conversationsRepo.togglePin(conversationId, true);
+
+            updatedGroup = group.copyWith(
+              isPinned: group.isPinned != null ? !group.isPinned! : true,
+            );
+            break;
+          case 'unpin':
+            await _conversationsRepo.togglePin(conversationId, false);
+            updatedGroup = group.copyWith(
+              isPinned: group.isPinned != null ? !group.isPinned! : true,
+            );
+            break;
+          case 'mute':
+            await _conversationsRepo.toggleMute(conversationId, true);
+
+            updatedGroup = group.copyWith(
+              isMuted: group.isMuted != null ? !group.isMuted! : true,
+            );
+            break;
+          case 'unmute':
+            await _conversationsRepo.toggleMute(conversationId, false);
+
+            updatedGroup = group.copyWith(
+              isMuted: group.isMuted != null ? !group.isMuted! : true,
+            );
+            break;
+          case 'favorite':
+            await _conversationsRepo.toggleFavorite(conversationId, true);
+
+            updatedGroup = group.copyWith(
+              isFavorite: group.isFavorite != null ? !group.isFavorite! : true,
+            );
+            break;
+          case 'unfavorite':
+            await _conversationsRepo.toggleFavorite(conversationId, false);
+
+            updatedGroup = group.copyWith(
+              isFavorite: group.isFavorite != null ? !group.isFavorite! : true,
+            );
+            break;
+          case 'delete':
+            final response = await _groupsService.deleteGroup(conversationId);
+            if (response['success']) {
+              await _conversationsRepo.deleteConversation(conversationId);
+            }
+            break;
+        }
+        // update the provider with the approapriate action update
+        if (updatedGroup != null) {
+          final updatedGroups = List<GroupModel>.from(state.groupList);
+          updatedGroups[convIndex] = updatedGroup;
+
+          // Sort groups
+          final sortedGroups = await filterAndSortGroupConversations(
+            updatedGroups,
+          );
+
+          state = state.copyWith(groupList: sortedGroups);
+        }
       }
     } catch (e) {
       debugPrint('❌ Error handling chat action: $e');
@@ -824,42 +1037,77 @@ class ChatNotifier extends Notifier<ChatState> {
       final conversationId = message.convId;
 
       if (message.isTyping) {
-        final typingUsers = Map<int, List<int>>.from(state.typingConvUsers);
-        final userIds = typingUsers[conversationId] ?? [];
-        if (!userIds.contains(message.senderId)) {
-          typingUsers[conversationId] = [...userIds, message.senderId];
+        // Cancel existing timer for this conversation
+        _typingTimers[conversationId]?.cancel();
+
+        // Get the currently typing users
+        final typingUsers = Map<int, Set<TypingUser>>.from(
+          state.typingConvUsers,
+        );
+
+        // Create a new typing user
+        final newtu = TypingUser(
+          userId: message.senderId,
+          userName: message.senderName,
+          userPfp: message.senderPfp,
+          convId: message.convId,
+        );
+
+        // Add it to the typing map
+        if (typingUsers.containsKey(conversationId)) {
+          // Remove existing entry for this user if present (to avoid duplicates)
+          typingUsers[conversationId]!.removeWhere(
+            (u) => u.userId == message.senderId,
+          );
+          typingUsers[conversationId]!.add(newtu);
+        } else {
+          typingUsers[conversationId] = {newtu};
         }
 
-        _typingTimers[conversationId]?.cancel();
+        // Immediately update state to show typing indicator
+        state = state.copyWith(typingConvUsers: typingUsers);
+
+        // Set timer to remove user after 2 seconds of inactivity
         _typingTimers[conversationId] = Timer(const Duration(seconds: 2), () {
-          final newTypingUsers = Map<int, List<int>>.from(
+          final updatedTypingUsers = Map<int, Set<TypingUser>>.from(
             state.typingConvUsers,
           );
-          final updatedUserIds = newTypingUsers[conversationId] ?? [];
-          updatedUserIds.remove(message.senderId);
-          if (updatedUserIds.isEmpty) {
-            newTypingUsers.remove(conversationId);
-          } else {
-            newTypingUsers[conversationId] = updatedUserIds;
+
+          if (updatedTypingUsers.containsKey(conversationId)) {
+            updatedTypingUsers[conversationId]!.removeWhere(
+              (u) => u.userId == message.senderId,
+            );
+
+            // Remove the conversation entry if no one is typing
+            if (updatedTypingUsers[conversationId]!.isEmpty) {
+              updatedTypingUsers.remove(conversationId);
+            }
           }
-          state = state.copyWith(typingConvUsers: newTypingUsers);
+
+          state = state.copyWith(typingConvUsers: updatedTypingUsers);
           _typingTimers[conversationId] = null;
         });
-
-        state = state.copyWith(typingConvUsers: typingUsers);
       } else {
-        final newTypingUsers = Map<int, List<int>>.from(state.typingConvUsers);
-        final userIds = newTypingUsers[conversationId] ?? [];
-        userIds.remove(message.senderId);
-        if (userIds.isEmpty) {
-          newTypingUsers.remove(conversationId);
-        } else {
-          newTypingUsers[conversationId] = userIds;
-        }
+        // User stopped typing - remove immediately
         _typingTimers[conversationId]?.cancel();
         _typingTimers[conversationId] = null;
 
-        state = state.copyWith(typingConvUsers: newTypingUsers);
+        final typingUsers = Map<int, Set<TypingUser>>.from(
+          state.typingConvUsers,
+        );
+
+        if (typingUsers.containsKey(conversationId)) {
+          typingUsers[conversationId]!.removeWhere(
+            (u) => u.userId == message.senderId,
+          );
+
+          // Remove the conversation entry if no one is typing
+          if (typingUsers[conversationId]!.isEmpty) {
+            typingUsers.remove(conversationId);
+          }
+
+          state = state.copyWith(typingConvUsers: typingUsers);
+        }
       }
     } catch (e) {
       debugPrint('❌ Error handling typing message: $e');
@@ -871,7 +1119,6 @@ class ChatNotifier extends Notifier<ChatState> {
     try {
       final convId = payload.convId;
       final convType = payload.convType;
-
       // Insert message into local DB
       await _messageRepo.insertMessage(
         MessageModel(
@@ -920,7 +1167,7 @@ class ChatNotifier extends Notifier<ChatState> {
         updatedConversations[convIndex] = updatedConversation;
 
         // Sort conversations
-        final sortedConversations = await _filterAndSortConversations(
+        final sortedConversations = await filterAndSortConversations(
           updatedConversations,
         );
 
@@ -953,7 +1200,7 @@ class ChatNotifier extends Notifier<ChatState> {
         updatedGroups[convIndex] = updatedGroup;
 
         // Sort groups
-        final sortedGroups = await _filterAndSortGroupConversations(
+        final sortedGroups = await filterAndSortGroupConversations(
           updatedGroups,
         );
 
@@ -1054,7 +1301,7 @@ class ChatNotifier extends Notifier<ChatState> {
           updatedDmList[convIndex] = updatedDm;
 
           // Sort conversations after updating last message
-          final sortedConversations = await _filterAndSortConversations(
+          final sortedConversations = await filterAndSortConversations(
             updatedDmList,
           );
 
@@ -1114,7 +1361,7 @@ class ChatNotifier extends Notifier<ChatState> {
           updatedGroups[convIndex] = updatedGroup;
 
           // Sort groups after updating last message
-          final sortedGroups = await _filterAndSortGroupConversations(
+          final sortedGroups = await filterAndSortGroupConversations(
             updatedGroups,
           );
 
@@ -1142,7 +1389,7 @@ class ChatNotifier extends Notifier<ChatState> {
       final convId = payload.convId;
       final pinnedMessageId = payload.messageId;
 
-      if (payload.isPinned) {
+      if (payload.pin) {
         // Update in local DB
         await _conversationsRepo.updatePinnedMessage(convId, pinnedMessageId);
 
@@ -1278,7 +1525,7 @@ class ChatNotifier extends Notifier<ChatState> {
 
         // Update groupList Provider state
         final updatedGroups = [...state.groupList, newGroup];
-        final sortedGroups = await _filterAndSortGroupConversations(
+        final sortedGroups = await filterAndSortGroupConversations(
           updatedGroups,
         );
         state = state.copyWith(groupList: sortedGroups);
@@ -1289,7 +1536,7 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   /// Handle online status update
-  Future<void> _handleOnlineStatus(OnlineStatusPayload payload) async {
+  Future<void> _handleOnlineStatus(ConnectionStatus payload) async {
     try {
       final userId = payload.senderId;
       final isOnline = payload.status == 'online';
@@ -1406,6 +1653,9 @@ class ChatNotifier extends Notifier<ChatState> {
 
   /// Dispose resources
   void dispose() {
+    if (_isDisposed) return; // Prevent multiple dispose calls
+    _isDisposed = true;
+
     _typingSubscription?.cancel();
     _messageSubscription?.cancel();
     _messageAckSubscription?.cancel();
@@ -1414,6 +1664,7 @@ class ChatNotifier extends Notifier<ChatState> {
     _conversationAddedSubscription?.cancel();
     _messageDeleteSubscription?.cancel();
     _onlineStatusSubscription?.cancel();
+    _joinConvSubscription?.cancel();
 
     for (final timer in _typingTimers.values) {
       timer?.cancel();

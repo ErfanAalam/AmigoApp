@@ -425,7 +425,7 @@ class ChatHelpers {
       messageType: message.type,
       senderId: currentUserId!,
       convId: conversationId,
-      isPinned: !wasPinned,
+      pin: !wasPinned,
     ).toJson();
 
     final wsmsg = WSMessage(

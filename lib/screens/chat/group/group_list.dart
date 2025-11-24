@@ -1,8 +1,8 @@
+import 'package:amigo/types/chat.types.dart';
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../../models/group_model.dart';
 import '../../../models/community_model.dart';
-import '../../../models/conversations.model.dart';
-import '../../../services/socket/websocket_service.dart';
 import '../../../widgets/chat/searchable_list_widget.dart';
 import '../../../widgets/chat_action_menu.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,17 +17,21 @@ class GroupsPage extends ConsumerStatefulWidget {
   const GroupsPage({super.key});
 
   @override
-  ConsumerState<GroupsPage> createState() => _GroupsPageState();
+  ConsumerState<GroupsPage> createState() => GroupsPageState();
 }
 
-class _GroupsPageState extends ConsumerState<GroupsPage> {
-  final WebSocketService _websocketService = WebSocketService();
+class GroupsPageState extends ConsumerState<GroupsPage> {
   final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_onSearchChanged);
+  }
+
+  /// Called when the page becomes visible (when user navigates to Groups tab)
+  void onPageVisible() {
+    ref.read(chatProvider.notifier).setActiveConversation(null, null);
   }
 
   @override
@@ -51,13 +55,12 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
 
   /// Show group chat actions bottom sheet
   Future<void> _showGroupChatActions(GroupModel group) async {
-    final chatState = ref.read(chatProvider);
     final action = await ChatActionBottomSheet.show(
       context: context,
       group: group,
-      isPinned: chatState.pinnedChats.contains(group.conversationId),
-      isMuted: chatState.mutedChats.contains(group.conversationId),
-      isFavorite: chatState.favoriteChats.contains(group.conversationId),
+      isPinned: group.isPinned ?? false,
+      isMuted: group.isMuted ?? false,
+      isFavorite: group.isFavorite ?? false,
     );
 
     if (action != null) {
@@ -70,70 +73,6 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
     await ref
         .read(chatProvider.notifier)
         .handleChatAction(action, group.conversationId, ChatType.group);
-
-    // Show snackbar feedback
-    switch (action) {
-      case 'pin':
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Chat pinned to top'),
-            backgroundColor: Colors.orange,
-            behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 2),
-          ),
-        );
-        break;
-      case 'unpin':
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Chat unpinned'),
-            backgroundColor: Colors.grey,
-            behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 2),
-          ),
-        );
-        break;
-      case 'mute':
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Chat muted'),
-            backgroundColor: Colors.blue,
-            behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 2),
-          ),
-        );
-        break;
-      case 'unmute':
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Chat unmuted'),
-            backgroundColor: Colors.blue,
-            behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 2),
-          ),
-        );
-        break;
-      case 'favorite':
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Added to favorites'),
-            backgroundColor: Colors.pink,
-            behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 2),
-          ),
-        );
-        break;
-      case 'unfavorite':
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Removed from favorites'),
-            backgroundColor: Colors.grey,
-            behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 2),
-          ),
-        );
-        break;
-    }
   }
 
   // All state management and WebSocket handling is now done by groupListProvider
@@ -365,22 +304,17 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
           final item = filteredItems[index];
 
           if (item is GroupModel) {
-            final typingUserIds =
-                chatState.typingConvUsers[item.conversationId] ?? [];
-            final isTyping = typingUserIds.isNotEmpty;
-            // Note: We don't have typing user names in the new structure
-            // You may need to fetch user names from userIds if needed
-            final typingUsersCount = typingUserIds.length;
+            final typingUsers =
+                chatState.typingConvUsers[item.conversationId] ??
+                <TypingUser>{};
 
             return GroupListItem(
               group: item,
-              isTyping: isTyping,
-              typingUsers: const <String>{}, // Empty for now
-              typingUsersCount: typingUsersCount,
+              typingUsers: typingUsers,
               conversationId: item.conversationId,
-              isPinned: chatState.pinnedChats.contains(item.conversationId),
-              isMuted: chatState.mutedChats.contains(item.conversationId),
-              isFavorite: chatState.favoriteChats.contains(item.conversationId),
+              isPinned: item.isPinned ?? false,
+              isMuted: item.isMuted ?? false,
+              isFavorite: item.isFavorite ?? false,
               onLongPress: () => _showGroupChatActions(item),
               onTap: () async {
                 // Set this group as active and clear unread count
@@ -388,18 +322,6 @@ class _GroupsPageState extends ConsumerState<GroupsPage> {
                     .read(chatProvider.notifier)
                     .setActiveConversation(item.conversationId, ChatType.group);
 
-                // Navigate to inner group chat page
-                // Convert GroupModel to ConversationModel for InnerGroupChatPage
-                // final conversationModel = ConversationModel(
-                //   id: item.conversationId,
-                //   type: 'group',
-                //   title: item.title,
-                //   createrId: (item.members?.isNotEmpty ?? false)
-                //       ? item.members![0].userId
-                //       : 0,
-                //   pinnedMessageId: null,
-                //   createdAt: item.joinedAt,
-                // );
                 final result = await Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -451,9 +373,7 @@ class GroupListItem extends ConsumerWidget {
   final GroupModel group;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
-  final bool isTyping;
-  final Set<String> typingUsers;
-  final int typingUsersCount;
+  final Set<TypingUser> typingUsers;
   final int conversationId;
   final bool isPinned;
   final bool isMuted;
@@ -464,9 +384,7 @@ class GroupListItem extends ConsumerWidget {
     required this.group,
     required this.onTap,
     this.onLongPress,
-    this.isTyping = false,
     this.typingUsers = const {},
-    this.typingUsersCount = 0,
     required this.conversationId,
     this.isPinned = false,
     this.isMuted = false,
@@ -495,16 +413,33 @@ class GroupListItem extends ConsumerWidget {
     }
   }
 
-  String _formatLastMessageText(GroupLastMessage? lastMessage) {
-    if (lastMessage == null) return 'No messages yet';
-
-    // If body is not empty, return it
-    if (lastMessage.body.isNotEmpty) {
-      return lastMessage.body;
+  String _formatLastMessageText(
+    String lastMessageBody,
+    String? messageType, [
+    Map<String, dynamic>? attachmentData,
+  ]) {
+    // If body is not empty and not a media type identifier, return it
+    if (lastMessageBody.isNotEmpty &&
+        ![
+          'image',
+          'images',
+          'video',
+          'videos',
+          'audio',
+          'audios',
+          'voice',
+          'file',
+          'document',
+          'location',
+          'contact',
+          'media',
+        ].contains(lastMessageBody.toLowerCase())) {
+      return lastMessageBody;
     }
 
-    // Handle media messages based on type
-    switch (lastMessage.type.toLowerCase()) {
+    // Handle media messages based on type or body
+    final type = (messageType ?? lastMessageBody).toLowerCase();
+    switch (type) {
       case 'image':
         return '📷 Photo';
       case 'video':
@@ -519,10 +454,8 @@ class GroupListItem extends ConsumerWidget {
         return '↪️ Forwarded message';
       // Backward compatibility for old 'attachment' type
       case 'attachment':
-        if (lastMessage.attachmentData != null &&
-            lastMessage.attachmentData!.containsKey('category')) {
-          final attachmentType = lastMessage.attachmentData!['category']
-              .toLowerCase();
+        if (attachmentData != null && attachmentData.containsKey('category')) {
+          final attachmentType = attachmentData['category'].toLowerCase();
           switch (attachmentType) {
             case 'image':
             case 'images':
@@ -537,6 +470,8 @@ class GroupListItem extends ConsumerWidget {
             case 'file':
             case 'document':
               return '📎 File';
+            default:
+              return '📎 Attachment';
           }
         }
         return '📎 Attachment';
@@ -547,9 +482,9 @@ class GroupListItem extends ConsumerWidget {
       case 'media':
         return '📎 Media';
       case 'text':
-        return lastMessage.body;
+        return lastMessageBody;
       default:
-        return lastMessage.body.isNotEmpty ? lastMessage.body : 'New message';
+        return lastMessageBody.isNotEmpty ? lastMessageBody : 'New message';
     }
   }
 
@@ -562,15 +497,25 @@ class GroupListItem extends ConsumerWidget {
     final hasUnreadMessages = group.unreadCount > 0;
 
     // Use draft if available, otherwise use last message
-    String lastMessageText;
+    String lastMessageText = '';
     if (draft != null && draft.isNotEmpty) {
       // Show draft as last message
       lastMessageText = draft;
     } else {
-      lastMessageText = _formatLastMessageText(group.metadata?.lastMessage);
+      // lastMessageText = _formatLastMessageText(group.metadata?.lastMessage);
+      if (group.lastMessageId != null &&
+          group.lastMessageAt != null &&
+          group.lastMessageType != null) {
+        lastMessageText = _formatLastMessageText(
+          group.lastMessageBody ?? '',
+          group.lastMessageType,
+          group.metadata?.lastMessage?.attachmentData,
+    );
+      }
     }
 
     final timeText = _formatTime(group.lastMessageAt ?? group.joinedAt);
+    final isTyping = typingUsers.isNotEmpty;
     final displayText = isTyping
         ? 'Typing...'
         : (draft != null && draft.isNotEmpty
@@ -647,22 +592,7 @@ class GroupListItem extends ConsumerWidget {
                     ),
                     const SizedBox(height: 4),
                     isTyping
-                        ? Row(
-                            children: [
-                              Text(
-                                typingUsersCount == 1
-                                    ? '${typingUsers.first} is typing'
-                                    : '$typingUsersCount people are typing',
-                                style: TextStyle(
-                                  color: Colors.teal[600],
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              _buildTypingAnimation(),
-                            ],
-                          )
+                        ? _buildTypingIndicator()
                         : Text(
                             displayText,
                             style: TextStyle(
@@ -718,6 +648,75 @@ class GroupListItem extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildTypingIndicator() {
+    if (typingUsers.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    // Multiple people typing
+    if (typingUsers.length > 1) {
+      return Row(
+        children: [
+          Text(
+            '${typingUsers.length} people typing',
+            style: TextStyle(
+              color: Colors.teal[600],
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(width: 4),
+          _buildTypingAnimation(),
+        ],
+      );
+    }
+
+    // Single person typing
+    final typingUser = typingUsers.first;
+    final hasPfp = typingUser.userPfp != null && typingUser.userPfp!.isNotEmpty;
+    final hasName =
+        typingUser.userName != null && typingUser.userName!.isNotEmpty;
+
+    return Row(
+      children: [
+        // Show profile picture if available
+        if (hasPfp) ...[
+          Container(
+            width: 16,
+            height: 16,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: Colors.teal[600]!.withAlpha(20),
+                width: 1,
+              ),
+            ),
+            child: CircleAvatar(
+              radius: 8,
+              backgroundColor: Colors.teal[100]!.withAlpha(20),
+              backgroundImage: CachedNetworkImageProvider(typingUser.userPfp!),
+            ),
+          ),
+          const SizedBox(width: 6),
+        ],
+        Text(
+          hasPfp
+              ? 'typing'
+              : (hasName
+                    ? '${typingUser.userName} typing'
+                    : 'member is typing'),
+          style: TextStyle(
+            color: Colors.teal[600],
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(width: 4),
+        _buildTypingAnimation(),
+      ],
     );
   }
 

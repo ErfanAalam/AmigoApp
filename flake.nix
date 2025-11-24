@@ -41,7 +41,7 @@
             echo "-----------------------------------------------------------------"
             echo "      Your flutter android development environment is ready"
             echo "-----------------------------------------------------------------"
-            exec fish
+            # exec fish
           '';
 
           buildInputs = with pkgs;

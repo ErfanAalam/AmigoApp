@@ -18,6 +18,7 @@ class MainScreen extends ConsumerStatefulWidget {
 class _MainScreenState extends ConsumerState<MainScreen> {
   int _currentPageIndex = 0;
   final GlobalKey<ChatsPageState> _chatsPageKey = GlobalKey<ChatsPageState>();
+  final GlobalKey<GroupsPageState> _groupsPageKey = GlobalKey<GroupsPageState>();
   final GlobalKey<CallsPageState> _callsPageKey = GlobalKey<CallsPageState>();
 
   late final PageController _pageController;
@@ -32,7 +33,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
 
     _pages = [
       ChatsPage(key: _chatsPageKey),
-      GroupsPage(),
+      GroupsPage(key: _groupsPageKey),
       ContactsPage(),
       CallsPage(key: _callsPageKey),
       ProfilePage(),
@@ -41,6 +42,8 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_currentPageIndex == 0) {
         _chatsPageKey.currentState?.onPageVisible();
+      } else if (_currentPageIndex == 1) {
+        _groupsPageKey.currentState?.onPageVisible();
       }
     });
   }
@@ -57,6 +60,8 @@ class _MainScreenState extends ConsumerState<MainScreen> {
 
     if (index == 0) {
       _chatsPageKey.currentState?.onPageVisible();
+    } else if (index == 1) {
+      _groupsPageKey.currentState?.onPageVisible();
     } else if (index == 3) {
       _callsPageKey.currentState?.onPageVisible();
       // Mark calls as seen when call screen is viewed
@@ -79,6 +84,8 @@ class _MainScreenState extends ConsumerState<MainScreen> {
 
           if (index == 0) {
             _chatsPageKey.currentState?.onPageVisible();
+          } else if (index == 1) {
+            _groupsPageKey.currentState?.onPageVisible();
           } else if (index == 3) {
             _callsPageKey.currentState?.onPageVisible();
             // Mark calls as seen when call screen is viewed

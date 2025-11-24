@@ -253,22 +253,22 @@ class GroupMetadata {
 
 class GroupLastMessage {
   final int id;
-  final String body;
+  final String? body;
   final String type;
-  final int senderId;
-  final String senderName;
+  final int? senderId;
+  final String? senderName;
   final String createdAt;
-  final int conversationId;
+  final int? conversationId;
   final Map<String, dynamic>? attachmentData;
 
   GroupLastMessage({
     required this.id,
-    required this.body,
+    this.body,
     required this.type,
-    required this.senderId,
-    required this.senderName,
+    this.senderId,
+    this.senderName,
     required this.createdAt,
-    required this.conversationId,
+    this.conversationId,
     this.attachmentData,
   });
 

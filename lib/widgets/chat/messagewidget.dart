@@ -13,7 +13,7 @@ class MessageBubbleConfig {
   final bool isStarred;
   final bool isHighlighted;
   final String messageTime;
-  final bool shouldAnimate;
+  final bool? shouldAnimate;
   final AnimationController? animationController;
   final Animation<double>? slideAnimation;
   final Animation<double>? fadeAnimation;
@@ -52,7 +52,7 @@ class MessageBubbleConfig {
     required this.isStarred,
     required this.isHighlighted,
     required this.messageTime,
-    required this.shouldAnimate,
+    this.shouldAnimate,
     this.animationController,
     this.slideAnimation,
     this.fadeAnimation,
@@ -125,7 +125,7 @@ class MessageBubble extends StatelessWidget {
     );
 
     // Apply animation if available
-    if (config.shouldAnimate &&
+    if (config.shouldAnimate != null &&
         config.slideAnimation != null &&
         config.fadeAnimation != null &&
         config.animationController != null) {

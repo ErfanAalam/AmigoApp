@@ -12,19 +12,16 @@ import 'package:amigo/utils/chat/chat_helpers.utils.dart';
 import 'package:amigo/utils/snowflake.util.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../../models/user_model.dart';
 import '../../../api/chats.services.dart';
-import '../../../api/user.service.dart';
 import '../../../services/socket/websocket_service.dart';
 import '../../../services/socket/websocket_message_handler.dart';
 import '../../../utils/animations.utils.dart';
 import '../../../widgets/chat/message_action_sheet.dart';
 import '../../../widgets/chat/date.widgets.dart';
-import '../../../widgets/loading_dots_animation.dart';
 import '../../../widgets/chat/scroll_to_bottom_button.dart';
 import '../../../widgets/chat/attachment_action_sheet.dart';
 import '../../../widgets/chat/messagewidget.dart';
@@ -68,7 +65,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   final UserUtils _userUtils = UserUtils();
 
   // stream subscriptions
-  StreamSubscription<OnlineStatusPayload>? _onlineStatusSubscription;
+  StreamSubscription<ConnectionStatus>? _onlineStatusSubscription;
   StreamSubscription<TypingPayload>? _typingSubscription;
   StreamSubscription<ChatMessagePayload>? _messageSubscription;
   StreamSubscription<ChatMessageAckPayload>? _messageAckSubscription;
@@ -131,6 +128,14 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // int _optimisticMessageId = -1; // Negative IDs for optimistic messages
   // final Set<int> _optimisticMessageIds = {}; // Track optimistic messages
   bool _isDisposed = false; // Track if the page is being disposed
+
+  bool get _canSetState => mounted && !_isDisposed;
+
+  void _safeSetState(VoidCallback fn) {
+    if (_canSetState) {
+      setState(fn);
+    }
+  }
 
   // User info cache for sender names and profile pics
   // final Map<int, Map<String, String?>> _userInfoCache = {};
@@ -237,7 +242,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Initialize voice recording manager
     _voiceRecordingManager = VoiceRecordingManager(
       mounted: () => mounted,
-      setState: () => setState(() {}),
+      setState: () => _safeSetState(() {}),
       showErrorDialog: _showErrorDialog,
       context: context,
       voiceModalAnimationController: _voiceModalAnimationController,
@@ -250,7 +255,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     _audioPlaybackManager = AudioPlaybackManager(
       vsync: this,
       mounted: () => mounted,
-      setState: () => setState(() {}),
+      setState: () => _safeSetState(() {}),
       showErrorDialog: _showErrorDialog,
       mediaCacheService: _mediaCacheService,
       messagesRepo: _messagesRepo,
@@ -337,19 +342,25 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // get the current user details
     final currentUser = await _userUtils.getUserDetails();
     if (currentUser != null) {
-      setState(() {
+      if (!_canSetState) {
+        return;
+      }
+      _safeSetState(() {
         _currentUserDetails = currentUser;
       });
     }
 
-    final messaagesFromLocal = await _messagesRepo.getMessagesByConversation(
+    final messagesFromLocal = await _messagesRepo.getMessagesByConversation(
       widget.dm.conversationId,
       limit: 100,
       offset: 0,
     );
 
-    setState(() {
-      _messages = messaagesFromLocal;
+    if (!_canSetState) {
+      return;
+    }
+    _safeSetState(() {
+      _messages = messagesFromLocal;
       _sortMessagesBySentAt();
       _isLoading = false;
     });
@@ -359,7 +370,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       final pinnedMessage = await _messagesRepo.getMessageById(
         widget.dm.pinnedMessageId!,
       );
-      setState(() {
+      if (!_canSetState) {
+        return;
+      }
+      _safeSetState(() {
         _pinnedMessage = pinnedMessage;
       });
     }
@@ -383,7 +397,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
     // start silent message sync (from server to local DB)
-    _syncMessagesFromServer();
+
+    await _syncMessagesFromServer();
   }
 
   Future<void> _loadMoreMessages() async {
@@ -394,7 +409,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       offset: _messages.length,
     );
 
-    setState(() {
+    if (!_canSetState) {
+      return;
+    }
+    _safeSetState(() {
       _messages.addAll(moreMessages);
       _sortMessagesBySentAt();
     });
@@ -407,19 +425,19 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     final needSync = await _conversationsRepo.getNeedSyncStatus(
       widget.dm.conversationId,
     );
-    print('######################needSync: $needSync ######################');
     if (needSync == false) return;
 
     // Start syncing
-    if (mounted) {
-      setState(() {
-        _isSyncingMessages = true;
-        _syncProgress = 0.0;
-        _syncStatus = 'Starting sync...';
-        _syncedMessageCount = 0;
-        _totalMessageCount = 0;
-      });
+    if (!_canSetState) {
+      return;
     }
+    _safeSetState(() {
+      _isSyncingMessages = true;
+      _syncProgress = 0.0;
+      _syncStatus = 'syncing messages';
+      _syncedMessageCount = 0;
+      _totalMessageCount = 0;
+    });
 
     try {
       int page = 1;
@@ -437,8 +455,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       if (firstPageResponse['success'] != true ||
           firstPageResponse['data'] == null) {
         // Failed to fetch, stop syncing
-        if (mounted) {
-          setState(() {
+        if (_canSetState) {
+          _safeSetState(() {
             _isSyncingMessages = false;
             _syncStatus = 'Sync failed';
           });
@@ -453,8 +471,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
       if (_totalMessageCount == 0) {
         // No messages to sync
-        if (mounted) {
-          setState(() {
+        if (_canSetState) {
+          _safeSetState(() {
             _isSyncingMessages = false;
             _syncStatus = '';
           });
@@ -467,8 +485,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         await _messagesRepo.insertMessages(firstPageHistory.messages);
         totalSynced += firstPageHistory.messages.length;
 
-        if (mounted) {
-          setState(() {
+        if (_canSetState) {
+          _safeSetState(() {
             _syncedMessageCount = totalSynced;
             _syncProgress = totalSynced / _totalMessageCount;
             _syncStatus =
@@ -481,7 +499,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       page++;
 
       // Continue fetching remaining pages
-      while (hasMorePages && mounted && !_isDisposed) {
+      while (hasMorePages && _canSetState) {
         final response = await _chatsServices.getConversationHistory(
           conversationId: widget.dm.conversationId,
           page: page,
@@ -505,8 +523,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         totalSynced += historyResponse.messages.length;
 
         // Update progress
-        if (mounted) {
-          setState(() {
+        if (_canSetState) {
+          _safeSetState(() {
             _syncedMessageCount = totalSynced;
             _syncProgress = totalSynced / _totalMessageCount;
             _syncStatus =
@@ -522,47 +540,61 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       }
 
       // Reload messages from local DB after sync
-      if (mounted && !_isDisposed) {
-        final syncedMessages = await _messagesRepo
-            .getMessagesByConversationWithSenderDetails(
-              widget.dm.conversationId,
-              limit: 100,
-              offset: 0,
-            );
-
-        setState(() {
-          _messages = syncedMessages;
-          _sortMessagesBySentAt();
-          _isSyncingMessages = false;
-          _syncProgress = 1.0;
-          _syncStatus = 'Sync complete';
-        });
-
-        // Mark sync as completed in conversations repo
-        await _conversationsRepo.updateNeedSyncStatus(
-          widget.dm.conversationId,
-          false,
-        );
-
-        // Clear sync status after a short delay
-        Future.delayed(const Duration(seconds: 1), () {
-          if (mounted && !_isDisposed) {
-            setState(() {
-              _syncStatus = '';
-              _syncProgress = 0.0;
-            });
-          }
-        });
+      if (!_canSetState) {
+        return;
       }
+      final syncedMessages = await _messagesRepo.getMessagesByConversation(
+        widget.dm.conversationId,
+        limit: 100,
+        offset: 0,
+      );
+
+      if (!_canSetState) {
+        return;
+      }
+      _safeSetState(() {
+        _messages = syncedMessages;
+        _sortMessagesBySentAt();
+        _isSyncingMessages = false;
+        _syncProgress = 1.0;
+        _syncStatus = 'Sync complete';
+      });
+
+      // Mark sync as completed in conversations repo
+      await _conversationsRepo.updateNeedSyncStatus(
+        widget.dm.conversationId,
+        false,
+      );
+
+      // Clear sync status after a short delay
+      Future.delayed(const Duration(seconds: 1), () {
+        _safeSetState(() {
+          _syncStatus = '';
+          _syncProgress = 0.0;
+        });
+      });
     } catch (e) {
       debugPrint('❌ Error syncing messages: $e');
-      if (mounted) {
-        setState(() {
-          _isSyncingMessages = false;
-          _syncStatus = 'Sync failed';
-        });
-      }
+      _safeSetState(() {
+        _isSyncingMessages = false;
+        _syncStatus = 'Sync failed';
+      });
     }
+  }
+
+  /// Sort messages by sentAt timestamp to maintain consistent order
+  /// This prevents messages from flipping when setState is called
+  void _sortMessagesBySentAt() {
+    _messages.sort((a, b) {
+      try {
+        final aTime = DateTime.parse(a.sentAt);
+        final bTime = DateTime.parse(b.sentAt);
+        return aTime.compareTo(bTime);
+      } catch (e) {
+        // If parsing fails, fall back to string comparison
+        return a.sentAt.compareTo(b.sentAt);
+      }
+    });
   }
 
   /// Handle message text changes with debouncing for draft saving
@@ -572,7 +604,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     // Create new timer to save draft after 500ms of no typing
     _draftSaveTimer = Timer(const Duration(milliseconds: 500), () {
-      if (mounted && !_isDisposed) {
+      if (_canSetState) {
         final draftNotifier = ref.read(draftMessagesProvider.notifier);
         final text = _messageController.text;
         draftNotifier.saveDraft(widget.dm.conversationId, text);
@@ -658,43 +690,35 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   /// Build message status ticks (single/double) based on delivery and read status
   Widget _buildMessageStatusTicks(MessageModel message) {
-    if (((message.status == MessageStatusType.read) && message.id > 0)) {
-      // Message is already marked as read - always show blue tick
-      return Icon(Icons.done_all, size: 16, color: Colors.blue);
-    } else if (message.status == MessageStatusType.delivered) {
-      // User is active - show blue tick for delivered messages
-      return Icon(Icons.done_all, size: 16, color: Colors.grey[800]);
-    } else {
-      return Icon(Icons.done, size: 16, color: Colors.grey[800]);
-    }
-  }
-
-  /// Sort messages by sentAt timestamp to maintain consistent order
-  /// This prevents messages from flipping when setState is called
-  void _sortMessagesBySentAt() {
-    _messages.sort((a, b) {
-      try {
-        final aTime = DateTime.parse(a.sentAt);
-        final bTime = DateTime.parse(b.sentAt);
-        return aTime.compareTo(bTime);
-      } catch (e) {
-        // If parsing fails, fall back to string comparison
-        return a.sentAt.compareTo(b.sentAt);
-      }
-    });
+    // if (((message.status == MessageStatusType.read) && message.id > 0)) {
+    //   // Message is already marked as read - always show blue tick
+    //   return Icon(Icons.done_all, size: 16, color: Colors.blue);
+    // } else if (message.status == MessageStatusType.delivered) {
+    //   // User is active - show blue tick for delivered messages
+    //   return Icon(Icons.done_all, size: 16, color: Colors.grey[800]);
+    // } else {
+    return Icon(Icons.done, size: 16, color: Colors.grey[800]);
+    // }
   }
 
   /// Handle incoming message from WebSocket
   void _handleMessageNew(ChatMessagePayload payload) async {
     try {
+      UserModel? senderDetails;
+      if (payload.senderName == null) {
+        senderDetails = await _userRepo.getUserById(payload.senderId);
+      }
+
       // create message model from payload
       final message = MessageModel(
         canonicalId: payload.canonicalId,
         conversationId: payload.convId,
-        attachments: payload.attachments,
-        metadata: payload.metadata,
-        body: payload.body,
         senderId: payload.senderId,
+        attachments: payload.attachments,
+        body: payload.body,
+        metadata: payload.metadata,
+        senderName: payload.senderName ?? senderDetails?.name ?? '',
+        senderProfilePic: senderDetails?.profilePic ?? '',
         isReplied: payload.replyToMessageId != null,
         type: payload.msgType,
         status: MessageStatusType.read,
@@ -702,24 +726,16 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       );
 
       // Add message to UI immediately with animation
-      if (mounted) {
-        setState(() {
-          _messages.add(message);
-          _sortMessagesBySentAt();
-        });
-        // // Update sticky date separator for new messages - using ValueNotifier
-        // _currentStickyDate.value = ChatHelpers.getMessageDateString(
-        //   newMessage.createdAt,
-        // );
-        // _showStickyDate.value = true;
+      if (!_canSetState) {
+        return;
+      }
+      _safeSetState(() {
+        _messages.add(message);
+        _sortMessagesBySentAt();
+      });
 
-        if (message.id > 0) {
-          _animateNewMessage(message.id);
-          // if (!_isAtBottom) {
-          //   _trackNewMessage();
-          // }
-          // _scrollToBottom();
-        }
+      if (message.id > 0) {
+        _animateNewMessage(message.id);
       }
     } catch (e) {
       debugPrint('❌ Error processing incoming message: $e');
@@ -753,6 +769,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   void _receiveTyping(TypingPayload payload) {
+    if (_isDisposed) {
+      return;
+    }
+
     final isTyping = payload.isTyping;
 
     // Cancel any existing timeout
@@ -767,11 +787,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
       // Set a safety timeout to hide typing indicator after 2 seconds
       _typingTimeout = Timer(const Duration(seconds: 2), () {
-        if (mounted) {
-          _isOtherTypingNotifier.value = false;
-          _typingAnimationController.stop();
-          _typingAnimationController.reset();
+        if (_isDisposed) {
+          return;
         }
+        _isOtherTypingNotifier.value = false;
+        _typingAnimationController.stop();
+        _typingAnimationController.reset();
       });
     } else {
       // Immediately stop typing indicator
@@ -784,7 +805,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // final wasTyping = _isTyping;
     final isTyping = value.isNotEmpty;
 
-    setState(() {
+    if (!_canSetState) {
+      return;
+    }
+    _safeSetState(() {
       _isTyping = isTyping;
     });
 
@@ -815,17 +839,22 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   /// Handle incoming message pin from WebSocket
   void _handleMessagePin(MessagePinPayload payload) async {
     // load pinned message from prefs and then DB
-    if (payload.isPinned) {
+    if (payload.pin) {
       final pinnedMessage = await _messagesRepo.getMessageById(
         payload.messageId,
       );
-      setState(() {
+      if (!_canSetState) {
+        return;
+      }
+      _safeSetState(() {
         _pinnedMessage = pinnedMessage;
       });
     } else {
-      setState(() {
-        _pinnedMessage = null;
-      });
+      if (_canSetState) {
+        _safeSetState(() {
+          _pinnedMessage = null;
+        });
+      }
     }
   }
 
@@ -876,13 +905,15 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       sentAt: nowUTC.toIso8601String(),
     );
 
+    // storing the message into the local database
+    await _messagesRepo.insertMessage(newMsg);
+
     // Clear input and reply state immediately for better UX
     _messageController.clear();
-    _cancelReply();
 
     // Add message to UI immediately with animation
-    if (mounted) {
-      setState(() {
+    if (_canSetState) {
+      _safeSetState(() {
         _messages.add(newMsg);
         _sortMessagesBySentAt();
       });
@@ -899,8 +930,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         convId: widget.dm.conversationId,
         senderId: _currentUserDetails!.id,
         senderName: _currentUserDetails!.name,
+        attachments: mediaResponse,
         convType: ChatType.dm,
-        msgType: MessageType.text,
+        msgType: messageType,
         body: messageText,
         replyToMessageId: _replyToMessageData?.id,
         sentAt: nowUTC,
@@ -918,9 +950,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-      // storing the message into the local database
-      _messagesRepo.insertMessage(newMsg);
-
       // updating the last message on sending own message
       ref
           .read(chatProvider.notifier)
@@ -935,6 +964,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         conversationId: widget.dm.conversationId,
         userIds: [widget.dm.recipientId],
       );
+
+      _cancelReply();
     } catch (e) {
       debugPrint('Error sending message');
     }
@@ -945,8 +976,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     ChatHelpers.scrollToBottom(
       scrollController: _scrollController,
       onScrollComplete: () {
-        if (mounted) {
-          setState(() {
+        if (_canSetState) {
+          _safeSetState(() {
             // _unreadCountWhileScrolled = 0;
             _isAtBottom = true;
           });
@@ -980,15 +1011,15 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     if (isAtBottomNow) {
       // User is at bottom - clear unread count
-      if (mounted && (!_isAtBottom)) {
-        setState(() {
+      if (_canSetState && (!_isAtBottom)) {
+        _safeSetState(() {
           _isAtBottom = true;
         });
       }
     } else if (scrolledUp || scrollPosition > 100) {
       // User scrolled up - show button
-      if (mounted && _isAtBottom) {
-        setState(() {
+      if (_canSetState && _isAtBottom) {
+        _safeSetState(() {
           _isAtBottom = false;
         });
       }
@@ -1057,7 +1088,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
 
     // Now the message should be in our list
-    if (!mounted) return;
+    if (!_canSetState) return;
 
     // PHASE 1: Scroll approximately to the message area so it gets built
     final updatedMessageIndex = _messages.indexWhere(
@@ -1091,32 +1122,31 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     // PHASE 2: Use message ID to find and highlight the message
     // After approximate scroll, highlight the message
-    if (mounted) {
-      setState(() {
-        _highlightedMessageId = messageId;
+    if (!_canSetState) {
+      return;
+    }
+    _safeSetState(() {
+      _highlightedMessageId = messageId;
+    });
+
+    // Cancel any existing timer
+    _highlightTimer?.cancel();
+
+    // Remove highlight after 2 seconds
+    _highlightTimer = Timer(const Duration(milliseconds: 2000), () {
+      _safeSetState(() {
+        _highlightedMessageId = null;
       });
+    });
 
-      // Cancel any existing timer
-      _highlightTimer?.cancel();
+    // If we couldn't find the message initially, retry
+    if (updatedMessageIndex == -1 && retryCount < maxRetries - 1) {
+      // Force a rebuild and wait a bit longer
+      _safeSetState(() {});
 
-      // Remove highlight after 2 seconds
-      _highlightTimer = Timer(const Duration(milliseconds: 2000), () {
-        if (mounted) {
-          setState(() {
-            _highlightedMessageId = null;
-          });
-        }
-      });
-
-      // If we couldn't find the message initially, retry
-      if (updatedMessageIndex == -1 && retryCount < maxRetries - 1) {
-        // Force a rebuild and wait a bit longer
-        setState(() {});
-
-        // Try again after a longer delay
-        await Future.delayed(const Duration(milliseconds: 300));
-        _scrollToMessage(messageId, retryCount: retryCount + 1);
-      }
+      // Try again after a longer delay
+      await Future.delayed(const Duration(milliseconds: 300));
+      _scrollToMessage(messageId, retryCount: retryCount + 1);
     }
   }
 
@@ -1510,9 +1540,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       controller: _scrollController,
       reverse: true, // Start from bottom (newest messages)
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      itemCount: _messages.length,
       physics:
           const ClampingScrollPhysics(), // Better performance than bouncing
-      cacheExtent: 200, // Reduce cache extent to save memory
+      cacheExtent: 500, // Reduce cache extent to save memory
       addAutomaticKeepAlives: false, // Don't keep all items alive
       addRepaintBoundaries:
           true, // Add repaint boundaries for better performance
@@ -1657,9 +1688,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Widget _buildMessageWithActions(MessageModel message, bool isMyMessage) {
-    final isSelected = _selectedMessages.contains(message.canonicalId!);
-    final isPinned = _pinnedMessage?.canonicalId == message.canonicalId!;
-    final isStarred = _starredMessages.contains(message.canonicalId!);
+    final isSelected = _selectedMessages.contains(message.id);
+    final isPinned = _pinnedMessage?.canonicalId == message.id;
+    final isStarred = _starredMessages.contains(message.id);
 
     // Wrap in RepaintBoundary to isolate repaints and improve scroll performance
     return RepaintBoundary(
@@ -1667,7 +1698,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       child: GestureDetector(
         onLongPress: () => _showMessageActions(message, isMyMessage),
         onTap: _selectedMessages.isNotEmpty
-            ? () => _toggleMessageSelection(message.canonicalId!)
+            ? () => _toggleMessageSelection(message.id)
             : null,
         onPanStart: (details) => _onSwipeStart(message, details),
         onPanUpdate: (details) => _onSwipeUpdate(message, details, isMyMessage),
@@ -1713,13 +1744,13 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // Swipe gesture handling methods
   void _onSwipeStart(MessageModel message, DragStartDetails details) {
     // Initialize swipe animation controller if not exists
-    if (!_swipeAnimationControllers.containsKey(message.canonicalId!)) {
+    if (!_swipeAnimationControllers.containsKey(message.id)) {
       final controller = AnimationController(
         duration: const Duration(milliseconds: 200),
         vsync: this,
       );
-      _swipeAnimationControllers[message.canonicalId!] = controller;
-      _swipeAnimations[message.canonicalId!] = Tween<double>(
+      _swipeAnimationControllers[message.id] = controller;
+      _swipeAnimations[message.id] = Tween<double>(
         begin: 0.0,
         end: 1.0,
       ).animate(CurvedAnimation(parent: controller, curve: Curves.easeOut));
@@ -1764,7 +1795,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     // Only proceed if this is confirmed as a horizontal swipe
     if (_isSwipeGesture && horizontalDistance > 0) {
-      final controller = _swipeAnimationControllers[message.canonicalId!];
+      final controller = _swipeAnimationControllers[message.id];
       if (controller != null) {
         // Calculate swipe progress (0 to 1) based on total distance
         final progress = (_swipeTotalDistance / 100).clamp(0.0, 1.0);
@@ -1778,7 +1809,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     DragEndDetails details,
     bool isMyMessage,
   ) {
-    final controller = _swipeAnimationControllers[message.canonicalId!];
+    final controller = _swipeAnimationControllers[message.id];
     if (controller != null) {
       // Only trigger reply if this was confirmed as a horizontal swipe gesture
       if (_isSwipeGesture &&
@@ -1809,7 +1840,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     bool isPinned,
     bool isStarred,
   ) {
-    final swipeAnimation = _swipeAnimations[message.canonicalId!];
+    final swipeAnimation = _swipeAnimations[message.id];
 
     if (swipeAnimation != null) {
       return AnimatedBuilder(
@@ -1899,7 +1930,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         nonMyMessageBackgroundColor: Colors.white,
         useIntrinsicWidth: true,
         useStackContainer: true,
-        currentUserId: _currentUserDetails?.id ?? 0,
+        currentUserId: _currentUserDetails?.id,
         conversationUserId: widget.dm.recipientId,
         onReplyTap: _scrollToMessage,
         messagesRepo: _messagesRepo,
@@ -1995,7 +2026,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       isMyMessage: isMyMessage,
       isStarred: _starredMessages.contains(message.id),
       mounted: () => mounted,
-      setState: () => setState(() {}),
+      setState: () => _safeSetState(() {}),
       showErrorDialog: _showErrorDialog,
       buildMessageStatusTicks: _buildMessageStatusTicks,
       onImagePreview: (url, caption) => _openImagePreview(url, caption),
@@ -2046,7 +2077,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   // Message action methods
   void _toggleMessageSelection(int messageId) {
-    setState(() {
+    if (!_canSetState) {
+      return;
+    }
+    _safeSetState(() {
       if (_selectedMessages.contains(messageId)) {
         _selectedMessages.remove(messageId);
       } else {
@@ -2056,7 +2090,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   void _exitSelectionMode() {
-    setState(() {
+    if (!_canSetState) {
+      return;
+    }
+    _safeSetState(() {
       _selectedMessages.clear();
     });
   }
@@ -2076,9 +2113,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         showReadBy: false,
         onReply: () => _replyToMessage(message),
         onPin: () => _togglePinMessage(message),
-        onStar: () => _toggleStarMessage(message.canonicalId!),
+        onStar: () => _toggleStarMessage(message.id),
         onForward: () => _forwardMessage(message),
-        onSelect: () => _enterSelectionMode(message.canonicalId!),
+        onSelect: () => _enterSelectionMode(message.id),
         onDelete: isMyMessage ? () => _deleteMessage(message.id) : null,
       ),
     );
@@ -2193,9 +2230,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         context: context,
         mounted: mounted,
         clearMessagesToForward: (messages) {
-          setState(() {
-            _messagesToForward.clear();
-          });
+          if (_canSetState) {
+            _safeSetState(() {
+              _messagesToForward.clear();
+            });
+          }
         },
         showErrorDialog: _showErrorDialog,
       ),
@@ -2347,7 +2386,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // }
 
   void _enterSelectionMode(int messageId) {
-    setState(() {
+    if (!_canSetState) {
+      return;
+    }
+    _safeSetState(() {
       _selectedMessages.add(messageId);
     });
   }
@@ -2359,7 +2401,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       currentPinnedMessageId: _pinnedMessage?.canonicalId,
       setPinnedMessageId: (value) => _pinnedMessage = value,
       currentUserId: _currentUserDetails?.id,
-      setState: setState,
+      setState: _safeSetState,
     );
   }
 
@@ -2369,27 +2411,35 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       conversationId: widget.dm.conversationId,
       starredMessages: _starredMessages,
       currentUserId: _currentUserDetails?.id,
-      setState: setState,
+      setState: _safeSetState,
     );
   }
 
   void _replyToMessage(MessageModel message) async {
-    setState(() {
+    if (!_canSetState) {
+      return;
+    }
+    _safeSetState(() {
       _replyToMessageData = message;
     });
   }
 
   void _cancelReply() {
-    setState(() {
+    if (!_canSetState) {
+      return;
+    }
+    _safeSetState(() {
       _replyToMessageData = null;
     });
   }
 
   Future<void> _forwardMessage(MessageModel message) async {
-    setState(() {
-      _messagesToForward.clear();
-      _messagesToForward.add(message.canonicalId!);
-    });
+    if (_canSetState) {
+      _safeSetState(() {
+        _messagesToForward.clear();
+        _messagesToForward.add(message.id);
+      });
+    }
     await _showForwardModal();
   }
 
@@ -2400,7 +2450,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       messages: _messages,
       chatsServices: _chatsServices,
       messagesRepo: _messagesRepo,
-      setState: setState,
+      setState: _safeSetState,
     );
   }
 
@@ -2410,7 +2460,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       selectedMessages: _selectedMessages,
       starredMessages: _starredMessages,
       currentUserId: _currentUserDetails?.id,
-      setState: setState,
+      setState: _safeSetState,
       exitSelectionMode: _exitSelectionMode,
     );
   }
@@ -2419,7 +2469,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     await ChatHelpers.bulkForwardMessages(
       selectedMessages: _selectedMessages,
       messagesToForward: _messagesToForward,
-      setState: setState,
+      setState: _safeSetState,
       exitSelectionMode: _exitSelectionMode,
       showForwardModal: _showForwardModal,
     );
@@ -2482,8 +2532,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       mounted: mounted,
       onMessageUpdated: (updatedMessage) {
         final index = _messages.indexWhere((m) => m.id == updatedMessage.id);
-        if (index != -1 && mounted) {
-          setState(() {
+        if (index != -1 && _canSetState) {
+          _safeSetState(() {
             _messages[index] = updatedMessage;
           });
         }
@@ -2715,6 +2765,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     _messageController.removeListener(_onMessageTextChanged);
     // _currentStickyDate.dispose();
     // _showStickyDate.dispose();
+
+    // Clear active conversation when leaving the messaging screen
+    ref.read(chatProvider.notifier).setActiveConversation(null, null);
 
     // Clear unread count in local DB
     _conversationsRepo.updateUnreadCount(widget.dm.conversationId, 0);

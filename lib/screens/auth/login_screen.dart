@@ -3,8 +3,6 @@ import 'package:amigo/models/user_model.dart';
 import 'package:amigo/services/socket/websocket_service.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart' as material;
-import 'package:shared_preferences/shared_preferences.dart'
-    show SharedPreferences;
 import 'signup_screen.dart';
 import '../home_layout.dart';
 import '../../api/api_service.dart';
@@ -72,7 +70,6 @@ class _LoginScreenState extends material.State<LoginScreen> {
     }
 
     final response = await apiService.send_login_otp(_completePhoneNumber);
-
     if (response['success']) {
       material.ScaffoldMessenger.of(context).showSnackBar(
         const material.SnackBar(

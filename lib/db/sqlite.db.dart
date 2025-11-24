@@ -23,9 +23,7 @@ class SqliteDatabase {
   Future<void> clearAllData() async {
     try {
       // Ensure database is open and accessible
-      if (_db == null) {
-        _db = AppDatabase();
-      }
+      _db ??= AppDatabase();
       final db = _db!;
 
       // Check if database is closed, if so reopen it

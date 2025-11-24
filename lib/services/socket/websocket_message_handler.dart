@@ -18,8 +18,8 @@ class WebSocketMessageHandler {
   StreamSubscription<WSMessage>? _messageSubscription;
 
   // Stream controllers for different message types
-  final StreamController<OnlineStatusPayload> _onlineStatusController =
-      StreamController<OnlineStatusPayload>.broadcast();
+  final StreamController<ConnectionStatus> _onlineStatusController =
+      StreamController<ConnectionStatus>.broadcast();
 
   final StreamController<ChatMessagePayload> _messageNewController =
       StreamController<ChatMessagePayload>.broadcast();
@@ -47,8 +47,8 @@ class WebSocketMessageHandler {
 
   bool _isInitialized = false;
 
-  /// Get stream for online status (type: 'user:online_status')
-  Stream<OnlineStatusPayload> get onlineStatusStream =>
+  /// Get stream for online status (type: 'connection:status')
+  Stream<ConnectionStatus> get onlineStatusStream =>
       _onlineStatusController.stream;
 
   /// Get stream for messages (type: 'message:new')
@@ -105,7 +105,7 @@ class WebSocketMessageHandler {
       // Route messages to appropriate streams based on type
       switch (message.type) {
         // ---------------------------------------------------
-        case WSMessageType.userOnlineStatus:
+        case WSMessageType.connectionStatus:
           final payload = message.onlineStatusPayload;
           if (payload != null) {
             _userStatusService.handleUserOnlineMessage(payload);

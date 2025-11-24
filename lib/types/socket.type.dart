@@ -16,6 +16,25 @@ enum ChatType {
   }
 }
 
+/// Connection status enum
+enum ConnectionStatusType {
+  forground('foreground'),
+  background('background'),
+  disconnected('disconnected'),
+  stale('stale');
+
+  final String value;
+  const ConnectionStatusType(this.value);
+
+  static ConnectionStatusType? fromString(String? value) {
+    if (value == null) return null;
+    return ConnectionStatusType.values.firstWhere(
+      (e) => e.value == value,
+      orElse: () => ConnectionStatusType.background,
+    );
+  }
+}
+
 /// Message type enum
 enum MessageType {
   text('text'),
@@ -79,7 +98,7 @@ enum ChatRoleType {
 
 /// WebSocket message type enum
 enum WSMessageType {
-  userOnlineStatus('user:online_status'),
+  connectionStatus('connection:status'),
   conversationJoin('conversation:join'),
   conversationLeave('conversation:leave'),
   conversationNew('conversation:new'),
@@ -116,14 +135,14 @@ enum WSMessageType {
 }
 
 /// Online status payload
-class OnlineStatusPayload {
+class ConnectionStatus {
   final int senderId;
-  final String status; // 'online' | 'offline'
+  final String status;
 
-  OnlineStatusPayload({required this.senderId, required this.status});
+  ConnectionStatus({required this.senderId, required this.status});
 
-  factory OnlineStatusPayload.fromJson(Map<String, dynamic> json) {
-    return OnlineStatusPayload(
+  factory ConnectionStatus.fromJson(Map<String, dynamic> json) {
+    return ConnectionStatus(
       senderId: json['sender_id'] as int,
       status: json['status'] as String,
     );
@@ -539,7 +558,7 @@ class MessagePinPayload {
   final int senderId;
   final String? senderName;
   final String? senderPfp;
-  final bool isPinned;
+  final bool pin;
 
   MessagePinPayload({
     required this.convId,
@@ -548,7 +567,7 @@ class MessagePinPayload {
     required this.senderId,
     this.senderName,
     this.senderPfp,
-    required this.isPinned,
+    required this.pin,
   });
 
   factory MessagePinPayload.fromJson(Map<String, dynamic> json) {
@@ -561,7 +580,7 @@ class MessagePinPayload {
       senderId: json['sender_id'] as int,
       senderName: json['sender_name'] as String?,
       senderPfp: json['sender_pfp'] as String?,
-      isPinned: json['is_pinned'] as bool,
+      pin: json['is_pinned'] as bool,
     );
   }
 
@@ -573,7 +592,7 @@ class MessagePinPayload {
       'sender_id': senderId,
       if (senderName != null) 'sender_name': senderName,
       if (senderPfp != null) 'sender_pfp': senderPfp,
-      'is_pinned': isPinned,
+      'is_pinned': pin,
     };
   }
 }
@@ -710,8 +729,8 @@ class WSMessage {
     Map<String, dynamic> payloadJson,
   ) {
     switch (type) {
-      case WSMessageType.userOnlineStatus:
-        return OnlineStatusPayload.fromJson(payloadJson);
+      case WSMessageType.connectionStatus:
+        return ConnectionStatus.fromJson(payloadJson);
       case WSMessageType.conversationJoin:
         return JoinLeavePayload.fromJson(payloadJson);
       case WSMessageType.conversationLeave:
@@ -748,7 +767,7 @@ class WSMessage {
   }
 
   dynamic _payloadToJson(dynamic payload) {
-    if (payload is OnlineStatusPayload) return payload.toJson();
+    if (payload is ConnectionStatus) return payload.toJson();
     if (payload is JoinLeavePayload) return payload.toJson();
     if (payload is ChatMessagePayload) return payload.toJson();
     if (payload is ChatMessageAckPayload) return payload.toJson();
@@ -762,8 +781,8 @@ class WSMessage {
   }
 
   /// Type-safe getters for payloads
-  OnlineStatusPayload? get onlineStatusPayload =>
-      payload is OnlineStatusPayload ? payload : null;
+  ConnectionStatus? get onlineStatusPayload =>
+      payload is ConnectionStatus ? payload : null;
 
   JoinLeavePayload? get joinLeavePayload =>
       payload is JoinLeavePayload ? payload : null;

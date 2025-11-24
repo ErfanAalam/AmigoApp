@@ -1,6 +1,5 @@
 import 'package:amigo/models/conversations.model.dart';
 import 'package:flutter/material.dart';
-import '../../../services/socket/websocket_service.dart';
 import '../../../services/user_status_service.dart';
 import '../../../widgets/chat_action_menu.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -21,7 +20,6 @@ class ChatsPage extends ConsumerStatefulWidget {
 
 class ChatsPageState extends ConsumerState<ChatsPage>
     with WidgetsBindingObserver {
-  final WebSocketService _websocketService = WebSocketService();
   final UserStatusService _userStatusService = UserStatusService();
   final TextEditingController _searchController = TextEditingController();
 
@@ -59,30 +57,6 @@ class ChatsPageState extends ConsumerState<ChatsPage>
     await ref
         .read(chatProvider.notifier)
         .handleChatAction(action, conversation.conversationId, ChatType.dm);
-    // Show snackbar feedback
-    switch (action) {
-      case 'pin':
-        _showSnackBar('Chat pinned to top', Colors.orange);
-        break;
-      case 'unpin':
-        _showSnackBar('Chat unpinned', Colors.grey);
-        break;
-      case 'mute':
-        _showSnackBar('Chat muted', Colors.blue);
-        break;
-      case 'unmute':
-        _showSnackBar('Chat unmuted', Colors.blue);
-        break;
-      case 'favorite':
-        _showSnackBar('Added to favorites', Colors.pink);
-        break;
-      case 'unfavorite':
-        _showSnackBar('Removed from favorites', Colors.grey);
-        break;
-      case 'delete':
-        _showSnackBar('Chat deleted', Colors.teal);
-        break;
-    }
   }
 
   /// Show delete confirmation dialog
@@ -112,13 +86,12 @@ class ChatsPageState extends ConsumerState<ChatsPage>
 
   /// Show chat actions bottom sheet
   Future<void> _showChatActions(DmModel conversation) async {
-    final chatState = ref.read(chatProvider);
     final action = await ChatActionBottomSheet.show(
       context: context,
       dm: conversation,
-      isPinned: chatState.pinnedChats.contains(conversation.conversationId),
-      isMuted: chatState.mutedChats.contains(conversation.conversationId),
-      isFavorite: chatState.favoriteChats.contains(conversation.conversationId),
+      isPinned: conversation.isPinned ?? false,
+      isMuted: conversation.isMuted ?? false,
+      isFavorite: conversation.isFavorite ?? false,
     );
 
     if (action != null) {
@@ -133,7 +106,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
         content: Text(message),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 2),
+        duration: Duration(seconds: 1),
       ),
     );
   }
@@ -366,7 +339,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
     }
 
     // Get filtered conversations from provider
-    final conversationsToShow = chatState.filteredConversations;
+    final conversationsToShow = chatState.filteredDmList;
 
     // Show empty state if no conversations
     if (conversationsToShow.isEmpty) {
@@ -406,21 +379,17 @@ class ChatsPageState extends ConsumerState<ChatsPage>
             return Container(); // Skip invalid conversations
           }
 
-          final typingUserIds =
-              chatState.typingConvUsers[conversation.conversationId] ?? [];
-          final isTyping = typingUserIds.isNotEmpty;
+          final typingUsers =
+              chatState.typingConvUsers[conversation.conversationId];
+          final isTyping = typingUsers != null && typingUsers.isNotEmpty;
 
           return ChatListItem(
             conversation: conversation,
             isTyping: isTyping,
-            isOnline: _userStatusService.isUserOnline(conversation.recipientId),
-            isPinned: chatState.pinnedChats.contains(
-              conversation.conversationId,
-            ),
-            isMuted: chatState.mutedChats.contains(conversation.conversationId),
-            isFavorite: chatState.favoriteChats.contains(
-              conversation.conversationId,
-            ),
+            isOnline: conversation.isRecipientOnline,
+            isPinned: conversation.isPinned ?? false,
+            isMuted: conversation.isMuted ?? false,
+            isFavorite: conversation.isFavorite ?? false,
             onLongPress: () => _showChatActions(conversation),
             conversationId: conversation.conversationId,
             onAvatarTap: () async {
@@ -601,6 +570,8 @@ class ChatListItem extends ConsumerWidget {
             case 'file':
             case 'document':
               return '📎 File';
+              default:
+              return '📎 Attachment';
           }
         }
         return '📎 Attachment';
@@ -646,6 +617,8 @@ class ChatListItem extends ConsumerWidget {
       lastMessageType,
       attachmentData,
     );
+    
+
     final timeText = conversation.lastMessageAt != null
         ? _formatTime(conversation.lastMessageAt!)
         : _formatTime(conversation.createdAt);

@@ -117,8 +117,7 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final chatState = ref.read(chatProvider);
-      final isPinned = chatState.pinnedChats.contains(widget.dm.conversationId);
+      final isPinned = widget.dm.isPinned ?? false;
       final action = isPinned ? 'unpin' : 'pin';
 
       await ref
@@ -147,8 +146,7 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final chatState = ref.read(chatProvider);
-      final isMuted = chatState.mutedChats.contains(widget.dm.conversationId);
+      final isMuted = widget.dm.isMuted ?? false;
       final action = isMuted ? 'unmute' : 'mute';
 
       await ref
@@ -177,10 +175,7 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final chatState = ref.read(chatProvider);
-      final isFavorite = chatState.favoriteChats.contains(
-        widget.dm.conversationId,
-      );
+      final isFavorite = widget.dm.isFavorite ?? false;
       final action = isFavorite ? 'unfavorite' : 'favorite';
 
       await ref
@@ -257,13 +252,9 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final chatState = ref.watch(chatProvider);
-    final isPinned = chatState.pinnedChats.contains(widget.dm.conversationId);
-    final isMuted = chatState.mutedChats.contains(widget.dm.conversationId);
-    final isFavorite = chatState.favoriteChats.contains(
-      widget.dm.conversationId,
-    );
-
+    final isPinned = widget.dm.isPinned ?? false;
+    final isMuted = widget.dm.isMuted ?? false;
+    final isFavorite = widget.dm.isFavorite ?? false;
     final recipientName = _recipientUser?.name ?? 'Unknown';
     final recipientProfilePic = _recipientUser?.profilePic;
     final isOnline = _recipientUser?.isOnline ?? false;

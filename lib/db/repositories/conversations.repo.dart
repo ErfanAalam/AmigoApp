@@ -114,27 +114,27 @@ class ConversationRepository {
 
     for (final conv in conversations) {
       // Check if conversation already exists to preserve needSync value
-      final existingConv = await getConversationById(conv.id);
+      // final existingConv = await getConversationById(conv.id);
 
       // Preserve existing needSync value if conversation exists, otherwise use provided value or default to true for new conversations
-      final needSyncValue = existingConv != null
-          ? (conv.needSync ?? existingConv.needSync ?? true)
-          : (conv.needSync ?? true);
-
-      final lastmessageidvalue = existingConv != null
-          ? (conv.lastMessageId ?? existingConv.lastMessageId)
-          : (conv.lastMessageId);
-      final pinnedmessageidvalue = existingConv != null
-          ? (conv.pinnedMessageId ?? existingConv.pinnedMessageId)
-          : (conv.pinnedMessageId);
+      // final needSyncValue = existingConv != null
+      //     ? (conv.needSync ?? existingConv.needSync ?? true)
+      //     : (conv.needSync ?? true);
+      //
+      // final lastmessageidvalue = existingConv != null
+      //     ? (conv.lastMessageId ?? existingConv.lastMessageId)
+      //     : (conv.lastMessageId);
+      // final pinnedmessageidvalue = existingConv != null
+      //     ? (conv.pinnedMessageId ?? existingConv.pinnedMessageId)
+      //     : (conv.pinnedMessageId);
 
       final convCompanion = ConversationsCompanion.insert(
         id: Value(conv.id),
         type: conv.type,
         title: Value(conv.title),
         createrId: conv.createrId,
-        lastMessageId: Value(lastmessageidvalue),
-        pinnedMessageId: Value(pinnedmessageidvalue),
+        lastMessageId: Value(conv.lastMessageId),
+        pinnedMessageId: Value(conv.pinnedMessageId),
         unreadCount: Value(conv.unreadCount ?? 0),
         createdAt: Value(conv.createdAt),
         isDeleted: Value(conv.isDeleted ?? false),
@@ -142,9 +142,8 @@ class ConversationRepository {
         isMuted: Value(conv.isMuted ?? false),
         isFavorite: Value(conv.isFavorite ?? false),
         updatedAt: Value(conv.updatedAt),
-        needSync: Value(needSyncValue),
       );
-      await db.into(db.conversations).insertOnConflictUpdate(convCompanion);
+      await db.into(db.conversations).insert(convCompanion);
     }
   }
 
@@ -170,6 +169,23 @@ class ConversationRepository {
     }
 
     return result;
+  }
+
+  /// Get all conversation IDs
+  /// If [type] is provided, returns only IDs for that conversation type
+  /// If [type] is null, returns all conversation IDs
+  Future<List<int>> getAllConversationIds({ChatType? type}) async {
+    final db = sqliteDatabase.database;
+
+    final query = db.select(db.conversations);
+
+    if (type != null) {
+      query.where((t) => t.type.equals(type.value));
+    }
+
+    final conversations = await query.get();
+
+    return conversations.map((conv) => conv.id).toList();
   }
 
   /// Clear all conversations from the database
