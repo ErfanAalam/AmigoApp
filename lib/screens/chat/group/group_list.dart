@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../providers/draft_provider.dart';
 import '../../../providers/chat_provider.dart';
 import '../../../types/socket.type.dart';
+import '../../../utils/route_transitions.dart';
 import 'messaging.dart';
 import 'create_group.dart';
 import 'community_group_list.dart';
@@ -324,9 +325,7 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
 
                 final result = await Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (context) => InnerGroupChatPage(group: item),
-                  ),
+                  SlideRightRoute(page: InnerGroupChatPage(group: item)),
                 );
 
                 // Check if group was deleted
@@ -353,9 +352,8 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (context) =>
-                        CommunityInnerGroupsPage(community: item),
+                  SlideRightRoute(
+                    page: CommunityInnerGroupsPage(community: item),
                   ),
                 );
               },
@@ -510,7 +508,7 @@ class GroupListItem extends ConsumerWidget {
           group.lastMessageBody ?? '',
           group.lastMessageType,
           group.metadata?.lastMessage?.attachmentData,
-    );
+        );
       }
     }
 

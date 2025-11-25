@@ -2,6 +2,7 @@ import 'package:amigo/models/conversations.model.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../screens/chat/dm/dm_details.dart';
+import '../../utils/route_transitions.dart';
 
 class UserProfileModal extends StatelessWidget {
   final DmModel dm;
@@ -64,9 +65,10 @@ class UserProfileModal extends StatelessWidget {
                     // Navigate to details screen without closing modal
                     final result = await Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (context) => DmDetailsScreen(dm: dm),
-                      ),
+                      // MaterialPageRoute(
+                      //   builder: (context) => DmDetailsScreen(dm: dm),
+                      // ),
+                      SlideRightRoute(page: DmDetailsScreen(dm: dm)),
                     );
                     // If chat was deleted, close modal and return true
                     if (result == true && context.mounted) {

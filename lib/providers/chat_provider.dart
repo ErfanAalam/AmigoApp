@@ -41,7 +41,7 @@ class ChatState {
     this.groupList = const [],
     this.communities = const [],
     this.commGroupList,
-    this.isLoading = false,
+    this.isLoading = true,
     this.activeConvId,
     this.activeConvType,
     Map<int, Set<TypingUser>>? typingConvUsers,
@@ -184,6 +184,7 @@ class ChatNotifier extends Notifier<ChatState> {
 
   /// Load conversations from local DB first
   Future<void> loadConvsFromLocal() async {
+    state = state.copyWith(isLoading: true);
     try {
       final localDMs = await _conversationsRepo.getAllDmsWithRecipientInfo();
       final localGroups = await _conversationsRepo.getGroupListWithoutMembers();
@@ -222,6 +223,7 @@ class ChatNotifier extends Notifier<ChatState> {
       }
     } catch (e) {
       debugPrint('❌ Error loading from local DB: $e');
+      state = state.copyWith(isLoading: false);
     }
   }
 

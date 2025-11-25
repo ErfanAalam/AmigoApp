@@ -9,6 +9,7 @@ import '../../../providers/draft_provider.dart';
 import '../../../providers/chat_provider.dart';
 import '../../../types/socket.type.dart';
 import '../../../widgets/chat/user_profile_modal.dart';
+import '../../../utils/route_transitions.dart';
 import 'messaging.dart';
 
 class ChatsPage extends ConsumerStatefulWidget {
@@ -97,18 +98,6 @@ class ChatsPageState extends ConsumerState<ChatsPage>
     if (action != null) {
       await _handleChatAction(action, conversation);
     }
-  }
-
-  /// Show snackbar with message
-  void _showSnackBar(String message, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 1),
-      ),
-    );
   }
 
   void _refreshConversations() {
@@ -424,12 +413,10 @@ class ChatsPageState extends ConsumerState<ChatsPage>
                     ChatType.dm,
                   );
 
-              // Navigate to inner chat page
+              // Navigate to inner chat page with slide animation
               await Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => InnerChatPage(dm: conversation),
-                ),
+                SlideRightRoute(page: InnerChatPage(dm: conversation)),
               );
 
               // Clear unread count again when returning from inner chat
@@ -570,7 +557,7 @@ class ChatListItem extends ConsumerWidget {
             case 'file':
             case 'document':
               return '📎 File';
-              default:
+            default:
               return '📎 Attachment';
           }
         }
@@ -617,7 +604,6 @@ class ChatListItem extends ConsumerWidget {
       lastMessageType,
       attachmentData,
     );
-    
 
     final timeText = conversation.lastMessageAt != null
         ? _formatTime(conversation.lastMessageAt!)

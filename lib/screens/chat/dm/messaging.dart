@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/db/repositories/messageStatus.repo.dart';
+import 'package:amigo/models/message_status.model.dart' as status_model;
 import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/message.model.dart';
@@ -688,17 +689,56 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   //   );
   // }
 
+  Future<status_model.MessageStatusType?> _getMessageStatus(
+    MessageModel message,
+  ) async {
+    final status = await _messageStatusRepo.getMessageStatusByMessageAndUser(
+      message.id,
+      _currentUserDetails!.id,
+    );
+    return status;
+  }
+
   /// Build message status ticks (single/double) based on delivery and read status
   Widget _buildMessageStatusTicks(MessageModel message) {
-    // if (((message.status == MessageStatusType.read) && message.id > 0)) {
-    //   // Message is already marked as read - always show blue tick
-    //   return Icon(Icons.done_all, size: 16, color: Colors.blue);
-    // } else if (message.status == MessageStatusType.delivered) {
-    //   // User is active - show blue tick for delivered messages
-    //   return Icon(Icons.done_all, size: 16, color: Colors.grey[800]);
-    // } else {
-    return Icon(Icons.done, size: 16, color: Colors.grey[800]);
-    // }
+    return FutureBuilder<status_model.MessageStatusType?>(
+      future: _getMessageStatus(message),
+      builder: (context, snapshot) {
+        // Use message.status as fallback if status lookup hasn't completed
+        if (!snapshot.hasData) {
+          // Show sent status while loading
+          if (message.status == MessageStatusType.read) {
+            return Icon(Icons.done_all, size: 16, color: Colors.blue);
+          } else if (message.status == MessageStatusType.delivered) {
+            return Icon(Icons.done_all, size: 16, color: Colors.grey[800]);
+          } else {
+            return Icon(Icons.done, size: 16, color: Colors.grey[800]);
+          }
+        }
+
+        final status = snapshot.data;
+
+        // Check readAt first (read implies delivered)
+        if (status?.readAt != null && status!.readAt!.isNotEmpty) {
+          return Icon(Icons.done_all, size: 16, color: Colors.blue);
+        }
+        // Then check deliveredAt
+        else if (status?.deliveredAt != null &&
+            status!.deliveredAt!.isNotEmpty) {
+          return Icon(Icons.done_all, size: 16, color: Colors.grey[800]);
+        }
+        // Fallback to message.status
+        else {
+          if (message.status == MessageStatusType.read) {
+            return Icon(Icons.done_all, size: 16, color: Colors.blue);
+          } else if (message.status == MessageStatusType.delivered) {
+            return Icon(Icons.done_all, size: 16, color: Colors.grey[800]);
+          } else {
+            return Icon(Icons.done, size: 16, color: Colors.grey[800]);
+          }
+        }
+      },
+    );
   }
 
   /// Handle incoming message from WebSocket
@@ -937,6 +977,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         replyToMessageId: _replyToMessageData?.id,
         sentAt: nowUTC,
       );
+
+      print('messagePayload: ${messagePayload.toJson()}');
 
       final wsmsg = WSMessage(
         type: WSMessageType.messageNew,
@@ -1274,27 +1316,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                                 );
                               },
                             ),
-                            if (_isSyncingMessages) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.green[400],
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Text(
-                                  'Syncing messages... ⚡',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ],
                           ],
                         ),
                       ],
@@ -1479,36 +1500,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
               style: TextStyle(color: Colors.grey[600], fontSize: 16),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 16),
-            // ElevatedButton(
-            //   onPressed: null,
-            //   style: ElevatedButton.styleFrom(
-            //     backgroundColor: Colors.grey[100],
-            //     padding: const EdgeInsets.symmetric(
-            //       horizontal: 20,
-            //       vertical: 10,
-            //     ),
-            //     shape: RoundedRectangleBorder(
-            //       borderRadius: BorderRadius.circular(10),
-            //     ),
-            //     elevation: 0,
-            //   ),
-            //   child: const Row(
-            //     mainAxisSize: MainAxisSize.min,
-            //     children: [
-            //       Icon(Icons.refresh_rounded, size: 16, color: Colors.black),
-            //       SizedBox(width: 6),
-            //       Text(
-            //         'Refresh',
-            //         style: TextStyle(
-            //           color: Colors.black,
-            //           fontSize: 12,
-            //           fontWeight: FontWeight.normal,
-            //         ),
-            //       ),
-            //     ],
-            //   ),
-            // ),
           ],
         ),
       );
@@ -1590,17 +1581,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
         // Calculate the actual message index, accounting for indicators
         int messageIndex = index;
-
-        // // Subtract 1 if there's a "no more messages" indicator at index 0
-        // if (!_hasMoreMessages && _messages.isNotEmpty && !_isLoadingMore) {
-        //   messageIndex = index - 1;
-        // }
-
-        // // Subtract 1 if there's a loading indicator at index 0
-        // if (_isLoadingMore) {
-        //   messageIndex = index - 1;
-        // }
-
         // Bounds check to prevent index out of bounds errors
         if (messageIndex < 0 || messageIndex >= _messages.length) {
           // Removed expensive debug prints during scroll - causes lag
@@ -2254,43 +2234,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
   }
 
-  // void _sendImageMessage(
-  //   File imageFile,
-  //   String source, {
-  //   MessageModel? failedMessage,
-  // }) async {
-  //   // await sendImageMessage(
-  //   //   SendMediaMessageConfig(
-  //   //     mediaFile: imageFile,
-  //   //     conversationId: widget.dm.id,
-  //   //     currentUserId: _currentUserId,
-  //   //     optimisticMessageId: _optimisticMessageId,
-  //   //     replyToMessage: _replyToMessageData,
-  //   //     replyToMessageId: _replyToMessageData?.id,
-  //   //     failedMessage: failedMessage,
-  //   //     messageType: 'image',
-  //   //     messages: _messages,
-  //   //     optimisticMessageIds: _optimisticMessageIds,
-  //   //     conversationMeta: _conversationMeta,
-  //   //     messagesRepo: _messagesRepo,
-  //   //     chatsServices: _chatsServices,
-  //   //     websocketService: _websocketService,
-  //   //     mounted: () => mounted,
-  //   //     setState: setState,
-  //   //     handleMediaUploadFailure: _handleMediaUploadFailure,
-  //   //     animateNewMessage: _animateNewMessage,
-  //   //     scrollToBottom: _scrollToBottom,
-  //   //     cancelReply: _cancelReply,
-  //   //     isReplying: _replyToMessageData != null,
-  //   //   ),
-  //   // );
-
-  //   // // Only decrement optimistic ID if this was a new message (not a retry)
-  //   // if (failedMessage == null) {
-  //   //   _optimisticMessageId--;
-  //   // }
-  // }
-
   Future<void> _sendMediaMessageToServer(
     File mediaFile,
     MessageType messageType,
@@ -2307,83 +2250,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       throw Exception('Failed to send media message');
     }
   }
-
-  // void _sendVideoMessage(
-  //   File videoFile,
-  //   String source, {
-  //   MessageModel? failedMessage,
-  // }) async {
-  //   await sendVideoMessage(
-  //     SendMediaMessageConfig(
-  //       mediaFile: videoFile,
-  //       conversationId: widget.dm.id,
-  //       currentUserId: _currentUserId,
-  //       optimisticMessageId: _optimisticMessageId,
-  //       replyToMessage: _replyToMessageData,
-  //       replyToMessageId: _replyToMessageData?.id,
-  //       failedMessage: failedMessage,
-  //       messageType: 'video',
-  //       messages: _messages,
-  //       optimisticMessageIds: _optimisticMessageIds,
-  //       conversationMeta: _conversationMeta,
-  //       messagesRepo: _messagesRepo,
-  //       chatsServices: _chatsServices,
-  //       websocketService: _websocketService,
-  //       mounted: () => mounted,
-  //       setState: setState,
-  //       handleMediaUploadFailure: _handleMediaUploadFailure,
-  //       animateNewMessage: _animateNewMessage,
-  //       scrollToBottom: _scrollToBottom,
-  //       cancelReply: _cancelReply,
-  //       isReplying: _replyToMessageData != null,
-  //     ),
-  //   );
-
-  //   // Only decrement optimistic ID if this was a new message (not a retry)
-  //   if (failedMessage == null) {
-  //     _optimisticMessageId--;
-  //   }
-  // }
-
-  // void _sendDocumentMessage(
-  //   File documentFile,
-  //   String fileName,
-  //   String extension, {
-  //   MessageModel? failedMessage,
-  // }) async {
-  //   await sendDocumentMessage(
-  //     SendMediaMessageConfig(
-  //       mediaFile: documentFile,
-  //       conversationId: widget.dm.id,
-  //       currentUserId: _currentUserId,
-  //       optimisticMessageId: _optimisticMessageId,
-  //       replyToMessage: _replyToMessageData,
-  //       replyToMessageId: _replyToMessageData?.id,
-  //       failedMessage: failedMessage,
-  //       messageType: 'document',
-  //       fileName: fileName,
-  //       extension: extension,
-  //       messages: _messages,
-  //       optimisticMessageIds: _optimisticMessageIds,
-  //       conversationMeta: _conversationMeta,
-  //       messagesRepo: _messagesRepo,
-  //       chatsServices: _chatsServices,
-  //       websocketService: _websocketService,
-  //       mounted: () => mounted,
-  //       setState: setState,
-  //       handleMediaUploadFailure: _handleMediaUploadFailure,
-  //       animateNewMessage: _animateNewMessage,
-  //       scrollToBottom: _scrollToBottom,
-  //       cancelReply: _cancelReply,
-  //       isReplying: _replyToMessageData != null,
-  //     ),
-  //   );
-
-  //   // Only decrement optimistic ID if this was a new message (not a retry)
-  //   if (failedMessage == null) {
-  //     _optimisticMessageId--;
-  //   }
-  // }
 
   void _enterSelectionMode(int messageId) {
     if (!_canSetState) {
@@ -2655,42 +2521,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       if (mounted && failedMessage == null) {
         Navigator.of(context).pop();
       }
-
-      // await sendRecordedVoice(
-      //   SendMediaMessageConfig(
-      //     mediaFile: voiceFile,
-      //     conversationId: widget.dm.id,
-      //     currentUserId: _currentUserId,
-      //     optimisticMessageId: _optimisticMessageId,
-      //     replyToMessage: _replyToMessageData,
-      //     replyToMessageId: _replyToMessageData?.id,
-      //     failedMessage: failedMessage,
-      //     messageType: 'audio',
-      //     duration: duration,
-      //     messages: _messages,
-      //     optimisticMessageIds: _optimisticMessageIds,
-      //     conversationMeta: _conversationMeta,
-      //     messagesRepo: _messagesRepo,
-      //     chatsServices: _chatsServices,
-      //     websocketService: _websocketService,
-      //     mounted: () => mounted,
-      //     setState: setState,
-      //     handleMediaUploadFailure: _handleMediaUploadFailure,
-      //     animateNewMessage: _animateNewMessage,
-      //     scrollToBottom: _scrollToBottom,
-      //     cancelReply: _cancelReply,
-      //     isReplying: _replyToMessageData != null,
-      //     context: context,
-      //     closeModal: failedMessage == null
-      //         ? () => Navigator.of(context).pop()
-      //         : null,
-      //   ),
-      // );
-
-      // Only decrement optimistic ID if this was a new message (not a retry)
-      // if (failedMessage == null) {
-      //   _optimisticMessageId--;
-      // }
     } catch (e) {
       _showErrorDialog('Failed to send voice note. Please try again.');
     }

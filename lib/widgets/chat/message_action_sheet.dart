@@ -1,4 +1,5 @@
 import 'package:amigo/models/message.model.dart';
+import 'package:amigo/types/socket.type.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -28,7 +29,6 @@ class MessageActionSheet extends StatelessWidget {
     this.isAdmin = false,
     this.showReadBy = false,
     required this.onReply,
-    // required this.onCopy,
     required this.onPin,
     required this.onStar,
     required this.onForward,
@@ -36,6 +36,56 @@ class MessageActionSheet extends StatelessWidget {
     this.onReadBy,
     this.onDelete,
   });
+
+  IconData _getMessageTypeIcon(MessageType type) {
+    switch (type) {
+      case MessageType.image:
+        return Icons.image;
+      case MessageType.video:
+        return Icons.videocam;
+      case MessageType.audio:
+        return Icons.audiotrack;
+      case MessageType.document:
+        return Icons.insert_drive_file;
+      case MessageType.attachment:
+        return Icons.attach_file;
+      case MessageType.reply:
+        return Icons.reply;
+      case MessageType.forwarded:
+        return Icons.forward;
+      case MessageType.reaction:
+        return Icons.emoji_emotions;
+      case MessageType.system:
+        return Icons.info;
+      case MessageType.text:
+        return Icons.message;
+    }
+  }
+
+  String _getMessageTypeLabel(MessageType type) {
+    switch (type) {
+      case MessageType.image:
+        return 'Image';
+      case MessageType.video:
+        return 'Video';
+      case MessageType.audio:
+        return 'Audio';
+      case MessageType.document:
+        return 'Document';
+      case MessageType.attachment:
+        return 'Attachment';
+      case MessageType.reply:
+        return 'Reply';
+      case MessageType.forwarded:
+        return 'Forwarded';
+      case MessageType.reaction:
+        return 'Reaction';
+      case MessageType.system:
+        return 'System message';
+      case MessageType.text:
+        return 'Text message';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -77,16 +127,40 @@ class MessageActionSheet extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.message, color: Colors.grey[600], size: 20),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        message.body != null && message.body!.length > 50
-                            ? '${message.body!.substring(0, 50)}...'
-                            : message.body!,
-                        style: TextStyle(color: Colors.grey[700], fontSize: 14),
+                    if (message.body != null &&
+                        message.body!.trim().isNotEmpty) ...[
+                      Icon(Icons.message, color: Colors.grey[600], size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          message.body!.length > 50
+                              ? '${message.body!.substring(0, 50)}...'
+                              : message.body!,
+                          style: TextStyle(
+                            color: Colors.grey[700],
+                            fontSize: 14,
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
+                    if (message.body == null ||
+                        message.body!.trim().isEmpty) ...[
+                      Icon(
+                        _getMessageTypeIcon(message.type),
+                        color: Colors.grey[600],
+                        size: 20,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _getMessageTypeLabel(message.type),
+                          style: TextStyle(
+                            color: Colors.grey[700],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

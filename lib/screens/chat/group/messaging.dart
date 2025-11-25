@@ -10,6 +10,7 @@ import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/providers/chat_provider.dart';
 import 'package:amigo/utils/chat/chat_helpers.utils.dart';
+import 'package:amigo/utils/route_transitions.dart';
 import 'package:amigo/utils/snowflake.util.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
@@ -1708,9 +1709,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   void _openGroupInfo() async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => GroupInfoPage(group: widget.group),
-      ),
+      // MaterialPageRoute(
+      //   builder: (context) => GroupInfoPage(group: widget.group),
+      // ),
+      SlideRightRoute(page: GroupInfoPage(group: widget.group)),
     );
 
     // Check if the group was deleted
