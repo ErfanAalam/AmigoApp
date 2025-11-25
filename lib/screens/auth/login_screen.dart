@@ -127,11 +127,15 @@ class _LoginScreenState extends material.State<LoginScreen> {
       if (response['success']) {
         // Authentication is handled in the API service interceptor
         // which automatically stores cookies and updates auth state
-        material.ScaffoldMessenger.of(context).showSnackBar(
-          const material.SnackBar(
-            content: material.Text('OTP verified successfully'),
-          ),
-        );
+
+        if (mounted) {
+          material.ScaffoldMessenger.of(context).showSnackBar(
+            const material.SnackBar(
+              content: material.Text('OTP verified successfully'),
+            ),
+          );
+        }
+
         final appVersion = await UserUtils().getAppVersion();
         await _userService.updateUser({'app_version': appVersion});
 

@@ -244,14 +244,10 @@ class ApiService {
         data: {'phone': phoneNumber, 'otp': otp, 'name': name, 'role': 'user'},
       );
 
-      // // Check if we received any cookies
-      // final cookies = response.headers['set-cookie'];
-      return {
-        'success': response.statusCode == 200,
-        'statusCode': response.statusCode,
-        'data': response.data,
-        'message': 'Signup OTP verified successfully',
-      };
+      if (response.data is String) {
+        return jsonDecode(response.data as String);
+      }
+      return response.data;
     } catch (e) {
       return {
         'success': false,

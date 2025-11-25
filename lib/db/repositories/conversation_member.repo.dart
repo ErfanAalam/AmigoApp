@@ -62,6 +62,28 @@ class ConversationMemberRepository {
     }
   }
 
+  /// Insert multiple conversation members (insert only, no update on conflict)
+  /// Use this when you've already checked that members don't exist
+  Future<void> insertConversationMembersOnly(
+    List<ConversationMemberModel> members,
+  ) async {
+    final db = sqliteDatabase.database;
+
+    for (final member in members) {
+      final memberCompanion = ConversationMembersCompanion.insert(
+        conversationId: member.conversationId,
+        userId: member.userId,
+        role: member.role, // role is required (non-nullable)
+        unreadCount: Value(member.unreadCount ?? 0),
+        joinedAt: Value(member.joinedAt),
+        removedAt: Value(member.removedAt),
+        lastReadMessageId: Value(member.lastReadMessageId),
+        lastDeliveredMessageId: Value(member.lastDeliveredMessageId),
+      );
+      await db.into(db.conversationMembers).insert(memberCompanion);
+    }
+  }
+
   /// Get all conversation members
   Future<List<ConversationMemberModel>> getAllConversationMembers() async {
     final db = sqliteDatabase.database;

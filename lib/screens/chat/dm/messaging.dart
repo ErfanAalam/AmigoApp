@@ -426,7 +426,64 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     final needSync = await _conversationsRepo.getNeedSyncStatus(
       widget.dm.conversationId,
     );
-    if (needSync == false) return;
+
+    // ===========================================================================
+    // ===========================================================================
+    // TEMPORARY NEED SYNC LOGIC CHANGE
+    // ===========================================================================
+    // ===========================================================================
+    if (needSync == false) {
+      final firstPageResponse = await _chatsServices.getConversationHistory(
+        conversationId: widget.dm.conversationId,
+        page: 1,
+        limit: 100,
+      );
+
+      // if (firstPageResponse['success'] != true ||
+      //     firstPageResponse['data'] == null) {
+      //   // Failed to fetch, stop syncing
+      //   if (_canSetState) {
+      //     _safeSetState(() {
+      //       _isSyncingMessages = false;
+      //       _syncStatus = 'Sync failed';
+      //     });
+      //   }
+      //   return;
+      // }
+
+      final firstPageHistory = ConversationHistoryResponse.fromJson(
+        firstPageResponse['data'],
+      );
+      // _totalMessageCount = firstPageHistory.totalCount;
+
+      // if (_totalMessageCount == 0) {
+      //   // No messages to sync
+      //   if (_canSetState) {
+      //     _safeSetState(() {
+      //       _isSyncingMessages = false;
+      //       _syncStatus = '';
+      //     });
+      //   }
+      //   return;
+      // }
+
+      // Process first page
+      if (firstPageHistory.messages.isNotEmpty) {
+        await _messagesRepo.insertMessages(firstPageHistory.messages);
+
+        // if (_canSetState) {
+        //   _safeSetState(() {
+        //     _syncedMessageCount = totalSynced;
+        //     _syncProgress = totalSynced / _totalMessageCount;
+        //     _syncStatus =
+        //         'Syncing messages... ($totalSynced/$_totalMessageCount)';
+        //   });
+        // }
+      }
+
+      // hasMorePages = firstPageHistory.hasNextPage;
+      // page++;
+    }
 
     // Start syncing
     if (!_canSetState) {
@@ -891,6 +948,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         },
       };
     }
+
+    // fddfd
+    // fddfd
 
     final newMsg = MessageModel(
       optimisticId: optimisticMessageId,

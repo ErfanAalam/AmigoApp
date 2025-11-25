@@ -72,6 +72,25 @@ class UserRepository {
     }
   }
 
+  /// Insert multiple users (insert only, no update on conflict)
+  /// Use this when you've already checked that users don't exist
+  Future<void> insertUsersOnly(List<UserModel> users) async {
+    final db = sqliteDatabase.database;
+
+    for (final user in users) {
+      final userCompanion = UsersCompanion.insert(
+        id: Value(user.id),
+        name: user.name,
+        phone: user.phone,
+        role: Value(user.role),
+        profilePic: Value(user.profilePic),
+        isOnline: user.isOnline,
+        callAccess: Value(user.callAccess ?? false),
+      );
+      await db.into(db.users).insert(userCompanion);
+    }
+  }
+
   /// Get all users
   Future<List<UserModel>> getAllUsers() async {
     final db = sqliteDatabase.database;

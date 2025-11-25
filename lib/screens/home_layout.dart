@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../api/user.service.dart';
+import '../models/user_model.dart';
+import '../utils/user.utils.dart';
 import 'chat/dm/dm_list.dart';
 import 'chat/group/group_list.dart';
 import 'contact/contact_list.dart';
@@ -18,8 +21,10 @@ class MainScreen extends ConsumerStatefulWidget {
 class _MainScreenState extends ConsumerState<MainScreen> {
   int _currentPageIndex = 0;
   final GlobalKey<ChatsPageState> _chatsPageKey = GlobalKey<ChatsPageState>();
-  final GlobalKey<GroupsPageState> _groupsPageKey = GlobalKey<GroupsPageState>();
+  final GlobalKey<GroupsPageState> _groupsPageKey =
+      GlobalKey<GroupsPageState>();
   final GlobalKey<CallsPageState> _callsPageKey = GlobalKey<CallsPageState>();
+  final UserService _userService = UserService();
 
   late final PageController _pageController;
 
@@ -46,6 +51,31 @@ class _MainScreenState extends ConsumerState<MainScreen> {
         _groupsPageKey.currentState?.onPageVisible();
       }
     });
+
+    _loadUserDetails();
+  }
+
+  void _loadUserDetails() async {
+    // Implement user details loading logic here
+
+    final currentUser = await UserUtils().getUserDetails();
+
+    if (currentUser == null) {
+      final response = await _userService.getUser();
+      if (response['success'] == true) {
+        final userDetail = {
+          'id': response['data']['id'],
+          'name': response['data']['name'],
+          'phone': response['data']['phone'],
+          'role': response['data']['role'],
+          'profile_pic': response['data']['profile_pic'],
+          'created_at': response['data']['created_at'],
+          'call_access': response['data']['call_access'],
+        };
+
+        await UserUtils().saveUserDetails(UserModel.fromJson(userDetail));
+      }
+    }
   }
 
   void _onTabSelected(int index) {

@@ -160,4 +160,9 @@ class NotificationBadgeNotifier extends Notifier<NotificationBadgeState> {
       debugPrint('Error marking calls as seen: $e');
     }
   }
+
+  /// Clear all badge counts (used during logout)
+  void clearAllCounts() {
+    state = const NotificationBadgeState();
+  }
 }

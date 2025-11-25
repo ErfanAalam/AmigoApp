@@ -163,22 +163,19 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
     );
 
     if (response['success']) {
-      // Send FCM token to backend after successful signup
-      await authService.sendFCMTokenToBackend(3);
-
       // Show the setup loading popup
       _showSetupLoadingPopup();
 
+      if (mounted) {
+        material.ScaffoldMessenger.of(context).showSnackBar(
+          const material.SnackBar(
+            content: material.Text('Account created successfully'),
+          ),
+        );
+      }
+
       final appVersion = await UserUtils().getAppVersion();
       await userService.updateUser({'app_version': appVersion});
-
-      // which automatically stores cookies and updates auth state
-      if (!mounted) return;
-      material.ScaffoldMessenger.of(context).showSnackBar(
-        const material.SnackBar(
-          content: material.Text('Account created successfully'),
-        ),
-      );
 
       final userDetail = {
         'id': response['data']['id'],
@@ -191,13 +188,17 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
       };
 
       await UserUtils().saveUserDetails(UserModel.fromJson(userDetail));
+
+      // Send FCM token to backend after successful signup
+      await authService.sendFCMTokenToBackend(3);
     } else {
-      if (!mounted) return;
-      material.ScaffoldMessenger.of(context).showSnackBar(
-        const material.SnackBar(
-          content: material.Text('Error verifying Signup OTP'),
-        ),
-      );
+      if (mounted) {
+        material.ScaffoldMessenger.of(context).showSnackBar(
+          const material.SnackBar(
+            content: material.Text('Error verifying Signup OTP'),
+          ),
+        );
+      }
     }
 
     setState(() {

@@ -15,6 +15,10 @@ import 'package:flutter/material.dart';
 import 'package:amigo/screens/auth/login_screen.dart';
 import '../media_cache_service.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:amigo/providers/chat_provider.dart';
+import 'package:amigo/providers/draft_provider.dart';
+import 'package:amigo/providers/notification_badge_provider.dart';
 
 class AuthService {
   static const String _authStatusKey = 'auth_status';
@@ -173,7 +177,43 @@ class AuthService {
       // 13. Clear current_user_name
       await prefs.remove('current_user_name');
 
-      // 14. Clear the local database completely
+      // 14. Clear all provider states
+      try {
+        final context = NavigationHelper.navigatorKey.currentContext;
+        if (context != null) {
+          final container = ProviderScope.containerOf(context);
+          
+          // Clear chat provider - reset dmList and groupList
+          try {
+            container.read(chatProvider.notifier).clearAllState();
+            debugPrint('✅ Cleared chat provider state');
+          } catch (e) {
+            debugPrint('⚠️ Error clearing chat provider: $e');
+          }
+
+          // Clear draft messages provider
+          try {
+            container.read(draftMessagesProvider.notifier).clearAllDrafts();
+            debugPrint('✅ Cleared draft messages provider state');
+          } catch (e) {
+            debugPrint('⚠️ Error clearing draft messages provider: $e');
+          }
+
+          // Clear notification badge provider - reset to initial state
+          try {
+            container.read(notificationBadgeProvider.notifier).clearAllCounts();
+            debugPrint('✅ Cleared notification badge provider state');
+          } catch (e) {
+            debugPrint('⚠️ Error clearing notification badge provider: $e');
+          }
+        } else {
+          debugPrint('⚠️ Navigator context not available for clearing providers');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Error clearing provider states: $e');
+      }
+
+      // 15. Clear the local database completely
       try {
         // Try to clear all data from tables first
         // If this fails (e.g., read-only), we'll just delete the file
@@ -196,7 +236,7 @@ class AuthService {
         } catch (_) {}
       }
 
-      // 15. Restart the app
+      // 16. Restart the app
       if (NavigationHelper.navigatorKey.currentContext != null) {
         Navigator.pushAndRemoveUntil(
           NavigationHelper.navigatorKey.currentContext!,

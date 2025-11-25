@@ -53,5 +53,10 @@ class DraftMessagesNotifier extends Notifier<Map<int, String>> {
   String? getDraft(int conversationId) {
     return state[conversationId];
   }
+
+  /// Clear all drafts (used during logout)
+  void clearAllDrafts() {
+    state = {};
+  }
 }
 
