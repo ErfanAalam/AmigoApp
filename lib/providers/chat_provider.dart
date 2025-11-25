@@ -253,9 +253,7 @@ class ChatNotifier extends Notifier<ChatState> {
           type: ChatType.dm,
         );
         final existingConvIdsSet = existingConvIds.toSet();
-        debugPrint(
-          'Existing conversation IDs: ${existingConvIdsSet.length}',
-        );
+        debugPrint('Existing conversation IDs: ${existingConvIdsSet.length}');
 
         // Get all existing conversation members (conversationId, userId pairs)
         final existingMembers = await _conversationsMemberRepo
@@ -311,10 +309,9 @@ class ChatNotifier extends Notifier<ChatState> {
         // Filter to only new member pairs
         final newMembers = convMembers
             .where(
-              (member) =>
-                  !existingMemberPairs.contains(
-                    '${member.conversationId}_${member.userId}',
-                  ),
+              (member) => !existingMemberPairs.contains(
+                '${member.conversationId}_${member.userId}',
+              ),
             )
             .toList();
         debugPrint(
@@ -510,9 +507,8 @@ class ChatNotifier extends Notifier<ChatState> {
         }
 
         // Fetch existing group conversation IDs from DB
-        final existingGroupConvIds = await _conversationsRepo.getAllConversationIds(
-          type: ChatType.group,
-        );
+        final existingGroupConvIds = await _conversationsRepo
+            .getAllConversationIds(type: ChatType.group);
         final existingGroupConvIdsSet = existingGroupConvIds.toSet();
         debugPrint(
           'Existing group conversation IDs: ${existingGroupConvIdsSet.length}',
@@ -1746,7 +1742,7 @@ class ChatNotifier extends Notifier<ChatState> {
   Future<void> _handleOnlineStatus(ConnectionStatus payload) async {
     try {
       final userId = payload.senderId;
-      final isOnline = payload.status == 'online';
+      final isOnline = payload.status == 'foreground';
 
       // Update user online status in database
       await _userRepo.updateUserOnlineStatus(userId, isOnline);

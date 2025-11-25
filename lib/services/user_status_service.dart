@@ -37,7 +37,7 @@ class UserStatusService {
     try {
       setUserOnlineStatus(
         payload.senderId,
-        isOnline: payload.status == 'online',
+        isOnline: payload.status == 'foreground',
       );
     } catch (e) {
       debugPrint('❌ Error handling user_online message');
