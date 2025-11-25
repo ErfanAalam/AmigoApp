@@ -689,56 +689,17 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   //   );
   // }
 
-  Future<status_model.MessageStatusType?> _getMessageStatus(
-    MessageModel message,
-  ) async {
-    final status = await _messageStatusRepo.getMessageStatusByMessageAndUser(
-      message.id,
-      _currentUserDetails!.id,
-    );
-    return status;
-  }
-
   /// Build message status ticks (single/double) based on delivery and read status
   Widget _buildMessageStatusTicks(MessageModel message) {
-    return FutureBuilder<status_model.MessageStatusType?>(
-      future: _getMessageStatus(message),
-      builder: (context, snapshot) {
-        // Use message.status as fallback if status lookup hasn't completed
-        if (!snapshot.hasData) {
-          // Show sent status while loading
-          if (message.status == MessageStatusType.read) {
-            return Icon(Icons.done_all, size: 16, color: Colors.blue);
-          } else if (message.status == MessageStatusType.delivered) {
-            return Icon(Icons.done_all, size: 16, color: Colors.grey[800]);
-          } else {
-            return Icon(Icons.done, size: 16, color: Colors.grey[800]);
-          }
-        }
-
-        final status = snapshot.data;
-
-        // Check readAt first (read implies delivered)
-        if (status?.readAt != null && status!.readAt!.isNotEmpty) {
-          return Icon(Icons.done_all, size: 16, color: Colors.blue);
-        }
-        // Then check deliveredAt
-        else if (status?.deliveredAt != null &&
-            status!.deliveredAt!.isNotEmpty) {
-          return Icon(Icons.done_all, size: 16, color: Colors.grey[800]);
-        }
-        // Fallback to message.status
-        else {
-          if (message.status == MessageStatusType.read) {
-            return Icon(Icons.done_all, size: 16, color: Colors.blue);
-          } else if (message.status == MessageStatusType.delivered) {
-            return Icon(Icons.done_all, size: 16, color: Colors.grey[800]);
-          } else {
-            return Icon(Icons.done, size: 16, color: Colors.grey[800]);
-          }
-        }
-      },
-    );
+    // if (((message.status == MessageStatusType.read) && message.id > 0)) {
+    //   // Message is already marked as read - always show blue tick
+    //   return Icon(Icons.done_all, size: 16, color: Colors.blue);
+    // } else if (message.status == MessageStatusType.delivered) {
+    //   // User is active - show blue tick for delivered messages
+    //   return Icon(Icons.done_all, size: 16, color: Colors.grey[800]);
+    // } else {
+    return Icon(Icons.done, size: 16, color: Colors.grey[800]);
+    // }
   }
 
   /// Handle incoming message from WebSocket
@@ -977,8 +938,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         replyToMessageId: _replyToMessageData?.id,
         sentAt: nowUTC,
       );
-
-      print('messagePayload: ${messagePayload.toJson()}');
 
       final wsmsg = WSMessage(
         type: WSMessageType.messageNew,
