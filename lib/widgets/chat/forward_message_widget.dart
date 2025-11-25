@@ -161,10 +161,26 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
   }
 
   String _getInitials(String name) {
-    final words = name.trim().split(' ');
+    if (name.isEmpty) {
+      return '?';
+    }
+
+    final trimmedName = name.trim();
+    if (trimmedName.isEmpty) {
+      return '?';
+    }
+
+    // Filter out empty strings from split result (handles multiple spaces)
+    final words = trimmedName
+        .split(' ')
+        .where((word) => word.isNotEmpty)
+        .toList();
+
     if (words.length >= 2) {
+      // Both words exist and are non-empty, safe to access [0]
       return '${words[0][0]}${words[1][0]}'.toUpperCase();
     } else if (words.isNotEmpty) {
+      // Single word exists and is non-empty, safe to access [0]
       return words[0][0].toUpperCase();
     }
     return '?';
@@ -179,7 +195,7 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
           : null,
       child: dm.recipientProfilePic == null
           ? Text(
-              _getInitials(dm.recipientName),
+              _getInitials(dm.recipientName ?? ''),
               style: const TextStyle(
                 color: Colors.teal,
                 fontWeight: FontWeight.bold,
@@ -430,23 +446,39 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                   bool isGroup;
                                   if (_filteredDmList.isNotEmpty &&
                                       _filteredGroupList.isNotEmpty) {
-                                    if (index <= _filteredDmList.length) {
+                                    // Both lists present: header(0), DMs(1 to dmLength), header(dmLength+1), Groups(dmLength+2 to end)
+                                    if (index > 0 &&
+                                        index <= _filteredDmList.length) {
+                                      // DM items: index 1 to dmLength
                                       actualIndex = index - 1;
                                       isGroup = false;
-                                    } else {
+                                    } else if (index >
+                                        _filteredDmList.length + 1) {
+                                      // Group items: index dmLength+2 onwards
                                       actualIndex =
                                           index - _filteredDmList.length - 2;
                                       isGroup = true;
+                                    } else {
+                                      // This should not happen, but return empty container as fallback
+                                      return const SizedBox.shrink();
                                     }
                                   } else if (_filteredDmList.isNotEmpty) {
+                                    // Only DM list
                                     actualIndex = index;
                                     isGroup = false;
                                   } else {
+                                    // Only Group list
                                     actualIndex = index;
                                     isGroup = true;
                                   }
 
+                                  // Validate indices before accessing lists
                                   if (isGroup) {
+                                    if (actualIndex < 0 ||
+                                        actualIndex >=
+                                            _filteredGroupList.length) {
+                                      return const SizedBox.shrink();
+                                    }
                                     final group =
                                         _filteredGroupList[actualIndex];
                                     final isSelected = _selectedConversations
@@ -560,6 +592,11 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                       ),
                                     );
                                   } else {
+                                    // Validate index before accessing DM list
+                                    if (actualIndex < 0 ||
+                                        actualIndex >= _filteredDmList.length) {
+                                      return const SizedBox.shrink();
+                                    }
                                     final dm = _filteredDmList[actualIndex];
                                     final isSelected = _selectedConversations
                                         .contains(dm.conversationId);
