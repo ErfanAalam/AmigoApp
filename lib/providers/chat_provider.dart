@@ -779,6 +779,58 @@ class ChatNotifier extends Notifier<ChatState> {
     state = state.copyWith(searchQuery: query.trim());
   }
 
+  /// Add a new group to the state (used when creating a group)
+  Future<void> addNewGroup(GroupModel group) async {
+    try {
+      // Check if group already exists
+      final existingIndex = state.groupList.indexWhere(
+        (g) => g.conversationId == group.conversationId,
+      );
+      if (existingIndex != -1) {
+        // Group already exists, update it instead
+        final updatedGroups = List<GroupModel>.from(state.groupList);
+        updatedGroups[existingIndex] = group;
+        final sortedGroups = await filterAndSortGroupConversations(
+          updatedGroups,
+        );
+        state = state.copyWith(groupList: sortedGroups);
+        return;
+      }
+
+      // Add new group to the list
+      final updatedGroups = [...state.groupList, group];
+      final sortedGroups = await filterAndSortGroupConversations(updatedGroups);
+      state = state.copyWith(groupList: sortedGroups);
+    } catch (e) {
+      debugPrint('❌ Error adding new group to state: $e');
+    }
+  }
+
+  /// Add a new DM to the state (used when creating a DM conversation)
+  Future<void> addNewDm(DmModel dm) async {
+    try {
+      // Check if DM already exists
+      final existingIndex = state.dmList.indexWhere(
+        (d) => d.conversationId == dm.conversationId,
+      );
+      if (existingIndex != -1) {
+        // DM already exists, update it instead
+        final updatedDms = List<DmModel>.from(state.dmList);
+        updatedDms[existingIndex] = dm;
+        final sortedDms = await filterAndSortConversations(updatedDms);
+        state = state.copyWith(dmList: sortedDms);
+        return;
+      }
+
+      // Add new DM to the list
+      final updatedDms = [...state.dmList, dm];
+      final sortedDms = await filterAndSortConversations(updatedDms);
+      state = state.copyWith(dmList: sortedDms);
+    } catch (e) {
+      debugPrint('❌ Error adding new DM to state: $e');
+    }
+  }
+
   /// Handle chat action (pin, mute, favorite, delete)
   Future<void> handleChatAction(
     String action,

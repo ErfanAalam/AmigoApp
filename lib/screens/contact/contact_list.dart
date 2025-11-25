@@ -8,21 +8,23 @@ import 'package:amigo/screens/chat/dm/messaging.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/contact_model.dart';
 import '../../models/user_model.dart';
 import '../../services/contact_service.dart';
 import '../../api/user.service.dart';
 import '../../api/chats.services.dart';
 import '../../services/socket/websocket_service.dart';
+import '../../providers/chat_provider.dart';
 
-class ContactsPage extends StatefulWidget {
+class ContactsPage extends ConsumerStatefulWidget {
   const ContactsPage({super.key});
 
   @override
-  State<ContactsPage> createState() => _ContactsPageState();
+  ConsumerState<ContactsPage> createState() => _ContactsPageState();
 }
 
-class _ContactsPageState extends State<ContactsPage>
+class _ContactsPageState extends ConsumerState<ContactsPage>
     with AutomaticKeepAliveClientMixin, TickerProviderStateMixin {
   final ContactService _contactService = ContactService();
   final WebSocketService _websocketService = WebSocketService();
@@ -351,9 +353,8 @@ class _ContactsPageState extends State<ContactsPage>
           joinedAt: conversationData['created_at'],
         );
 
-        // Store both conversation members in SQLite
+        // Store conversation members in SQLite
         await _conversationMemberRepository.insertConversationMembers([
-          // currentUserMember,
           receiverMember,
         ]);
 
@@ -368,6 +369,9 @@ class _ContactsPageState extends State<ContactsPage>
         );
 
         await _userRepository.insertUser(userToSave);
+
+        // Add the new DM to the chat provider state
+        await ref.read(chatProvider.notifier).addNewDm(dm);
 
         Navigator.push(
           context,

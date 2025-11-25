@@ -1,18 +1,28 @@
+import 'package:amigo/db/repositories/conversation_member.repo.dart';
+import 'package:amigo/db/repositories/conversations.repo.dart';
+import 'package:amigo/models/conversations.model.dart';
+import 'package:amigo/models/group_model.dart';
+import 'package:amigo/screens/chat/group/messaging.dart';
+import 'package:amigo/types/socket.type.dart';
+import 'package:amigo/utils/route_transitions.dart';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../models/user_model.dart';
 import '../../../api/groups.services.dart';
 import '../../../api/user.service.dart';
 import '../../../services/contact_service.dart';
 import '../../../services/socket/websocket_service.dart';
+import '../../../providers/chat_provider.dart';
 
-class CreateGroupPage extends StatefulWidget {
+class CreateGroupPage extends ConsumerStatefulWidget {
   const CreateGroupPage({super.key});
 
   @override
-  State<CreateGroupPage> createState() => _CreateGroupPageState();
+  ConsumerState<CreateGroupPage> createState() => _CreateGroupPageState();
 }
 
-class _CreateGroupPageState extends State<CreateGroupPage> {
+class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
   final GroupsService _groupsService = GroupsService();
   final UserService _userService = UserService();
   final ContactService _contactService = ContactService();
@@ -20,6 +30,9 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
   final TextEditingController _searchController = TextEditingController();
   final WebSocketService _websocketService = WebSocketService();
 
+  final ConversationRepository _conversationRepo = ConversationRepository();
+  final ConversationMemberRepository _conversationMemberRepo =
+      ConversationMemberRepository();
   List<UserModel> _allUsers = [];
   List<UserModel> _filteredUsers = [];
   Set<int> _selectedUserIds = {};
@@ -153,22 +166,66 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
             ),
           );
 
-          await _websocketService.sendMessage({
-            'type': 'join_conversation',
-            'conversation_id': response['data']['id'],
-            'data': {'recipient_id': _selectedUserIds.toList()},
-          });
+          final newGroupConversation = GroupModel(
+            conversationId: response['data']['id'],
+            title: groupName,
+            joinedAt: DateTime.now().toIso8601String(),
+          );
 
-          await _websocketService.sendMessage({
-            'type': 'active_in_conversation',
-            'conversation_id': response['data']['id'],
-          });
+          final newGroup = ConversationModel(
+            id: response['data']['id'],
+            type: 'group',
+            unreadCount: 0,
+            pinnedMessageId: null,
+            createrId: (await UserUtils().getUserDetails())?.id ?? 0,
+            createdAt: DateTime.now().toIso8601String(),
+          );
 
-          // Go back to groups page
-          Navigator.pop(
+          await _conversationRepo.insertConversations([newGroup]);
+
+          for (var userId in _selectedUserIds) {
+            final receiverMember = ConversationMemberModel(
+              conversationId: response['data']['id'],
+              userId: userId,
+              role: 'member',
+              joinedAt: DateTime.now().toIso8601String(),
+            );
+
+            // Store conversation members in SQLite
+            await _conversationMemberRepo.insertConversationMembers([
+              receiverMember,
+            ]);
+          }
+          // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+          // Send WebSocket messages in background (non-blocking, non-critical)
+          final joinConvPayload = JoinLeavePayload(
+            convId: response['data']['id'],
+            convType: ChatType.group,
+            userId: (await UserUtils().getUserDetails())?.id ?? 0,
+            userName: (await UserUtils().getUserDetails())?.name ?? '',
+          ).toJson();
+
+          final wsmsg = WSMessage(
+            type: WSMessageType.conversationJoin,
+            payload: joinConvPayload,
+            wsTimestamp: DateTime.now(),
+          ).toJson();
+
+          await _websocketService.sendMessage(wsmsg);
+          // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+          // Add the new group to the chat provider state
+          await ref
+              .read(chatProvider.notifier)
+              .addNewGroup(newGroupConversation);
+
+          await Navigator.pushAndRemoveUntil(
             context,
-            true,
-          ); // Return true to indicate group was created
+            SlideRightRoute(
+              page: InnerGroupChatPage(group: newGroupConversation),
+            ),
+            (route) => route.isFirst, // Keep only the initial route (home)
+          );
         }
       } else {
         throw Exception(response['message'] ?? 'Failed to create group');
