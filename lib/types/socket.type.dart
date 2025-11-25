@@ -119,6 +119,8 @@ enum WSMessageType {
   callRinging('call:ringing'),
   callMissed('call:missed'),
   socketHealthCheck('socket:health_check'),
+  ping('ping'),
+  pong('pong'),
   socketError('socket:error');
 
   final String value;
@@ -276,7 +278,9 @@ class ChatMessageAckPayload {
   final int convId;
   final int senderId;
   final DateTime deliveredAt;
-  final MessageStatusType? msgStatus;
+  final List<int>? deliveredTo;
+  final List<int>? readBy;
+  final List<int>? offlineUsers;
 
   ChatMessageAckPayload({
     required this.optimisticId,
@@ -284,7 +288,9 @@ class ChatMessageAckPayload {
     required this.convId,
     required this.senderId,
     required this.deliveredAt,
-    this.msgStatus,
+    this.deliveredTo,
+    this.readBy,
+    this.offlineUsers,
   });
 
   factory ChatMessageAckPayload.fromJson(Map<String, dynamic> json) {
@@ -309,8 +315,14 @@ class ChatMessageAckPayload {
       convId: json['conv_id'] as int,
       senderId: json['sender_id'] as int,
       deliveredAt: deliveredAt,
-      msgStatus: json['msg_status'] != null
-          ? MessageStatusType.fromString(json['msg_status'] as String?)
+      deliveredTo: json['delivered_to'] != null
+          ? (json['delivered_to'] as List<dynamic>).map((e) => e as int).toList()
+          : null,
+      readBy: json['read_by'] != null
+          ? (json['read_by'] as List<dynamic>).map((e) => e as int).toList()
+          : null,
+      offlineUsers: json['offline_users'] != null
+          ? (json['offline_users'] as List<dynamic>).map((e) => e as int).toList()
           : null,
     );
   }
@@ -322,7 +334,9 @@ class ChatMessageAckPayload {
       'conv_id': convId,
       'sender_id': senderId,
       'delivered_at': deliveredAt.toIso8601String(),
-      if (msgStatus != null) 'msg_status': msgStatus!.value,
+      if (deliveredTo != null) 'delivered_to': deliveredTo,
+      if (readBy != null) 'read_by': readBy,
+      if (offlineUsers != null) 'offline_users': offlineUsers,
     };
   }
 }
@@ -749,6 +763,8 @@ class WSMessage {
         return MessageForwardPayload.fromJson(payloadJson);
       case WSMessageType.messageDelete:
         return DeleteMessagePayload.fromJson(payloadJson);
+      case WSMessageType.ping:
+      case WSMessageType.pong:
       case WSMessageType.socketHealthCheck:
       case WSMessageType.socketError:
         return MiscPayload.fromJson(payloadJson);

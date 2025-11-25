@@ -182,6 +182,22 @@ class WebSocketMessageHandler {
           }
           break;
 
+        case WSMessageType.ping:
+          // final payload = message.miscPayload;
+          // if (payload != null) {
+          //   _showHealthCheckDialog(payload);
+          // }
+          debugPrint('🏓 Ping received from server');
+          break;
+
+        case WSMessageType.pong:
+          // final payload = message.miscPayload;
+          // if (payload != null) {
+          //   _showHealthCheckDialog(payload);
+          // }
+          debugPrint('🏓 Pong received from server');
+          break;
+
         case WSMessageType.socketError:
           debugPrint('❌ WebSocket error: ${message.miscPayload?.message}');
           break;

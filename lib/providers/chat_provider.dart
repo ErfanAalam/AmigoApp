@@ -18,6 +18,7 @@ import '../services/socket/websocket_message_handler.dart';
 import '../services/user_status_service.dart';
 import '../api/chats.services.dart';
 import '../api/groups.services.dart';
+import '../utils/user.utils.dart';
 
 /// State class for DM list
 class ChatState {
@@ -1170,6 +1171,7 @@ class ChatNotifier extends Notifier<ChatState> {
 
   /// Handle new message
   Future<void> _handleNewMessage(ChatMessagePayload payload) async {
+    debugPrint('✅ recieved new message at chat provider');
     try {
       final convId = payload.convId;
       final convType = payload.convType;
@@ -1291,8 +1293,21 @@ class ChatNotifier extends Notifier<ChatState> {
         payload.canonicalId,
       );
 
-      // Use msgStatus from payload if available, otherwise default to delivered
-      final status = payload.msgStatus ?? MessageStatusType.delivered;
+      // Determine status from delivered_to and read_by arrays
+      // Default to delivered if arrays are not available
+      MessageStatusType status = MessageStatusType.delivered;
+      final currentUser = await UserUtils().getUserDetails();
+      if (currentUser != null) {
+        final currentUserId = currentUser.id;
+        if (payload.readBy != null && payload.readBy!.contains(currentUserId)) {
+          status = MessageStatusType.read;
+        } else if (payload.deliveredTo != null &&
+            payload.deliveredTo!.contains(currentUserId)) {
+          status = MessageStatusType.delivered;
+        } else {
+          status = MessageStatusType.sent;
+        }
+      }
       await _messageRepo.updateMessageStatus(payload.canonicalId, status);
 
       await _conversationsRepo.updateLastMessageId(
@@ -1564,6 +1579,7 @@ class ChatNotifier extends Notifier<ChatState> {
         final newConv = ConversationModel(
           id: convId,
           type: 'group',
+          title: message.title,
           createrId: message.createrId,
           unreadCount: 0,
           pinnedMessageId: null,
@@ -1576,6 +1592,22 @@ class ChatNotifier extends Notifier<ChatState> {
 
         // Store in local DB
         await _conversationsRepo.insertConversations([newConv]);
+
+        // Store conversation members in local DB
+        if (message.members != null && message.members!.isNotEmpty) {
+          final convMembers = message.members!
+              .map(
+                (member) => ConversationMemberModel(
+                  conversationId: newGroup.conversationId,
+                  userId: member.userId,
+                  role: member.role.value,
+                  unreadCount: 0,
+                  joinedAt: member.joinedAt.toIso8601String(),
+                ),
+              )
+              .toList();
+          await _conversationsMemberRepo.insertConversationMembers(convMembers);
+        }
 
         // Update groupList Provider state
         final updatedGroups = [...state.groupList, newGroup];

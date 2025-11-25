@@ -6,14 +6,13 @@ list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_windows
   firebase_core
   flutter_secure_storage_windows
+  flutter_sound
   flutter_webrtc
   geolocator_windows
-  irondash_engine_context
   permission_handler_windows
   screen_brightness_windows
   share_plus
   sqlite3_flutter_libs
-  super_native_extensions
   url_launcher_windows
 )
 

@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
+import 'package:amigo/services/background/test_bg.service.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/material.dart';
 // import 'package:flutter/widgets.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -58,6 +58,8 @@ void main() async {
 
   // Initialize RingtoneManager for call audio
   await RingtoneManager.init();
+
+  // await TestBGService().initializeService();
 
   // Run the app (with CallService provider and Riverpod)
   material.runApp(
