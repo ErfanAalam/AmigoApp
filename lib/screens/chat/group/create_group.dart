@@ -176,6 +176,7 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
             id: response['data']['id'],
             type: 'group',
             unreadCount: 0,
+            title: groupName,
             pinnedMessageId: null,
             createrId: (await UserUtils().getUserDetails())?.id ?? 0,
             createdAt: DateTime.now().toIso8601String(),

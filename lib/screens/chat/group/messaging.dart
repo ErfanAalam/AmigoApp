@@ -1439,16 +1439,108 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     File mediaFile,
     MessageType messageType,
   ) async {
+    final optimisticId = Snowflake.generateNegative();
+
+    final nowUTC = DateTime.now().toUtc();
+
+    // Structure metadata properly for reply messages and upload status
+    Map<String, dynamic> metadata = {
+      'is_uploading': true, // UI widgets check for this to show loading state
+    };
+    if (_replyToMessageData != null) {
+      metadata['reply_to'] = {
+        'message_id': _replyToMessageData!.id,
+        'sender_id': _replyToMessageData!.senderId,
+        'sender_name': _replyToMessageData!.senderName,
+      };
+    }
+
+    // Build attachments with local_path for UI to display during upload
+    final fileName = mediaFile.path.split('/').last;
+    final attachments = {
+      'file_name': fileName,
+      'local_path': mediaFile.path, // Required for UI to display local file
+    };
+
+    final newMsg = MessageModel(
+      optimisticId: optimisticId,
+      conversationId: widget.group.conversationId,
+      senderId: _currentUserDetails!.id,
+      senderName: _currentUserDetails!.name,
+      senderProfilePic: _currentUserDetails!.profilePic,
+      metadata: metadata,
+      attachments: attachments,
+      type: messageType,
+      body: '',
+      isReplied: _replyToMessageData != null,
+      status: MessageStatusType.sent,
+      sentAt: nowUTC.toIso8601String(),
+    );
+
+    if (mounted) {
+      setState(() {
+        _messages.add(newMsg);
+        _sortMessagesBySentAt();
+      });
+
+      _animateNewMessage(newMsg.optimisticId!);
+      _scrollToBottom();
+    }
+
     final response = await _chatsServices.sendMediaMessage(mediaFile);
     if (response['success'] == true && response['data'] != null) {
       final mediaData = MediaResponse.fromJson(response['data']);
       // return mediaData;
 
-      _sendMessage(messageType, mediaResponse: mediaData);
+      _sendMessage(
+        messageType,
+        mediaResponse: mediaData,
+        optimisticId: optimisticId,
+      );
 
       debugPrint('Media data: $mediaData, messageType: $messageType');
     } else {
-      throw Exception('Failed to send media message');
+      // Update message to show upload failed state
+      if (mounted) {
+        setState(() {
+          final index = _messages.indexWhere(
+            (msg) => msg.optimisticId == optimisticId,
+          );
+          if (index != -1) {
+            final failedMsg = _messages[index];
+            final updatedMetadata = Map<String, dynamic>.from(
+              failedMsg.metadata ?? {},
+            );
+            updatedMetadata['is_uploading'] = false;
+            updatedMetadata['upload_failed'] = true;
+
+            _messages[index] = MessageModel(
+              canonicalId: failedMsg.canonicalId,
+              optimisticId: failedMsg.optimisticId,
+              conversationId: failedMsg.conversationId,
+              senderId: failedMsg.senderId,
+              senderName: failedMsg.senderName,
+              senderProfilePic: failedMsg.senderProfilePic,
+              metadata: updatedMetadata,
+              attachments: failedMsg.attachments,
+              type: failedMsg.type,
+              body: failedMsg.body,
+              isReplied: failedMsg.isReplied,
+              status: failedMsg.status,
+              sentAt: failedMsg.sentAt,
+              localMediaPath: failedMsg.localMediaPath,
+              isStarred: failedMsg.isStarred,
+              isForwarded: failedMsg.isForwarded,
+              isDeleted: failedMsg.isDeleted,
+            );
+          }
+        });
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to send media message')),
+        );
+      }
     }
   }
 
@@ -1456,6 +1548,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   void _sendMessage(
     MessageType messageType, {
     MediaResponse? mediaResponse,
+    int? optimisticId,
   }) async {
     String messageText = '';
     if (messageType == MessageType.text) {
@@ -1463,7 +1556,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       if (messageText.isEmpty) return;
     }
 
-    final optimisticMessageId = Snowflake.generateNegative();
+    final optimisticMessageId = optimisticId ?? Snowflake.generateNegative();
 
     // Clear draft when message is sent
     final draftNotifier = ref.read(draftMessagesProvider.notifier);
@@ -1481,6 +1574,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           'sender_id': _replyToMessageData!.senderId,
           'sender_name': _replyToMessageData!.senderName,
         },
+        'is_loading': false,
       };
     }
 
@@ -1508,7 +1602,19 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // Add message to UI immediately with animation
     if (mounted) {
       setState(() {
-        _messages.add(newMsg);
+        // If optimisticId is provided, replace the existing optimistic message
+        if (optimisticId != null) {
+          final index = _messages.indexWhere(
+            (msg) => msg.optimisticId == optimisticId,
+          );
+          if (index != -1) {
+            _messages[index] = newMsg;
+          } else {
+            _messages.add(newMsg);
+          }
+        } else {
+          _messages.add(newMsg);
+        }
         _sortMessagesBySentAt();
       });
 
