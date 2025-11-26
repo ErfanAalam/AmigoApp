@@ -1,4 +1,5 @@
 import 'package:drift/drift.dart';
+import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../models/message_status.model.dart';
 import '../sqlite.db.dart';
 import '../sqlite.schema.dart';
@@ -413,17 +414,42 @@ class MessageStatusRepository {
         .write(MessageStatusModelCompanion(deliveredAt: Value(deliveredAt)));
   }
 
-  /// Update readAt timestamp
-  Future<void> updateReadAt({
+  // update deliveredAt timestamp for a specific user with message id
+  Future<void> updateDeliveredAtForUser({
+    required int messageId,
+    required int userId,
+    String? deliveredAt,
+  }) async {
+    try {
+      final db = sqliteDatabase.database;
+      await (db.update(db.messageStatusModel)..where(
+            (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
+          ))
+          .write(MessageStatusModelCompanion(deliveredAt: Value(deliveredAt)));
+    } catch (e) {
+      debugPrint(
+        'Error updating deliveredAt for messageId $messageId and userId $userId: $e',
+      );
+    }
+  }
+
+  // update readAt timestamp for a specific user with message id
+  Future<void> updateReadAtForUser({
     required int messageId,
     required int userId,
     String? readAt,
   }) async {
-    final db = sqliteDatabase.database;
-    await (db.update(db.messageStatusModel)..where(
-          (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
-        ))
-        .write(MessageStatusModelCompanion(readAt: Value(readAt)));
+    try {
+      final db = sqliteDatabase.database;
+      await (db.update(db.messageStatusModel)..where(
+            (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
+          ))
+          .write(MessageStatusModelCompanion(readAt: Value(readAt)));
+    } catch (e) {
+      debugPrint(
+        'Error updating readAt for messageId $messageId and userId $userId: $e',
+      );
+    }
   }
 
   /// Delete message status by ID

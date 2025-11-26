@@ -43,6 +43,7 @@ import '../../../services/draft_message_service.dart';
 import '../../../providers/draft_provider.dart';
 import '../../../widgets/chat/inputcontainer.widget.dart';
 import '../../../widgets/chat/media_messages.widget.dart';
+import '../../../services/notification_service.dart';
 import 'group_info.dart';
 
 class InnerGroupChatPage extends ConsumerStatefulWidget {
@@ -306,6 +307,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     debugPrint('-------initializing the group-------');
 
+    // Clear notifications for this conversation when opened
+    NotificationService().clearConversationNotifications(
+      widget.group.conversationId.toString(),
+    );
+
     // _websocketService.connect(widget.group.conversationId);
 
     getAllConversationMembers();
@@ -541,7 +547,49 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     final needSync = await _conversationRepo.getNeedSyncStatus(
       widget.group.conversationId,
     );
-    if (needSync == false) return;
+    if (needSync == false) {
+      if (mounted) {
+        setState(() {
+          _isSyncingMessages = false;
+          _syncProgress = 1.0;
+          _syncStatus = 'Sync complete';
+        });
+      }
+      final firstPageResponse = await _chatsServices.getConversationHistory(
+        conversationId: widget.group.conversationId,
+        page: 1,
+        limit: 100,
+      );
+
+      final firstPageHistory = ConversationHistoryResponse.fromJson(
+        firstPageResponse['data'],
+      );
+
+      // Process first page
+      if (firstPageHistory.messages.isNotEmpty) {
+        await _messagesRepo.insertMessages(firstPageHistory.messages);
+      }
+
+      // Reload messages from local DB after sync
+      final syncedMessages = await _messagesRepo.getMessagesByConversation(
+        widget.group.conversationId,
+        limit: 100,
+        offset: 0,
+      );
+
+      if (mounted) {
+        setState(() {
+          _messages = syncedMessages;
+          _sortMessagesBySentAt();
+          _isSyncingMessages = false;
+          _syncProgress = 1.0;
+          _syncStatus = 'Sync complete';
+        });
+      }
+
+      // return early since we don't need heavy sync
+      return;
+    }
 
     // Start syncing
     if (mounted) {

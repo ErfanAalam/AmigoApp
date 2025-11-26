@@ -40,6 +40,7 @@ import '../../../services/draft_message_service.dart';
 import '../../../providers/draft_provider.dart';
 import '../../../widgets/chat/inputcontainer.widget.dart';
 import '../../../widgets/chat/media_messages.widget.dart';
+import '../../../services/notification_service.dart';
 
 class InnerChatPage extends ConsumerStatefulWidget {
   final DmModel dm;
@@ -72,6 +73,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   StreamSubscription<ChatMessageAckPayload>? _messageAckSubscription;
   StreamSubscription<MessagePinPayload>? _messagePinSubscription;
   StreamSubscription<DeleteMessagePayload>? _messageDeleteSubscription;
+  StreamSubscription<JoinLeavePayload>? _joinConvSubscription;
 
   // State variables
   bool _isLoading = false;
@@ -166,13 +168,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     null,
   );
   final ValueNotifier<bool> _showStickyDate = ValueNotifier<bool>(false);
-  //
+
   Timer? _typingTimeout;
-  //
+
   // Scroll debounce timer
   Timer? _scrollDebounceTimer;
-  //
-  //
+
   // Message animation controllers
   final Map<int, AnimationController> _messageAnimationControllers = {};
   final Map<int, Animation<double>> _messageSlideAnimations = {};
@@ -205,6 +206,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   @override
   void initState() {
     super.initState();
+
+    // Clear notifications for this conversation when opened
+    NotificationService().clearConversationNotifications(
+      widget.dm.conversationId.toString(),
+    );
 
     // Initialize typing animation
     _initializeTypingAnimation();
@@ -337,6 +343,14 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     //         debugPrint('❌ Message delete stream error: $error');
     //       },
     //     );
+    _joinConvSubscription = _wsMessageHandler
+        .joinConversation(convId)
+        .listen(
+          _handleConversationJoin,
+          onError: (error) {
+            debugPrint('❌ Conversation join/leave stream error: $error');
+          },
+        );
   }
 
   Future<void> _initializeChat() async {
@@ -467,57 +481,56 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // TEMPORARY NEED SYNC LOGIC CHANGE
     // ===========================================================================
     // ===========================================================================
+
     if (needSync == false) {
+      if (_canSetState) {
+        _safeSetState(() {
+          _isSyncingMessages = false;
+          _syncProgress = 1.0;
+          _syncStatus = 'Sync complete';
+        });
+      }
       final firstPageResponse = await _chatsServices.getConversationHistory(
         conversationId: widget.dm.conversationId,
         page: 1,
         limit: 100,
       );
 
-      // if (firstPageResponse['success'] != true ||
-      //     firstPageResponse['data'] == null) {
-      //   // Failed to fetch, stop syncing
-      //   if (_canSetState) {
-      //     _safeSetState(() {
-      //       _isSyncingMessages = false;
-      //       _syncStatus = 'Sync failed';
-      //     });
-      //   }
-      //   return;
-      // }
-
       final firstPageHistory = ConversationHistoryResponse.fromJson(
         firstPageResponse['data'],
       );
-      // _totalMessageCount = firstPageHistory.totalCount;
-
-      // if (_totalMessageCount == 0) {
-      //   // No messages to sync
-      //   if (_canSetState) {
-      //     _safeSetState(() {
-      //       _isSyncingMessages = false;
-      //       _syncStatus = '';
-      //     });
-      //   }
-      //   return;
-      // }
 
       // Process first page
       if (firstPageHistory.messages.isNotEmpty) {
         await _messagesRepo.insertMessages(firstPageHistory.messages);
-
-        // if (_canSetState) {
-        //   _safeSetState(() {
-        //     _syncedMessageCount = totalSynced;
-        //     _syncProgress = totalSynced / _totalMessageCount;
-        //     _syncStatus =
-        //         'Syncing messages... ($totalSynced/$_totalMessageCount)';
-        //   });
-        // }
       }
 
       // hasMorePages = firstPageHistory.hasNextPage;
       // page++;
+
+      // Reload messages from local DB after sync
+      if (!_canSetState) {
+        return;
+      }
+      final syncedMessages = await _messagesRepo.getMessagesByConversation(
+        widget.dm.conversationId,
+        limit: 100,
+        offset: 0,
+      );
+
+      if (!_canSetState) {
+        return;
+      }
+      _safeSetState(() {
+        _messages = syncedMessages;
+        _sortMessagesBySentAt();
+        _isSyncingMessages = false;
+        _syncProgress = 1.0;
+        _syncStatus = 'Sync complete';
+      });
+
+      // return early since we don't need heavy sync
+      return;
     }
 
     // Start syncing
@@ -783,15 +796,15 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   /// Build message status ticks (single/double) based on delivery and read status
   Widget _buildMessageStatusTicks(MessageModel message) {
-    // if (((message.status == MessageStatusType.read) && message.id > 0)) {
-    //   // Message is already marked as read - always show blue tick
-    //   return Icon(Icons.done_all, size: 16, color: Colors.blue);
-    // } else if (message.status == MessageStatusType.delivered) {
-    //   // User is active - show blue tick for delivered messages
-    //   return Icon(Icons.done_all, size: 16, color: Colors.grey[800]);
-    // } else {
-    return Icon(Icons.done, size: 16, color: Colors.grey[800]);
-    // }
+    if (((message.status == MessageStatusType.read) && message.id > 0)) {
+      // Message is already marked as read - always show blue tick
+      return Icon(Icons.done_all, size: 16, color: Colors.blue);
+    } else if (message.status == MessageStatusType.delivered) {
+      // User is active - show blue tick for delivered messages
+      return Icon(Icons.done_all, size: 16, color: Colors.grey[800]);
+    } else {
+      return Icon(Icons.done, size: 16, color: Colors.grey[800]);
+    }
   }
 
   /// Handle incoming message from WebSocket
@@ -837,7 +850,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   void _handleMessageAck(ChatMessageAckPayload payload) async {
     try {
-      print('payload: $payload');
       // Find the message with matching optimisticId
       final messageIndex = _messages.indexWhere(
         (msg) =>
@@ -879,6 +891,48 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
       // Save to DB
       await _messagesRepo.insertMessage(updatedMessage);
+
+      final recipientId = widget.dm.recipientId;
+
+      // Determine status based on readBy and deliveredTo arrays
+      // Only update status if this is a message sent by the current user
+      // MessageStatusType? newStatus;
+      // if (message.senderId == _currentUserDetails?.id) {
+      //   if (payload.readBy != null && payload.readBy!.contains(recipientId)) {
+      //     newStatus = MessageStatusType.read;
+      //   } else if (payload.deliveredTo != null &&
+      //       payload.deliveredTo!.contains(recipientId)) {
+      //     newStatus = MessageStatusType.delivered;
+      //   } else {
+      //     newStatus = MessageStatusType.sent;
+      //   }
+      // }
+
+      MessageStatusType status = MessageStatusType.delivered;
+      if (payload.readBy != null && payload.readBy!.isNotEmpty) {
+        if (payload.readBy!.contains(recipientId)) {
+          status = MessageStatusType.read;
+        }
+      } else if (payload.deliveredTo != null &&
+          payload.deliveredTo!.isNotEmpty) {
+        if (payload.deliveredTo!.contains(recipientId)) {
+          status = MessageStatusType.delivered;
+        }
+      } else {
+        status = MessageStatusType.sent;
+      }
+
+      // Update the message in-place with canonicalId and status (no setState to avoid UI update)
+      // The canonicalId will take precedence in the id getter
+      if (!_canSetState) {
+        return;
+      }
+      _safeSetState(() {
+        _messages[messageIndex] = _messages[messageIndex].copyWith(
+          canonicalId: payload.canonicalId,
+          status: status,
+        );
+      });
     } catch (e) {
       debugPrint('❌ Error processing message_ack: $e');
     }
@@ -969,6 +1023,35 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       if (_canSetState) {
         _safeSetState(() {
           _pinnedMessage = null;
+        });
+      }
+    }
+  }
+
+  void _handleConversationJoin(JoinLeavePayload payload) async {
+    // find all the messages with message status not read (send or delivered)
+    for (final message in _messages) {
+      if (message.status != MessageStatusType.read &&
+          message.senderId == _currentUserDetails?.id) {
+        final messageIndex = _messages.indexWhere(
+          (msg) => msg.id == message.id,
+        );
+
+        if (messageIndex == -1) {
+          debugPrint(
+            '⚠️ Message with id ${payload.convId} not found in _messages',
+          );
+          continue;
+        }
+
+        // update the message status to read
+        if (!_canSetState) {
+          return;
+        }
+        _safeSetState(() {
+          _messages[messageIndex] = _messages[messageIndex].copyWith(
+            status: MessageStatusType.read,
+          );
         });
       }
     }
@@ -1586,23 +1669,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Widget _buildMessagesList() {
-    if (_messages.isEmpty && !_isLoading) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.message_rounded, size: 32, color: Colors.grey[400]),
-            const SizedBox(height: 6),
-            Text(
-              "No message yet",
-              style: TextStyle(color: Colors.grey[600], fontSize: 16),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      );
-    }
-
     // Only show "No messages yet" if we've fully initialized and confirmed no messages
     if (_messages.isEmpty && !_isLoading) {
       return Center(

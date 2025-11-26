@@ -1411,21 +1411,47 @@ class ChatNotifier extends Notifier<ChatState> {
         payload.canonicalId,
       );
 
-      // Determine status from delivered_to and read_by arrays
-      // Default to delivered if arrays are not available
-      MessageStatusType status = MessageStatusType.delivered;
-      final currentUser = await UserUtils().getUserDetails();
-      if (currentUser != null) {
-        final currentUserId = currentUser.id;
-        if (payload.readBy != null && payload.readBy!.contains(currentUserId)) {
-          status = MessageStatusType.read;
-        } else if (payload.deliveredTo != null &&
-            payload.deliveredTo!.contains(currentUserId)) {
-          status = MessageStatusType.delivered;
-        } else {
-          status = MessageStatusType.sent;
+      // update message status in the status table based on delivered_to and read_by
+      if (payload.deliveredTo != null && payload.deliveredTo!.isNotEmpty) {
+        for (final userId in payload.deliveredTo!) {
+          await _messageStatusRepo.updateDeliveredAtForUser(
+            messageId: payload.canonicalId,
+            userId: userId,
+            deliveredAt: payload.deliveredAt.toIso8601String(),
+          );
         }
       }
+      if (payload.readBy != null && payload.readBy!.isNotEmpty) {
+        for (final userId in payload.readBy!) {
+          await _messageStatusRepo.updateReadAtForUser(
+            messageId: payload.canonicalId,
+            userId: userId,
+            readAt: payload.deliveredAt.toIso8601String(),
+          );
+        }
+      }
+
+      // for chat type DM there will be only two users so we can directly set the status leaving us
+      MessageStatusType status = MessageStatusType.delivered;
+      if (payload.readBy != null && payload.readBy!.isNotEmpty) {
+        if (payload.readBy!.contains(payload.senderId)) {
+          payload.readBy!.remove(payload.senderId);
+        }
+        if (payload.readBy!.length == 1) {
+          status = MessageStatusType.read;
+        }
+      } else if (payload.deliveredTo != null &&
+          payload.deliveredTo!.isNotEmpty) {
+        if (payload.deliveredTo!.contains(payload.senderId)) {
+          payload.readBy!.remove(payload.senderId);
+        }
+        if (payload.readBy!.length == 1) {
+          status = MessageStatusType.delivered;
+        }
+      } else {
+        status = MessageStatusType.sent;
+      }
+
       await _messageRepo.updateMessageStatus(payload.canonicalId, status);
 
       await _conversationsRepo.updateLastMessageId(
@@ -1894,6 +1920,14 @@ class ChatNotifier extends Notifier<ChatState> {
         conversationId: payload.convId,
         userId: payload.userId,
       );
+
+      // update message table message status for DMs
+      if (payload.convType == ChatType.dm) {
+        await _messageRepo.updateAllMessagesStatusForDMs(
+          payload.convId,
+          MessageStatusType.read,
+        );
+      }
     } catch (e) {
       debugPrint('❌ Error handling conversation join/leave event: $e');
     }

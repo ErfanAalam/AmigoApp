@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:amigo/env.dart';
 import 'package:amigo/services/notification_service.dart';
+import 'package:amigo/db/repositories/message.repo.dart';
+import 'package:amigo/types/socket.type.dart';
+import 'package:amigo/models/message.model.dart';
 import 'package:dio/dio.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -122,7 +126,15 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     );
   } else if (data['type'] == 'message') {
     // Handle regular message notifications in background
-    // await _handleBackgroundMessage(data);
+    // Store message in local DB if chat_message is present
+    await _storeMessageFromNotificationBackground(data);
+    
+    // Show notification
+    await notifcations.showMessageNotification(
+      title: message.notification?.title ?? 'New Message',
+      body: message.notification?.body ?? 'You have a new message',
+      data: data,
+    );
   } else {
     debugPrint('📨 Non-call message received in background: ${data['type']}');
   }
@@ -275,5 +287,58 @@ void _stopBackgroundStatusPolling() {
     _backgroundPollingTimer?.cancel();
     _backgroundPollingTimer = null;
     _backgroundPollingCallId = null;
+  }
+}
+
+/// Store message from FCM notification data to local database (background handler)
+Future<void> _storeMessageFromNotificationBackground(Map<String, dynamic> data) async {
+  try {
+    // Check if chat_message is present in the notification data
+    final chatMessageStr = data['chat_message'];
+    if (chatMessageStr == null) {
+      debugPrint('ℹ️ No chat_message in notification data, skipping storage');
+      return;
+    }
+
+    // Parse the chat_message JSON string
+    Map<String, dynamic> chatMessageJson;
+    if (chatMessageStr is String) {
+      chatMessageJson = jsonDecode(chatMessageStr);
+    } else if (chatMessageStr is Map) {
+      chatMessageJson = Map<String, dynamic>.from(chatMessageStr);
+    } else {
+      debugPrint('❌ Invalid chat_message format in notification');
+      return;
+    }
+
+    // Convert to ChatMessagePayload
+    final chatMessagePayload = ChatMessagePayload.fromJson(chatMessageJson);
+
+    // Convert to MessageModel and store in local DB
+    final messageModel = MessageModel(
+      optimisticId: chatMessagePayload.optimisticId,
+      canonicalId: chatMessagePayload.canonicalId,
+      conversationId: chatMessagePayload.convId,
+      senderId: chatMessagePayload.senderId,
+      senderName: chatMessagePayload.senderName,
+      type: chatMessagePayload.msgType,
+      body: chatMessagePayload.body,
+      status: MessageStatusType.delivered, // Messages from notifications are delivered
+      attachments: chatMessagePayload.attachments,
+      metadata: chatMessagePayload.metadata,
+      isStarred: false,
+      isReplied: chatMessagePayload.replyToMessageId != null,
+      isForwarded: false,
+      isDeleted: false,
+      sentAt: chatMessagePayload.sentAt.toIso8601String(),
+    );
+
+    // Store in local database
+    final messageRepo = MessageRepository();
+    await messageRepo.insertMessage(messageModel);
+    
+    debugPrint('✅ [BACKGROUND] Stored message from FCM notification: ${chatMessagePayload.canonicalId ?? chatMessagePayload.optimisticId}');
+  } catch (e) {
+    debugPrint('❌ [BACKGROUND] Error storing message from FCM notification: $e');
   }
 }

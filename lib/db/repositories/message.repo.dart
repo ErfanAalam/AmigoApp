@@ -1,6 +1,7 @@
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/socket.type.dart';
 import 'package:drift/drift.dart';
+import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../sqlite.db.dart';
 import '../sqlite.schema.dart';
 
@@ -422,14 +423,18 @@ class MessageRepository {
     int messageId,
     MessageStatusType status,
   ) async {
-    final db = sqliteDatabase.database;
-    await (db.update(db.messages)
-          ..where((t) => t.id.equals(BigInt.from(messageId))))
-        .write(MessagesCompanion(status: Value(status.value)));
+    try {
+      final db = sqliteDatabase.database;
+      await (db.update(db.messages)
+            ..where((t) => t.id.equals(BigInt.from(messageId))))
+          .write(MessagesCompanion(status: Value(status.value)));
+    } catch (e) {
+      debugPrint("Error updating message status: $e");
+    }
   }
 
   /// Update all messages status for a conversation
-  Future<void> updateAllMessagesStatus(
+  Future<void> updateAllMessagesStatusForDMs(
     int conversationId,
     MessageStatusType status,
   ) async {
