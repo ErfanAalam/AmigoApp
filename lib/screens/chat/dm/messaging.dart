@@ -874,39 +874,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       updatedMetadata['is_uploading'] = false;
       updatedMetadata.remove('upload_failed');
 
-      // Update the message with canonicalId, status, and cleared uploading state
-      final updatedMessage = currentMessage.copyWith(
-        canonicalId: payload.canonicalId,
-        status: MessageStatusType
-            .delivered, // Update to delivered when acknowledged
-        metadata: updatedMetadata,
-      );
-
-      // Update in UI and DB
-      if (_canSetState) {
-        _safeSetState(() {
-          _messages[messageIndex] = updatedMessage;
-        });
-      }
-
-      // Save to DB
-      await _messagesRepo.insertMessage(updatedMessage);
-
+      // updating message status
       final recipientId = widget.dm.recipientId;
-
-      // Determine status based on readBy and deliveredTo arrays
-      // Only update status if this is a message sent by the current user
-      // MessageStatusType? newStatus;
-      // if (message.senderId == _currentUserDetails?.id) {
-      //   if (payload.readBy != null && payload.readBy!.contains(recipientId)) {
-      //     newStatus = MessageStatusType.read;
-      //   } else if (payload.deliveredTo != null &&
-      //       payload.deliveredTo!.contains(recipientId)) {
-      //     newStatus = MessageStatusType.delivered;
-      //   } else {
-      //     newStatus = MessageStatusType.sent;
-      //   }
-      // }
 
       MessageStatusType status = MessageStatusType.delivered;
       if (payload.readBy != null && payload.readBy!.isNotEmpty) {
@@ -922,6 +891,13 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         status = MessageStatusType.sent;
       }
 
+      // Update the message with canonicalId, status, and cleared uploading state
+      final updatedMessage = currentMessage.copyWith(
+        canonicalId: payload.canonicalId,
+        status: status, // Update to delivered when acknowledged
+        metadata: updatedMetadata,
+      );
+
       // Update the message in-place with canonicalId and status (no setState to avoid UI update)
       // The canonicalId will take precedence in the id getter
       if (!_canSetState) {
@@ -930,9 +906,31 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       _safeSetState(() {
         _messages[messageIndex] = _messages[messageIndex].copyWith(
           canonicalId: payload.canonicalId,
-          status: status,
+          status: status, // Update to delivered when acknowledged
+          metadata: updatedMetadata,
         );
       });
+
+      // Save to DB
+      try {
+        await _messagesRepo.insertMessage(updatedMessage);
+      } catch (e) {
+        debugPrint('❌ Error updating message in DB: $e');
+      }
+
+      // Determine status based on readBy and deliveredTo arrays
+      // Only update status if this is a message sent by the current user
+      // MessageStatusType? newStatus;
+      // if (message.senderId == _currentUserDetails?.id) {
+      //   if (payload.readBy != null && payload.readBy!.contains(recipientId)) {
+      //     newStatus = MessageStatusType.read;
+      //   } else if (payload.deliveredTo != null &&
+      //       payload.deliveredTo!.contains(recipientId)) {
+      //     newStatus = MessageStatusType.delivered;
+      //   } else {
+      //     newStatus = MessageStatusType.sent;
+      //   }
+      // }
     } catch (e) {
       debugPrint('❌ Error processing message_ack: $e');
     }
@@ -1070,6 +1068,13 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
 
     final optimisticMessageId = optimisticId ?? Snowflake.generateNegative();
+    print(
+      "--------------------------------------------------------------------------------",
+    );
+    print("optimisticMessageId -> ${optimisticMessageId}");
+    print(
+      "--------------------------------------------------------------------------------",
+    );
 
     // Clear draft when message is sent
     final draftNotifier = ref.read(draftMessagesProvider.notifier);
@@ -2424,6 +2429,13 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     MessageType messageType,
   ) async {
     final optimisticId = Snowflake.generateNegative();
+    print(
+      "--------------------------------------------------------------------------------",
+    );
+    print("optimisticId -> ${optimisticId}");
+    print(
+      "--------------------------------------------------------------------------------",
+    );
 
     final nowUTC = DateTime.now().toUtc();
 

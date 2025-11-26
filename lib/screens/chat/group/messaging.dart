@@ -1380,7 +1380,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       }
 
       // Save to DB
-      await _messagesRepo.insertMessage(updatedMessage);
+      try {
+        await _messagesRepo.insertMessage(updatedMessage);
+      } catch (e) {
+        debugPrint('❌ Error updating message in DB: $e');
+      }
     } catch (e) {
       debugPrint('❌ Error processing message_ack: $e');
     }

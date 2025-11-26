@@ -192,14 +192,32 @@ class MessageStatusRepository {
     int userId,
   ) async {
     final db = sqliteDatabase.database;
-    final status =
+    final statuses =
         await (db.select(db.messageStatusModel)..where(
               (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
             ))
-            .getSingleOrNull();
+            .get();
 
-    if (status == null) return null;
-    return _statusToModel(status);
+    if (statuses.isEmpty) return null;
+    
+    // If there are duplicates, return the first one and clean up duplicates
+    if (statuses.length > 1) {
+      // Keep the first one (usually the most recent due to auto-increment id)
+      final firstStatus = statuses.first;
+      
+      // Delete duplicates in a transaction
+      await db.transaction(() async {
+        for (int i = 1; i < statuses.length; i++) {
+          await (db.delete(db.messageStatusModel)
+                ..where((t) => t.id.equals(statuses[i].id)))
+              .go();
+        }
+      });
+      
+      return _statusToModel(firstStatus);
+    }
+    
+    return _statusToModel(statuses.first);
   }
 
   /// Get all read statuses for a message

@@ -125,13 +125,36 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration {
     return MigrationStrategy(
       onCreate: (Migrator m) async {
         await m.createAll();
+        // Create unique index on messageId and userId
+        await m.database.customStatement(
+          'CREATE UNIQUE INDEX IF NOT EXISTS unique_user_message ON message_status_model(message_id, user_id)',
+        );
+      },
+      onUpgrade: (Migrator m, int from, int to) async {
+        if (from < 2) {
+          // Clean up any duplicate entries before adding the unique constraint
+          // Keep the row with the highest id (most recent) for each (messageId, userId) pair
+          await m.database.customStatement('''
+            DELETE FROM message_status_model
+            WHERE id NOT IN (
+              SELECT MAX(id)
+              FROM message_status_model
+              GROUP BY message_id, user_id
+            )
+          ''');
+          
+          // Create unique index on messageId and userId
+          await m.database.customStatement(
+            'CREATE UNIQUE INDEX IF NOT EXISTS unique_user_message ON message_status_model(message_id, user_id)',
+          );
+        }
       },
     );
   }

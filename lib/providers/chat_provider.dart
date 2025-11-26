@@ -1403,7 +1403,6 @@ class ChatNotifier extends Notifier<ChatState> {
 
   /// Handle ack message
   Future<void> _handleAckMessage(ChatMessageAckPayload payload) async {
-    print('payload: $payload');
     try {
       // Update message status in local DB
       await _messageRepo.updateMessageId(

@@ -69,43 +69,48 @@ class MessageRepository {
   Future<void> insertMessage(MessageModel message) async {
     final db = sqliteDatabase.database;
 
-    // Check if message already exists to preserve body and metadata
-    final existingMessage = await getMessageById(
-      message.canonicalId ?? message.optimisticId ?? 0,
-    );
+    // Wrap in transaction to prevent database locks
+    await db.transaction(() async {
+      // Check if message already exists to preserve body and metadata
+      final messageId = message.canonicalId ?? message.optimisticId;
+      MessageModel? existingMessage;
+      if (messageId != null) {
+        existingMessage = await getMessageById(messageId);
+      }
 
-    // Preserve existing body if new body is null/empty and existing has value
-    final bodyValue = (message.body != null && message.body!.isNotEmpty)
-        ? message.body
-        : (existingMessage?.body);
+      // Preserve existing body if new body is null/empty and existing has value
+      final bodyValue = (message.body != null && message.body!.isNotEmpty)
+          ? message.body
+          : (existingMessage?.body);
 
-    // Preserve existing attachments if new attachments are null/empty and existing has value
-    final attachmentsValue =
-        (message.attachments != null && message.attachments!.isNotEmpty)
-        ? message.attachments
-        : (existingMessage?.attachments);
+      // Preserve existing attachments if new attachments are null/empty and existing has value
+      final attachmentsValue =
+          (message.attachments != null && message.attachments!.isNotEmpty)
+          ? message.attachments
+          : (existingMessage?.attachments);
 
-    // Preserve existing metadata if new metadata is null/empty and existing has value
-    final metadataValue =
-        (message.metadata != null && message.metadata!.isNotEmpty)
-        ? message.metadata
-        : (existingMessage?.metadata);
+      // Preserve existing metadata if new metadata is null/empty and existing has value
+      final metadataValue =
+          (message.metadata != null && message.metadata!.isNotEmpty)
+          ? message.metadata
+          : (existingMessage?.metadata);
 
-    // Preserve existing isReplied flag if new one is false/null but existing is true
-    final isRepliedValue = message.isReplied == true
-        ? true
-        : (existingMessage?.isReplied ?? false);
+      // Preserve existing isReplied flag if new one is false/null but existing is true
+      final isRepliedValue = message.isReplied == true
+          ? true
+          : (existingMessage?.isReplied ?? false);
 
-    // Create updated message with preserved values
-    final updatedMessage = message.copyWith(
-      body: bodyValue,
-      attachments: attachmentsValue,
-      metadata: metadataValue,
-      isReplied: isRepliedValue ? true : null,
-    );
+      // Create updated message with preserved values
+      final updatedMessage = message.copyWith(
+        body: bodyValue,
+        attachments: attachmentsValue,
+        metadata: metadataValue,
+        isReplied: isRepliedValue ? true : null,
+      );
 
-    final companion = _modelToCompanion(updatedMessage);
-    await db.into(db.messages).insertOnConflictUpdate(companion);
+      final companion = _modelToCompanion(updatedMessage);
+      await db.into(db.messages).insertOnConflictUpdate(companion);
+    });
   }
 
   /// Insert multiple messages (bulk insert)

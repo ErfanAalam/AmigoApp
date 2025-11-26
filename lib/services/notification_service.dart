@@ -41,7 +41,7 @@ class NotificationService {
   // Track notifications by conversation for grouped notifications
   // Key: conversationId, Value: List of {title, body, messageId}
   final Map<String, List<Map<String, dynamic>>> _conversationNotifications = {};
-  
+
   // Summary notification ID (fixed ID for the summary)
   static const int _summaryNotificationId = -1;
 
@@ -190,7 +190,7 @@ class NotificationService {
     if (data['type'] == 'message') {
       // Store message in local DB if chat_message is present
       await _storeMessageFromNotification(data);
-      
+
       // Show notification
       _handleMessageNotification(data, notification);
     }
@@ -203,7 +203,7 @@ class NotificationService {
     if (data['type'] == 'message') {
       // Store message in local DB if chat_message is present
       await _storeMessageFromNotification(data);
-      
+
       // Ensure conversationId is included in the data
       final notificationData = {
         'type': 'message',
@@ -267,7 +267,8 @@ class NotificationService {
         senderName: chatMessagePayload.senderName,
         type: chatMessagePayload.msgType,
         body: chatMessagePayload.body,
-        status: MessageStatusType.delivered, // Messages from notifications are delivered
+        status: MessageStatusType
+            .delivered, // Messages from notifications are delivered
         attachments: chatMessagePayload.attachments,
         metadata: chatMessagePayload.metadata,
         isStarred: false,
@@ -279,8 +280,10 @@ class NotificationService {
 
       // Store in local database
       await _messageRepo.insertMessage(messageModel);
-      
-      debugPrint('✅ Stored message from FCM notification: ${chatMessagePayload.canonicalId ?? chatMessagePayload.optimisticId}');
+
+      debugPrint(
+        '✅ Stored message from FCM notification: ${chatMessagePayload.canonicalId ?? chatMessagePayload.optimisticId}',
+      );
     } catch (e) {
       debugPrint('❌ Error storing message from FCM notification: $e');
     }
@@ -294,7 +297,7 @@ class NotificationService {
   }) async {
     final conversationId = data['conversationId']?.toString() ?? '';
     final messageId = data['messageId']?.toString() ?? '';
-    
+
     if (conversationId.isEmpty) {
       debugPrint('❌ ConversationId is missing in notification data');
       return;
@@ -314,7 +317,7 @@ class NotificationService {
         'messageId': messageId,
         'senderName': data['senderName'] ?? 'Unknown',
         'timestamp': DateTime.now().millisecondsSinceEpoch,
-      }
+      },
     ];
 
     // Create individual notification for this conversation
@@ -332,12 +335,12 @@ class NotificationService {
           enableVibration: true,
           groupKey: 'messages_group', // All message notifications in same group
           setAsGroupSummary: false, // This is an individual notification
-          groupAlertBehavior: GroupAlertBehavior.children, // Only summary makes sound
+          groupAlertBehavior:
+              GroupAlertBehavior.children, // Only summary makes sound
         );
 
-    final NotificationDetails conversationNotificationDetailsObj = NotificationDetails(
-      android: conversationNotificationDetails,
-    );
+    final NotificationDetails conversationNotificationDetailsObj =
+        NotificationDetails(android: conversationNotificationDetails);
 
     await _localNotifications.show(
       conversationNotificationId,
@@ -384,11 +387,9 @@ class NotificationService {
         final latestMessage = messages.last;
         final senderName = latestMessage['senderName'] ?? 'Unknown';
         final body = latestMessage['body'] ?? '';
-        
+
         // Format: "Sender: Message preview"
-        final preview = body.length > 30 
-            ? body.substring(0, 30) + '...' 
-            : body;
+        final preview = body.length > 30 ? body.substring(0, 30) + '...' : body;
         conversationLines.add('$senderName: $preview');
       }
     }
@@ -397,7 +398,7 @@ class NotificationService {
     String summaryTitle;
     if (totalConversations == 1) {
       final firstConv = sortedConversations.first;
-      final senderName = firstConv.value.isNotEmpty 
+      final senderName = firstConv.value.isNotEmpty
           ? firstConv.value.last['senderName'] ?? 'Unknown'
           : 'Unknown';
       summaryTitle = senderName;
@@ -409,7 +410,7 @@ class NotificationService {
     String summaryBody;
     if (totalConversations == 1) {
       final firstConv = sortedConversations.first;
-      summaryBody = firstConv.value.isNotEmpty 
+      summaryBody = firstConv.value.isNotEmpty
           ? firstConv.value.last['body'] ?? 'New message'
           : 'New message';
     } else {
@@ -436,9 +437,8 @@ class NotificationService {
           styleInformation: inboxStyle,
         );
 
-    final NotificationDetails summaryNotificationDetailsObj = NotificationDetails(
-      android: summaryNotificationDetails,
-    );
+    final NotificationDetails summaryNotificationDetailsObj =
+        NotificationDetails(android: summaryNotificationDetails);
 
     await _localNotifications.show(
       _summaryNotificationId,
@@ -456,10 +456,10 @@ class NotificationService {
   Future<void> clearConversationNotifications(String conversationId) async {
     // Remove from tracking
     _conversationNotifications.remove(conversationId);
-    
+
     // Cancel the individual notification for this conversation
     await _localNotifications.cancel(conversationId.hashCode);
-    
+
     // Update summary notification
     await _updateSummaryNotification();
   }
@@ -587,7 +587,7 @@ class NotificationService {
     try {
       // Cancel all notifications
       await _localNotifications.cancelAll();
-      
+
       // Clear conversation tracking
       _conversationNotifications.clear();
 
