@@ -1181,7 +1181,7 @@ class ChatNotifier extends Notifier<ChatState> {
     );
 
     _messageDeleteSubscription = _messageHandler.messageDeleteStream.listen(
-      _handleMessageDelete,
+      handleMessageDelete,
       onError: (error) {
         debugPrint('❌ Message delete stream error: $error');
       },
@@ -1403,6 +1403,7 @@ class ChatNotifier extends Notifier<ChatState> {
 
   /// Handle ack message
   Future<void> _handleAckMessage(ChatMessageAckPayload payload) async {
+    print('payload: $payload');
     try {
       // Update message status in local DB
       await _messageRepo.updateMessageId(
@@ -1567,44 +1568,88 @@ class ChatNotifier extends Notifier<ChatState> {
     }
   }
 
+  /// Update pinned message in provider state when pinning/unpinning locally
+  void updatePinnedMessageInState(
+    int conversationId,
+    int? pinnedMessageId,
+  ) async {
+    try {
+      // Update database
+      await _conversationsRepo.updatePinnedMessage(
+        conversationId,
+        pinnedMessageId,
+      );
+
+      final convType = await _conversationsRepo.getConversationTypeById(
+        conversationId,
+      );
+
+      if (convType == null) {
+        return;
+      }
+
+      if (convType == ChatType.dm.value) {
+        final convIndex = state.dmList.indexWhere(
+          (conv) => conv.conversationId == conversationId,
+        );
+        if (convIndex != -1) {
+          final dm = state.dmList[convIndex];
+          final updatedDm = dm.copyWith(pinnedMessageId: pinnedMessageId);
+          final updatedDmList = List<DmModel>.from(state.dmList);
+          updatedDmList[convIndex] = updatedDm;
+          state = state.copyWith(dmList: updatedDmList);
+        }
+      } else if (convType == ChatType.group.value) {
+        final convIndex = state.groupList.indexWhere(
+          (group) => group.conversationId == conversationId,
+        );
+        if (convIndex != -1) {
+          final group = state.groupList[convIndex];
+          final updatedGroup = group.copyWith(pinnedMessageId: pinnedMessageId);
+          final updatedGroupList = List<GroupModel>.from(state.groupList);
+          updatedGroupList[convIndex] = updatedGroup;
+          state = state.copyWith(groupList: updatedGroupList);
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error updating pinned message in state: $e');
+    }
+  }
+
   /// Handle reply message (now handled via messageNewStream with replyToMessageId)
 
   /// Handle reply message
   Future<void> _handlePinMessage(MessagePinPayload payload) async {
     try {
       final convId = payload.convId;
-      final pinnedMessageId = payload.messageId;
+      final pinnedMessageId = payload.pin ? payload.messageId : null;
 
-      if (payload.pin) {
-        // Update in local DB
-        await _conversationsRepo.updatePinnedMessage(convId, pinnedMessageId);
+      // Update in local DB
+      await _conversationsRepo.updatePinnedMessage(convId, pinnedMessageId);
 
-        // Update in Provider state
-        final dmIndex = state.dmList.indexWhere(
-          (dm) => dm.conversationId == convId,
-        );
-        if (dmIndex != -1) {
-          final dm = state.dmList[dmIndex];
-          final updatedDm = dm.copyWith(pinnedMessageId: pinnedMessageId);
-          final updatedDmList = List<DmModel>.from(state.dmList);
-          updatedDmList[dmIndex] = updatedDm;
-          state = state.copyWith(dmList: updatedDmList);
-        }
-      } else {
-        // Unpin message in local DB
-        await _conversationsRepo.updatePinnedMessage(convId, null);
+      // Update in Provider state - Check DM list first
+      final dmIndex = state.dmList.indexWhere(
+        (dm) => dm.conversationId == convId,
+      );
+      if (dmIndex != -1) {
+        final dm = state.dmList[dmIndex];
+        final updatedDm = dm.copyWith(pinnedMessageId: pinnedMessageId);
+        final updatedDmList = List<DmModel>.from(state.dmList);
+        updatedDmList[dmIndex] = updatedDm;
+        state = state.copyWith(dmList: updatedDmList);
+        return;
+      }
 
-        // Update in Provider state
-        final dmIndex = state.dmList.indexWhere(
-          (dm) => dm.conversationId == convId,
-        );
-        if (dmIndex != -1) {
-          final dm = state.dmList[dmIndex];
-          final updatedDm = dm.copyWith(pinnedMessageId: null);
-          final updatedDmList = List<DmModel>.from(state.dmList);
-          updatedDmList[dmIndex] = updatedDm;
-          state = state.copyWith(dmList: updatedDmList);
-        }
+      // Check Group list if not found in DM list
+      final groupIndex = state.groupList.indexWhere(
+        (group) => group.conversationId == convId,
+      );
+      if (groupIndex != -1) {
+        final group = state.groupList[groupIndex];
+        final updatedGroup = group.copyWith(pinnedMessageId: pinnedMessageId);
+        final updatedGroupList = List<GroupModel>.from(state.groupList);
+        updatedGroupList[groupIndex] = updatedGroup;
+        state = state.copyWith(groupList: updatedGroupList);
       }
     } catch (e) {
       debugPrint('❌ Error handling pin message: $e');
@@ -1770,7 +1815,7 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   /// Handle message delete
-  Future<void> _handleMessageDelete(DeleteMessagePayload payload) async {
+  Future<void> handleMessageDelete(DeleteMessagePayload payload) async {
     try {
       final conversationId = payload.convId;
       final deletedMessageIds = payload.messageIds;

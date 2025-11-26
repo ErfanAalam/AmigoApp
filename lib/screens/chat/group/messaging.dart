@@ -457,13 +457,44 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       _isLoading = false;
     });
 
-    // load pinned message from prefs and then DB
-    if (widget.group.pinnedMessageId != null) {
+    // Load pinned message ID directly from database (not from widget.group which may be stale)
+    final conversation = await _conversationRepo.getConversationById(
+      widget.group.conversationId,
+    );
+    final currentPinnedMessageId = conversation?.pinnedMessageId;
+
+    if (currentPinnedMessageId != null) {
       final pinnedMessage = await _messagesRepo.getMessageById(
-        widget.group.pinnedMessageId!,
+        currentPinnedMessageId,
       );
+      if (pinnedMessage != null) {
+        setState(() {
+          _pinnedMessage = pinnedMessage;
+          // Ensure pinned message is in _messages list if not already present
+          final isInMessages = _messages.any(
+            (msg) =>
+                msg.canonicalId == pinnedMessage.canonicalId ||
+                msg.id == pinnedMessage.id,
+          );
+          if (!isInMessages) {
+            _messages.add(pinnedMessage);
+            _sortMessagesBySentAt();
+          }
+        });
+      } else {
+        // Pinned message ID exists but message not found - clear it from DB
+        await _conversationRepo.updatePinnedMessage(
+          widget.group.conversationId,
+          null,
+        );
+        setState(() {
+          _pinnedMessage = null;
+        });
+      }
+    } else {
+      // Ensure _pinnedMessage is null when there's no pinned message
       setState(() {
-        _pinnedMessage = pinnedMessage;
+        _pinnedMessage = null;
       });
     }
 
@@ -1207,24 +1238,51 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         sentAt: payload.sentAt.toIso8601String(),
       );
 
+      // Check if message already exists (avoid duplicates)
+      final existingIndex = _messages.indexWhere(
+        (msg) =>
+            msg.canonicalId == message.canonicalId ||
+            msg.id == message.id ||
+            (msg.optimisticId != null &&
+                msg.optimisticId == message.optimisticId),
+      );
+
       // Add message to UI immediately with animation
       if (mounted) {
         setState(() {
-          _messages.add(message);
-          _sortMessagesBySentAt();
+          if (existingIndex == -1) {
+            // New message - check if it should be at the end
+            if (_messages.isEmpty) {
+              _messages.add(message);
+            } else {
+              // Compare with last message to see if this is newer
+              final lastMessage = _messages.last;
+              try {
+                final lastTime = DateTime.parse(lastMessage.sentAt);
+                final newTime = DateTime.parse(message.sentAt);
+                if (newTime.isAfter(lastTime) ||
+                    newTime.isAtSameMomentAs(lastTime)) {
+                  // New message is newer or same time - add at end (no sort needed)
+                  _messages.add(message);
+                } else {
+                  // Message is older - add and sort
+                  _messages.add(message);
+                  _sortMessagesBySentAt();
+                }
+              } catch (e) {
+                // If parsing fails, add at end and sort to be safe
+                _messages.add(message);
+                _sortMessagesBySentAt();
+              }
+            }
+          } else {
+            // Message already exists - update it in place
+            _messages[existingIndex] = message;
+          }
         });
-        // // Update sticky date separator for new messages - using ValueNotifier
-        // _currentStickyDate.value = ChatHelpers.getMessageDateString(
-        //   newMessage.createdAt,
-        // );
-        // _showStickyDate.value = true;
 
         if (message.id > 0) {
           _animateNewMessage(message.id);
-          // if (!_isAtBottom) {
-          //   _trackNewMessage();
-          // }
-          // _scrollToBottom();
         }
       }
     } catch (e) {
@@ -1234,11 +1292,12 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   void _handleMessageAck(ChatMessageAckPayload payload) async {
     try {
-      // Find the message with matching optimisticId
+      // Find the message with matching optimisticId or canonicalId
       final messageIndex = _messages.indexWhere(
         (msg) =>
             msg.optimisticId == payload.optimisticId ||
-            msg.id == payload.optimisticId,
+            msg.id == payload.optimisticId ||
+            msg.canonicalId == payload.canonicalId,
       );
 
       if (messageIndex == -1) {
@@ -1248,11 +1307,32 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         return;
       }
 
-      // Update the message in-place with canonicalId (no setState to avoid UI update)
-      // The canonicalId will take precedence in the id getter
-      _messages[messageIndex] = _messages[messageIndex].copyWith(
-        canonicalId: payload.canonicalId,
+      final currentMessage = _messages[messageIndex];
+
+      // Clear uploading state and update status
+      final updatedMetadata = Map<String, dynamic>.from(
+        currentMessage.metadata ?? {},
       );
+      updatedMetadata['is_uploading'] = false;
+      updatedMetadata.remove('upload_failed');
+
+      // Update the message with canonicalId, status, and cleared uploading state
+      final updatedMessage = currentMessage.copyWith(
+        canonicalId: payload.canonicalId,
+        status: MessageStatusType
+            .delivered, // Update to delivered when acknowledged
+        metadata: updatedMetadata,
+      );
+
+      // Update in UI and DB
+      if (mounted) {
+        setState(() {
+          _messages[messageIndex] = updatedMessage;
+        });
+      }
+
+      // Save to DB
+      await _messagesRepo.insertMessage(updatedMessage);
     } catch (e) {
       debugPrint('❌ Error processing message_ack: $e');
     }
@@ -1331,7 +1411,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
 
     // delete messages from local DB
-    await _messagesRepo.deleteMessages(payload.messageIds);
+    // await _messagesRepo.deleteMessages(payload.messageIds);
   }
 
   // /// Send group message with immediate display (optimistic UI)
@@ -1479,8 +1559,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     if (mounted) {
       setState(() {
+        // New message - add at end (newest messages are at end in reverse list)
         _messages.add(newMsg);
-        _sortMessagesBySentAt();
+        // No need to sort - new message is already at the correct end position
       });
 
       _animateNewMessage(newMsg.optimisticId!);
@@ -1500,47 +1581,124 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
       debugPrint('Media data: $mediaData, messageType: $messageType');
     } else {
-      // Update message to show upload failed state
+      // Update message to show upload failed state and save to DB
+      await _markMessageAsFailed(optimisticId);
       if (mounted) {
-        setState(() {
-          final index = _messages.indexWhere(
-            (msg) => msg.optimisticId == optimisticId,
-          );
-          if (index != -1) {
-            final failedMsg = _messages[index];
-            final updatedMetadata = Map<String, dynamic>.from(
-              failedMsg.metadata ?? {},
-            );
-            updatedMetadata['is_uploading'] = false;
-            updatedMetadata['upload_failed'] = true;
+        // ScaffoldMessenger.of(context).showSnackBar(
+        //   const SnackBar(content: Text('Failed to send media message')),
+        // );
+      }
+    }
+  }
 
-            _messages[index] = MessageModel(
-              canonicalId: failedMsg.canonicalId,
-              optimisticId: failedMsg.optimisticId,
-              conversationId: failedMsg.conversationId,
-              senderId: failedMsg.senderId,
-              senderName: failedMsg.senderName,
-              senderProfilePic: failedMsg.senderProfilePic,
-              metadata: updatedMetadata,
-              attachments: failedMsg.attachments,
-              type: failedMsg.type,
-              body: failedMsg.body,
-              isReplied: failedMsg.isReplied,
-              status: failedMsg.status,
-              sentAt: failedMsg.sentAt,
-              localMediaPath: failedMsg.localMediaPath,
-              isStarred: failedMsg.isStarred,
-              isForwarded: failedMsg.isForwarded,
-              isDeleted: failedMsg.isDeleted,
+  /// Mark a message as failed in both UI and DB
+  Future<void> _markMessageAsFailed(int messageId) async {
+    if (!mounted) return;
+
+    final index = _messages.indexWhere(
+      (msg) => msg.id == messageId || msg.optimisticId == messageId,
+    );
+
+    if (index == -1) return;
+
+    final failedMsg = _messages[index];
+    final updatedMetadata = Map<String, dynamic>.from(failedMsg.metadata ?? {});
+    updatedMetadata['is_uploading'] = false;
+    updatedMetadata['upload_failed'] = true;
+
+    final updatedMessage = failedMsg.copyWith(
+      status: MessageStatusType.failed,
+      metadata: updatedMetadata,
+    );
+
+    // Update in UI
+    if (mounted) {
+      setState(() {
+        _messages[index] = updatedMessage;
+      });
+    }
+
+    // Save to DB with failed status
+    await _messagesRepo.insertMessage(updatedMessage);
+  }
+
+  /// Resend a failed message
+  Future<void> _resendFailedMessage(MessageModel failedMessage) async {
+    // Set uploading state immediately for visual feedback
+    final uploadingMetadata = Map<String, dynamic>.from(
+      failedMessage.metadata ?? {},
+    );
+    uploadingMetadata.remove('upload_failed');
+    uploadingMetadata['is_uploading'] = true;
+
+    final uploadingMessage = failedMessage.copyWith(
+      status: MessageStatusType.sent,
+      metadata: uploadingMetadata,
+    );
+
+    // Update in UI immediately to show uploading state
+    final index = _messages.indexWhere(
+      (msg) =>
+          msg.id == failedMessage.id ||
+          msg.optimisticId == failedMessage.optimisticId,
+    );
+    if (index != -1 && mounted) {
+      setState(() {
+        _messages[index] = uploadingMessage;
+      });
+    }
+
+    // Save uploading state to DB
+    await _messagesRepo.insertMessage(uploadingMessage);
+
+    // Resend the message
+    try {
+      final messagePayload = ChatMessagePayload(
+        optimisticId: failedMessage.optimisticId ?? failedMessage.id,
+        convId: failedMessage.conversationId,
+        senderId: failedMessage.senderId,
+        senderName: failedMessage.senderName,
+        attachments: failedMessage.attachments,
+        convType: ChatType.group,
+        msgType: failedMessage.type,
+        body: failedMessage.body,
+        replyToMessageId: failedMessage.metadata?['reply_to']?['message_id'],
+        sentAt: DateTime.parse(failedMessage.sentAt),
+      );
+
+      final wsmsg = WSMessage(
+        type: WSMessageType.messageNew,
+        payload: messagePayload,
+        wsTimestamp: DateTime.now(),
+      ).toJson();
+
+      await _webSocket
+          .sendMessage(wsmsg)
+          .then((_) {
+            // Clear uploading state on success
+            final successMetadata = Map<String, dynamic>.from(
+              uploadingMessage.metadata ?? {},
             );
-          }
-        });
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to send media message')),
-        );
-      }
+            successMetadata['is_uploading'] = false;
+            final successMessage = uploadingMessage.copyWith(
+              metadata: successMetadata,
+            );
+            if (index != -1 && mounted) {
+              setState(() {
+                _messages[index] = successMessage;
+              });
+            }
+            _messagesRepo.insertMessage(successMessage);
+          })
+          .catchError((e) async {
+            debugPrint('Error resending message: $e');
+            // Mark as failed again
+            await _markMessageAsFailed(failedMessage.id);
+          });
+    } catch (e) {
+      debugPrint('Error resending message: $e');
+      // Mark as failed again
+      await _markMessageAsFailed(failedMessage.id);
     }
   }
 
@@ -1609,13 +1767,18 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           );
           if (index != -1) {
             _messages[index] = newMsg;
+            // Only sort if we replaced a message (might have changed position)
+            _sortMessagesBySentAt();
           } else {
+            // New message - add at end (newest messages are at end in reverse list)
             _messages.add(newMsg);
+            // No need to sort - new message is already at the correct end position
           }
         } else {
+          // New message - add at end (newest messages are at end in reverse list)
           _messages.add(newMsg);
+          // No need to sort - new message is already at the correct end position
         }
-        _sortMessagesBySentAt();
       });
 
       _animateNewMessage(newMsg.optimisticId!);
@@ -1644,8 +1807,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      await _webSocket.sendMessage(wsmsg).catchError((e) {
-        debugPrint('Error sending message');
+      await _webSocket.sendMessage(wsmsg).catchError((e) async {
+        debugPrint('Error sending message: $e');
+        // Mark message as failed in DB and UI
+        await _markMessageAsFailed(newMsg.id);
       });
 
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -1665,7 +1830,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       );
       _cancelReply();
     } catch (e) {
-      debugPrint('Error sending message');
+      debugPrint('Error sending message: $e');
+      // Mark message as failed in DB and UI
+      await _markMessageAsFailed(newMsg.id);
     }
   }
 
@@ -1922,12 +2089,16 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                 if (_pinnedMessage != null)
                   PinnedMessageSection(
                     pinnedMessage: _messages.firstWhere(
-                      (message) => message.id == _pinnedMessage?.canonicalId,
+                      (message) =>
+                          message.canonicalId == _pinnedMessage?.canonicalId ||
+                          message.id == _pinnedMessage?.id,
+                      orElse: () => _pinnedMessage!,
                     ),
                     currentUserId: _currentUserDetails?.id ?? 0,
                     // isGroupChat: widget.group.type == ChatType.group,
-                    onTap: () =>
-                        _scrollToMessage(_pinnedMessage?.canonicalId ?? 0),
+                    onTap: () => _scrollToMessage(
+                      _pinnedMessage?.canonicalId ?? _pinnedMessage?.id ?? 0,
+                    ),
                     onUnpin: () => _togglePinMessage(_pinnedMessage!),
                   ),
 
@@ -2158,14 +2329,19 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         // Debug: Check user ID comparison
         final isMyMessage = message.senderId == _currentUserDetails?.id;
 
-        return Column(
-          children: [
-            // Date separator - show the date for the group of messages that starts here
-            if (ChatHelpers.shouldShowDateSeparator(_messages, messageIndex))
-              DateSeparator(dateTimeString: message.sentAt),
-            // Message bubble with long press
-            _buildMessageWithActions(message, isMyMessage),
-          ],
+        // Wrap the message with a container that has a key for scrolling
+        // This prevents widgets from being rebuilt incorrectly when messages are added
+        return Container(
+          key: ValueKey(message.id),
+          child: Column(
+            children: [
+              // Date separator - show the date for the group of messages that starts here
+              if (ChatHelpers.shouldShowDateSeparator(_messages, messageIndex))
+                DateSeparator(dateTimeString: message.sentAt),
+              // Message bubble with long press
+              _buildMessageWithActions(message, isMyMessage),
+            ],
+          ),
         );
       },
     );
@@ -2407,6 +2583,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         context: context,
         buildMessageContent: _buildMessageContent,
         isMediaMessage: _isMediaMessage,
+        onRetryFailedMessage: _resendFailedMessage,
         isGroupChat: true,
         nonMyMessageBackgroundColor: Colors.grey[100]!,
         useIntrinsicWidth: false,
@@ -2676,8 +2853,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       setState: () => setState(() {}),
       showErrorDialog: _showErrorDialog,
       onImagePreview: (url, caption) => _openImagePreview(url, caption),
-      onRetryImage: (file, source, {MessageModel? failedMessage}) =>
-          _sendMediaMessageToServer(file, MessageType.image),
+      onRetryImage: (file, source, {MessageModel? failedMessage}) {
+        if (failedMessage != null) {
+          _resendFailedMessage(failedMessage);
+        } else {
+          _sendMediaMessageToServer(file, MessageType.image);
+        }
+      },
       onCacheImage: (url, id) {
         ChatHelpers.cacheMediaForMessage(
           url: url,
@@ -2689,21 +2871,36 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       },
       onVideoPreview: (url, caption, fileName) =>
           _openVideoPreview(url, caption, fileName),
-      onRetryVideo: (file, source, {MessageModel? failedMessage}) =>
-          _sendMediaMessageToServer(file, MessageType.video),
+      onRetryVideo: (file, source, {MessageModel? failedMessage}) {
+        if (failedMessage != null) {
+          _resendFailedMessage(failedMessage);
+        } else {
+          _sendMediaMessageToServer(file, MessageType.video);
+        }
+      },
       videoThumbnailCache: _videoThumbnailCache,
       videoThumbnailFutures: _videoThumbnailFutures,
       onDocumentPreview: (url, fileName, caption, fileSize) =>
           _openDocumentPreview(url, fileName, caption, fileSize),
       onRetryDocument:
-          (file, fileName, extension, {MessageModel? failedMessage}) =>
-              _sendMediaMessageToServer(file, MessageType.document),
+          (file, fileName, extension, {MessageModel? failedMessage}) {
+            if (failedMessage != null) {
+              _resendFailedMessage(failedMessage);
+            } else {
+              _sendMediaMessageToServer(file, MessageType.document);
+            }
+          },
       audioPlaybackManager: _audioPlaybackManager,
-      onRetryAudio: ({MessageModel? failedMessage}) =>
+      onRetryAudio: ({MessageModel? failedMessage}) {
+        if (failedMessage != null) {
+          _resendFailedMessage(failedMessage);
+        } else {
           _sendMediaMessageToServer(
             File(failedMessage?.attachments?['url'] ?? ''),
             MessageType.audio,
-          ),
+          );
+        }
+      },
     );
   }
 
@@ -2908,14 +3105,37 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   void _togglePinMessage(MessageModel message) async {
+    // Check if this message is currently pinned by comparing IDs
+    final messageId = message.canonicalId ?? message.id;
+    final pinnedMessageId = _pinnedMessage?.canonicalId ?? _pinnedMessage?.id;
+    final wasPinned = messageId == pinnedMessageId && _pinnedMessage != null;
+    final newPinnedMessageId = wasPinned ? null : message.canonicalId;
+
+    // Clear or set pinned message immediately for instant UI feedback
+    setState(() {
+      _pinnedMessage = wasPinned ? null : message;
+    });
+
     await ChatHelpers.togglePinMessage(
       message: message,
       conversationId: widget.group.conversationId,
-      currentPinnedMessageId: _pinnedMessage?.canonicalId,
-      setPinnedMessageId: (value) => _pinnedMessage = value,
+      currentPinnedMessageId: pinnedMessageId,
+      setPinnedMessageId: (value) {
+        // This is called inside togglePinMessage's setState, but we already updated above
+        // Keep it for consistency
+        _pinnedMessage = value;
+      },
       currentUserId: _currentUserDetails?.id,
       setState: setState,
     );
+
+    // Update provider state immediately for UI consistency
+    ref
+        .read(chatProvider.notifier)
+        .updatePinnedMessageInState(
+          widget.group.conversationId,
+          newPinnedMessageId,
+        );
   }
 
   void _toggleStarMessage(int messageId) async {
@@ -2940,15 +3160,39 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           (message) => _selectedMessages.contains(message.id),
         );
       });
-      await _messagesRepo.deleteMessages(
-        _selectedMessages.map((id) => id).toList(),
-      );
-    } else {
-      debugPrint(
-        '❌ Failed to delete group messages: ${response['message'] ?? 'Unknown error'}',
-      );
+
+      ref
+          .read(chatProvider.notifier)
+          .handleMessageDelete(
+            DeleteMessagePayload(
+              messageIds: _selectedMessages.map((id) => id).toList(),
+              convId: widget.group.conversationId,
+              senderId: _currentUserDetails?.id ?? 0,
+            ),
+          )
+          .catchError((e) {
+            debugPrint('❌ Error deleting messages: $e');
+          });
+
+      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      final deleteMessagePayload = DeleteMessagePayload(
+        messageIds: _selectedMessages.map((id) => id).toList(),
+        convId: widget.group.conversationId,
+        senderId: _currentUserDetails?.id ?? 0,
+      ).toJson();
+
+      final wsmsg = WSMessage(
+        type: WSMessageType.messageDelete,
+        payload: deleteMessagePayload,
+        wsTimestamp: DateTime.now(),
+      ).toJson();
+
+      _webSocket.sendMessage(wsmsg).catchError((e) {
+        debugPrint('❌ Error sending message delete: $e');
+      });
+      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      _exitSelectionMode();
     }
-    _exitSelectionMode();
   }
 
   /// Scroll to a specific message
@@ -3050,15 +3294,44 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   void _deleteMessage(int messageId) async {
-    await ChatHelpers.deleteMessage(
-      messageId: messageId,
-      conversationId: widget.group.conversationId,
-      messages: _messages,
-      chatsServices: _chatsServices,
-      messagesRepo: _messagesRepo,
-      setState: setState,
-      isAdminOrStaff: _isAdminOrStaff,
-    );
+    setState(() {
+      _messages.removeWhere((message) => message.id == messageId);
+    });
+
+    ref
+        .read(chatProvider.notifier)
+        .handleMessageDelete(
+          DeleteMessagePayload(
+            messageIds: [messageId],
+            convId: widget.group.conversationId,
+            senderId: _currentUserDetails?.id ?? 0,
+          ),
+        )
+        .catchError((e) {
+          debugPrint('❌ Error deleting messages: $e');
+        });
+
+    final deleteResponse = _isAdminOrStaff
+        ? await _chatsServices.deleteMessage([messageId], _isAdminOrStaff)
+        : await _chatsServices.deleteMessage([messageId]);
+
+    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    final deleteMessagePayload = DeleteMessagePayload(
+      messageIds: [messageId],
+      convId: widget.group.conversationId,
+      senderId: _currentUserDetails?.id ?? 0,
+    ).toJson();
+
+    final wsmsg = WSMessage(
+      type: WSMessageType.messageDelete,
+      payload: deleteMessagePayload,
+      wsTimestamp: DateTime.now(),
+    ).toJson();
+
+    _webSocket.sendMessage(wsmsg).catchError((e) {
+      debugPrint('❌ Error sending message delete: $e');
+    });
+    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
   }
 
   void _bulkStarMessages() async {

@@ -412,7 +412,8 @@ class ChatHelpers {
       }
     });
 
-    final newPinnedMessageId = message.canonicalId;
+    // Set to null when unpinning, otherwise set to message canonicalId
+    final newPinnedMessageId = wasPinned ? null : message.canonicalId;
 
     await conversationRepo.updatePinnedMessage(
       conversationId,
@@ -420,7 +421,7 @@ class ChatHelpers {
     );
 
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    final joinConvPayload = MessagePinPayload(
+    final pinMessagePayload = MessagePinPayload(
       messageId: message.canonicalId!,
       messageType: message.type,
       senderId: currentUserId!,
@@ -430,7 +431,7 @@ class ChatHelpers {
 
     final wsmsg = WSMessage(
       type: WSMessageType.messagePin,
-      payload: joinConvPayload,
+      payload: pinMessagePayload,
       wsTimestamp: DateTime.now(),
     ).toJson();
 
@@ -481,45 +482,6 @@ class ChatHelpers {
     }
   }
 
-  /// Delete a message
-  ///
-  /// [messageId] - The message ID to delete
-  /// [conversationId] - The conversation ID
-  /// [messages] - List of messages (will be updated)
-  /// [chatsServices] - ChatsServices instance
-  /// [messagesRepo] - MessagesRepository instance
-  /// [isAdminOrStaff] - Whether user is admin/staff (for group chats, optional)
-  /// [setState] - Callback to update state
-  static Future<void> deleteMessage({
-    required int messageId,
-    required int conversationId,
-    required List messages,
-    required dynamic chatsServices,
-    required dynamic messagesRepo,
-    required void Function(void Function()) setState,
-    bool? isAdminOrStaff,
-  }) async {
-    final response = isAdminOrStaff != null
-        ? await chatsServices.deleteMessage([messageId], isAdminOrStaff)
-        : await chatsServices.deleteMessage([messageId]);
-
-    if (response['success'] == true) {
-      // Remove from local state
-      setState(() {
-        messages.removeWhere((message) => message.id == messageId);
-      });
-
-      // Remove from local storage cache
-      await messagesRepo.removeMessageFromCache(
-        conversationId: conversationId,
-        messageIds: [messageId],
-      );
-    } else {
-      debugPrint(
-        '❌ Failed to delete message: ${response['message'] ?? 'Unknown error'}',
-      );
-    }
-  }
 
   /// Bulk star/unstar messages
   ///

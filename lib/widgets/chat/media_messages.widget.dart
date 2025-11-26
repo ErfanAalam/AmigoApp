@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:amigo/models/message.model.dart';
+import 'package:amigo/types/socket.type.dart';
 import 'package:amigo/utils/chat/chat_helpers.utils.dart';
 import 'package:flutter/material.dart';
 import '../../utils/chat/cachedImage_widget.dart';
@@ -604,272 +605,287 @@ Widget buildDocumentMessage(MediaMessageConfig config) {
     }
   }
 
+  // Check if message is failed
+  final isFailedStatus = config.message.status == MessageStatusType.failed;
+
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      GestureDetector(
-        onTap: documentUrl != null
-            ? () => config.onDocumentPreview(
-                documentUrl,
-                fileName,
-                config.message.body,
-                fileSize,
-              )
-            : null,
-        child: Stack(
-          children: [
-            Container(
-              width: 280,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: config.isMyMessage ? Colors.teal : Colors.white,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(14),
-                  topRight: const Radius.circular(14),
-                  bottomLeft: Radius.circular(config.isMyMessage ? 14 : 0),
-                  bottomRight: Radius.circular(config.isMyMessage ? 0 : 14),
-                ),
-                border: Border.all(
-                  color: config.isMyMessage ? Colors.teal : Colors.grey[300]!,
-                  width: 1,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withAlpha(5),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: config.isMyMessage
-                          ? Colors.teal.withAlpha(25)
-                          : Colors.teal.withAlpha(10),
-                      borderRadius: BorderRadius.circular(8),
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          GestureDetector(
+            onTap: documentUrl != null
+                ? () => config.onDocumentPreview(
+                    documentUrl,
+                    fileName,
+                    config.message.body,
+                    fileSize,
+                  )
+                : null,
+            child: Stack(
+              children: [
+                Container(
+                  width: 280,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: config.isMyMessage ? Colors.teal : Colors.white,
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(14),
+                      topRight: const Radius.circular(14),
+                      bottomLeft: Radius.circular(config.isMyMessage ? 14 : 0),
+                      bottomRight: Radius.circular(config.isMyMessage ? 0 : 14),
                     ),
-                    child: Icon(
-                      docIcon,
-                      size: 24,
+                    border: Border.all(
                       color: config.isMyMessage
-                          ? Colors.white
-                          : Colors.teal[700],
+                          ? Colors.teal
+                          : Colors.grey[300]!,
+                      width: 1,
                     ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(5),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          (fileName != null && fileName.isNotEmpty)
-                              ? fileName
-                              : 'Document',
-                          style: TextStyle(
-                            color: config.isMyMessage
-                                ? Colors.white
-                                : Colors.black87,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: config.isMyMessage
+                              ? Colors.teal.withAlpha(25)
+                              : Colors.teal.withAlpha(10),
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                        if (fileSize != null) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            ChatHelpers.formatFileSize(fileSize),
-                            style: TextStyle(
-                              color: config.isMyMessage
-                                  ? Colors.white
-                                  : Colors.grey[600],
-                              fontSize: 13,
-                              fontWeight: FontWeight.w400,
-                            ),
-                          ),
-                        ] else if (isUploading) ...[
-                          const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              SizedBox(
-                                width: 12,
-                                height: 12,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                    config.isMyMessage
-                                        ? Colors.white70
-                                        : Colors.teal,
-                                  ),
-                                ),
+                        child: Icon(
+                          docIcon,
+                          size: 24,
+                          color: config.isMyMessage
+                              ? Colors.white
+                              : Colors.teal[700],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              (fileName != null && fileName.isNotEmpty)
+                                  ? fileName
+                                  : 'Document',
+                              style: TextStyle(
+                                color: config.isMyMessage
+                                    ? Colors.white
+                                    : Colors.black87,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
                               ),
-                              const SizedBox(width: 6),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                            if (fileSize != null) ...[
+                              const SizedBox(height: 2),
                               Text(
-                                'Uploading...',
+                                ChatHelpers.formatFileSize(fileSize),
                                 style: TextStyle(
                                   color: config.isMyMessage
-                                      ? Colors.white70
+                                      ? Colors.white
                                       : Colors.grey[600],
                                   fontSize: 13,
                                   fontWeight: FontWeight.w400,
                                 ),
                               ),
+                            ] else if (isUploading) ...[
+                              const SizedBox(height: 2),
+                              Row(
+                                children: [
+                                  SizedBox(
+                                    width: 12,
+                                    height: 12,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        config.isMyMessage
+                                            ? Colors.white70
+                                            : Colors.teal,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Uploading...',
+                                    style: TextStyle(
+                                      color: config.isMyMessage
+                                          ? Colors.white70
+                                          : Colors.grey[600],
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w400,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ] else if (isFailed) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                'Upload failed',
+                                style: TextStyle(
+                                  color: Colors.red[400],
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w400,
+                                ),
+                              ),
                             ],
+                          ],
+                        ),
+                      ),
+                      // Show loading or view icon (retry moved outside)
+                      if (isUploading)
+                        SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              config.isMyMessage ? Colors.white70 : Colors.teal,
+                            ),
                           ),
-                        ] else if (isFailed) ...[
-                          const SizedBox(height: 2),
+                        )
+                      else if (!isFailedStatus)
+                        Icon(
+                          Icons.visibility,
+                          size: 22,
+                          color: config.isMyMessage
+                              ? Colors.white
+                              : Colors.teal[600],
+                        ),
+                    ],
+                  ),
+                ),
+                // Timestamp overlay positioned at bottom right
+                Positioned(
+                  bottom: 4,
+                  right: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: config.isMyMessage
+                          ? Colors.black.withOpacity(0.3)
+                          : Colors.black.withOpacity(0.6),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isUploading)
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
+                            ),
+                          )
+                        else ...[
                           Text(
-                            'Upload failed',
+                            ChatHelpers.formatMessageTime(
+                              config.message.sentAt,
+                            ),
                             style: TextStyle(
-                              color: Colors.red[400],
-                              fontSize: 13,
+                              color: config.isMyMessage
+                                  ? Colors.white
+                                  : Colors.black,
+                              fontSize: 11,
                               fontWeight: FontWeight.w400,
                             ),
                           ),
+                          if (config.isMyMessage && !isFailedStatus) ...[
+                            const SizedBox(width: 4),
+                            config.buildMessageStatusTicks?.call(
+                                  config.message,
+                                ) ??
+                                const SizedBox.shrink(),
+                          ],
                         ],
                       ],
                     ),
                   ),
-                  // Show loading, retry, or view icon
-                  if (isUploading)
-                    SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          config.isMyMessage ? Colors.white70 : Colors.teal,
-                        ),
+                ),
+                if (config.isStarred)
+                  Positioned(
+                    bottom: 4,
+                    left: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 2,
+                        vertical: 2,
                       ),
-                    )
-                  else if (isFailed && config.isMyMessage)
-                    GestureDetector(
-                      onTap: () {
-                        final localFilePath =
-                            documentData['local_path'] as String?;
-                        final fileName = documentData['file_name'] as String?;
-                        final extension =
-                            documentData['file_extension'] as String?;
-
-                        if (localFilePath != null &&
-                            File(localFilePath).existsSync() &&
-                            fileName != null &&
-                            extension != null) {
-                          config.onRetryDocument(
-                            File(localFilePath),
-                            fileName,
-                            extension,
-                            failedMessage: config.message,
-                          );
-                        } else {
-                          config.showErrorDialog(
-                            'Original file not found. Please select the document again.',
-                          );
-                        }
-                      },
-                      child: Icon(
-                        Icons.refresh,
-                        size: 22,
-                        color: config.isMyMessage
-                            ? Colors.white
-                            : Colors.teal[600],
+                      decoration: BoxDecoration(
+                        color: Colors.black.withAlpha(60),
+                        borderRadius: BorderRadius.circular(14),
                       ),
-                    )
-                  else
-                    Icon(
-                      Icons.visibility,
-                      size: 22,
-                      color: config.isMyMessage
-                          ? Colors.white
-                          : Colors.teal[600],
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.star, size: 14, color: Colors.yellow),
+                        ],
+                      ),
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
-            // Timestamp overlay positioned at bottom right
-            Positioned(
-              bottom: 4,
-              right: 8,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: config.isMyMessage
-                      ? Colors.black.withOpacity(0.3)
-                      : Colors.black.withOpacity(0.6),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (isUploading)
-                      SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Colors.white,
-                          ),
-                        ),
-                      )
-                    else if (isFailed && config.isMyMessage)
-                      Text(
-                        ChatHelpers.formatMessageTime(config.message.sentAt),
-                        style: TextStyle(
-                          color: config.isMyMessage
-                              ? Colors.white
-                              : Colors.black,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w400,
-                        ),
-                      )
-                    else ...[
-                      Text(
-                        ChatHelpers.formatMessageTime(config.message.sentAt),
-                        style: TextStyle(
-                          color: config.isMyMessage
-                              ? Colors.white
-                              : Colors.black,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w400,
-                        ),
-                      ),
-                      if (config.isMyMessage) ...[
-                        const SizedBox(width: 4),
-                        config.buildMessageStatusTicks?.call(config.message) ??
-                            const SizedBox.shrink(),
-                      ],
-                    ],
-                  ],
-                ),
-              ),
+          ),
+          // Retry button on outer right side (like WhatsApp)
+          if (isFailedStatus && config.isMyMessage) ...[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () {
+                final localFilePath = documentData['local_path'] as String?;
+                final fileName = documentData['file_name'] as String?;
+                final extension = documentData['file_extension'] as String?;
+
+                if (localFilePath != null &&
+                    File(localFilePath).existsSync() &&
+                    fileName != null &&
+                    extension != null) {
+                  config.onRetryDocument(
+                    File(localFilePath),
+                    fileName,
+                    extension,
+                    failedMessage: config.message,
+                  );
+                } else {
+                  config.showErrorDialog(
+                    'Original file not found. Please select the document again.',
+                  );
+                }
+              },
+              child: isUploading
+                  ? _RotatingRefreshIcon(
+                      size: 20,
+                      color: config.isMyMessage
+                          ? Colors.teal[600] ?? Colors.teal
+                          : Colors.grey[600] ?? Colors.grey,
+                    )
+                  : Icon(
+                      Icons.refresh,
+                      size: 20,
+                      color: config.isMyMessage
+                          ? Colors.teal[600] ?? Colors.teal
+                          : Colors.grey[600] ?? Colors.grey,
+                    ),
             ),
-            if (config.isStarred)
-              Positioned(
-                bottom: 4,
-                left: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 2,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withAlpha(60),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.star, size: 14, color: Colors.yellow),
-                    ],
-                  ),
-                ),
-              ),
           ],
-        ),
+        ],
       ),
       if (config.message.body != null && config.message.body!.isNotEmpty) ...[
         const SizedBox(height: 8),
@@ -958,206 +974,229 @@ Widget buildAudioMessage(MediaMessageConfig config) {
     progressValue = progressValue.clamp(0.0, 1.0);
   }
 
+  // Check if message is failed
+  final isFailedStatus = config.message.status == MessageStatusType.failed;
+
   return AnimatedBuilder(
     animation: animation,
     builder: (context, child) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 250,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: config.isMyMessage ? Colors.teal : Colors.white,
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(14),
-                topRight: const Radius.circular(14),
-                bottomLeft: Radius.circular(config.isMyMessage ? 14 : 0),
-                bottomRight: Radius.circular(config.isMyMessage ? 0 : 14),
-              ),
-            ),
-            child: Row(
-              children: [
-                GestureDetector(
-                  onTap: audioUrl != null && !isUploading && !isFailed
-                      ? () {
-                          config.audioPlaybackManager.togglePlayback(
-                            audioKey,
-                            audioUrl,
-                            onError: (error) {
-                              config.showErrorDialog(error);
-                            },
-                          );
-                        }
-                      : null,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: isPlaying
-                          ? (config.isMyMessage
-                                ? Colors.white.withAlpha(40)
-                                : Colors.blue.withAlpha(30))
-                          : (config.isMyMessage
-                                ? Colors.white.withAlpha(20)
-                                : Colors.grey[200]),
-                      borderRadius: BorderRadius.circular(100),
-                      boxShadow: isPlaying
-                          ? [
-                              BoxShadow(
-                                color:
-                                    (config.isMyMessage
-                                            ? Colors.white
-                                            : Colors.blue)
-                                        .withAlpha(30),
-                                blurRadius: 8,
-                                spreadRadius: 2,
-                              ),
-                            ]
-                          : null,
-                    ),
-                    child: Transform.scale(
-                      scale: isPlaying ? (animation?.value ?? 1.0) : 1.0,
-                      child: Icon(
-                        isPlaying ? Icons.pause : Icons.play_arrow,
-                        size: 20,
-                        color: isPlaying
-                            ? (config.isMyMessage
-                                  ? Colors.white
-                                  : Colors.blue[700])
-                            : (config.isMyMessage
-                                  ? Colors.white
-                                  : Colors.grey[700]),
-                      ),
-                    ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Container(
+                width: 250,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: config.isMyMessage ? Colors.teal : Colors.white,
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(14),
+                    topRight: const Radius.circular(14),
+                    bottomLeft: Radius.circular(config.isMyMessage ? 14 : 0),
+                    bottomRight: Radius.circular(config.isMyMessage ? 0 : 14),
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          if (isPlaying && animation != null)
-                            buildAnimatedWaveform(config.isMyMessage, animation)
-                          else
-                            Icon(
-                              Icons.audiotrack,
-                              size: 16,
-                              color: config.isMyMessage
-                                  ? Colors.white70
-                                  : Colors.grey[600],
-                            ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Container(
-                              height: 3,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(2),
-                                color: config.isMyMessage
-                                    ? Colors.white30
-                                    : Colors.grey[300],
-                              ),
-                              child: LinearProgressIndicator(
-                                value: progressValue,
-                                backgroundColor: Colors.transparent,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  config.isMyMessage
+                child: Row(
+                  children: [
+                    GestureDetector(
+                      onTap: audioUrl != null && !isUploading && !isFailed
+                          ? () {
+                              config.audioPlaybackManager.togglePlayback(
+                                audioKey,
+                                audioUrl,
+                                onError: (error) {
+                                  config.showErrorDialog(error);
+                                },
+                              );
+                            }
+                          : null,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: isPlaying
+                              ? (config.isMyMessage
+                                    ? Colors.white.withAlpha(40)
+                                    : Colors.blue.withAlpha(30))
+                              : (config.isMyMessage
+                                    ? Colors.white.withAlpha(20)
+                                    : Colors.grey[200]),
+                          borderRadius: BorderRadius.circular(100),
+                          boxShadow: isPlaying
+                              ? [
+                                  BoxShadow(
+                                    color:
+                                        (config.isMyMessage
+                                                ? Colors.white
+                                                : Colors.blue)
+                                            .withAlpha(30),
+                                    blurRadius: 8,
+                                    spreadRadius: 2,
+                                  ),
+                                ]
+                              : null,
+                        ),
+                        child: Transform.scale(
+                          scale: isPlaying ? (animation?.value ?? 1.0) : 1.0,
+                          child: Icon(
+                            isPlaying ? Icons.pause : Icons.play_arrow,
+                            size: 20,
+                            color: isPlaying
+                                ? (config.isMyMessage
                                       ? Colors.white
-                                      : Colors.blue,
+                                      : Colors.blue[700])
+                                : (config.isMyMessage
+                                      ? Colors.white
+                                      : Colors.grey[700]),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              if (isPlaying && animation != null)
+                                buildAnimatedWaveform(
+                                  config.isMyMessage,
+                                  animation,
+                                )
+                              else
+                                Icon(
+                                  Icons.audiotrack,
+                                  size: 16,
+                                  color: config.isMyMessage
+                                      ? Colors.white70
+                                      : Colors.grey[600],
                                 ),
-                                minHeight: 3,
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Container(
+                                  height: 3,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(2),
+                                    color: config.isMyMessage
+                                        ? Colors.white30
+                                        : Colors.grey[300],
+                                  ),
+                                  child: LinearProgressIndicator(
+                                    value: progressValue,
+                                    backgroundColor: Colors.transparent,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      config.isMyMessage
+                                          ? Colors.white
+                                          : Colors.blue,
+                                    ),
+                                    minHeight: 3,
+                                  ),
+                                ),
                               ),
-                            ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              const SizedBox(width: 8),
+                              if (config.isStarred)
+                                Icon(
+                                  Icons.star,
+                                  size: 14,
+                                  color: Colors.yellow,
+                                ),
+                              if (isUploading)
+                                SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      config.isMyMessage
+                                          ? Colors.white70
+                                          : Colors.teal,
+                                    ),
+                                  ),
+                                )
+                              else ...[
+                                Text(
+                                  AudioPlaybackManager.formatDuration(
+                                    isPlaying ? position : duration,
+                                  ),
+                                  style: TextStyle(
+                                    color: config.isMyMessage
+                                        ? Colors.white70
+                                        : Colors.grey[600],
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                              const Spacer(),
+                              if (!isUploading && !isFailedStatus) ...[
+                                Text(
+                                  ChatHelpers.formatMessageTime(
+                                    config.message.sentAt,
+                                  ),
+                                  style: TextStyle(
+                                    color: config.isMyMessage
+                                        ? Colors.white70
+                                        : Colors.grey[600],
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                if (config.isMyMessage) ...[
+                                  const SizedBox(width: 4),
+                                  config.buildMessageStatusTicks?.call(
+                                        config.message,
+                                      ) ??
+                                      const SizedBox.shrink(),
+                                ],
+                              ],
+                            ],
                           ),
                         ],
                       ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          const SizedBox(width: 8),
-                          if (config.isStarred)
-                            Icon(Icons.star, size: 14, color: Colors.yellow),
-                          if (isUploading)
-                            SizedBox(
-                              width: 12,
-                              height: 12,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  config.isMyMessage
-                                      ? Colors.white70
-                                      : Colors.teal,
-                                ),
-                              ),
-                            )
-                          else if (isFailed && config.isMyMessage)
-                            GestureDetector(
-                              onTap: () {
-                                final localFilePath =
-                                    audioData['local_path'] as String?;
+                    ),
+                  ],
+                ),
+              ),
+              // Retry button on outer right side (like WhatsApp)
+              if (isFailedStatus && config.isMyMessage) ...[
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () {
+                    final localFilePath = audioData['local_path'] as String?;
 
-                                if (localFilePath != null &&
-                                    File(localFilePath).existsSync()) {
-                                  config.onRetryAudio(
-                                    failedMessage: config.message,
-                                  );
-                                } else {
-                                  config.showErrorDialog(
-                                    'Original file not found. Please record again.',
-                                  );
-                                }
-                              },
-                              child: Icon(
-                                Icons.refresh,
-                                size: 14,
-                                color: config.isMyMessage
-                                    ? Colors.white70
-                                    : Colors.teal[600],
-                              ),
-                            )
-                          else ...[
-                            Text(
-                              AudioPlaybackManager.formatDuration(
-                                isPlaying ? position : duration,
-                              ),
-                              style: TextStyle(
-                                color: config.isMyMessage
-                                    ? Colors.white70
-                                    : Colors.grey[600],
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                          const Spacer(),
-                          if (!isUploading && !isFailed) ...[
-                            Text(
-                              ChatHelpers.formatMessageTime(
-                                config.message.sentAt,
-                              ),
-                              style: TextStyle(
-                                color: config.isMyMessage
-                                    ? Colors.white70
-                                    : Colors.grey[600],
-                                fontSize: 12,
-                              ),
-                            ),
-                            if (config.isMyMessage) ...[
-                              const SizedBox(width: 4),
-                              config.buildMessageStatusTicks?.call(
-                                    config.message,
-                                  ) ??
-                                  const SizedBox.shrink(),
-                            ],
-                          ],
-                        ],
-                      ),
-                    ],
-                  ),
+                    if (localFilePath != null &&
+                        File(localFilePath).existsSync()) {
+                      config.onRetryAudio(failedMessage: config.message);
+                    } else {
+                      config.showErrorDialog(
+                        'Original file not found. Please record again.',
+                      );
+                    }
+                  },
+                  child: isUploading
+                      ? _RotatingRefreshIcon(
+                          size: 20,
+                          color: config.isMyMessage
+                              ? Colors.teal[600] ?? Colors.teal
+                              : Colors.grey[600] ?? Colors.grey,
+                        )
+                      : Icon(
+                          Icons.refresh,
+                          size: 20,
+                          color: config.isMyMessage
+                              ? Colors.teal[600] ?? Colors.teal
+                              : Colors.grey[600] ?? Colors.grey,
+                        ),
                 ),
               ],
-            ),
+            ],
           ),
           if (config.message.body != null &&
               config.message.body!.isNotEmpty) ...[
@@ -1175,4 +1214,43 @@ Widget buildAudioMessage(MediaMessageConfig config) {
       );
     },
   );
+}
+
+/// Rotating refresh icon widget for showing upload progress
+class _RotatingRefreshIcon extends StatefulWidget {
+  final double size;
+  final Color color;
+
+  const _RotatingRefreshIcon({required this.size, required this.color});
+
+  @override
+  State<_RotatingRefreshIcon> createState() => _RotatingRefreshIconState();
+}
+
+class _RotatingRefreshIconState extends State<_RotatingRefreshIcon>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(seconds: 1),
+      vsync: this,
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _controller,
+      child: Icon(Icons.refresh, size: widget.size, color: widget.color),
+    );
+  }
 }

@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:amigo/models/message.model.dart';
+import 'package:amigo/types/socket.type.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import '../../utils/chat/preview_media.utils.dart';
 import '../../db/repositories/message.repo.dart';
 import '../../db/repositories/user.repo.dart';
@@ -33,6 +35,8 @@ class MessageBubbleConfig {
 
   // Optional callbacks for DM-specific features
   final Widget Function(MessageModel message)? buildMessageStatusTicks;
+  final void Function(MessageModel message)?
+  onRetryFailedMessage; // Retry callback for failed messages
 
   // Configuration flags
   final bool isGroupChat; // true for group, false for DM
@@ -61,6 +65,7 @@ class MessageBubbleConfig {
     this.buildReplyPreview,
     required this.isMediaMessage,
     this.buildMessageStatusTicks,
+    this.onRetryFailedMessage,
     required this.isGroupChat,
     required this.nonMyMessageBackgroundColor,
     required this.useIntrinsicWidth,
@@ -81,6 +86,11 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isFailed = config.message.status == MessageStatusType.failed;
+    final isUploading = config.message.metadata?['is_uploading'] == true;
+    final showRetry =
+        isFailed && config.isMyMessage && config.onRetryFailedMessage != null;
+
     Widget messageContent = RepaintBoundary(
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
@@ -119,6 +129,29 @@ class MessageBubble extends StatelessWidget {
                     : _buildColumnContainer(),
               ),
             ),
+            // Retry button on outer right side (like WhatsApp) - only for text messages
+            if ((showRetry || (isUploading && config.isMyMessage)) &&
+                !config.isMediaMessage(config.message)) ...[
+              const SizedBox(width: 8),
+              if (isUploading)
+                _RotatingRefreshIcon(
+                  size: 20,
+                  color: config.isMyMessage
+                      ? Colors.teal[600] ?? Colors.teal
+                      : Colors.grey[600] ?? Colors.grey,
+                )
+              else
+                GestureDetector(
+                  onTap: () => config.onRetryFailedMessage!(config.message),
+                  child: Icon(
+                    Icons.refresh,
+                    size: 20,
+                    color: config.isMyMessage
+                        ? Colors.teal[600] ?? Colors.teal
+                        : Colors.grey[600] ?? Colors.grey,
+                  ),
+                ),
+            ],
           ],
         ),
       ),
@@ -391,6 +424,10 @@ class MessageBubble extends StatelessWidget {
 
   /// Build children for time and status row
   List<Widget> _buildTimeAndStatusRowChildren() {
+    final isFailed = config.message.status == MessageStatusType.failed;
+    // For text messages, retry button is shown outside the container
+    // For media messages, they handle their own retry buttons
+
     return [
       if (config.isStarred) ...[
         Icon(
@@ -409,65 +446,14 @@ class MessageBubble extends StatelessWidget {
         ),
       ),
       // Show delivery/read status ticks for own messages (DM only)
-      if (config.isMyMessage && config.buildMessageStatusTicks != null) ...[
+      // Don't show status ticks for failed messages
+      if (config.isMyMessage &&
+          !isFailed &&
+          config.buildMessageStatusTicks != null) ...[
         const SizedBox(width: 4),
         config.buildMessageStatusTicks!(config.message),
       ],
     ];
-  }
-
-  /// Fetch reply message and sender details from repositories
-  Future<Map<String, dynamic>?> _fetchReplyData() async {
-    if (!config.message.isReply || config.message.metadata == null) {
-      return null;
-    }
-
-    final replyTo = config.message.metadata!['reply_to'];
-    if (replyTo == null || replyTo is! Map<String, dynamic>) {
-      return null;
-    }
-
-    final replyMessageId = replyTo['message_id'];
-    final replySenderId = replyTo['sender_id'];
-
-    if (replyMessageId == null || config.messagesRepo == null) {
-      return null;
-    }
-
-    try {
-      // Fetch the replied message
-      final replyMessage = await config.messagesRepo!.getMessageById(
-        replyMessageId is int
-            ? replyMessageId
-            : int.tryParse(replyMessageId.toString()) ?? 0,
-      );
-
-      if (replyMessage == null) {
-        return null;
-      }
-
-      // Fetch sender name if sender_id is available
-      String? senderName;
-      if (replySenderId != null && config.userRepo != null) {
-        final senderId = replySenderId is int
-            ? replySenderId
-            : int.tryParse(replySenderId.toString());
-        if (senderId != null) {
-          final user = await config.userRepo!.getUserById(senderId);
-          senderName = user?.name;
-        }
-      }
-
-      // Use sender name from reply_to metadata if available, otherwise use fetched name
-      senderName = replyTo['sender_name'] as String? ?? senderName;
-
-      return {
-        'message': replyMessage,
-        'senderName': senderName ?? 'Unknown User',
-      };
-    } catch (e) {
-      return null;
-    }
   }
 
   /// Build reply preview widget using either callback or shared widget
@@ -492,8 +478,8 @@ class MessageBubble extends StatelessWidget {
               ? Colors.white.withAlpha(15)
               : Colors.white.withAlpha(20),
           otherMessageBackgroundColor: config.isGroupChat
-              ? Colors.grey[200]!
-              : Colors.grey[100]!,
+              ? (Colors.grey[200] ?? Colors.grey.shade200)
+              : (Colors.grey[100] ?? Colors.grey.shade100),
           myMessageTextColor: config.isGroupChat
               ? Colors.white
               : Colors.white.withOpacity(0.8),
@@ -510,42 +496,238 @@ class MessageBubble extends StatelessWidget {
   }
 
   /// Build reply preview widget with async data fetching
+  /// Uses a separate StatefulWidget to cache data and prevent re-fetching on rebuild
   Widget _buildReplyPreviewWithFetch() {
-    return FutureBuilder<Map<String, dynamic>?>(
-      future: _fetchReplyData(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          // Show loading indicator while fetching
-          return Container(
-            padding: const EdgeInsets.all(8),
-            child: const SizedBox(
-              height: 16,
-              width: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
+    // Use message ID as key to ensure widget identity is preserved
+    return _ReplyPreviewWithFetch(
+      key: ValueKey('reply_${config.message.id}'),
+      message: config.message,
+      isMyMessage: config.isMyMessage,
+      messagesRepo: config.messagesRepo,
+      userRepo: config.userRepo,
+      buildReplyPreviewWidget: _buildReplyPreviewWidget,
+      buildReplyPreview: config.buildReplyPreview,
+      onReplyTap: config.onReplyTap,
+      currentUserId: config.currentUserId,
+      conversationUserId: config.conversationUserId,
+      isGroupChat: config.isGroupChat,
+    );
+  }
+}
+
+/// Global static cache for reply data to persist across widget recreations
+class _ReplyDataCache {
+  static final Map<int, Map<String, dynamic>> _cache = {};
+
+  static Map<String, dynamic>? get(int messageId) {
+    return _cache[messageId];
+  }
+
+  static void set(int messageId, Map<String, dynamic> data) {
+    _cache[messageId] = data;
+  }
+}
+
+/// Separate StatefulWidget for reply preview that caches data to prevent flickering
+class _ReplyPreviewWithFetch extends StatefulWidget {
+  final MessageModel message;
+  final bool isMyMessage;
+  final MessageRepository? messagesRepo;
+  final UserRepository? userRepo;
+  final Widget Function(MessageModel replyMessage, bool isMyMessage)
+  buildReplyPreviewWidget;
+  final Widget Function(MessageModel replyMessage, bool isMyMessage)?
+  buildReplyPreview;
+  final void Function(int messageId)? onReplyTap;
+  final int? currentUserId;
+  final int? conversationUserId;
+  final bool isGroupChat;
+
+  const _ReplyPreviewWithFetch({
+    super.key,
+    required this.message,
+    required this.isMyMessage,
+    this.messagesRepo,
+    this.userRepo,
+    required this.buildReplyPreviewWidget,
+    this.buildReplyPreview,
+    this.onReplyTap,
+    this.currentUserId,
+    this.conversationUserId,
+    required this.isGroupChat,
+  });
+
+  @override
+  State<_ReplyPreviewWithFetch> createState() => _ReplyPreviewWithFetchState();
+}
+
+class _ReplyPreviewWithFetchState extends State<_ReplyPreviewWithFetch>
+    with AutomaticKeepAliveClientMixin {
+  // Store the resolved reply data directly - no FutureBuilder
+  MessageModel? _cachedReplyMessage;
+  String? _cachedSenderName;
+  bool _isLoading = false;
+
+  @override
+  bool get wantKeepAlive => true; // Keep state alive to prevent re-fetching
+
+  @override
+  void initState() {
+    super.initState();
+    // Check global cache first
+    final cachedData = _ReplyDataCache.get(widget.message.id);
+    if (cachedData != null) {
+      _cachedReplyMessage = cachedData['message'] as MessageModel?;
+      _cachedSenderName = cachedData['senderName'] as String?;
+    } else if (widget.message.isReply) {
+      // Load reply data if not in cache
+      _isLoading = true;
+      _loadReplyData();
+    }
+  }
+
+  @override
+  void didUpdateWidget(_ReplyPreviewWithFetch oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Only re-fetch if the message ID changed (new message)
+    if (widget.message.id != oldWidget.message.id) {
+      // Check global cache for new message
+      final cachedData = _ReplyDataCache.get(widget.message.id);
+      if (cachedData != null) {
+        setState(() {
+          _cachedReplyMessage = cachedData['message'] as MessageModel?;
+          _cachedSenderName = cachedData['senderName'] as String?;
+          _isLoading = false;
+        });
+      } else if (widget.message.isReply) {
+        setState(() {
+          _cachedReplyMessage = null;
+          _cachedSenderName = null;
+          _isLoading = true;
+        });
+        _loadReplyData();
+      } else {
+        setState(() {
+          _cachedReplyMessage = null;
+          _cachedSenderName = null;
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadReplyData() async {
+    if (!widget.message.isReply || widget.message.metadata == null) {
+      return;
+    }
+
+    final replyTo = widget.message.metadata!['reply_to'];
+    if (replyTo == null || replyTo is! Map<String, dynamic>) {
+      return;
+    }
+
+    final replyMessageId = replyTo['message_id'];
+    final replySenderId = replyTo['sender_id'];
+
+    if (replyMessageId == null || widget.messagesRepo == null) {
+      return;
+    }
+
+    try {
+      // Fetch the replied message
+      final replyMessage = await widget.messagesRepo!.getMessageById(
+        replyMessageId is int
+            ? replyMessageId
+            : int.tryParse(replyMessageId.toString()) ?? 0,
+      );
+
+      if (replyMessage == null) {
+        return;
+      }
+
+      // Fetch sender name if sender_id is available
+      String? senderName;
+      if (replySenderId != null && widget.userRepo != null) {
+        final senderId = replySenderId is int
+            ? replySenderId
+            : int.tryParse(replySenderId.toString());
+        if (senderId != null) {
+          final user = await widget.userRepo!.getUserById(senderId);
+          senderName = user?.name;
+        }
+      }
+
+      // Use sender name from reply_to metadata if available, otherwise use fetched name
+      senderName = replyTo['sender_name'] as String? ?? senderName;
+
+      // Store in global cache AND state - this persists across widget recreations
+      final cacheData = {
+        'message': replyMessage,
+        'senderName': senderName ?? 'Unknown User',
+      };
+      _ReplyDataCache.set(widget.message.id, cacheData);
+
+      // Store in state - this will trigger rebuild with actual data
+      // Once stored, it will NEVER change unless message ID changes
+      if (mounted) {
+        setState(() {
+          _cachedReplyMessage = replyMessage;
+          _cachedSenderName = senderName ?? 'Unknown User';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      // Silently fail - don't show error, just don't show reply preview
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
+
+    // If we have cached reply message, show it immediately - NO FLICKERING
+    if (_cachedReplyMessage != null) {
+      final replyMessageWithSender = _cachedReplyMessage!.copyWith(
+        senderName: _cachedSenderName,
+      );
+      return widget.buildReplyPreviewWidget(
+        replyMessageWithSender,
+        widget.isMyMessage,
+      );
+    }
+
+    // If still loading, show nothing (don't show empty/shrink if data will come)
+    // This prevents flickering - once data is loaded, it will be cached and shown
+    // Check global cache one more time in case it was set by another instance
+    if (_isLoading) {
+      final cachedData = _ReplyDataCache.get(widget.message.id);
+      if (cachedData != null) {
+        final replyMessage = cachedData['message'] as MessageModel?;
+        final senderName = cachedData['senderName'] as String?;
+        if (replyMessage != null) {
+          // Update state from cache
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() {
+                _cachedReplyMessage = replyMessage;
+                _cachedSenderName = senderName;
+                _isLoading = false;
+              });
+            }
+          });
+          // Return immediately with cached data
+          final replyMessageWithSender = replyMessage.copyWith(
+            senderName: senderName,
+          );
+          return widget.buildReplyPreviewWidget(
+            replyMessageWithSender,
+            widget.isMyMessage,
           );
         }
+      }
+    }
 
-        if (snapshot.hasError || !snapshot.hasData || snapshot.data == null) {
-          // Show error or empty state
-          return const SizedBox.shrink();
-        }
-
-        final replyData = snapshot.data!;
-        final replyMessage = replyData['message'] as MessageModel;
-        final senderName = replyData['senderName'] as String?;
-
-        // Create a copy of replyMessage with sender name
-        final replyMessageWithSender = replyMessage.copyWith(
-          senderName: senderName,
-        );
-
-        return _buildReplyPreviewWidget(
-          replyMessageWithSender,
-          config.isMyMessage,
-        );
-      },
-    );
+    return const SizedBox.shrink();
   }
 }
 
@@ -702,7 +884,7 @@ class ReplyPreview extends StatelessWidget {
             Text(
               isRepliedMessageMine
                   ? 'You'
-                  : config.replyMessage.senderName ?? '',
+                  : (config.replyMessage.senderName ?? 'Unknown User'),
               style: TextStyle(
                 color: config.isMyMessage ? Colors.white : Colors.teal,
                 fontSize: 12,
@@ -714,11 +896,11 @@ class ReplyPreview extends StatelessWidget {
               Text(
                 (config.replyMessage.body?.length ?? 0) > 50
                     ? '${config.replyMessage.body?.substring(0, 50)}...'
-                    : config.replyMessage.body ?? '',
+                    : (config.replyMessage.body ?? ''),
                 style: TextStyle(
                   color: config.isMyMessage
                       ? config.myMessageTextColor
-                      : Colors.grey[600],
+                      : (Colors.grey[600] ?? Colors.grey.shade600),
                   fontSize: 13,
                   height: 1.2,
                 ),
@@ -731,7 +913,7 @@ class ReplyPreview extends StatelessWidget {
                 style: TextStyle(
                   color: config.isMyMessage
                       ? config.myMessageMediaColor
-                      : Colors.grey[600],
+                      : (Colors.grey[600] ?? Colors.grey.shade600),
                   fontSize: 13,
                   height: 1.2,
                 ),
@@ -742,6 +924,45 @@ class ReplyPreview extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Rotating refresh icon widget for showing upload progress
+class _RotatingRefreshIcon extends StatefulWidget {
+  final double size;
+  final Color color;
+
+  const _RotatingRefreshIcon({required this.size, required this.color});
+
+  @override
+  State<_RotatingRefreshIcon> createState() => _RotatingRefreshIconState();
+}
+
+class _RotatingRefreshIconState extends State<_RotatingRefreshIcon>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(seconds: 1),
+      vsync: this,
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _controller,
+      child: Icon(Icons.refresh, size: widget.size, color: widget.color),
     );
   }
 }

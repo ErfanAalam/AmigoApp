@@ -65,7 +65,8 @@ enum MessageStatusType {
   unsent('unsent'),
   sent('sent'),
   delivered('delivered'),
-  read('read');
+  read('read'),
+  failed('failed');
 
   final String value;
   const MessageStatusType(this.value);
@@ -316,13 +317,17 @@ class ChatMessageAckPayload {
       senderId: json['sender_id'] as int,
       deliveredAt: deliveredAt,
       deliveredTo: json['delivered_to'] != null
-          ? (json['delivered_to'] as List<dynamic>).map((e) => e as int).toList()
+          ? (json['delivered_to'] as List<dynamic>)
+                .map((e) => e as int)
+                .toList()
           : null,
       readBy: json['read_by'] != null
           ? (json['read_by'] as List<dynamic>).map((e) => e as int).toList()
           : null,
       offlineUsers: json['offline_users'] != null
-          ? (json['offline_users'] as List<dynamic>).map((e) => e as int).toList()
+          ? (json['offline_users'] as List<dynamic>)
+                .map((e) => e as int)
+                .toList()
           : null,
     );
   }
@@ -594,7 +599,7 @@ class MessagePinPayload {
       senderId: json['sender_id'] as int,
       senderName: json['sender_name'] as String?,
       senderPfp: json['sender_pfp'] as String?,
-      pin: json['is_pinned'] as bool,
+      pin: json['pin'] as bool,
     );
   }
 
@@ -606,7 +611,7 @@ class MessagePinPayload {
       'sender_id': senderId,
       if (senderName != null) 'sender_name': senderName,
       if (senderPfp != null) 'sender_pfp': senderPfp,
-      'is_pinned': pin,
+      'pin': pin,
     };
   }
 }
