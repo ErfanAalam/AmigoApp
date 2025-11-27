@@ -748,21 +748,21 @@ class _ProfilePageState extends State<ProfilePage> {
                               : 'Loading...',
                           valueColor: Colors.grey[700],
                         ),
-                        ProfileOption(
-                          icon: Icons.storage,
-                          title: 'Database Viewer',
-                          subtitle: 'View and inspect database contents',
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => DriftDbViewer(
-                                  SqliteDatabase.instance.database,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+                        // ProfileOption(
+                        //   icon: Icons.storage,
+                        //   title: 'Database Viewer',
+                        //   subtitle: 'View and inspect database contents',
+                        //   onTap: () {
+                        //     Navigator.push(
+                        //       context,
+                        //       MaterialPageRoute(
+                        //         builder: (context) => DriftDbViewer(
+                        //           SqliteDatabase.instance.database,
+                        //         ),
+                        //       ),
+                        //     );
+                        //   },
+                        // ),
                       ],
                     ),
                   ],

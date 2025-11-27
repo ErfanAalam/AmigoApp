@@ -1068,13 +1068,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
 
     final optimisticMessageId = optimisticId ?? Snowflake.generateNegative();
-    print(
-      "--------------------------------------------------------------------------------",
-    );
-    print("optimisticMessageId -> ${optimisticMessageId}");
-    print(
-      "--------------------------------------------------------------------------------",
-    );
 
     // Clear draft when message is sent
     final draftNotifier = ref.read(draftMessagesProvider.notifier);
@@ -1675,7 +1668,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   Widget _buildMessagesList() {
     // Only show "No messages yet" if we've fully initialized and confirmed no messages
-    if (_messages.isEmpty && !_isLoading) {
+    if (_messages.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -2429,13 +2422,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     MessageType messageType,
   ) async {
     final optimisticId = Snowflake.generateNegative();
-    print(
-      "--------------------------------------------------------------------------------",
-    );
-    print("optimisticId -> ${optimisticId}");
-    print(
-      "--------------------------------------------------------------------------------",
-    );
 
     final nowUTC = DateTime.now().toUtc();
 

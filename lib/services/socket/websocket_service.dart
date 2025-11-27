@@ -120,8 +120,8 @@ class WebSocketService {
     // Build WebSocket URL preserving the original scheme, host, port, and path
     String wsUrl;
     if (uri.hasPort && uri.port != 80 && uri.port != 443) {
-      wsUrl = '${uri.scheme}://${uri.host}:${uri.port}${uri.path}';
-      // wsUrl = '${uri.scheme}://${uri.host}${uri.path}';
+      // wsUrl = '${uri.scheme}://${uri.host}:${uri.port}${uri.path}';
+      wsUrl = '${uri.scheme}://${uri.host}${uri.path}';
     } else {
       wsUrl = '${uri.scheme}://${uri.host}${uri.path}';
     }
