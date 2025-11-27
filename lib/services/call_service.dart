@@ -135,7 +135,6 @@ class CallService extends ChangeNotifier {
             break;
         }
       });
-      debugPrint('checkpoint 3');
     } catch (e) {
       debugPrint('[CALL] Error initializing CallService');
     }

@@ -1,9 +1,19 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:amigo/db/repositories/conversation_member.repo.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
+import 'package:amigo/db/repositories/message.repo.dart';
+import 'package:amigo/db/repositories/messageStatus.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/group_model.dart';
+import 'package:amigo/models/message.model.dart';
+import 'package:amigo/models/user_model.dart';
+import 'package:amigo/providers/chat_provider.dart';
+import 'package:amigo/types/socket.type.dart';
+import 'package:amigo/utils/snowflake.util.dart';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../api/chats.services.dart';
@@ -60,16 +70,16 @@ class ShareableConversation {
 
 /// A screen that handles incoming shared media (images and videos)
 /// from the Android share sheet and allows selecting conversations to share to.
-class ShareHandlerScreen extends StatefulWidget {
+class ShareHandlerScreen extends ConsumerStatefulWidget {
   final List<SharedMediaFile>? initialFiles;
 
   const ShareHandlerScreen({super.key, this.initialFiles});
 
   @override
-  State<ShareHandlerScreen> createState() => _ShareHandlerScreenState();
+  ConsumerState<ShareHandlerScreen> createState() => _ShareHandlerScreenState();
 }
 
-class _ShareHandlerScreenState extends State<ShareHandlerScreen>
+class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
     with SingleTickerProviderStateMixin {
   // List to store shared media files
   List<SharedMediaFile> _sharedFiles = [];
@@ -94,9 +104,20 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen>
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
+  // Current user details
+  UserModel? _currentUserDetails;
+
   // Services
   final ChatsServices _chatsServices = ChatsServices();
-  final WebSocketService _websocketService = WebSocketService();
+  final WebSocketService _webSocket = WebSocketService();
+
+  // Repositories
+  final MessageRepository _messageRepo = MessageRepository();
+  final MessageStatusRepository _messageStatusRepo = MessageStatusRepository();
+
+  // Utils
+  final UserUtils _userUtils = UserUtils();
+
   @override
   void initState() {
     super.initState();
@@ -149,6 +170,13 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen>
     setState(() {
       _isLoadingConversations = true;
     });
+
+    final userDetails = await _userUtils.getUserDetails();
+    if (userDetails != null) {
+      setState(() {
+        _currentUserDetails = userDetails;
+      });
+    }
 
     try {
       // Load from local database for instant display
@@ -305,23 +333,83 @@ class _ShareHandlerScreenState extends State<ShareHandlerScreen>
             fileToUpload,
           );
 
+          final optimisticMessageId = Snowflake.generateNegative();
+
           if (uploadResponse['success'] == true &&
               uploadResponse['data'] != null) {
             final mediaData = uploadResponse['data'];
 
             // Send to each selected conversation via WebSocket
             for (final conversationId in _selectedConversations) {
-              await _websocketService.sendMessage({
-                'type': 'media',
-                'data': {
-                  ...mediaData,
-                  'conversation_id': conversationId,
-                  'message_type': file.type == SharedMediaType.image
-                      ? 'image'
-                      : 'video',
-                },
-                'conversation_id': conversationId,
+              final newMsg = MessageModel(
+                optimisticId: optimisticMessageId,
+                conversationId: conversationId,
+                senderId: _currentUserDetails!.id,
+                senderName: _currentUserDetails!.name,
+                senderProfilePic: _currentUserDetails!.profilePic,
+                metadata: {},
+                attachments: mediaData,
+                type: file.type == SharedMediaType.image
+                    ? MessageType.image
+                    : MessageType.video,
+                body: '',
+                isReplied: false,
+                status: MessageStatusType.sent,
+                sentAt: DateTime.now().toUtc().toIso8601String(),
+              );
+
+              // storing the message into the local database
+              await _messageRepo.insertMessage(newMsg);
+
+              // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+              final messagePayload = ChatMessagePayload(
+                optimisticId: optimisticMessageId,
+                convId: conversationId,
+                senderId: _currentUserDetails!.id,
+                senderName: _currentUserDetails!.name,
+                attachments: mediaData,
+                convType: conversationId is GroupModel
+                    ? ChatType.group
+                    : ChatType.dm,
+                msgType: file.type == SharedMediaType.image
+                    ? MessageType.image
+                    : MessageType.video,
+                body: '',
+                replyToMessageId: null,
+                sentAt: DateTime.now().toUtc(),
+              );
+
+              final wsmsg = WSMessage(
+                type: WSMessageType.messageNew,
+                payload: messagePayload,
+                wsTimestamp: DateTime.now(),
+              ).toJson();
+
+              await _webSocket.sendMessage(wsmsg).catchError((e) async {
+                debugPrint('Error sending message: $e');
+                // Mark message as failed in DB and UI
               });
+
+              // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+              ref
+                  .read(chatProvider.notifier)
+                  .updateLastMessageOnSendingOwnMessage(conversationId, newMsg);
+
+              final List<ConversationMemberModel> conversationMembers =
+                  await ConversationMemberRepository()
+                      .getMembersByConversationId(conversationId);
+              final List<int> userIds = conversationMembers
+                  .map((member) => member.userId)
+                  .toList();
+
+              // // store that message in the message status table
+              await _messageStatusRepo.insertMessageStatusesWithMultipleUserIds(
+                messageId: newMsg.id,
+                conversationId: conversationId,
+                userIds: userIds,
+              );
             }
 
             successCount++;

@@ -1067,7 +1067,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       if (messageText.isEmpty) return;
     }
 
+    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 10');
+
     final optimisticMessageId = optimisticId ?? Snowflake.generateNegative();
+
+    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 11');
 
     // Clear draft when message is sent
     final draftNotifier = ref.read(draftMessagesProvider.notifier);
@@ -1075,6 +1079,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     // Create optimistic message for immediate display with current UTC time
     final nowUTC = DateTime.now().toUtc();
+
+    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 12');
 
     // Structure metadata properly for reply messages
     Map<String, dynamic>? replyMetadata;
@@ -1088,8 +1094,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       };
     }
 
-    // fddfd
-    // fddfd
+    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 13');
 
     final newMsg = MessageModel(
       optimisticId: optimisticMessageId,
@@ -1106,8 +1111,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       sentAt: nowUTC.toIso8601String(),
     );
 
+    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 14');
+
     // storing the message into the local database
     await _messagesRepo.insertMessage(newMsg);
+
+    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 15');
 
     // Clear input and reply state immediately for better UX
     _messageController.clear();
@@ -1135,6 +1144,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       _scrollToBottom();
     }
 
+    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 16');
+
     try {
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -1157,11 +1168,16 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         wsTimestamp: DateTime.now(),
       ).toJson();
 
+      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 17');
+
       await _webSocket.sendMessage(wsmsg).catchError((e) async {
         debugPrint('Error sending message: $e');
+        debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 18');
         // Mark message as failed in DB and UI
         await _markMessageAsFailed(newMsg.id);
       });
+
+      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 19');
 
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -1173,6 +1189,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             newMsg,
           );
 
+      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 20');
+
       // store that message in the message status table
       await _messageStatusRepo.insertMessageStatusesWithMultipleUserIds(
         messageId: newMsg.id,
@@ -1180,9 +1198,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         userIds: [widget.dm.recipientId],
       );
 
+      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 21');
+
       _cancelReply();
     } catch (e) {
       debugPrint('Error sending message: $e');
+      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 22');
       // Mark message as failed in DB and UI
       await _markMessageAsFailed(newMsg.id);
     }
@@ -1471,28 +1492,28 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                             fontSize: 16,
                           ),
                         ),
-                        Row(
-                          children: [
-                            StreamBuilder<Map<int, bool>>(
-                              stream: UserStatusService().userStatusStream,
-                              initialData: UserStatusService().onlineStatus,
-                              builder: (context, snapshot) {
-                                final isOnline =
-                                    snapshot.data?[widget.dm.recipientId] ??
-                                    false;
-                                return Text(
-                                  isOnline ? 'Online' : 'Offline',
-                                  style: TextStyle(
-                                    color: isOnline
-                                        ? Colors.greenAccent[100]
-                                        : Colors.red[100],
-                                    fontSize: 12,
-                                  ),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
+                        // Row(
+                        //   children: [
+                        //     StreamBuilder<Map<int, bool>>(
+                        //       stream: UserStatusService().userStatusStream,
+                        //       initialData: UserStatusService().onlineStatus,
+                        //       builder: (context, snapshot) {
+                        //         final isOnline =
+                        //             snapshot.data?[widget.dm.recipientId] ??
+                        //             false;
+                        //         return Text(
+                        //           isOnline ? 'Online' : 'Offline',
+                        //           style: TextStyle(
+                        //             color: isOnline
+                        //                 ? Colors.greenAccent[100]
+                        //                 : Colors.red[100],
+                        //             fontSize: 12,
+                        //           ),
+                        //         );
+                        //       },
+                        //     ),
+                        //   ],
+                        // ),
                       ],
                     ),
                   ),
@@ -2421,6 +2442,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     File mediaFile,
     MessageType messageType,
   ) async {
+    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 1');
     final optimisticId = Snowflake.generateNegative();
 
     final nowUTC = DateTime.now().toUtc();
@@ -2436,6 +2458,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         'sender_name': _replyToMessageData!.senderName,
       };
     }
+    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 2');
 
     // Build attachments with local_path for UI to display during upload
     final fileName = mediaFile.path.split('/').last;
@@ -2459,6 +2482,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       sentAt: nowUTC.toIso8601String(),
     );
 
+    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 3');
+
     if (_canSetState) {
       _safeSetState(() {
         _messages.add(newMsg);
@@ -2469,9 +2494,16 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       _scrollToBottom();
     }
 
+    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 4');
+
     final response = await _chatsServices.sendMediaMessage(mediaFile);
+    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 5');
+
     if (response['success'] == true && response['data'] != null) {
+      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 6');
       final mediaData = MediaResponse.fromJson(response['data']);
+
+      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 7');
 
       _sendMessage(
         messageType,
@@ -2479,9 +2511,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         optimisticId: optimisticId,
       );
 
+      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 8');
+
       debugPrint('Media data: $mediaData, messageType: $messageType');
     } else {
       // Update message to show upload failed state and save to DB
+      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 9');
       await _markMessageAsFailed(optimisticId);
       if (_canSetState) {
         // ScaffoldMessenger.of(context).showSnackBar(
@@ -2551,6 +2586,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     // Resend the message
     try {
+      // Use current time for the resent message
+      final newSentAt = DateTime.now().toUtc();
+
       final messagePayload = ChatMessagePayload(
         optimisticId: failedMessage.optimisticId ?? failedMessage.id,
         convId: failedMessage.conversationId,
@@ -2561,7 +2599,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         msgType: failedMessage.type,
         body: failedMessage.body,
         replyToMessageId: failedMessage.metadata?['reply_to']?['message_id'],
-        sentAt: DateTime.parse(failedMessage.sentAt),
+        sentAt: newSentAt,
       );
 
       final wsmsg = WSMessage(
@@ -2573,17 +2611,33 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       await _webSocket
           .sendMessage(wsmsg)
           .then((_) {
-            // Clear uploading state on success
+            // Clear uploading state and upload_failed flag on success
             final successMetadata = Map<String, dynamic>.from(
               uploadingMessage.metadata ?? {},
             );
             successMetadata['is_uploading'] = false;
+            successMetadata.remove(
+              'upload_failed',
+            ); // Explicitly remove upload_failed
+            // Update message with new timestamp and clear upload flags
             final successMessage = uploadingMessage.copyWith(
+              sentAt: newSentAt.toIso8601String(),
               metadata: successMetadata,
             );
-            if (index != -1 && _canSetState) {
+            // Recalculate index to ensure we update the correct message
+            final currentIndex = _messages.indexWhere(
+              (msg) =>
+                  msg.id == failedMessage.id ||
+                  msg.optimisticId == failedMessage.optimisticId,
+            );
+            if (currentIndex != -1 && _canSetState) {
               _safeSetState(() {
-                _messages[index] = successMessage;
+                // Update the message with new timestamp
+                _messages[currentIndex] = successMessage;
+                // Re-sort messages so the resent message appears at the bottom
+                _sortMessagesBySentAt();
+                // Scroll to bottom to show the resent message
+                _scrollToBottom();
               });
             }
             _messagesRepo.insertMessage(successMessage);

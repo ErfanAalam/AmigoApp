@@ -230,21 +230,12 @@ class ChatNotifier extends Notifier<ChatState> {
 
   /// Load conversations from server
   Future<void> loadConvsFromServer({bool silent = true}) async {
-    print(
-      "--------------------------------------------------------------------------------",
-    );
-    print("loadConvsFromServer called");
-    print(
-      "--------------------------------------------------------------------------------",
-    );
-    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 1');
     if (!silent) {
       state = state.copyWith(isLoading: true);
     }
 
     final response = await _userService.getChatList('dm');
     if (response['success']) {
-      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 2');
       final List<dynamic> conversationsList = response['data'];
 
       if (conversationsList.isNotEmpty) {
@@ -272,7 +263,6 @@ class ChatNotifier extends Notifier<ChatState> {
         final convList = await _convertToConversationsTypeAsync(
           conversationsList,
         );
-        debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 3');
 
         // Filter conversations to only include new ones
         final newConvs = convList
@@ -292,7 +282,6 @@ class ChatNotifier extends Notifier<ChatState> {
           // Continue even if DB insert fails
         }
 
-        debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 4');
         // Store conversation members in local DB - filter to only new ones
         final convMembers = dmList
             .map(
@@ -328,7 +317,6 @@ class ChatNotifier extends Notifier<ChatState> {
           debugPrint('❌ Error inserting conversation members to DB: $e');
           // Continue even if DB insert fails
         }
-        debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 5');
 
         // Store user (recipient) in local DB - filter to only new ones
         final users = dmList
@@ -360,7 +348,6 @@ class ChatNotifier extends Notifier<ChatState> {
           // Continue even if DB insert fails
         }
 
-        debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 6');
         // Load pin/mute/favorite status from local DB (these are local-only, not from server)
         // Query all DM conversations from DB to get their local pin/mute/favorite status
         final localConvs = await _conversationsRepo.getConversationsByType(
@@ -371,7 +358,6 @@ class ChatNotifier extends Notifier<ChatState> {
           convStatusMap[conv.id] = conv;
         }
 
-        debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 7');
 
         // Merge with existing Sets to preserve group status
         // final currentPinnedChats = Set<int>.from(state.pinnedChats);
@@ -414,7 +400,6 @@ class ChatNotifier extends Notifier<ChatState> {
 
         // Update Provider state
         final sortedDms = await filterAndSortConversations(dmList);
-        debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 8');
         state = state.copyWith(
           dmList: sortedDms,
           isLoading: false,
@@ -424,7 +409,6 @@ class ChatNotifier extends Notifier<ChatState> {
           // deletedChats: currentDeletedChats,
         );
       }
-      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 9');
       // else {
       //   state = state.copyWith(dmList: [], isLoading: false);
       // }
@@ -435,10 +419,8 @@ class ChatNotifier extends Notifier<ChatState> {
       debugPrint('🔄 Loading groups from server...');
       final groupResponse = await _userService.getChatList('group');
       debugPrint('📦 Group response success: ${groupResponse['success']}');
-      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 10');
 
       if (groupResponse['success']) {
-        debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 11');
         final List<dynamic> groupsList = groupResponse['data'] is List
             ? groupResponse['data']
             : [];
@@ -452,7 +434,6 @@ class ChatNotifier extends Notifier<ChatState> {
           try {
             if (group is Map<String, dynamic>) {
               final groupModel = GroupModel.fromJson(group);
-              debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 12');
               groups.add(groupModel);
 
               if (groupModel.lastMessageId != null) {
@@ -481,7 +462,6 @@ class ChatNotifier extends Notifier<ChatState> {
                       (e) => debugPrint('❌ Error inserting last message: $e'),
                     );
               }
-              debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 13');
 
               final convModel = ConversationModel(
                 id: groupModel.conversationId,
@@ -499,7 +479,6 @@ class ChatNotifier extends Notifier<ChatState> {
               );
               convs.add(convModel);
 
-              debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 14');
             }
           } catch (e) {
             debugPrint('❌ Error processing group conversation: $e');
@@ -531,7 +510,6 @@ class ChatNotifier extends Notifier<ChatState> {
           debugPrint('❌ Error inserting group conversations to DB: $e');
           // Continue even if DB insert fails - we can still show groups from server
         }
-        debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 15');
 
         // Load pin/mute/favorite status from local DB for groups (these are local-only, not from server)
         final localGroupConvs = await _conversationsRepo.getConversationsByType(
@@ -541,7 +519,6 @@ class ChatNotifier extends Notifier<ChatState> {
         for (final conv in localGroupConvs) {
           groupConvStatusMap[conv.id] = conv;
         }
-        debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 15');
 
         // Update groups with local status (pinned, muted, favorite)
         groups = groups.map((group) {
@@ -556,7 +533,6 @@ class ChatNotifier extends Notifier<ChatState> {
           return group;
         }).toList();
 
-        debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 16');
         // Update pinned/muted/favorite Sets with group status
         // final currentPinnedChats = Set<int>.from(state.pinnedChats);
         // final currentMutedChats = Set<int>.from(state.mutedChats);

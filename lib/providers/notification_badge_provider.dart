@@ -102,19 +102,19 @@ class NotificationBadgeNotifier extends Notifier<NotificationBadgeState> {
     }
   }
 
-  /// Get total unread group count
+  /// Get count of groups with unread messages
   Future<int> _getUnreadGroupCount() async {
     try {
       final groups = await _conversationsRepo.getConversationsByType(
         ChatType.group,
       );
-      int total = 0;
+      int count = 0;
       for (final group in groups) {
         if (group.unreadCount != null && group.unreadCount! > 0) {
-          total += group.unreadCount!;
+          count++; // Count groups with unread messages, not total messages
         }
       }
-      return total;
+      return count;
     } catch (e) {
       return 0;
     }

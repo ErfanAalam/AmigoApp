@@ -112,7 +112,6 @@ class MediaCacheService {
           }
           if (total != -1) {
             final progress = (received / total * 100).toStringAsFixed(0);
-            debugPrint('📊 Download progress: $progress%');
           }
         },
         options: Options(
@@ -125,7 +124,6 @@ class MediaCacheService {
       final tempFile = File(tempFilePath);
       final finalFile = await tempFile.rename(filePath);
 
-      debugPrint('✅ Media downloaded successfully: $fileName');
       return finalFile.path;
     } catch (e) {
       debugPrint('❌ Error in _performDownload: $e');

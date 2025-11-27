@@ -1705,6 +1705,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     // Resend the message
     try {
+      // Use current time for the resent message
+      final newSentAt = DateTime.now().toUtc();
+
       final messagePayload = ChatMessagePayload(
         optimisticId: failedMessage.optimisticId ?? failedMessage.id,
         convId: failedMessage.conversationId,
@@ -1715,7 +1718,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         msgType: failedMessage.type,
         body: failedMessage.body,
         replyToMessageId: failedMessage.metadata?['reply_to']?['message_id'],
-        sentAt: DateTime.parse(failedMessage.sentAt),
+        sentAt: newSentAt,
       );
 
       final wsmsg = WSMessage(
@@ -1732,12 +1735,28 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
               uploadingMessage.metadata ?? {},
             );
             successMetadata['is_uploading'] = false;
+            successMetadata.remove(
+              'upload_failed',
+            ); // Explicitly remove upload_failed
+            // Update message with new timestamp and clear upload flags
             final successMessage = uploadingMessage.copyWith(
+              sentAt: newSentAt.toIso8601String(),
               metadata: successMetadata,
             );
-            if (index != -1 && mounted) {
+            // Recalculate index to ensure we update the correct message
+            final currentIndex = _messages.indexWhere(
+              (msg) =>
+                  msg.id == failedMessage.id ||
+                  msg.optimisticId == failedMessage.optimisticId,
+            );
+            if (currentIndex != -1 && mounted) {
               setState(() {
-                _messages[index] = successMessage;
+                // Update the message with new timestamp
+                _messages[currentIndex] = successMessage;
+                // Re-sort messages so the resent message appears at the bottom
+                _sortMessagesBySentAt();
+                // Scroll to bottom to show the resent message
+                _scrollToBottom();
               });
             }
             _messagesRepo.insertMessage(successMessage);

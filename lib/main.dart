@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
-import 'package:amigo/services/background/test_bg.service.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/material.dart';
@@ -269,77 +268,128 @@ class _MyAppState extends material.State<MyApp> {
 
   /// Handle navigation from notification tap
   void _handleNotificationNavigation(Map<String, dynamic> data) {
-    // Add a small delay to ensure navigator is ready
-    Future.delayed(const Duration(milliseconds: 300), () async {
+    // Add a delay to ensure navigator is ready and app is fully initialized
+    Future.delayed(const Duration(milliseconds: 500), () async {
       try {
         // Convert to integer
-        final conversationId = int.tryParse(data['conversationId']);
+        final conversationIdStr = data['conversationId']?.toString();
+        if (conversationIdStr == null) {
+          debugPrint('❌ ConversationId is null in notification data');
+          return;
+        }
 
-        if (conversationId == null) return;
+        final conversationId = int.tryParse(conversationIdStr);
+        if (conversationId == null) {
+          debugPrint('❌ Failed to parse conversationId: $conversationIdStr');
+          return;
+        }
 
-        // Try to fetch the conversation from local DB
-        await _fetchAndNavigateToConversation(conversationId, data);
+        debugPrint('🔔 Navigating to conversation: $conversationId');
+
+        // Try to fetch the conversation from local DB with retry
+        await _fetchAndNavigateToConversationWithRetry(conversationId, data);
       } catch (e) {
-        debugPrint('❌ Error navigating to conversation from notification');
+        debugPrint('❌ Error navigating to conversation from notification: $e');
       }
     });
   }
 
-  /// Fetch conversation details and navigate to appropriate page
-  Future<void> _fetchAndNavigateToConversation(
+  /// Fetch conversation details and navigate to appropriate page with retry
+  Future<void> _fetchAndNavigateToConversationWithRetry(
     int conversationId,
-    Map<String, dynamic> notificationData,
-  ) async {
-    try {
-      // First, try to get it as a DM conversation
-      final conversationsRepo = ConversationRepository();
-      final convType = await conversationsRepo.getConversationTypeById(
-        conversationId,
-      );
-      if (convType != null && convType == 'dm') {
-        final dm = await conversationsRepo.getDmByConversationId(
-          conversationId,
-        );
-        if (dm != null) {
-          _navigateToDM(dm);
-          return;
+    Map<String, dynamic> notificationData, {
+    int maxRetries = 5,
+    Duration retryDelay = const Duration(milliseconds: 500),
+  }) async {
+    for (int attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        // Check if navigator is ready
+        if (NavigationHelper.navigatorKey.currentContext == null) {
+          debugPrint(
+            '⏳ Navigator not ready, retrying in ${retryDelay.inMilliseconds}ms... (attempt ${attempt + 1}/$maxRetries)',
+          );
+          await Future.delayed(retryDelay);
+          continue;
         }
-      } else if (convType != null && convType == 'group') {
-        final group = await conversationsRepo.getGroupWithMembersByConvId(
+
+        // First, try to get it as a DM conversation
+        final conversationsRepo = ConversationRepository();
+        final convType = await conversationsRepo.getConversationTypeById(
           conversationId,
         );
-        if (group != null) {
-          _navigateToGroup(group);
-          return;
+
+        if (convType == null) {
+          debugPrint(
+            '⏳ Conversation not found in DB, retrying... (attempt ${attempt + 1}/$maxRetries)',
+          );
+          await Future.delayed(retryDelay);
+          continue;
+        }
+
+        if (convType == 'dm') {
+          final dm = await conversationsRepo.getDmByConversationId(
+            conversationId,
+          );
+          if (dm != null) {
+            debugPrint('✅ Found DM conversation, navigating...');
+            _navigateToDM(dm);
+            return;
+          } else {
+            debugPrint(
+              '⏳ DM conversation data incomplete, retrying... (attempt ${attempt + 1}/$maxRetries)',
+            );
+            await Future.delayed(retryDelay);
+            continue;
+          }
+        } else if (convType == 'group') {
+          final group = await conversationsRepo.getGroupWithMembersByConvId(
+            conversationId,
+          );
+          if (group != null) {
+            debugPrint('✅ Found group conversation, navigating...');
+            _navigateToGroup(group);
+            return;
+          } else {
+            debugPrint(
+              '⏳ Group conversation data incomplete, retrying... (attempt ${attempt + 1}/$maxRetries)',
+            );
+            await Future.delayed(retryDelay);
+            continue;
+          }
+        }
+      } catch (e) {
+        debugPrint(
+          '❌ Error fetching conversation (attempt ${attempt + 1}): $e',
+        );
+        if (attempt < maxRetries - 1) {
+          await Future.delayed(retryDelay);
         }
       }
-    } catch (e) {
-      debugPrint('❌ Error fetching conversation');
     }
+
+    debugPrint(
+      '❌ Failed to navigate to conversation after $maxRetries attempts',
+    );
   }
 
   /// Navigate to DM conversation
   void _navigateToDM(DmModel dm) {
-    if (NavigationHelper.navigatorKey.currentContext != null) {
-      material.Navigator.of(
-        NavigationHelper.navigatorKey.currentContext!,
-      ).push(material.MaterialPageRoute(builder: (_) => InnerChatPage(dm: dm)));
-    } else {
-      debugPrint('❌ Navigator context is null, cannot navigate');
-    }
+    // Use NavigationHelper's pushRouteWithRetry for more reliable navigation
+    NavigationHelper.pushRouteWithRetry(
+      InnerChatPage(dm: dm),
+      maxRetries: 10,
+      retryDelay: const Duration(milliseconds: 300),
+    );
   }
 
   /// Navigate to group conversation
   void _navigateToGroup(GroupModel group) {
-    if (NavigationHelper.navigatorKey.currentContext != null) {
-      material.Navigator.of(NavigationHelper.navigatorKey.currentContext!).push(
-        material.MaterialPageRoute(
-          builder: (_) => InnerGroupChatPage(group: group),
-        ),
-      );
-    } else {
-      debugPrint('❌ Navigator context is null, cannot navigate');
-    }
+    // Use NavigationHelper's pushRouteWithRetry for more reliable navigation
+    NavigationHelper.pushRouteWithRetry(
+      InnerGroupChatPage(group: group),
+      maxRetries: 10,
+      retryDelay: const Duration(milliseconds: 300),
+    );
   }
 
   /// Initialize sharing intent listeners

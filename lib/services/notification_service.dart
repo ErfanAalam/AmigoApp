@@ -204,15 +204,28 @@ class NotificationService {
       // Store message in local DB if chat_message is present
       await _storeMessageFromNotification(data);
 
-      // Ensure conversationId is included in the data
+      // Ensure conversationId is included in the data and convert to string
+      final chatdata = ChatMessagePayload.fromJson(
+        jsonDecode(data['chat_message']),
+      );
+
+      // if (chatdata.convId == null) {
+      //   debugPrint('❌ conversationId is missing in Firebase notification data');
+      //   return;
+      // }
+
       final notificationData = {
         'type': 'message',
-        'conversationId': data['conversationId'],
-        'senderId': data['senderId'],
-        'senderName': data['senderName'],
-        'messageId': data['messageId'],
-        'messageType': data['messageType'],
+        'conversationId': chatdata.convId,
+        'senderId': chatdata.senderId,
+        'senderName': chatdata.senderName,
+        'messageId': chatdata.canonicalId,
+        'messageType': chatdata.msgType.value,
       };
+
+      debugPrint(
+        '🔔 Emitting Firebase notification data: conversationId=${chatdata.convId}',
+      );
 
       _messageNotificationController.add(notificationData);
     }
@@ -511,15 +524,25 @@ class NotificationService {
     Map<String, dynamic> data,
   ) {
     // Ensure all required fields are present
+    // Convert conversationId to string to ensure consistent format
+    final conversationId = data['conversationId']?.toString();
+
+    if (conversationId == null || conversationId.isEmpty) {
+      debugPrint('❌ conversationId is missing in notification data');
+      return;
+    }
+
     final notificationData = {
       'type': data['type'] ?? 'message',
-      'conversationId': data['conversationId'],
-      'senderId': data['senderId'],
-      'senderName': data['senderName'],
-      'messageId': data['messageId'],
-      'messageType': data['messageType'],
+      'conversationId': conversationId,
+      'senderId': data['senderId']?.toString(),
+      'senderName': data['senderName']?.toString(),
+      'messageId': data['messageId']?.toString(),
+      'messageType': data['messageType']?.toString(),
       'action': actionId ?? 'tap',
     };
+
+    debugPrint('🔔 Emitting notification data: conversationId=$conversationId');
 
     // Only emit to stream - navigation will be handled by the listener in main.dart
     _messageNotificationController.add(notificationData);

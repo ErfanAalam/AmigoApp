@@ -215,10 +215,8 @@ Widget buildImageMessage(MediaMessageConfig config) {
                   else if (isFailed && config.isMyMessage)
                     GestureDetector(
                       onTap: () {
-                        final localFilePath =
-                            imageData['local_path'] as String?;
-                        if (localFilePath != null &&
-                            File(localFilePath).existsSync()) {
+                        final localFilePath = localPath ?? imageUrl;
+                        if (localFilePath != null) {
                           config.onRetryImage(
                             File(localFilePath),
                             'image',

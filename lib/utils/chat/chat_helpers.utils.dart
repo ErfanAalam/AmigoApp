@@ -353,7 +353,6 @@ class ChatHelpers {
         // Update database with local path
         await messageRepo.updateLocalMediaPath(messageId, localPath);
         final prefix = debugPrefix != null ? '$debugPrefix ' : '';
-        debugPrint('✅ Cached media for $prefix$messageId');
       }
     } catch (e) {
       final prefix = debugPrefix != null ? '$debugPrefix ' : '';
