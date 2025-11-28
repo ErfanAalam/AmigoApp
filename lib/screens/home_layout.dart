@@ -1,3 +1,4 @@
+import 'package:amigo/providers/chat_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/user.service.dart';
@@ -102,6 +103,8 @@ class _MainScreenState extends ConsumerState<MainScreen> {
   @override
   Widget build(BuildContext context) {
     final badgeState = ref.watch(notificationBadgeProvider);
+    final unreadDMs = ref.watch(chatProvider).unreadDmCount;
+    final unreadGroups = ref.watch(chatProvider).unreadGroupCount;
 
     return Scaffold(
       body: PageView(
@@ -138,11 +141,11 @@ class _MainScreenState extends ConsumerState<MainScreen> {
         destinations: <Widget>[
           NavigationDestination(
             selectedIcon: BadgeWidget(
-              count: badgeState.chatCount,
+              count: unreadDMs,
               child: const Icon(Icons.message, color: Colors.teal),
             ),
             icon: BadgeWidget(
-              count: badgeState.chatCount,
+              count: unreadDMs,
               child: const Icon(
                 Icons.message_outlined,
                 color: Color.fromARGB(255, 65, 64, 64),
@@ -152,11 +155,11 @@ class _MainScreenState extends ConsumerState<MainScreen> {
           ),
           NavigationDestination(
             selectedIcon: BadgeWidget(
-              count: badgeState.groupCount,
+              count: unreadGroups,
               child: const Icon(Icons.group, color: Colors.teal),
             ),
             icon: BadgeWidget(
-              count: badgeState.groupCount,
+              count: unreadGroups,
               child: const Icon(
                 Icons.group_outlined,
                 color: Color.fromARGB(255, 65, 64, 64),

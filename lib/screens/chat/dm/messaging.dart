@@ -118,6 +118,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // bool _hasCheckedCache = false; // Track if we've checked cache
   // bool _isCheckingCache = true; // Show brief cache check state
   bool _isTyping = false;
+  bool _isSendingMessage = false;
   // bool isloadingMediamessage = false;
   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
   // Map<int, int?> userLastReadMessageIds = {}; // userId -> lastReadMessageId
@@ -505,6 +506,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         await _messagesRepo.insertMessages(firstPageHistory.messages);
       }
 
+      // Sync message statuses
+      await _syncMessageStatuses();
+
       // hasMorePages = firstPageHistory.hasNextPage;
       // page++;
 
@@ -547,7 +551,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     try {
       int page = 1;
-      const int limit = 100; // Fetch 100 messages per page
+      const int limit = 200; // Fetch 100 messages per page
       bool hasMorePages = true;
       int totalSynced = 0;
 
@@ -645,6 +649,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         await Future.delayed(const Duration(milliseconds: 100));
       }
 
+      // Sync message statuses after all messages are synced
+      await _syncMessageStatuses();
+
       // Reload messages from local DB after sync
       if (!_canSetState) {
         return;
@@ -685,6 +692,62 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         _isSyncingMessages = false;
         _syncStatus = 'Sync failed';
       });
+    }
+  }
+
+  /// Sync message statuses from server to local DB
+  Future<void> _syncMessageStatuses() async {
+    try {
+      int page = 1;
+      const int limit = 1000; // Fetch up to 1000 statuses per page
+      bool hasMorePages = true;
+
+      while (hasMorePages && _canSetState) {
+        final response = await _chatsServices.getMessageStatuses(
+          conversationId: widget.dm.conversationId,
+          page: page,
+          limit: limit,
+        );
+
+        if (response['success'] != true || response['data'] == null) {
+          break; // Stop on error
+        }
+
+        final statusesData = response['data'];
+        final List<dynamic> statuses = statusesData['statuses'] ?? [];
+
+        if (statuses.isEmpty) {
+          break; // No more statuses
+        }
+
+        // Convert to format expected by repository
+        final List<Map<String, dynamic>> statusesToInsert = statuses.map((
+          status,
+        ) {
+          return {
+            'id': status['id'],
+            'conversationId': status['conv_id'],
+            'messageId': status['message_id'],
+            'userId': status['user_id'],
+            'deliveredAt': status['delivered_at'],
+            'readAt': status['read_at'],
+          };
+        }).toList();
+
+        // Insert statuses into local DB
+        await _messageStatusRepo.insertMessageStatuses(statusesToInsert);
+
+        // Check if there are more pages
+        final pagination = statusesData['pagination'];
+        hasMorePages = pagination?['hasNextPage'] ?? false;
+        page++;
+
+        // Small delay to avoid overwhelming the server
+        await Future.delayed(const Duration(milliseconds: 50));
+      }
+    } catch (e) {
+      debugPrint('❌ Error syncing message statuses: $e');
+      // Don't fail the entire sync if status sync fails
     }
   }
 
@@ -1061,17 +1124,18 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     MediaResponse? mediaResponse,
     int? optimisticId,
   }) async {
+    if (mounted) {
+      setState(() {
+        _isSendingMessage = true;
+      });
+    }
     String messageText = '';
     if (messageType == MessageType.text) {
       messageText = _messageController.text.trim();
       if (messageText.isEmpty) return;
     }
 
-    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 10');
-
     final optimisticMessageId = optimisticId ?? Snowflake.generateNegative();
-
-    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 11');
 
     // Clear draft when message is sent
     final draftNotifier = ref.read(draftMessagesProvider.notifier);
@@ -1079,8 +1143,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     // Create optimistic message for immediate display with current UTC time
     final nowUTC = DateTime.now().toUtc();
-
-    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 12');
 
     // Structure metadata properly for reply messages
     Map<String, dynamic>? replyMetadata;
@@ -1094,7 +1156,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       };
     }
 
-    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 13');
+    // fddfd
+    // fddfd
 
     final newMsg = MessageModel(
       optimisticId: optimisticMessageId,
@@ -1111,12 +1174,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       sentAt: nowUTC.toIso8601String(),
     );
 
-    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 14');
-
     // storing the message into the local database
     await _messagesRepo.insertMessage(newMsg);
-
-    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 15');
 
     // Clear input and reply state immediately for better UX
     _messageController.clear();
@@ -1144,8 +1203,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       _scrollToBottom();
     }
 
-    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 16');
-
     try {
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -1168,16 +1225,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 17');
-
       await _webSocket.sendMessage(wsmsg).catchError((e) async {
         debugPrint('Error sending message: $e');
-        debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 18');
         // Mark message as failed in DB and UI
         await _markMessageAsFailed(newMsg.id);
       });
-
-      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 19');
 
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -1189,8 +1241,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             newMsg,
           );
 
-      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 20');
-
       // store that message in the message status table
       await _messageStatusRepo.insertMessageStatusesWithMultipleUserIds(
         messageId: newMsg.id,
@@ -1198,14 +1248,17 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         userIds: [widget.dm.recipientId],
       );
 
-      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 21');
-
       _cancelReply();
     } catch (e) {
       debugPrint('Error sending message: $e');
-      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 22');
       // Mark message as failed in DB and UI
       await _markMessageAsFailed(newMsg.id);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSendingMessage = false;
+        });
+      }
     }
   }
 
@@ -1492,28 +1545,31 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                             fontSize: 16,
                           ),
                         ),
-                        // Row(
-                        //   children: [
-                        //     StreamBuilder<Map<int, bool>>(
-                        //       stream: UserStatusService().userStatusStream,
-                        //       initialData: UserStatusService().onlineStatus,
-                        //       builder: (context, snapshot) {
-                        //         final isOnline =
-                        //             snapshot.data?[widget.dm.recipientId] ??
-                        //             false;
-                        //         return Text(
-                        //           isOnline ? 'Online' : 'Offline',
-                        //           style: TextStyle(
-                        //             color: isOnline
-                        //                 ? Colors.greenAccent[100]
-                        //                 : Colors.red[100],
-                        //             fontSize: 12,
-                        //           ),
-                        //         );
-                        //       },
-                        //     ),
-                        //   ],
-                        // ),
+                        Row(
+                          children: [
+                            StreamBuilder<Map<int, bool>>(
+                              stream: UserStatusService().userStatusStream,
+                              initialData: UserStatusService().onlineStatus,
+                              builder: (context, snapshot) {
+                                final isOnline = ref
+                                    .read(chatProvider)
+                                    .isUserOnline(
+                                      widget.dm.recipientId,
+                                      widget.dm.conversationId,
+                                    );
+                                return Text(
+                                  isOnline ? 'Online' : 'Offline',
+                                  style: TextStyle(
+                                    color: isOnline
+                                        ? Colors.greenAccent[100]
+                                        : Colors.red[100],
+                                    fontSize: 12,
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
@@ -1689,7 +1745,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   Widget _buildMessagesList() {
     // Only show "No messages yet" if we've fully initialized and confirmed no messages
-    if (_messages.isEmpty) {
+    if (_messages.isEmpty && !_isLoading) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -2442,8 +2498,14 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     File mediaFile,
     MessageType messageType,
   ) async {
-    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 1');
     final optimisticId = Snowflake.generateNegative();
+    print(
+      "--------------------------------------------------------------------------------",
+    );
+    print("optimisticId -> ${optimisticId}");
+    print(
+      "--------------------------------------------------------------------------------",
+    );
 
     final nowUTC = DateTime.now().toUtc();
 
@@ -2458,7 +2520,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         'sender_name': _replyToMessageData!.senderName,
       };
     }
-    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 2');
 
     // Build attachments with local_path for UI to display during upload
     final fileName = mediaFile.path.split('/').last;
@@ -2482,8 +2543,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       sentAt: nowUTC.toIso8601String(),
     );
 
-    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 3');
-
     if (_canSetState) {
       _safeSetState(() {
         _messages.add(newMsg);
@@ -2494,16 +2553,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       _scrollToBottom();
     }
 
-    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 4');
-
     final response = await _chatsServices.sendMediaMessage(mediaFile);
-    debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 5');
-
     if (response['success'] == true && response['data'] != null) {
-      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 6');
       final mediaData = MediaResponse.fromJson(response['data']);
-
-      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 7');
 
       _sendMessage(
         messageType,
@@ -2511,12 +2563,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         optimisticId: optimisticId,
       );
 
-      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 8');
-
       debugPrint('Media data: $mediaData, messageType: $messageType');
     } else {
       // Update message to show upload failed state and save to DB
-      debugPrint('>>>>>>>>>>>>>......>>>>>>>>>> checkpoint 9');
       await _markMessageAsFailed(optimisticId);
       if (_canSetState) {
         // ScaffoldMessenger.of(context).showSnackBar(
@@ -2586,9 +2635,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     // Resend the message
     try {
-      // Use current time for the resent message
-      final newSentAt = DateTime.now().toUtc();
-
       final messagePayload = ChatMessagePayload(
         optimisticId: failedMessage.optimisticId ?? failedMessage.id,
         convId: failedMessage.conversationId,
@@ -2599,7 +2645,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         msgType: failedMessage.type,
         body: failedMessage.body,
         replyToMessageId: failedMessage.metadata?['reply_to']?['message_id'],
-        sentAt: newSentAt,
+        sentAt: DateTime.parse(failedMessage.sentAt),
       );
 
       final wsmsg = WSMessage(
@@ -2611,33 +2657,17 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       await _webSocket
           .sendMessage(wsmsg)
           .then((_) {
-            // Clear uploading state and upload_failed flag on success
+            // Clear uploading state on success
             final successMetadata = Map<String, dynamic>.from(
               uploadingMessage.metadata ?? {},
             );
             successMetadata['is_uploading'] = false;
-            successMetadata.remove(
-              'upload_failed',
-            ); // Explicitly remove upload_failed
-            // Update message with new timestamp and clear upload flags
             final successMessage = uploadingMessage.copyWith(
-              sentAt: newSentAt.toIso8601String(),
               metadata: successMetadata,
             );
-            // Recalculate index to ensure we update the correct message
-            final currentIndex = _messages.indexWhere(
-              (msg) =>
-                  msg.id == failedMessage.id ||
-                  msg.optimisticId == failedMessage.optimisticId,
-            );
-            if (currentIndex != -1 && _canSetState) {
+            if (index != -1 && _canSetState) {
               _safeSetState(() {
-                // Update the message with new timestamp
-                _messages[currentIndex] = successMessage;
-                // Re-sort messages so the resent message appears at the bottom
-                _sortMessagesBySentAt();
-                // Scroll to bottom to show the resent message
-                _scrollToBottom();
+                _messages[index] = successMessage;
               });
             }
             _messagesRepo.insertMessage(successMessage);
@@ -2804,6 +2834,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       isOtherTypingNotifier: _isOtherTypingNotifier,
       typingIndicator: _buildTypingIndicator(),
       isReplying: _replyToMessageData != null,
+      isSending: _isSendingMessage,
       replyToMessageData: _replyToMessageData,
       currentUserId: _currentUserDetails?.id,
       onSendMessage: (messageType) => _sendMessage(messageType),

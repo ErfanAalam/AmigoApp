@@ -199,24 +199,24 @@ class MessageStatusRepository {
             .get();
 
     if (statuses.isEmpty) return null;
-    
+
     // If there are duplicates, return the first one and clean up duplicates
     if (statuses.length > 1) {
       // Keep the first one (usually the most recent due to auto-increment id)
       final firstStatus = statuses.first;
-      
+
       // Delete duplicates in a transaction
       await db.transaction(() async {
         for (int i = 1; i < statuses.length; i++) {
-          await (db.delete(db.messageStatusModel)
-                ..where((t) => t.id.equals(statuses[i].id)))
-              .go();
+          await (db.delete(
+            db.messageStatusModel,
+          )..where((t) => t.id.equals(statuses[i].id))).go();
         }
       });
-      
+
       return _statusToModel(firstStatus);
     }
-    
+
     return _statusToModel(statuses.first);
   }
 
@@ -588,7 +588,7 @@ class MessageStatusRepository {
         .write(MessageStatusModelCompanion(messageId: Value(canonicalId)));
   }
 
-  /// Mark all messages in a conversation as read for a user
+  /// Mark all messages in a conversation as read for a user where readAt is null
   Future<void> markAllAsReadByConversationAndUser({
     required int conversationId,
     required int userId,
@@ -597,51 +597,43 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final timestamp = readAt ?? DateTime.now().toIso8601String();
 
-    // Get all message IDs for the conversation
-    final messages =
-        await (db.select(db.messages)..where(
-              (t) =>
-                  t.conversationId.equals(conversationId) &
-                  t.isDeleted.equals(false),
-            ))
-            .get();
+    try {
+      // Bulk update all undelivered statuses in a single query
+      await (db.update(db.messageStatusModel)
+            ..where((t) => t.userId.equals(userId) & t.readAt.isNull()))
+          .write(MessageStatusModelCompanion(readAt: Value(timestamp)));
+    } catch (e) {
+      debugPrint(
+        'Error marking all as read for conversation $conversationId and user $userId: $e',
+      );
+    }
+  }
 
-    if (messages.isEmpty) return;
-
-    // Mark all messages as read in a transaction
-    await db.transaction(() async {
-      for (final message in messages) {
-        final messageId = message.id.toInt();
-        final existing = await getMessageStatusByMessageAndUser(
-          messageId,
-          userId,
-        );
-
-        if (existing != null) {
-          // Update existing status
-          await (db.update(db.messageStatusModel)..where(
-                (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
-              ))
-              .write(
-                MessageStatusModelCompanion(
-                  readAt: Value(timestamp),
-                  // Also ensure deliveredAt is set if not already set
-                  deliveredAt: existing.deliveredAt == null
-                      ? Value(timestamp)
-                      : const Value.absent(),
-                ),
-              );
-        } else {
-          // Insert new status with both delivered and read timestamps
-          await insertMessageStatus(
-            conversationId: conversationId,
-            messageId: messageId,
-            userId: userId,
-            deliveredAt: timestamp,
-            readAt: timestamp,
-          );
-        }
-      }
-    });
+  /// mark all undelivered message_status as delivered for a user
+  Future<void> markAllAsDeliveredForUser({
+    required int userId,
+    String? deliveredAt,
+  }) async {
+    final db = sqliteDatabase.database;
+    final timestamp = deliveredAt ?? DateTime.now().toIso8601String();
+    try {
+      // Bulk update all undelivered statuses in a single query
+      await (db.update(db.messageStatusModel)
+            ..where((t) => t.userId.equals(userId) & t.deliveredAt.isNull()))
+          .write(MessageStatusModelCompanion(deliveredAt: Value(timestamp)));
+      // final undeliveredStatuses = await (db.select(
+      //   db.messageStatusModel,
+      // )..where((t) => t.userId.equals(userId) & t.deliveredAt.isNull())).get();
+      // if (undeliveredStatuses.isEmpty) return;
+      // await db.transaction(() async {
+      //   for (final status in undeliveredStatuses) {
+      //     await (db.update(db.messageStatusModel)
+      //           ..where((t) => t.id.equals(status.id)))
+      //         .write(MessageStatusModelCompanion(deliveredAt: Value(timestamp)));
+      //   }
+      // });
+    } catch (e) {
+      debugPrint('Error marking all as delivered for user $userId: $e');
+    }
   }
 }

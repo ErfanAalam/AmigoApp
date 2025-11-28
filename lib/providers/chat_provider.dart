@@ -18,7 +18,6 @@ import '../services/socket/websocket_message_handler.dart';
 import '../services/user_status_service.dart';
 import '../api/chats.services.dart';
 import '../api/groups.services.dart';
-import '../utils/user.utils.dart';
 
 /// State class for DM list
 class ChatState {
@@ -131,6 +130,23 @@ class ChatState {
     }).toList();
 
     return [...filteredGroups, ...filteredCommunities];
+  }
+
+  int get unreadDmCount {
+    // count the number of DMs where unread count is greater than 0 (not unread message count just the number of conversations with unread messages)
+    return dmList.where((dm) => (dm.unreadCount ?? 0) > 0).length;
+  }
+
+  int get unreadGroupCount {
+    // count the number of DMs where unread count is greater than 0 (not unread message count just the number of conversations with unread messages)
+    return groupList.where((group) => (group.unreadCount) > 0).length;
+  }
+
+  bool isUserOnline(int recipientId, int convId) {
+    final dm = dmList.firstWhere(
+      (dm) => dm.conversationId == convId && dm.recipientId == recipientId,
+    );
+    return dm.isRecipientOnline;
   }
 }
 
@@ -358,7 +374,6 @@ class ChatNotifier extends Notifier<ChatState> {
           convStatusMap[conv.id] = conv;
         }
 
-
         // Merge with existing Sets to preserve group status
         // final currentPinnedChats = Set<int>.from(state.pinnedChats);
         // final currentMutedChats = Set<int>.from(state.mutedChats);
@@ -478,7 +493,6 @@ class ChatNotifier extends Notifier<ChatState> {
                 createdAt: groupModel.joinedAt,
               );
               convs.add(convModel);
-
             }
           } catch (e) {
             debugPrint('❌ Error processing group conversation: $e');
@@ -1810,6 +1824,13 @@ class ChatNotifier extends Notifier<ChatState> {
       if (hasChanges) {
         state = state.copyWith(dmList: updatedDmList);
       }
+
+      // mark as delivered all undelivered messages from this user in both messages table and message_status table
+      await _messageStatusRepo.markAllAsDeliveredForUser(
+        userId: userId,
+        deliveredAt: DateTime.now().toIso8601String(),
+      );
+      await _messageRepo.updateAllMessagesAsDeliveredForUserId(userId);
     } catch (e) {
       debugPrint('❌ Error handling online status: $e');
     }
@@ -1898,10 +1919,7 @@ class ChatNotifier extends Notifier<ChatState> {
 
       // update message table message status for DMs
       if (payload.convType == ChatType.dm) {
-        await _messageRepo.updateAllMessagesStatusForDMs(
-          payload.convId,
-          MessageStatusType.read,
-        );
+        await _messageRepo.updateAllMessagesAsReadForDM(payload.convId);
       }
     } catch (e) {
       debugPrint('❌ Error handling conversation join/leave event: $e');

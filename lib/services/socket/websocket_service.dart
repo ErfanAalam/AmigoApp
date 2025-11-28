@@ -80,7 +80,8 @@ class WebSocketService {
       }
 
       // Build WebSocket URL with access token as query parameter
-      final wsUrl = _buildWebSocketUrl(accessToken);
+      final wsUrl =
+          '${Environment.websocketUrl}?token=${Uri.encodeComponent(accessToken)}';
 
       // Create WebSocket connection using native WebSocket
       debugPrint('🔍 About to connect to: $wsUrl');
@@ -109,27 +110,6 @@ class WebSocketService {
       debugPrint('❌ WebSocket connection failed');
       _handleConnectionError(e.toString());
     }
-  }
-
-  /// Build WebSocket URL with access token as query parameter
-  String _buildWebSocketUrl(String accessToken) {
-    // Use the configured WebSocket URL directly
-    final websocketUrl = Environment.websocketUrl;
-    final uri = Uri.parse(websocketUrl);
-
-    // Build WebSocket URL preserving the original scheme, host, port, and path
-    String wsUrl;
-    if (uri.hasPort && uri.port != 80 && uri.port != 443) {
-      // wsUrl = '${uri.scheme}://${uri.host}:${uri.port}${uri.path}';
-      wsUrl = '${uri.scheme}://${uri.host}${uri.path}';
-    } else {
-      wsUrl = '${uri.scheme}://${uri.host}${uri.path}';
-    }
-
-    // Add access token as query parameter
-    final finalUrl = '$wsUrl?token=${Uri.encodeComponent(accessToken)}';
-
-    return finalUrl;
   }
 
   /// Handle incoming WebSocket messages

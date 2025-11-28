@@ -56,6 +56,29 @@ class ChatsServices {
     }
   }
 
+  Future<Map<String, dynamic>> getMessageStatuses({
+    required int conversationId,
+    int page = 1,
+    int limit = 1000,
+  }) async {
+    try {
+      final response = await _apiService.authenticatedGet(
+        '/chat/get-message-statuses/$conversationId?page=$page&limit=$limit',
+      );
+
+      if (response.data is String) {
+        return jsonDecode(response.data as String);
+      }
+      return response.data;
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Failed to get message statuses',
+      };
+    }
+  }
+
   Future<Map<String, dynamic>> sendMediaMessage(File file) async {
     try {
       final response = await _apiService.sendMedia(file: file);

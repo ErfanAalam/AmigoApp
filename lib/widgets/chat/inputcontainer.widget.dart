@@ -10,6 +10,7 @@ class MessageInputContainer extends StatelessWidget {
   final ValueNotifier<bool> isOtherTypingNotifier;
   final Widget? typingIndicator;
   final bool isReplying;
+  final bool isSending;
   final MessageModel? replyToMessageData;
   final int? currentUserId;
   final Function(MessageType)? onSendMessage;
@@ -32,6 +33,7 @@ class MessageInputContainer extends StatelessWidget {
     required this.isOtherTypingNotifier,
     this.typingIndicator,
     required this.isReplying,
+    required this.isSending,
     this.replyToMessageData,
     this.currentUserId,
     this.onSendMessage,
@@ -116,28 +118,16 @@ class MessageInputContainer extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               FloatingActionButton(
-                onPressed: shouldDisableSending
+                onPressed: (shouldDisableSending || isSending)
                     ? null
                     : (messageController.text.isNotEmpty
                           ? () => onSendMessage!(MessageType.text)
                           : () => onSendVoiceNote!()),
-                backgroundColor: shouldDisableSending
-                    ? Colors.grey[400]
-                    : Colors.teal,
+                backgroundColor: Colors.teal,
                 mini: true,
                 child: messageController.text.isNotEmpty
-                    ? Icon(
-                        Icons.send,
-                        color: shouldDisableSending
-                            ? Colors.grey[600]
-                            : Colors.white,
-                      )
-                    : Icon(
-                        Icons.mic,
-                        color: shouldDisableSending
-                            ? Colors.grey[600]
-                            : Colors.white,
-                      ),
+                    ? Icon(Icons.send, color: Colors.white)
+                    : Icon(Icons.mic, color: Colors.white),
               ),
             ],
           ),

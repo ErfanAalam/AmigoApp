@@ -439,14 +439,39 @@ class MessageRepository {
   }
 
   /// Update all messages status for a conversation
-  Future<void> updateAllMessagesStatusForDMs(
-    int conversationId,
-    MessageStatusType status,
-  ) async {
-    final db = sqliteDatabase.database;
-    await (db.update(db.messages)
-          ..where((t) => t.conversationId.equals(conversationId)))
-        .write(MessagesCompanion(status: Value(status.value)));
+  Future<void> updateAllMessagesAsReadForDM(int conversationId) async {
+    try {
+      final db = sqliteDatabase.database;
+      await (db.update(db.messages)..where(
+            (t) =>
+                t.conversationId.equals(conversationId) &
+                t.status.equals(MessageStatusType.read.value).not(),
+          ))
+          .write(
+            MessagesCompanion(status: Value(MessageStatusType.read.value)),
+          );
+    } catch (e) {
+      debugPrint("Error updating all messages status for DMs: $e");
+    }
+  }
+
+  /// update message status for all conversation for user id
+  Future<void> updateAllMessagesAsDeliveredForUserId(int userId) async {
+    try {
+      final db = sqliteDatabase.database;
+
+      // Update messages in those conversations
+      await (db.update(db.messages)..where(
+            (t) =>
+                t.senderId.equals(userId) &
+                t.status.equals(MessageStatusType.sent.value),
+          ))
+          .write(
+            MessagesCompanion(status: Value(MessageStatusType.delivered.value)),
+          );
+    } catch (e) {
+      debugPrint("Error updating all messages status for user ID: $e");
+    }
   }
 
   /// Update message ID (for optimistic updates)

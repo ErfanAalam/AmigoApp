@@ -108,6 +108,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   // bool _hasCheckedCache = false;
   // bool _isCheckingCache = true;
   bool _isTyping = false;
+  bool _isSendingMessage = false;
   bool _isAdminOrStaff = false;
   // bool _isOtherTyping = false;
   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
@@ -570,6 +571,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         await _messagesRepo.insertMessages(firstPageHistory.messages);
       }
 
+      // Sync message statuses
+      await _syncMessageStatuses();
+
       // Reload messages from local DB after sync
       final syncedMessages = await _messagesRepo.getMessagesByConversation(
         widget.group.conversationId,
@@ -604,7 +608,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     try {
       int page = 1;
-      const int limit = 100; // Fetch 100 messages per page
+      const int limit = 200; // Fetch 100 messages per page
       bool hasMorePages = true;
       int totalSynced = 0;
 
@@ -733,8 +737,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         page++;
 
         // Small delay to avoid overwhelming the server
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future.delayed(const Duration(milliseconds: 50));
       }
+
+      // Sync message statuses after all messages are synced
+      await _syncMessageStatuses();
 
       // Reload messages from local DB after sync
       if (mounted && !_isDisposed) {
@@ -776,6 +783,60 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           _syncStatus = 'Sync failed';
         });
       }
+    }
+  }
+
+  /// Sync message statuses from server to local DB
+  Future<void> _syncMessageStatuses() async {
+    try {
+      int page = 1;
+      const int limit = 1000; // Fetch up to 1000 statuses per page
+      bool hasMorePages = true;
+
+      while (hasMorePages && mounted && !_isDisposed) {
+        final response = await _chatsServices.getMessageStatuses(
+          conversationId: widget.group.conversationId,
+          page: page,
+          limit: limit,
+        );
+
+        if (response['success'] == true) {
+          final statusesData = response['data'];
+          final List<dynamic> statuses = statusesData['statuses'] ?? [];
+
+          if (statuses.isEmpty) {
+            break; // No more statuses
+          }
+
+          // Convert to format expected by repository
+          final List<Map<String, dynamic>> statusesToInsert = statuses.map((
+            status,
+          ) {
+            return {
+              'id': status['id'],
+              'conversationId': status['conv_id'],
+              'messageId': status['message_id'],
+              'userId': status['user_id'],
+              'deliveredAt': status['delivered_at'],
+              'readAt': status['read_at'],
+            };
+          }).toList();
+
+          // Insert statuses into local DB
+          await _messageStatusRepo.insertMessageStatuses(statusesToInsert);
+
+          // Check if there are more pages
+          final pagination = statusesData['pagination'];
+          hasMorePages = pagination?['hasNextPage'] ?? false;
+          page++;
+
+          // Small delay to avoid overwhelming the server
+          await Future.delayed(const Duration(milliseconds: 50));
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error syncing message statuses: $e');
+      // Don't fail the entire sync if status sync fails
     }
   }
 
@@ -1779,6 +1840,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     MediaResponse? mediaResponse,
     int? optimisticId,
   }) async {
+    if (mounted) {
+      setState(() {
+        _isSendingMessage = true;
+      });
+    }
     String messageText = '';
     if (messageType == MessageType.text) {
       messageText = _messageController.text.trim();
@@ -1904,6 +1970,12 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       debugPrint('Error sending message: $e');
       // Mark message as failed in DB and UI
       await _markMessageAsFailed(newMsg.id);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSendingMessage = false;
+        });
+      }
     }
   }
 
@@ -3432,6 +3504,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       isOtherTypingNotifier: _isOtherTypingNotifier,
       typingIndicator: _buildTypingIndicator(),
       isReplying: _replyToMessageData != null,
+      isSending: _isSendingMessage,
       replyToMessageData: _replyToMessageData,
       currentUserId: _currentUserDetails?.id ?? 0,
       onSendMessage: (messageType) => _sendMessage(messageType),
