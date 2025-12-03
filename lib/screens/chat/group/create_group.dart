@@ -103,12 +103,13 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
       });
 
       if (mounted) {
+        final themeColor = ref.watch(themeColorProvider);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               'NO Contact found please add some contacts to your phone: ${e.toString()}',
             ),
-            backgroundColor: Colors.teal,
+            backgroundColor: themeColor.primary,
           ),
         );
       }

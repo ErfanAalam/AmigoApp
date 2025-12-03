@@ -1,17 +1,20 @@
+import 'package:amigo/config/app_colors.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../api/chats.services.dart';
 import '../../api/user.service.dart';
+import '../../providers/theme_color_provider.dart';
 
-class DeletedChatsPage extends StatefulWidget {
+class DeletedChatsPage extends ConsumerStatefulWidget {
   const DeletedChatsPage({super.key});
 
   @override
-  State<DeletedChatsPage> createState() => _DeletedChatsPageState();
+  ConsumerState<DeletedChatsPage> createState() => _DeletedChatsPageState();
 }
 
-class _DeletedChatsPageState extends State<DeletedChatsPage> {
+class _DeletedChatsPageState extends ConsumerState<DeletedChatsPage> {
   final ConversationRepository _conversationRepo = ConversationRepository();
   final ChatsServices _chatsServices = ChatsServices();
   final UserService _userService = UserService();
@@ -107,6 +110,8 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
+
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
@@ -118,7 +123,7 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
             fontSize: 20,
           ),
         ),
-        backgroundColor: Colors.teal,
+        backgroundColor: themeColor.primary,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
@@ -126,20 +131,20 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
         ),
       ),
       body: _isLoading
-          ? _buildLoadingState()
+          ? _buildLoadingState(themeColor)
           : _deletedChats.isEmpty
           ? _buildEmptyState()
-          : _buildDeletedChatsList(),
+          : _buildDeletedChatsList(themeColor),
     );
   }
 
-  Widget _buildLoadingState() {
+  Widget _buildLoadingState(ColorTheme themeColor) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.teal[400]!),
+            valueColor: AlwaysStoppedAnimation<Color>(themeColor.primary),
           ),
           const SizedBox(height: 16),
           Text(
@@ -197,22 +202,25 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
     );
   }
 
-  Widget _buildDeletedChatsList() {
+  Widget _buildDeletedChatsList(ColorTheme themeColor) {
     return RefreshIndicator(
       onRefresh: _loadDeletedChats,
-      color: Colors.teal,
+      color: themeColor.primary,
       child: ListView.builder(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         itemCount: _deletedChats.length,
         itemBuilder: (context, index) {
           final chatData = _deletedChats[index];
-          return _buildDeletedChatItem(chatData);
+          return _buildDeletedChatItem(chatData, themeColor);
         },
       ),
     );
   }
 
-  Widget _buildDeletedChatItem(Map<String, dynamic> chatData) {
+  Widget _buildDeletedChatItem(
+    Map<String, dynamic> chatData,
+    ColorTheme themeColor,
+  ) {
     final userName =
         chatData['userName'] ?? chatData['user_name'] ?? 'Unknown User';
     final userProfilePic =
@@ -263,7 +271,7 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: () => _showRestoreDialog(chatData),
+          onTap: () => _showRestoreDialog(chatData, themeColor),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Row(
@@ -273,7 +281,7 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
                   children: [
                     CircleAvatar(
                       radius: 28,
-                      backgroundColor: Colors.teal[100],
+                      backgroundColor: themeColor.primaryLight.withOpacity(0.3),
                       backgroundImage: userProfilePic != null
                           ? CachedNetworkImageProvider(userProfilePic)
                           : null,
@@ -281,7 +289,7 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
                           ? Text(
                               _getInitials(userName),
                               style: TextStyle(
-                                color: Colors.teal[700],
+                                color: themeColor.primary,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 20,
                               ),
@@ -363,16 +371,16 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
                   icon: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.teal[50],
+                      color: themeColor.primaryLight.withOpacity(0.2),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(
                       Icons.restore_rounded,
-                      color: Colors.teal[700],
+                      color: themeColor.primary,
                       size: 20,
                     ),
                   ),
-                  onPressed: () => _showRestoreDialog(chatData),
+                  onPressed: () => _showRestoreDialog(chatData, themeColor),
                   tooltip: 'Restore chat',
                 ),
               ],
@@ -383,18 +391,21 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
     );
   }
 
-  void _showRestoreDialog(Map<String, dynamic> chatData) {
+  void _showRestoreDialog(
+    Map<String, dynamic> chatData,
+    ColorTheme themeColor,
+  ) {
     final displayUserName =
         chatData['userName'] ?? chatData['user_name'] ?? 'Unknown User';
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.restore_rounded, color: Colors.teal, size: 24),
-            SizedBox(width: 12),
-            Text(
+            Icon(Icons.restore_rounded, color: themeColor.primary, size: 24),
+            const SizedBox(width: 12),
+            const Text(
               'Restore Chat',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
@@ -415,7 +426,7 @@ class _DeletedChatsPageState extends State<DeletedChatsPage> {
               _restoreChat(chatData);
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.teal,
+              backgroundColor: themeColor.primary,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),

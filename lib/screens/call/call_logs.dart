@@ -574,12 +574,13 @@ class CallsPageState extends ConsumerState<CallsPage>
       }
     } catch (e) {
       if (context.mounted) {
+        final themeColor = ref.watch(themeColorProvider);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               'Failed to start call: Please check your internet connection',
             ),
-            backgroundColor: Colors.teal,
+            backgroundColor: themeColor.primary,
           ),
         );
       }

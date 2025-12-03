@@ -436,14 +436,34 @@ class MessageStatusRepository {
   Future<void> updateDeliveredAtForUser({
     required int messageId,
     required int userId,
+    required int conversationId,
     String? deliveredAt,
   }) async {
     try {
       final db = sqliteDatabase.database;
-      await (db.update(db.messageStatusModel)..where(
-            (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
-          ))
-          .write(MessageStatusModelCompanion(deliveredAt: Value(deliveredAt)));
+      // Check if status already exists
+      final existing = await getMessageStatusByMessageAndUser(
+        messageId,
+        userId,
+      );
+
+      if (existing != null) {
+        // Update existing status
+        await (db.update(db.messageStatusModel)..where(
+              (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
+            ))
+            .write(
+              MessageStatusModelCompanion(deliveredAt: Value(deliveredAt)),
+            );
+      } else {
+        // Insert new status if it doesn't exist
+        await insertMessageStatus(
+          conversationId: conversationId,
+          messageId: messageId,
+          userId: userId,
+          deliveredAt: deliveredAt,
+        );
+      }
     } catch (e) {
       debugPrint(
         'Error updating deliveredAt for messageId $messageId and userId $userId: $e',
@@ -455,14 +475,32 @@ class MessageStatusRepository {
   Future<void> updateReadAtForUser({
     required int messageId,
     required int userId,
+    required int conversationId,
     String? readAt,
   }) async {
     try {
       final db = sqliteDatabase.database;
-      await (db.update(db.messageStatusModel)..where(
-            (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
-          ))
-          .write(MessageStatusModelCompanion(readAt: Value(readAt)));
+      // Check if status already exists
+      final existing = await getMessageStatusByMessageAndUser(
+        messageId,
+        userId,
+      );
+
+      if (existing != null) {
+        // Update existing status
+        await (db.update(db.messageStatusModel)..where(
+              (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
+            ))
+            .write(MessageStatusModelCompanion(readAt: Value(readAt)));
+      } else {
+        // Insert new status if it doesn't exist
+        await insertMessageStatus(
+          conversationId: conversationId,
+          messageId: messageId,
+          userId: userId,
+          readAt: readAt,
+        );
+      }
     } catch (e) {
       debugPrint(
         'Error updating readAt for messageId $messageId and userId $userId: $e',

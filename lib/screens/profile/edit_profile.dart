@@ -1,12 +1,14 @@
 import 'package:amigo/models/user_model.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import '../../api/user.service.dart';
 import '../../api/api_service.dart';
+import '../../providers/theme_color_provider.dart';
 
-class EditProfileModal extends StatefulWidget {
+class EditProfileModal extends ConsumerStatefulWidget {
   final Map<String, dynamic> userData;
   final Function(Map<String, dynamic>) onProfileUpdated;
 
@@ -17,10 +19,10 @@ class EditProfileModal extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<EditProfileModal> createState() => _EditProfileModalState();
+  ConsumerState<EditProfileModal> createState() => _EditProfileModalState();
 }
 
-class _EditProfileModalState extends State<EditProfileModal>
+class _EditProfileModalState extends ConsumerState<EditProfileModal>
     with TickerProviderStateMixin {
   late AnimationController _animationController;
   late AnimationController _fadeController;
@@ -192,6 +194,8 @@ class _EditProfileModalState extends State<EditProfileModal>
 
   @override
   Widget build(BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
+
     return Material(
       color: Colors.transparent,
       child: AnimatedBuilder(
@@ -226,7 +230,10 @@ class _EditProfileModalState extends State<EditProfileModal>
                             padding: EdgeInsets.all(20),
                             decoration: BoxDecoration(
                               gradient: LinearGradient(
-                                colors: [Colors.teal, Colors.teal[300]!],
+                                colors: [
+                                  themeColor.primary,
+                                  themeColor.primaryLight,
+                                ],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
                               ),
@@ -268,13 +275,14 @@ class _EditProfileModalState extends State<EditProfileModal>
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
                                         border: Border.all(
-                                          color: Colors.teal,
+                                          color: themeColor.primary,
                                           width: 3,
                                         ),
                                       ),
                                       child: CircleAvatar(
                                         radius: 50,
-                                        backgroundColor: Colors.teal[100],
+                                        backgroundColor: themeColor.primaryLight
+                                            .withOpacity(0.3),
                                         backgroundImage: _selectedImage != null
                                             ? FileImage(_selectedImage!)
                                             : (_profilePicUrl != null
@@ -291,7 +299,7 @@ class _EditProfileModalState extends State<EditProfileModal>
                                                   _nameController.text,
                                                 ),
                                                 style: TextStyle(
-                                                  color: Colors.teal,
+                                                  color: themeColor.primary,
                                                   fontWeight: FontWeight.bold,
                                                   fontSize: 24,
                                                 ),
@@ -304,7 +312,7 @@ class _EditProfileModalState extends State<EditProfileModal>
                                       bottom: 0,
                                       child: Container(
                                         decoration: BoxDecoration(
-                                          color: Colors.teal,
+                                          color: themeColor.primary,
                                           shape: BoxShape.circle,
                                           border: Border.all(
                                             color: Colors.white,
@@ -326,7 +334,7 @@ class _EditProfileModalState extends State<EditProfileModal>
                                                 children: [
                                                   Icon(
                                                     Icons.photo_library,
-                                                    color: Colors.teal,
+                                                    color: themeColor.primary,
                                                   ),
                                                   SizedBox(width: 8),
                                                   Text('Gallery'),
@@ -339,7 +347,7 @@ class _EditProfileModalState extends State<EditProfileModal>
                                                 children: [
                                                   Icon(
                                                     Icons.camera_alt,
-                                                    color: Colors.teal,
+                                                    color: themeColor.primary,
                                                   ),
                                                   SizedBox(width: 8),
                                                   Text('Camera'),
@@ -376,10 +384,12 @@ class _EditProfileModalState extends State<EditProfileModal>
                                     controller: _nameController,
                                     decoration: InputDecoration(
                                       labelText: 'Full Name',
-                                      labelStyle: TextStyle(color: Colors.teal),
+                                      labelStyle: TextStyle(
+                                        color: themeColor.primary,
+                                      ),
                                       prefixIcon: Icon(
                                         Icons.person,
-                                        color: Colors.teal,
+                                        color: themeColor.primary,
                                       ),
                                       border: InputBorder.none,
                                       contentPadding: EdgeInsets.symmetric(
@@ -402,7 +412,9 @@ class _EditProfileModalState extends State<EditProfileModal>
                                             ? null
                                             : () => Navigator.of(context).pop(),
                                         style: OutlinedButton.styleFrom(
-                                          side: BorderSide(color: Colors.teal),
+                                          side: BorderSide(
+                                            color: themeColor.primary,
+                                          ),
                                           shape: RoundedRectangleBorder(
                                             borderRadius: BorderRadius.circular(
                                               12,
@@ -415,7 +427,7 @@ class _EditProfileModalState extends State<EditProfileModal>
                                         child: Text(
                                           'Cancel',
                                           style: TextStyle(
-                                            color: Colors.teal,
+                                            color: themeColor.primary,
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
@@ -428,7 +440,7 @@ class _EditProfileModalState extends State<EditProfileModal>
                                             ? null
                                             : _updateProfile,
                                         style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.teal,
+                                          backgroundColor: themeColor.primary,
                                           shape: RoundedRectangleBorder(
                                             borderRadius: BorderRadius.circular(
                                               12,

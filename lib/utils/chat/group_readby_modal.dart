@@ -4,6 +4,8 @@ import 'package:amigo/models/message_status.model.dart';
 import 'package:amigo/models/user_model.dart';
 import 'package:amigo/types/socket.type.dart' hide MessageStatusType;
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/theme_color_provider.dart';
 
 /// Helper class to combine UserModel with status timestamps
 class MemberWithStatus {
@@ -16,7 +18,7 @@ class MemberWithStatus {
 
 /// ReadBy Modal Widget with smooth animations and good UI/UX
 /// Shows which group members have read a message and which haven't
-class ReadByModal extends StatefulWidget {
+class ReadByModal extends ConsumerStatefulWidget {
   final MessageModel message;
   final List<UserModel> members;
   final int? currentUserId;
@@ -29,10 +31,10 @@ class ReadByModal extends StatefulWidget {
   });
 
   @override
-  State<ReadByModal> createState() => _ReadByModalState();
+  ConsumerState<ReadByModal> createState() => _ReadByModalState();
 }
 
-class _ReadByModalState extends State<ReadByModal>
+class _ReadByModalState extends ConsumerState<ReadByModal>
     with TickerProviderStateMixin {
   late AnimationController _slideController;
   late AnimationController _fadeController;
@@ -226,6 +228,8 @@ class _ReadByModalState extends State<ReadByModal>
 
   @override
   Widget build(BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
+
     return AnimatedBuilder(
       animation: _fadeAnimation,
       builder: (context, child) {
@@ -274,12 +278,13 @@ class _ReadByModalState extends State<ReadByModal>
                                   Container(
                                     padding: const EdgeInsets.all(8),
                                     decoration: BoxDecoration(
-                                      color: Colors.teal[50],
+                                      color: themeColor.primaryLight
+                                          .withOpacity(0.2),
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                     child: Icon(
                                       Icons.mark_chat_read_rounded,
-                                      color: Colors.teal[600],
+                                      color: themeColor.primary,
                                       size: 24,
                                     ),
                                   ),
@@ -334,7 +339,7 @@ class _ReadByModalState extends State<ReadByModal>
                                       width: 4,
                                       height: 40,
                                       decoration: BoxDecoration(
-                                        color: Colors.teal[400],
+                                        color: themeColor.primary,
                                         borderRadius: BorderRadius.circular(2),
                                       ),
                                     ),

@@ -1,10 +1,13 @@
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/group_model.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../providers/theme_color_provider.dart';
+import '../../config/app_colors.dart';
 
 /// Forward Message Modal widget for both DM and group chats
-class ForwardMessageModal extends StatefulWidget {
+class ForwardMessageModal extends ConsumerStatefulWidget {
   final Set<int> messagesToForward;
   final List<DmModel>? dmList;
   final List<GroupModel>? groupList;
@@ -23,10 +26,11 @@ class ForwardMessageModal extends StatefulWidget {
   });
 
   @override
-  State<ForwardMessageModal> createState() => _ForwardMessageModalState();
+  ConsumerState<ForwardMessageModal> createState() =>
+      _ForwardMessageModalState();
 }
 
-class _ForwardMessageModalState extends State<ForwardMessageModal>
+class _ForwardMessageModalState extends ConsumerState<ForwardMessageModal>
     with TickerProviderStateMixin {
   late AnimationController _slideController;
   late AnimationController _fadeController;
@@ -186,18 +190,18 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
     return '?';
   }
 
-  Widget _buildDmAvatar(DmModel dm) {
+  Widget _buildDmAvatar(DmModel dm, ColorTheme themeColor) {
     return CircleAvatar(
       radius: 25,
-      backgroundColor: Colors.teal[100],
+      backgroundColor: themeColor.primaryLight.withOpacity(0.3),
       backgroundImage: dm.recipientProfilePic != null
           ? CachedNetworkImageProvider(dm.recipientProfilePic!)
           : null,
       child: dm.recipientProfilePic == null
           ? Text(
               _getInitials(dm.recipientName ?? ''),
-              style: const TextStyle(
-                color: Colors.teal,
+              style: TextStyle(
+                color: themeColor.primary,
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
               ),
@@ -216,6 +220,8 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
 
   @override
   Widget build(BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
+
     return FadeTransition(
       opacity: _fadeAnimation,
       child: SafeArea(
@@ -257,7 +263,11 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                         ),
                         child: Row(
                           children: [
-                            Icon(Icons.forward, color: Colors.teal, size: 28),
+                            Icon(
+                              Icons.forward,
+                              color: themeColor.primary,
+                              size: 28,
+                            ),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Column(
@@ -329,16 +339,16 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                   vertical: 6,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: Colors.teal.withOpacity(0.1),
+                                  color: themeColor.primary.withOpacity(0.1),
                                   borderRadius: BorderRadius.circular(20),
                                   border: Border.all(
-                                    color: Colors.teal.withOpacity(0.3),
+                                    color: themeColor.primary.withOpacity(0.3),
                                   ),
                                 ),
                                 child: Text(
                                   '${_selectedConversations.length} selected',
                                   style: TextStyle(
-                                    color: Colors.teal[700],
+                                    color: themeColor.primary,
                                     fontWeight: FontWeight.w600,
                                     fontSize: 12,
                                   ),
@@ -353,15 +363,15 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                       // Conversations list
                       Expanded(
                         child: widget.isLoading
-                            ? const Center(
+                            ? Center(
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     CircularProgressIndicator(
-                                      color: Colors.teal,
+                                      color: themeColor.primary,
                                     ),
-                                    SizedBox(height: 16),
-                                    Text('Loading chats...'),
+                                    const SizedBox(height: 16),
+                                    const Text('Loading chats...'),
                                   ],
                                 ),
                               )
@@ -494,12 +504,16 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                       ),
                                       decoration: BoxDecoration(
                                         color: isSelected
-                                            ? Colors.teal.withOpacity(0.1)
+                                            ? themeColor.primary.withOpacity(
+                                                0.1,
+                                              )
                                             : Colors.transparent,
                                         borderRadius: BorderRadius.circular(12),
                                         border: Border.all(
                                           color: isSelected
-                                              ? Colors.teal.withOpacity(0.3)
+                                              ? themeColor.primary.withOpacity(
+                                                  0.3,
+                                                )
                                               : Colors.transparent,
                                           width: 1,
                                         ),
@@ -521,7 +535,7 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                                       : FontWeight.w500,
                                                   fontSize: 16,
                                                   color: isSelected
-                                                      ? Colors.teal[700]
+                                                      ? themeColor.primary
                                                       : Colors.black87,
                                                 ),
                                               ),
@@ -572,11 +586,11 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                           decoration: BoxDecoration(
                                             shape: BoxShape.circle,
                                             color: isSelected
-                                                ? Colors.teal
+                                                ? themeColor.primary
                                                 : Colors.transparent,
                                             border: Border.all(
                                               color: isSelected
-                                                  ? Colors.teal
+                                                  ? themeColor.primary
                                                   : Colors.grey[400]!,
                                               width: 2,
                                             ),
@@ -611,12 +625,16 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                       ),
                                       decoration: BoxDecoration(
                                         color: isSelected
-                                            ? Colors.teal.withOpacity(0.1)
+                                            ? themeColor.primary.withOpacity(
+                                                0.1,
+                                              )
                                             : Colors.transparent,
                                         borderRadius: BorderRadius.circular(12),
                                         border: Border.all(
                                           color: isSelected
-                                              ? Colors.teal.withOpacity(0.3)
+                                              ? themeColor.primary.withOpacity(
+                                                  0.3,
+                                                )
                                               : Colors.transparent,
                                           width: 1,
                                         ),
@@ -626,7 +644,7 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                             _toggleConversationSelection(
                                               dm.conversationId,
                                             ),
-                                        leading: _buildDmAvatar(dm),
+                                        leading: _buildDmAvatar(dm, themeColor),
                                         title: Text(
                                           dm.recipientName,
                                           style: TextStyle(
@@ -635,7 +653,7 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                                 : FontWeight.w500,
                                             fontSize: 16,
                                             color: isSelected
-                                                ? Colors.teal[700]
+                                                ? themeColor.primary
                                                 : Colors.black87,
                                           ),
                                         ),
@@ -659,11 +677,11 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                           decoration: BoxDecoration(
                                             shape: BoxShape.circle,
                                             color: isSelected
-                                                ? Colors.teal
+                                                ? themeColor.primary
                                                 : Colors.transparent,
                                             border: Border.all(
                                               color: isSelected
-                                                  ? Colors.teal
+                                                  ? themeColor.primary
                                                   : Colors.grey[400]!,
                                               width: 2,
                                             ),
@@ -704,7 +722,7 @@ class _ForwardMessageModalState extends State<ForwardMessageModal>
                                     ? null
                                     : _handleForward,
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.teal,
+                                  backgroundColor: themeColor.primary,
                                   foregroundColor: Colors.white,
                                   padding: const EdgeInsets.symmetric(
                                     vertical: 16,

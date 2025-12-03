@@ -3,21 +3,23 @@ import 'package:amigo/models/user_model.dart';
 import 'package:amigo/services/socket/websocket_service.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart' as material;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'signup_screen.dart';
 import '../home_layout.dart';
 import '../../api/api_service.dart';
 import '../../services/auth/auth.service.dart';
 import '../../models/country_model.dart' as country_model;
 import '../../widgets/country_selector_modal.dart';
+import '../../providers/theme_color_provider.dart';
 
-class LoginScreen extends material.StatefulWidget {
+class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  material.State<LoginScreen> createState() => _LoginScreenState();
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends material.State<LoginScreen> {
+class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _phoneController = material.TextEditingController();
   final _otpController = material.TextEditingController();
   String _completePhoneNumber = '';
@@ -192,16 +194,15 @@ class _LoginScreenState extends material.State<LoginScreen> {
 
   @override
   material.Widget build(material.BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
+
     return material.Scaffold(
       body: material.Container(
-        decoration: const material.BoxDecoration(
+        decoration: material.BoxDecoration(
           gradient: material.LinearGradient(
             begin: material.Alignment.topLeft,
             end: material.Alignment.bottomRight,
-            colors: [
-              material.Colors.teal,
-              material.Color.fromARGB(255, 10, 107, 97),
-            ],
+            colors: [themeColor.primary, themeColor.primaryDark],
             stops: [0.0, 0.5],
           ),
         ),
@@ -468,7 +469,7 @@ class _LoginScreenState extends material.State<LoginScreen> {
                                               material
                                                   .Icons
                                                   .arrow_circle_left_outlined,
-                                              color: material.Colors.teal[600],
+                                              color: themeColor.primary,
                                               size: 36,
                                             ),
                                           ),
@@ -537,10 +538,10 @@ class _LoginScreenState extends material.State<LoginScreen> {
                             // Login Button - changes based on state
                             material.Container(
                               decoration: material.BoxDecoration(
-                                gradient: const material.LinearGradient(
+                                gradient: material.LinearGradient(
                                   colors: [
-                                    material.Colors.teal,
-                                    material.Colors.teal,
+                                    themeColor.primary,
+                                    themeColor.primary,
                                   ],
                                 ),
                                 borderRadius: material.BorderRadius.circular(
@@ -548,9 +549,7 @@ class _LoginScreenState extends material.State<LoginScreen> {
                                 ),
                                 boxShadow: [
                                   material.BoxShadow(
-                                    color: const material.Color(
-                                      0xFF667eea,
-                                    ).withOpacity(0.3),
+                                    color: themeColor.primary.withOpacity(0.3),
                                     blurRadius: 20,
                                     offset: const material.Offset(0, 10),
                                   ),
@@ -630,10 +629,10 @@ class _LoginScreenState extends material.State<LoginScreen> {
                                       handlePhoneSubmit();
                                     },
                                     child: material.Container(
-                                      decoration: const material.BoxDecoration(
+                                      decoration: material.BoxDecoration(
                                         border: material.Border(
                                           bottom: material.BorderSide(
-                                            color: material.Color(0xFF667eea),
+                                            color: themeColor.primary,
                                             width: 1,
                                           ),
                                         ),
@@ -644,9 +643,7 @@ class _LoginScreenState extends material.State<LoginScreen> {
                                       child: material.Text(
                                         'Resend OTP',
                                         style: material.TextStyle(
-                                          color: const material.Color(
-                                            0xFF667eea,
-                                          ),
+                                          color: themeColor.primary,
                                           fontWeight: material.FontWeight.bold,
                                           fontSize: 14,
                                           letterSpacing: 0.5,
@@ -684,7 +681,7 @@ class _LoginScreenState extends material.State<LoginScreen> {
                                   child: material.Text(
                                     'Sign Up',
                                     style: material.TextStyle(
-                                      color: const material.Color(0xFF667eea),
+                                      color: themeColor.primary,
                                       fontWeight: material.FontWeight.bold,
                                       fontSize: 14,
                                     ),

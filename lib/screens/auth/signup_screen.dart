@@ -3,8 +3,7 @@ import 'package:amigo/models/user_model.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart'
-    show SharedPreferences;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../services/socket/websocket_service.dart';
 import '../home_layout.dart';
 import '../../api/api_service.dart';
@@ -13,15 +12,16 @@ import '../../services/notification_service.dart';
 import '../../models/country_model.dart' as country_model;
 import '../../widgets/country_selector_modal.dart';
 import '../../widgets/setup_loading_popup.dart';
+import '../../providers/theme_color_provider.dart';
 
-class SignUpScreen extends material.StatefulWidget {
+class SignUpScreen extends ConsumerStatefulWidget {
   const SignUpScreen({super.key});
 
   @override
-  material.State<SignUpScreen> createState() => _SignUpScreenState();
+  ConsumerState<SignUpScreen> createState() => _SignUpScreenState();
 }
 
-class _SignUpScreenState extends material.State<SignUpScreen> {
+class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   final _firstNameController = material.TextEditingController();
   final _lastNameController = material.TextEditingController();
   final _phoneController = material.TextEditingController();
@@ -208,16 +208,15 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
 
   @override
   material.Widget build(material.BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
+
     return material.Scaffold(
       body: material.Container(
-        decoration: const material.BoxDecoration(
+        decoration: material.BoxDecoration(
           gradient: material.LinearGradient(
             begin: material.Alignment.topLeft,
             end: material.Alignment.bottomRight,
-            colors: [
-              material.Colors.teal,
-              material.Color.fromARGB(255, 10, 107, 97),
-            ],
+            colors: [themeColor.primary, themeColor.primaryDark],
             stops: [0.0, 0.5],
           ),
         ),
@@ -626,16 +625,16 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
                           // Action Button
                           material.Container(
                             decoration: material.BoxDecoration(
-                              gradient: const material.LinearGradient(
+                              gradient: material.LinearGradient(
                                 colors: [
-                                  material.Colors.teal,
-                                  material.Colors.teal,
+                                  themeColor.primary,
+                                  themeColor.primary,
                                 ],
                               ),
                               borderRadius: material.BorderRadius.circular(14),
                               boxShadow: [
                                 material.BoxShadow(
-                                  color: material.Colors.teal.withOpacity(0.3),
+                                  color: themeColor.primary.withOpacity(0.3),
                                   blurRadius: 15,
                                   offset: const material.Offset(0, 8),
                                 ),
@@ -720,7 +719,7 @@ class _SignUpScreenState extends material.State<SignUpScreen> {
                                 child: material.Text(
                                   'Sign In',
                                   style: material.TextStyle(
-                                    color: material.Colors.teal,
+                                    color: themeColor.primary,
                                     fontWeight: material.FontWeight.bold,
                                     fontSize: 13,
                                   ),

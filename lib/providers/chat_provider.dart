@@ -1393,6 +1393,8 @@ class ChatNotifier extends Notifier<ChatState> {
 
   /// Handle ack message
   Future<void> _handleAckMessage(ChatMessageAckPayload payload) async {
+    debugPrint('✅ recieved ack message at chat provider');
+    debugPrint('✅ payload: ${payload.toJson()}');
     try {
       // Update message status in local DB
       await _messageRepo.updateMessageId(
@@ -1401,22 +1403,46 @@ class ChatNotifier extends Notifier<ChatState> {
       );
 
       // update message status in the status table based on delivered_to and read_by
-      if (payload.deliveredTo != null && payload.deliveredTo!.isNotEmpty) {
-        for (final userId in payload.deliveredTo!) {
+      // First, handle users who have read the message (they should have both deliveredAt and readAt)
+      if (payload.readBy != null && payload.readBy!.isNotEmpty) {
+        debugPrint('✅ updating readAt for users: ${payload.readBy}');
+        for (final userId in payload.readBy!) {
+          // Users who read must have been delivered first, so set both timestamps
           await _messageStatusRepo.updateDeliveredAtForUser(
             messageId: payload.canonicalId,
             userId: userId,
+            conversationId: payload.convId,
             deliveredAt: payload.deliveredAt.toIso8601String(),
           );
-        }
-      }
-      if (payload.readBy != null && payload.readBy!.isNotEmpty) {
-        for (final userId in payload.readBy!) {
           await _messageStatusRepo.updateReadAtForUser(
             messageId: payload.canonicalId,
             userId: userId,
+            conversationId: payload.convId,
             readAt: payload.deliveredAt.toIso8601String(),
           );
+        }
+      }
+
+      // Then, handle users who are only delivered (not in readBy)
+      if (payload.deliveredTo != null && payload.deliveredTo!.isNotEmpty) {
+        // Filter out users who are already in readBy
+        final onlyDeliveredUsers = payload.deliveredTo!
+            .where(
+              (userId) =>
+                  payload.readBy == null || !payload.readBy!.contains(userId),
+            )
+            .toList();
+
+        if (onlyDeliveredUsers.isNotEmpty) {
+          debugPrint('✅ updating deliveredAt for users: $onlyDeliveredUsers');
+          for (final userId in onlyDeliveredUsers) {
+            await _messageStatusRepo.updateDeliveredAtForUser(
+              messageId: payload.canonicalId,
+              userId: userId,
+              conversationId: payload.convId,
+              deliveredAt: payload.deliveredAt.toIso8601String(),
+            );
+          }
         }
       }
 
@@ -1451,12 +1477,6 @@ class ChatNotifier extends Notifier<ChatState> {
       await _messageStatusRepo.updateMessageId(
         payload.optimisticId,
         payload.canonicalId,
-      );
-
-      // update the sended message in the status table with deliveredAt timestamp
-      await _messageStatusRepo.updateDeliveredAt(
-        messageId: payload.canonicalId,
-        deliveredAt: DateTime.now().toIso8601String(),
       );
     } catch (e) {
       debugPrint('❌ Error handling ack message: $e');

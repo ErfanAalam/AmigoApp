@@ -2175,7 +2175,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                 children: [
                   CircleAvatar(
                     radius: 18,
-                    backgroundColor: themeColor.primaryLight.withOpacity(0.3),
+                    backgroundColor: Colors.white,
                     child: Text(
                       widget.group.title.isNotEmpty
                           ? widget.group.title[0].toUpperCase()
@@ -2905,7 +2905,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         onStar: () => _toggleStarMessage(message.id),
         onForward: () => _forwardMessage(message),
         onSelect: () => _enterSelectionMode(message.id),
-        onReadBy: () => _showReadByModal(message),
+        onReadBy: (message.senderId == _currentUserDetails?.id) ? () => _showReadByModal(message) : null,
         onDelete: isAdmin || _isAdminOrStaff
             ? () => _deleteMessage(message.id)
             : null,

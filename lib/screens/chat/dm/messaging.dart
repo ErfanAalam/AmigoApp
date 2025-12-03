@@ -869,9 +869,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       return Icon(Icons.done_all, size: 16, color: Colors.blue);
     } else if (message.status == MessageStatusType.delivered) {
       // User is active - show blue tick for delivered messages
-      return Icon(Icons.done_all, size: 16, color: Colors.grey[800]);
+      return Icon(Icons.done_all, size: 16, color: Colors.grey[600]);
     } else {
-      return Icon(Icons.done, size: 16, color: Colors.grey[800]);
+      return Icon(Icons.done, size: 16, color: Colors.grey[600]);
     }
   }
 

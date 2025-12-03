@@ -21,21 +21,21 @@ class _CallManagerState extends ConsumerState<CallManager> {
   Widget build(BuildContext context) {
     final callServiceState = ref.watch(callServiceProvider);
 
-    print('[CallManager] Consumer builder called');
-    print('[CallManager] CallServiceState: $callServiceState');
-    print(
-      '[CallManager] CallService hasActiveCall: ${callServiceState.hasActiveCall}',
-    );
+    // print('[CallManager] Consumer builder called');
+    // print('[CallManager] CallServiceState: $callServiceState');
+    // print(
+    //   '[CallManager] CallService hasActiveCall: ${callServiceState.hasActiveCall}',
+    // );
 
     final activeCall = callServiceState.activeCall;
-    print('[CallManager] Build called - activeCall: $activeCall');
+    // print('[CallManager] Build called - activeCall: $activeCall');
     if (activeCall != null) {
-      print('[CallManager] Active call details:');
-      print('  - callId: ${activeCall.callId}');
-      print('  - callType: ${activeCall.callType}');
-      print('  - status: ${activeCall.status}');
-      print('  - userName: ${activeCall.userName}');
-      print('  - hasShownIncomingCall: $_hasShownIncomingCall');
+      // print('[CallManager] Active call details:');
+      // print('  - callId: ${activeCall.callId}');
+      // print('  - callType: ${activeCall.callType}');
+      // print('  - status: ${activeCall.status}');
+      // print('  - userName: ${activeCall.userName}');
+      // print('  - hasShownIncomingCall: $_hasShownIncomingCall');
     }
 
     // Check if we need to show incoming call screen
@@ -43,9 +43,9 @@ class _CallManagerState extends ConsumerState<CallManager> {
         activeCall.callType == CallType.incoming &&
         activeCall.status == CallStatus.ringing &&
         !_hasShownIncomingCall) {
-      print(
-        '[CallManager] 🚨 INCOMING CALL DETECTED! Showing incoming call screen...',
-      );
+      // print(
+      //   '[CallManager] 🚨 INCOMING CALL DETECTED! Showing incoming call screen...',
+      // );
       _hasShownIncomingCall = true;
 
       // Show incoming call screen as an overlay
