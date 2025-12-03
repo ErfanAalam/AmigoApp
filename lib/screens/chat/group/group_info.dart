@@ -1,30 +1,35 @@
 import 'dart:async';
+import 'package:amigo/db/repositories/contacts.repo.dart';
 import 'package:amigo/db/repositories/conversation_member.repo.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../models/group_model.dart';
 import '../../../models/user_model.dart';
 import '../../../api/groups.services.dart';
 import '../../../api/user.service.dart';
 import '../../../services/contact_service.dart';
+import '../../../providers/theme_color_provider.dart';
 
-class GroupInfoPage extends StatefulWidget {
+class GroupInfoPage extends ConsumerStatefulWidget {
   final GroupModel group;
 
   const GroupInfoPage({Key? key, required this.group}) : super(key: key);
 
   @override
-  State<GroupInfoPage> createState() => _GroupInfoPageState();
+  ConsumerState<GroupInfoPage> createState() => _GroupInfoPageState();
 }
 
-class _GroupInfoPageState extends State<GroupInfoPage>
+class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     with SingleTickerProviderStateMixin {
   final GroupsService _groupsService = GroupsService();
   final UserService _userService = UserService();
   final ContactService _contactService = ContactService();
+
+  final ContactsRepository _contactsRepository = ContactsRepository();
 
   final ConversationRepository _conversationRepository =
       ConversationRepository();
@@ -203,44 +208,52 @@ class _GroupInfoPageState extends State<GroupInfoPage>
   }
 
   Future<void> _loadAvailableUsers({bool forceRefresh = false}) async {
+    // try {
+    //   // If no stored data or force refresh, fetch from backend
+    //   final contacts = await _contactService.fetchContacts();
+    //   if (contacts.isEmpty) {
+    //     return;
+    //   }
+
+    //   // Get contacts in backend format (same as contacts page)
+    //   final contactsData = contacts
+    //       .map((contact) => contact.phoneNumber)
+    //       .toList();
+
+    //   final response = await _userService.getAvailableUsers(contactsData);
+
+    //   if (response['success'] == true && response['data'] != null) {
+    //     // Handle both response structures: direct array or nested data (same as contacts page)
+    //     List<dynamic> usersData = response['data'] is List
+    //         ? response['data']
+    //         : response['data']['data'] ?? [];
+
+    //     // Convert to UserModel (same as contacts page)
+    //     List<UserModel> users = usersData
+    //         .map((userJson) => UserModel.fromJson(userJson))
+    //         .toList();
+
+    //     // Filter out users who are already members of this group
+    //     final filteredUsers = users
+    //         .where((user) => !_isUserAlreadyMember(user.id))
+    //         .toList();
+
+    //     _availableUsers = filteredUsers;
+    //     debugPrint(
+    //       'Fetched and stored ${users.length} contacts, ${filteredUsers.length} available for group',
+    //     );
+    //   }
+    // } catch (e) {
+    //   debugPrint('Error loading available users: $e');
+    // }
     try {
-      // If no stored data or force refresh, fetch from backend
-      final contacts = await _contactService.fetchContacts();
-      if (contacts.isEmpty) {
-        return;
+      final localContacts = await _contactsRepository.getAllContacts();
+      if (localContacts.isNotEmpty) {
+        setState(() {
+          _availableUsers = localContacts;
+        });
       }
-
-      // Get contacts in backend format (same as contacts page)
-      final contactsData = contacts
-          .map((contact) => contact.phoneNumber)
-          .toList();
-
-      final response = await _userService.getAvailableUsers(contactsData);
-
-      if (response['success'] == true && response['data'] != null) {
-        // Handle both response structures: direct array or nested data (same as contacts page)
-        List<dynamic> usersData = response['data'] is List
-            ? response['data']
-            : response['data']['data'] ?? [];
-
-        // Convert to UserModel (same as contacts page)
-        List<UserModel> users = usersData
-            .map((userJson) => UserModel.fromJson(userJson))
-            .toList();
-
-        // Filter out users who are already members of this group
-        final filteredUsers = users
-            .where((user) => !_isUserAlreadyMember(user.id))
-            .toList();
-
-        _availableUsers = filteredUsers;
-        debugPrint(
-          'Fetched and stored ${users.length} contacts, ${filteredUsers.length} available for group',
-        );
-      }
-    } catch (e) {
-      debugPrint('Error loading available users: $e');
-    }
+    } catch (_) {}
   }
 
   bool _isUserAlreadyMember(int userId) {
@@ -265,6 +278,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
   }
 
   Widget _buildGroupAvatar(String title, {double radius = 40}) {
+    final themeColor = ref.watch(themeColorProvider);
     final firstLetter = title.isNotEmpty ? title[0].toUpperCase() : '?';
     return Container(
       width: radius * 2,
@@ -272,13 +286,13 @@ class _GroupInfoPageState extends State<GroupInfoPage>
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: LinearGradient(
-          colors: [Colors.teal.shade400, Colors.teal.shade600],
+          colors: [themeColor.primaryLight, themeColor.primary],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.teal.withOpacity(0.3),
+            color: themeColor.primary.withOpacity(0.3),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -298,6 +312,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
   }
 
   Future<void> _showEditTitleDialog() async {
+    final themeColor = ref.watch(themeColorProvider);
     if (!_isCurrentUserAdmin()) {
       _showSnackBar('Only admins can edit group title', isError: true);
       return;
@@ -322,7 +337,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Colors.teal, width: 2),
+              borderSide: BorderSide(color: themeColor.primary, width: 2),
             ),
           ),
           maxLength: 50,
@@ -341,7 +356,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
               }
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.teal,
+              backgroundColor: themeColor.primary,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
@@ -407,9 +422,9 @@ class _GroupInfoPageState extends State<GroupInfoPage>
     _searchQuery = '';
 
     // Show the animated dialog
+    // await _loadAvailableUsers();
     await _showAnimatedAddMemberDialog();
     // Load available users first
-    await _loadAvailableUsers();
   }
 
   Future<void> _refreshContacts() async {
@@ -418,7 +433,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
     });
 
     await _loadAvailableUsers(forceRefresh: true);
-
+ 
     // Filter again after refresh to update the available users
     final filteredUsers = _availableUsers
         .where((user) => !_isUserAlreadyMember(user.id))
@@ -431,6 +446,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
   }
 
   Future<void> _showAnimatedAddMemberDialog() async {
+    await _refreshContacts();
     await showGeneralDialog(
       context: context,
       barrierDismissible: true,
@@ -454,6 +470,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
   }
 
   Widget _buildAddMemberDialogContent() {
+    final themeColor = ref.watch(themeColorProvider);
     final TextEditingController searchController = TextEditingController(
       text: _searchQuery,
     );
@@ -490,7 +507,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [Colors.teal, Colors.teal.shade600],
+                    colors: [themeColor.primary, themeColor.primaryDark],
                   ),
                   borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(20),
@@ -575,7 +592,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                             child: Text(
                               '${_selectedUserIds.length}',
                               style: TextStyle(
-                                color: Colors.teal.shade700,
+                                color: themeColor.primary,
                                 fontSize: 14,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -646,12 +663,14 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             colors: [
-                              Colors.teal.shade50,
-                              Colors.teal.shade50.withOpacity(0.3),
+                              themeColor.primaryLight.withOpacity(0.2),
+                              themeColor.primaryLight.withOpacity(0.1),
                             ],
                           ),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.teal.shade200),
+                          border: Border.all(
+                            color: themeColor.primaryLight.withOpacity(0.6),
+                          ),
                         ),
                         child: Row(
                           children: [
@@ -679,7 +698,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                     }
                                   });
                                 },
-                                activeColor: Colors.teal,
+                                activeColor: themeColor.primary,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(4),
                                 ),
@@ -725,7 +744,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                   vertical: 4,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: Colors.teal,
+                                  color: themeColor.primary,
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
@@ -791,19 +810,23 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                     margin: const EdgeInsets.only(bottom: 8),
                                     decoration: BoxDecoration(
                                       color: isSelected
-                                          ? Colors.teal.shade50
+                                          ? themeColor.primaryLight.withOpacity(
+                                              0.2,
+                                            )
                                           : Colors.white,
                                       borderRadius: BorderRadius.circular(12),
                                       border: Border.all(
                                         color: isSelected
-                                            ? Colors.teal
+                                            ? themeColor.primary
                                             : Colors.grey.shade200,
                                         width: isSelected ? 2 : 1,
                                       ),
                                       boxShadow: [
                                         BoxShadow(
                                           color: isSelected
-                                              ? Colors.teal.withOpacity(0.1)
+                                              ? themeColor.primary.withOpacity(
+                                                  0.1,
+                                                )
                                               : Colors.grey.withOpacity(0.05),
                                           blurRadius: isSelected ? 8 : 4,
                                           spreadRadius: 0,
@@ -838,7 +861,8 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                                           ),
                                                       boxShadow: [
                                                         BoxShadow(
-                                                          color: Colors.teal
+                                                          color: themeColor
+                                                              .primary
                                                               .withOpacity(0.2),
                                                           blurRadius: 8,
                                                           spreadRadius: 0,
@@ -849,7 +873,11 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                                       radius: 20,
                                                       backgroundColor:
                                                           isSelected
-                                                          ? Colors.teal.shade100
+                                                          ? themeColor
+                                                                .primaryLight
+                                                                .withOpacity(
+                                                                  0.4,
+                                                                )
                                                           : Colors
                                                                 .grey
                                                                 .shade100,
@@ -898,9 +926,9 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                                               3,
                                                             ),
                                                         decoration:
-                                                            const BoxDecoration(
-                                                              color:
-                                                                  Colors.teal,
+                                                            BoxDecoration(
+                                                              color: themeColor
+                                                                  .primary,
                                                               shape: BoxShape
                                                                   .circle,
                                                             ),
@@ -968,7 +996,8 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                                       }
                                                     });
                                                   },
-                                                  activeColor: Colors.teal,
+                                                  activeColor:
+                                                      themeColor.primary,
                                                   shape: RoundedRectangleBorder(
                                                     borderRadius:
                                                         BorderRadius.circular(
@@ -1033,14 +1062,14 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                 _addMembers(_selectedUserIds.toList());
                               },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.teal,
+                          backgroundColor: themeColor.primary,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
                           elevation: 2,
-                          shadowColor: Colors.teal.withOpacity(0.3),
+                          shadowColor: themeColor.primary.withOpacity(0.3),
                         ),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -1156,6 +1185,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
     if (confirmed == true) {
       try {
         // Show loading indicator
+        final themeColor = ref.watch(themeColorProvider);
         showDialog(
           context: context,
           barrierDismissible: false,
@@ -1165,8 +1195,8 @@ class _GroupInfoPageState extends State<GroupInfoPage>
             ),
             content: Row(
               children: [
-                const CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
+                CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(themeColor.primary),
                 ),
                 const SizedBox(width: 16),
                 Expanded(child: Text('Promoting $userName to admin...')),
@@ -1229,6 +1259,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
     if (confirmed == true) {
       try {
         // Show loading indicator
+        final themeColor = ref.watch(themeColorProvider);
         showDialog(
           context: context,
           barrierDismissible: false,
@@ -1238,8 +1269,8 @@ class _GroupInfoPageState extends State<GroupInfoPage>
             ),
             content: Row(
               children: [
-                const CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
+                CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(themeColor.primary),
                 ),
                 const SizedBox(width: 16),
                 Expanded(child: Text('Demoting $userName to member...')),
@@ -1281,6 +1312,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
   }
 
   Future<bool?> _showPromoteToAdminDialog(String userName) async {
+    final themeColor = ref.watch(themeColorProvider);
     return showGeneralDialog<bool>(
       context: context,
       barrierDismissible: true,
@@ -1305,7 +1337,10 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [Colors.white, Colors.teal.shade50],
+                    colors: [
+                      Colors.white,
+                      themeColor.primaryLight.withOpacity(0.2),
+                    ],
                   ),
                 ),
                 child: Column(
@@ -1319,13 +1354,13 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                           Container(
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: Colors.teal.shade50,
+                              color: themeColor.primaryLight.withOpacity(0.2),
                               shape: BoxShape.circle,
                             ),
                             child: Icon(
                               Icons.admin_panel_settings,
                               size: 48,
-                              color: Colors.teal.shade700,
+                              color: themeColor.primary,
                             ),
                           ),
                           const SizedBox(height: 16),
@@ -1351,9 +1386,9 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                 ),
                                 TextSpan(
                                   text: userName,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.teal,
+                                    color: themeColor.primary,
                                   ),
                                 ),
                                 const TextSpan(
@@ -1433,7 +1468,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                             child: ElevatedButton(
                               onPressed: () => Navigator.pop(context, true),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.teal,
+                                backgroundColor: themeColor.primary,
                                 foregroundColor: Colors.white,
                                 padding: const EdgeInsets.symmetric(
                                   vertical: 14,
@@ -1442,7 +1477,9 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 elevation: 2,
-                                shadowColor: Colors.teal.withOpacity(0.3),
+                                shadowColor: themeColor.primary.withOpacity(
+                                  0.3,
+                                ),
                               ),
                               child: const Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1675,6 +1712,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
       return;
     }
 
+    final themeColor = ref.watch(themeColorProvider);
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1691,7 +1729,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.teal,
+              backgroundColor: themeColor.primary,
               foregroundColor: Colors.white,
             ),
             child: const Text('Remove'),
@@ -1983,10 +2021,11 @@ class _GroupInfoPageState extends State<GroupInfoPage>
   }
 
   void _showSnackBar(String message, {bool isError = false}) {
+    final themeColor = ref.watch(themeColorProvider);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? Colors.teal : Colors.green,
+        backgroundColor: isError ? themeColor.primary : Colors.green,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
@@ -1995,6 +2034,8 @@ class _GroupInfoPageState extends State<GroupInfoPage>
 
   @override
   Widget build(BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
+
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
@@ -2002,14 +2043,14 @@ class _GroupInfoPageState extends State<GroupInfoPage>
           'Group Info',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
-        backgroundColor: Colors.teal,
+        backgroundColor: themeColor.primary,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: _isLoading
-          ? const Center(
+          ? Center(
               child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
+                valueColor: AlwaysStoppedAnimation<Color>(themeColor.primary),
               ),
             )
           : _errorMessage != null
@@ -2085,9 +2126,9 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                                 strokeWidth: 2,
                                               ),
                                             )
-                                          : const Icon(
+                                          : Icon(
                                               Icons.edit,
-                                              color: Colors.teal,
+                                              color: themeColor.primary,
                                             ),
                                       tooltip: 'Edit group title',
                                     ),
@@ -2141,7 +2182,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                       ),
                                       label: const Text('Add Member'),
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.teal,
+                                        backgroundColor: themeColor.primary,
                                         foregroundColor: Colors.white,
                                         shape: RoundedRectangleBorder(
                                           borderRadius: BorderRadius.circular(
@@ -2252,12 +2293,14 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                       padding: const EdgeInsets.all(12),
                                       decoration: BoxDecoration(
                                         color: isCurrentUser
-                                            ? Colors.teal.shade50
+                                            ? themeColor.primaryLight
+                                                  .withOpacity(0.2)
                                             : Colors.grey.shade50,
                                         borderRadius: BorderRadius.circular(12),
                                         border: isCurrentUser
                                             ? Border.all(
-                                                color: Colors.teal.shade200,
+                                                color: themeColor.primaryLight
+                                                    .withOpacity(0.6),
                                               )
                                             : null,
                                       ),
@@ -2267,7 +2310,8 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                             radius: 20,
                                             backgroundColor: isAdmin
                                                 ? Colors.amber.shade100
-                                                : Colors.teal.shade100,
+                                                : themeColor.primaryLight
+                                                      .withOpacity(0.4),
                                             child: Text(
                                               ((member['userName'] ??
                                                           member['name'] ??
@@ -2277,7 +2321,7 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                               style: TextStyle(
                                                 color: isAdmin
                                                     ? Colors.amber.shade700
-                                                    : Colors.teal.shade700,
+                                                    : themeColor.primary,
                                                 fontWeight: FontWeight.bold,
                                               ),
                                             ),
@@ -2312,7 +2356,8 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                                               vertical: 2,
                                                             ),
                                                         decoration: BoxDecoration(
-                                                          color: Colors.teal,
+                                                          color: themeColor
+                                                              .primary,
                                                           borderRadius:
                                                               BorderRadius.circular(
                                                                 10,
@@ -2534,9 +2579,9 @@ class _GroupInfoPageState extends State<GroupInfoPage>
                                                             member['name'] ??
                                                             'Unknown',
                                                       ),
-                                                  icon: const Icon(
+                                                  icon: Icon(
                                                     Icons.remove_circle_outline,
-                                                    color: Colors.teal,
+                                                    color: themeColor.primary,
                                                   ),
                                                   tooltip: 'Remove member',
                                                 ),

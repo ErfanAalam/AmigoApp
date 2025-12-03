@@ -3,9 +3,12 @@ import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/socket.type.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../utils/chat/preview_media.utils.dart';
 import '../../db/repositories/message.repo.dart';
 import '../../db/repositories/user.repo.dart';
+import '../../providers/theme_color_provider.dart';
+import '../../config/app_colors.dart';
 
 /// Configuration for MessageBubble widget
 class MessageBubbleConfig {
@@ -79,13 +82,14 @@ class MessageBubbleConfig {
 }
 
 /// Shared MessageBubble widget for both DM and group chats
-class MessageBubble extends StatelessWidget {
+class MessageBubble extends ConsumerWidget {
   final MessageBubbleConfig config;
 
   const MessageBubble({super.key, required this.config});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeColor = ref.watch(themeColorProvider);
     final isFailed = config.message.status == MessageStatusType.failed;
     final isUploading = config.message.metadata?['is_uploading'] == true;
     final showRetry =
@@ -125,8 +129,8 @@ class MessageBubble extends StatelessWidget {
                   ),
                 ),
                 child: config.useStackContainer
-                    ? _buildStackContainer()
-                    : _buildColumnContainer(),
+                    ? _buildStackContainer(themeColor)
+                    : _buildColumnContainer(themeColor),
               ),
             ),
             // Retry button on outer right side (like WhatsApp) - only for text messages
@@ -137,7 +141,7 @@ class MessageBubble extends StatelessWidget {
                 _RotatingRefreshIcon(
                   size: 20,
                   color: config.isMyMessage
-                      ? Colors.teal[600] ?? Colors.teal
+                      ? themeColor.primary
                       : Colors.grey[600] ?? Colors.grey,
                 )
               else
@@ -147,7 +151,7 @@ class MessageBubble extends StatelessWidget {
                     Icons.refresh,
                     size: 20,
                     color: config.isMyMessage
-                        ? Colors.teal[600] ?? Colors.teal
+                        ? themeColor.primary
                         : Colors.grey[600] ?? Colors.grey,
                   ),
                 ),
@@ -180,7 +184,7 @@ class MessageBubble extends StatelessWidget {
   }
 
   /// Build container using Stack (for DM)
-  Widget _buildStackContainer() {
+  Widget _buildStackContainer(ColorTheme themeColor) {
     return Stack(
       children: [
         // Check if this is a media message (image/video)
@@ -197,7 +201,7 @@ class MessageBubble extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         color: config.isMyMessage
-                            ? Colors.teal[600]
+                            ? themeColor.primary
                             : Colors.grey[100],
                         borderRadius: BorderRadius.only(
                           topLeft: const Radius.circular(0),
@@ -224,7 +228,7 @@ class MessageBubble extends StatelessWidget {
                 ),
                 decoration: BoxDecoration(
                   color: config.isMyMessage
-                      ? Colors.teal[600]
+                      ? themeColor.primary
                       : config.nonMyMessageBackgroundColor,
                   borderRadius: BorderRadius.only(
                     topLeft: const Radius.circular(14),
@@ -290,7 +294,7 @@ class MessageBubble extends StatelessWidget {
   }
 
   /// Build container using Column (for Group)
-  Widget _buildColumnContainer() {
+  Widget _buildColumnContainer(ColorTheme themeColor) {
     return Column(
       crossAxisAlignment: config.isMyMessage
           ? CrossAxisAlignment.end
@@ -314,7 +318,7 @@ class MessageBubble extends StatelessWidget {
                             ? config.message.senderName ?? ''
                             : 'Unknown User',
                         style: TextStyle(
-                          color: Colors.teal[700],
+                          color: themeColor.primary,
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
                         ),
@@ -330,7 +334,7 @@ class MessageBubble extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         color: config.isMyMessage
-                            ? Colors.teal[600]
+                            ? themeColor.primary
                             : Colors.grey[100],
                         borderRadius: BorderRadius.only(
                           topLeft: const Radius.circular(0),
@@ -357,7 +361,7 @@ class MessageBubble extends StatelessWidget {
                 ),
                 decoration: BoxDecoration(
                   color: config.isMyMessage
-                      ? Colors.teal[600]
+                      ? themeColor.primary
                       : config.nonMyMessageBackgroundColor,
                   borderRadius: BorderRadius.only(
                     topLeft: const Radius.circular(14),
@@ -385,7 +389,7 @@ class MessageBubble extends StatelessWidget {
                               ? config.message.senderName ?? ''
                               : 'Unknown User',
                           style: TextStyle(
-                            color: Colors.teal[700],
+                            color: themeColor.primary,
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                           ),
@@ -735,7 +739,7 @@ class _ReplyPreviewWithFetchState extends State<_ReplyPreviewWithFetch>
 ///
 /// Displays a video thumbnail with automatic generation and caching.
 /// Shows a loading indicator while the thumbnail is being generated.
-class VideoThumbnailWidget extends StatefulWidget {
+class VideoThumbnailWidget extends ConsumerStatefulWidget {
   final String videoUrl;
   final Map<String, String?> thumbnailCache;
   final Map<String, Future<String?>> thumbnailFutures;
@@ -750,10 +754,11 @@ class VideoThumbnailWidget extends StatefulWidget {
   });
 
   @override
-  State<VideoThumbnailWidget> createState() => _VideoThumbnailWidgetState();
+  ConsumerState<VideoThumbnailWidget> createState() =>
+      _VideoThumbnailWidgetState();
 }
 
-class _VideoThumbnailWidgetState extends State<VideoThumbnailWidget> {
+class _VideoThumbnailWidgetState extends ConsumerState<VideoThumbnailWidget> {
   @override
   void initState() {
     super.initState();
@@ -794,11 +799,12 @@ class _VideoThumbnailWidgetState extends State<VideoThumbnailWidget> {
     }
 
     // Show loading state while thumbnail is being generated
+    final themeColor = ref.watch(themeColorProvider);
     return Container(
       color: Colors.black87,
       child: Center(
         child: CircularProgressIndicator(
-          valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
+          valueColor: AlwaysStoppedAnimation<Color>(themeColor.primary),
           strokeWidth: 2,
         ),
       ),
@@ -844,13 +850,14 @@ class ReplyPreviewConfig {
 }
 
 /// Shared ReplyPreview widget for both DM and group chats
-class ReplyPreview extends StatelessWidget {
+class ReplyPreview extends ConsumerWidget {
   final ReplyPreviewConfig config;
 
   const ReplyPreview({super.key, required this.config});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeColor = ref.watch(themeColorProvider);
     // Determine if the replied-to message is from current user
     final isRepliedMessageMine = config.isGroupChat
         ? (config.currentUserId != null &&
@@ -873,7 +880,7 @@ class ReplyPreview extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           border: Border(
             left: BorderSide(
-              color: config.isMyMessage ? Colors.white : Colors.teal,
+              color: config.isMyMessage ? Colors.white : themeColor.primary,
               width: 1,
             ),
           ),
@@ -886,7 +893,7 @@ class ReplyPreview extends StatelessWidget {
                   ? 'You'
                   : (config.replyMessage.senderName ?? 'Unknown User'),
               style: TextStyle(
-                color: config.isMyMessage ? Colors.white : Colors.teal,
+                color: config.isMyMessage ? Colors.white : themeColor.primary,
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),

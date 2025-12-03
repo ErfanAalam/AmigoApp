@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/theme_color_provider.dart';
 
 /// A WhatsApp-style notification badge widget
 /// 
 /// Displays a small circular red badge with white text.
 /// Auto-hides when count is zero.
 /// Handles double-digit numbers gracefully (max "99+").
-class BadgeWidget extends StatelessWidget {
+class BadgeWidget extends ConsumerWidget {
   final int count;
   final Widget child;
   final Color? badgeColor;
@@ -24,7 +26,8 @@ class BadgeWidget extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeColor = ref.watch(themeColorProvider);
     // Don't show badge if count is zero
     if (count <= 0) {
       return child;
@@ -39,16 +42,13 @@ class BadgeWidget extends StatelessWidget {
           top: -8,
           child: Container(
             padding: padding ?? (count > 9 
-              ? const EdgeInsets.symmetric(horizontal: 5, vertical: 2)
-              : const EdgeInsets.all(4)),
+              ? EdgeInsets.symmetric(horizontal: 5, vertical: 2)
+              : EdgeInsets.all(4)),
             decoration: BoxDecoration(
-              color: badgeColor ?? const Color.fromARGB(255, 9, 117, 103),
+              color: badgeColor ?? themeColor.primary,
               shape: BoxShape.circle,
             ),
-            constraints: const BoxConstraints(
-              minWidth: 18,
-              minHeight: 18,
-            ),
+            constraints: BoxConstraints(minWidth: 18, minHeight: 18),
             alignment: Alignment.center,
             child: Text(
               _formatCount(count),

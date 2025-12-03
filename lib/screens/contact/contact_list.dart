@@ -16,6 +16,8 @@ import '../../api/user.service.dart';
 import '../../api/chats.services.dart';
 import '../../services/socket/websocket_service.dart';
 import '../../providers/chat_provider.dart';
+import '../../providers/theme_color_provider.dart';
+import '../../config/app_colors.dart';
 
 class ContactsPage extends ConsumerStatefulWidget {
   const ContactsPage({super.key});
@@ -400,6 +402,8 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
   @override
   Widget build(BuildContext context) {
     super.build(context); // Required for AutomaticKeepAliveClientMixin
+    final themeColor = ref.watch(themeColorProvider);
+
     return Stack(
       children: [
         Scaffold(
@@ -407,7 +411,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
           appBar: PreferredSize(
             preferredSize: Size.fromHeight(60),
             child: AppBar(
-              backgroundColor: Colors.teal,
+              backgroundColor: themeColor.primary,
               leadingWidth: 60,
               leading: Container(
                 margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
@@ -502,7 +506,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Color(0xFF00A884).withOpacity(0.4),
+                  color: themeColor.primary.withOpacity(0.4),
                   blurRadius: 20,
                   offset: Offset(0, 8),
                 ),
@@ -510,7 +514,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
             ),
             child: FloatingActionButton(
               onPressed: _showFindUserDialog,
-              backgroundColor: Color(0xFF00A884),
+              backgroundColor: themeColor.primary,
               elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
@@ -557,7 +561,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                   ),
                                   child: CircularProgressIndicator(
                                     valueColor: AlwaysStoppedAnimation<Color>(
-                                      Color(0xFF00A884),
+                                      themeColor.primary,
                                     ),
                                     strokeWidth: 3,
                                   ),
@@ -596,7 +600,9 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                   Container(
                                     padding: EdgeInsets.all(20),
                                     decoration: BoxDecoration(
-                                      color: Color(0xFF00A884).withOpacity(0.1),
+                                      color: themeColor.primary.withOpacity(
+                                        0.1,
+                                      ),
                                       borderRadius: BorderRadius.circular(20),
                                     ),
                                     child: Icon(
@@ -604,7 +610,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                           ? Icons.search_off_rounded
                                           : Icons.person_off_rounded,
                                       size: 48,
-                                      color: Color(0xFF00A884),
+                                      color: themeColor.primary,
                                     ),
                                   ),
                                   SizedBox(height: 20),
@@ -637,7 +643,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                       icon: Icon(Icons.person_add_rounded),
                                       label: Text('Add Contact'),
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: Color(0xFF00A884),
+                                        backgroundColor: themeColor.primary,
                                         foregroundColor: Colors.white,
                                         padding: EdgeInsets.symmetric(
                                           horizontal: 24,
@@ -692,9 +698,8 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                                   BorderRadius.circular(20),
                                               boxShadow: [
                                                 BoxShadow(
-                                                  color: Color(
-                                                    0xFF00A884,
-                                                  ).withOpacity(0.2),
+                                                  color: themeColor.primary
+                                                      .withOpacity(0.2),
                                                   blurRadius: 12,
                                                   offset: Offset(0, 4),
                                                 ),
@@ -702,9 +707,9 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                             ),
                                             child: CircleAvatar(
                                               radius: 28,
-                                              backgroundColor: Color(
-                                                0xFF00A884,
-                                              ).withOpacity(0.1),
+                                              backgroundColor: themeColor
+                                                  .primary
+                                                  .withOpacity(0.1),
                                               backgroundImage:
                                                   user.profilePic != null
                                                   ? CachedNetworkImageProvider(
@@ -714,7 +719,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                               child: user.profilePic == null
                                                   ? Icon(
                                                       Icons.person_rounded,
-                                                      color: Color(0xFF00A884),
+                                                      color: themeColor.primary,
                                                       size: 28,
                                                     )
                                                   : null,
@@ -749,15 +754,14 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                           Container(
                                             padding: EdgeInsets.all(8),
                                             decoration: BoxDecoration(
-                                              color: Color(
-                                                0xFF00A884,
-                                              ).withOpacity(0.1),
+                                              color: themeColor.primary
+                                                  .withOpacity(0.1),
                                               borderRadius:
                                                   BorderRadius.circular(10),
                                             ),
                                             child: Icon(
                                               Icons.chat_bubble_rounded,
-                                              color: Color(0xFF00A884),
+                                              color: themeColor.primary,
                                               size: 20,
                                             ),
                                           ),
@@ -794,11 +798,11 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                   right: 16,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.teal,
+                  color: themeColor.primary,
 
                   boxShadow: [
                     BoxShadow(
-                      color: Color(0xFF00A884).withOpacity(0.3),
+                      color: themeColor.primary.withOpacity(0.3),
                       blurRadius: 20,
                       offset: Offset(0, 8),
                     ),
@@ -900,17 +904,17 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
 }
 
 /// Find User Dialog Widget
-class FindUserDialog extends StatefulWidget {
+class FindUserDialog extends ConsumerStatefulWidget {
   final Function(UserModel) onUserSelected;
 
   const FindUserDialog({Key? key, required this.onUserSelected})
     : super(key: key);
 
   @override
-  State<FindUserDialog> createState() => _FindUserDialogState();
+  ConsumerState<FindUserDialog> createState() => _FindUserDialogState();
 }
 
-class _FindUserDialogState extends State<FindUserDialog> {
+class _FindUserDialogState extends ConsumerState<FindUserDialog> {
   final TextEditingController _phoneController = TextEditingController();
   final UserService _userService = UserService();
   bool _isSearching = false;
@@ -925,6 +929,7 @@ class _FindUserDialogState extends State<FindUserDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
 
@@ -956,7 +961,7 @@ class _FindUserDialogState extends State<FindUserDialog> {
               width: double.infinity,
               padding: EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: Colors.teal,
+                color: themeColor.primary,
                 borderRadius: BorderRadius.only(
                   topLeft: Radius.circular(20),
                   topRight: Radius.circular(20),
@@ -1032,17 +1037,17 @@ class _FindUserDialogState extends State<FindUserDialog> {
                       width: double.infinity,
                       padding: EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Color(0xFF00A884).withOpacity(0.1),
+                        color: themeColor.primary.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: Color(0xFF00A884).withOpacity(0.3),
+                          color: themeColor.primary.withOpacity(0.3),
                         ),
                       ),
                       child: Row(
                         children: [
                           Icon(
                             Icons.info_outline_rounded,
-                            color: Color(0xFF00A884),
+                            color: themeColor.primary,
                             size: 20,
                           ),
                           SizedBox(width: 12),
@@ -1050,7 +1055,7 @@ class _FindUserDialogState extends State<FindUserDialog> {
                             child: Text(
                               'Please include country code (e.g., +1, +91)',
                               style: TextStyle(
-                                color: Color(0xFF00A884),
+                                color: themeColor.primary,
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -1093,12 +1098,12 @@ class _FindUserDialogState extends State<FindUserDialog> {
                             margin: EdgeInsets.all(12),
                             padding: EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: Color(0xFF00A884).withOpacity(0.1),
+                              color: themeColor.primary.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Icon(
                               Icons.phone_rounded,
-                              color: Color(0xFF00A884),
+                              color: themeColor.primary,
                               size: 20,
                             ),
                           ),
@@ -1113,7 +1118,7 @@ class _FindUserDialogState extends State<FindUserDialog> {
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide(
-                              color: Color(0xFF00A884),
+                              color: themeColor.primary,
                               width: 2,
                             ),
                           ),
@@ -1140,12 +1145,12 @@ class _FindUserDialogState extends State<FindUserDialog> {
                             Container(
                               padding: EdgeInsets.all(20),
                               decoration: BoxDecoration(
-                                color: Color(0xFF00A884).withOpacity(0.1),
+                                color: themeColor.primary.withOpacity(0.1),
                                 borderRadius: BorderRadius.circular(16),
                               ),
                               child: CircularProgressIndicator(
                                 valueColor: AlwaysStoppedAnimation<Color>(
-                                  Color(0xFF00A884),
+                                  themeColor.primary,
                                 ),
                                 strokeWidth: 3,
                               ),
@@ -1182,7 +1187,7 @@ class _FindUserDialogState extends State<FindUserDialog> {
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(16),
                                 border: Border.all(
-                                  color: Color(0xFF00A884).withOpacity(0.3),
+                                  color: themeColor.primary.withOpacity(0.3),
                                 ),
                                 boxShadow: [
                                   BoxShadow(
@@ -1213,9 +1218,8 @@ class _FindUserDialogState extends State<FindUserDialog> {
                                             ),
                                             boxShadow: [
                                               BoxShadow(
-                                                color: Color(
-                                                  0xFF00A884,
-                                                ).withOpacity(0.2),
+                                                color: themeColor.primary
+                                                    .withOpacity(0.2),
                                                 blurRadius: 8,
                                                 spreadRadius: 0,
                                               ),
@@ -1223,9 +1227,8 @@ class _FindUserDialogState extends State<FindUserDialog> {
                                           ),
                                           child: CircleAvatar(
                                             radius: 24,
-                                            backgroundColor: Color(
-                                              0xFF00A884,
-                                            ).withOpacity(0.1),
+                                            backgroundColor: themeColor.primary
+                                                .withOpacity(0.1),
                                             backgroundImage:
                                                 user.profilePic != null
                                                 ? CachedNetworkImageProvider(
@@ -1235,7 +1238,7 @@ class _FindUserDialogState extends State<FindUserDialog> {
                                             child: user.profilePic == null
                                                 ? Icon(
                                                     Icons.person,
-                                                    color: Color(0xFF00A884),
+                                                    color: themeColor.primary,
                                                     size: 24,
                                                   )
                                                 : null,
@@ -1268,7 +1271,7 @@ class _FindUserDialogState extends State<FindUserDialog> {
                                         ),
                                         Icon(
                                           Icons.arrow_forward_ios_rounded,
-                                          color: Color(0xFF00A884),
+                                          color: themeColor.primary,
                                           size: 16,
                                         ),
                                       ],
@@ -1372,14 +1375,14 @@ class _FindUserDialogState extends State<FindUserDialog> {
                     child: ElevatedButton(
                       onPressed: _isSearching ? null : _performSearch,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Color(0xFF00A884),
+                        backgroundColor: themeColor.primary,
                         foregroundColor: Colors.white,
                         padding: EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                         elevation: 0,
-                        shadowColor: Color(0xFF00A884).withOpacity(0.3),
+                        shadowColor: themeColor.primary.withOpacity(0.3),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,

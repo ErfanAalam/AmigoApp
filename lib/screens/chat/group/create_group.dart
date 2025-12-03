@@ -14,6 +14,7 @@ import '../../../api/user.service.dart';
 import '../../../services/contact_service.dart';
 import '../../../services/socket/websocket_service.dart';
 import '../../../providers/chat_provider.dart';
+import '../../../providers/theme_color_provider.dart';
 
 class CreateGroupPage extends ConsumerStatefulWidget {
   const CreateGroupPage({super.key});
@@ -253,13 +254,14 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
 
   @override
   Widget build(BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
     return Scaffold(
       appBar: AppBar(
         title: const Text(
           'Create Group',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
-        backgroundColor: Colors.teal,
+        backgroundColor: themeColor.primary,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
@@ -295,14 +297,14 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
               controller: _groupNameController,
               decoration: InputDecoration(
                 hintText: 'Group name',
-                prefixIcon: const Icon(Icons.group, color: Colors.teal),
+                prefixIcon: Icon(Icons.group, color: themeColor.primary),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide(color: Colors.grey[300]!),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Colors.teal, width: 2),
+                  borderSide: BorderSide(color: themeColor.primary, width: 2),
                 ),
                 filled: true,
                 fillColor: Colors.grey[50],
@@ -315,11 +317,11 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: Colors.teal[50],
+              color: themeColor.primaryLight,
               child: Text(
                 '${_selectedUserIds.length} member${_selectedUserIds.length > 1 ? 's' : ''} selected',
                 style: TextStyle(
-                  color: Colors.teal[700],
+                  color: themeColor.primaryDark,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -358,14 +360,15 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
   }
 
   Widget _buildLoadingState() {
-    return const Center(
+    final themeColor = ref.watch(themeColorProvider);
+    return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
+            valueColor: AlwaysStoppedAnimation<Color>(themeColor.primaryDark),
           ),
-          SizedBox(height: 16),
+          const SizedBox(height: 16),
           Text(
             'Loading users...',
             style: TextStyle(fontSize: 16, color: Colors.grey),
@@ -413,17 +416,17 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
   }
 }
 
-class UserListItem extends StatelessWidget {
+class UserListItem extends ConsumerWidget {
   final UserModel user;
   final bool isSelected;
   final VoidCallback onTap;
 
   const UserListItem({
-    Key? key,
+    super.key,
     required this.user,
     required this.isSelected,
     required this.onTap,
-  }) : super(key: key);
+  });
 
   String _getInitials(String name) {
     final words = name
@@ -440,10 +443,11 @@ class UserListItem extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeColor = ref.watch(themeColorProvider);
     return Container(
       decoration: BoxDecoration(
-        color: isSelected ? Colors.teal[50] : Colors.white,
+        color: isSelected ? themeColor.primaryLight : Colors.white,
         border: Border(
           bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
         ),
@@ -453,15 +457,15 @@ class UserListItem extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 25,
-              backgroundColor: Colors.teal[100],
+              backgroundColor: themeColor.primaryLight,
               backgroundImage: user.profilePic != null
                   ? NetworkImage(user.profilePic!)
                   : null,
               child: user.profilePic == null
                   ? Text(
                       _getInitials(user.name),
-                      style: const TextStyle(
-                        color: Colors.teal,
+                      style: TextStyle(
+                        color: themeColor.primary,
                         fontWeight: FontWeight.bold,
                         fontSize: 18,
                       ),
@@ -474,8 +478,8 @@ class UserListItem extends StatelessWidget {
                 bottom: 0,
                 child: Container(
                   padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(
-                    color: Colors.teal,
+                  decoration: BoxDecoration(
+                    color: themeColor.primary,
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.check, color: Colors.white, size: 16),
@@ -495,7 +499,7 @@ class UserListItem extends StatelessWidget {
           style: TextStyle(color: Colors.grey[600], fontSize: 14),
         ),
         trailing: isSelected
-            ? Icon(Icons.check_circle, color: Colors.teal[600], size: 24)
+            ? Icon(Icons.check_circle, color: themeColor.primary, size: 24)
             : Icon(
                 Icons.radio_button_unchecked,
                 color: Colors.grey[400],

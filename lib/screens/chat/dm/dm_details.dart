@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../providers/chat_provider.dart';
+import '../../../providers/theme_color_provider.dart';
+import '../../../config/app_colors.dart';
 import '../../../types/socket.type.dart';
 import '../../../utils/user.utils.dart';
 
@@ -259,10 +261,12 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
     final recipientProfilePic = _recipientUser?.profilePic;
     final isOnline = _recipientUser?.isOnline ?? false;
 
+    final themeColor = ref.watch(themeColorProvider);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Chat Details'),
-        backgroundColor: Colors.teal,
+        backgroundColor: themeColor.primary,
         foregroundColor: Colors.white,
       ),
       body: ListView(
@@ -274,7 +278,7 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
               children: [
                 CircleAvatar(
                   radius: 50,
-                  backgroundColor: Colors.teal[100],
+                  backgroundColor: themeColor.primaryLight.withOpacity(0.3),
                   backgroundImage: recipientProfilePic != null
                       ? CachedNetworkImageProvider(recipientProfilePic)
                       : null,
@@ -282,7 +286,7 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
                       ? Text(
                           _getInitials(recipientName),
                           style: TextStyle(
-                            color: Colors.teal[700],
+                            color: themeColor.primary,
                             fontSize: 32,
                             fontWeight: FontWeight.bold,
                           ),
@@ -358,8 +362,9 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
     required String title,
     required String subtitle,
   }) {
+    final themeColor = ref.watch(themeColorProvider);
     return ListTile(
-      leading: Icon(icon, color: Colors.teal),
+      leading: Icon(icon, color: themeColor.primary),
       title: Text(title),
       subtitle: Text(subtitle),
     );
@@ -372,8 +377,9 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
     Color? textColor,
     bool isLoading = false,
   }) {
+    final themeColor = ref.watch(themeColorProvider);
     return ListTile(
-      leading: Icon(icon, color: textColor ?? Colors.teal),
+      leading: Icon(icon, color: textColor ?? themeColor.primary),
       title: Text(title, style: TextStyle(color: textColor)),
       trailing: isLoading
           ? const SizedBox(

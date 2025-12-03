@@ -9,6 +9,8 @@ import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/providers/chat_provider.dart';
+import 'package:amigo/providers/theme_color_provider.dart';
+import 'package:amigo/config/app_colors.dart';
 import 'package:amigo/utils/chat/chat_helpers.utils.dart';
 import 'package:amigo/utils/route_transitions.dart';
 import 'package:amigo/utils/snowflake.util.dart';
@@ -450,6 +452,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         _currentUserDetails = currentUser;
       });
     }
+
+    ref
+        .read(chatProvider.notifier)
+        .setActiveConversation(widget.group.conversationId, ChatType.group);
 
     // Load messages from local storage first
     final messaagesFromLocal = await _messagesRepo.getMessagesByConversation(
@@ -2142,6 +2148,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   @override
   Widget build(BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
+
     return Scaffold(
       backgroundColor: Colors.white, // Pure white background
       appBar: AppBar(
@@ -2167,13 +2175,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                 children: [
                   CircleAvatar(
                     radius: 18,
-                    backgroundColor: Colors.teal[100],
+                    backgroundColor: themeColor.primaryLight.withOpacity(0.3),
                     child: Text(
                       widget.group.title.isNotEmpty
                           ? widget.group.title[0].toUpperCase()
                           : '?',
                       style: TextStyle(
-                        color: Colors.teal[700],
+                        color: themeColor.primary,
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
                       ),
@@ -2197,7 +2205,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                   ),
                 ],
               ),
-        backgroundColor: Colors.teal,
+        backgroundColor: themeColor.primary,
         elevation: 0,
         actions: _selectedMessages.isNotEmpty
             ? _buildSelectionModeActions()
@@ -2303,10 +2311,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   Widget _buildSyncProgressBar() {
+    final themeColor = ref.watch(themeColorProvider);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.teal.shade700,
+        color: themeColor.primary,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.2),
@@ -2491,6 +2500,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   Widget _buildMessageWithActions(MessageModel message, bool isMyMessage) {
+    final themeColor = ref.watch(themeColorProvider);
     final isSelected = _selectedMessages.contains(message.id);
     final isPinned = _pinnedMessage?.canonicalId == message.id;
     final isStarred = _starredMessages.contains(message.id);
@@ -2504,7 +2514,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       onPanUpdate: (details) => _onSwipeUpdate(message, details, isMyMessage),
       onPanEnd: (details) => _onSwipeEnd(message, details, isMyMessage),
       child: Container(
-        color: isSelected ? Colors.teal.withOpacity(0.1) : Colors.transparent,
+        color: isSelected
+            ? themeColor.primary.withOpacity(0.1)
+            : Colors.transparent,
         child: Stack(
           children: [
             _buildSwipeableMessageBubble(
@@ -2523,9 +2535,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                   height: 24,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: isSelected ? Colors.teal : Colors.white,
+                    color: isSelected ? themeColor.primary : Colors.white,
                     border: Border.all(
-                      color: isSelected ? Colors.teal : Colors.grey[400]!,
+                      color: isSelected
+                          ? themeColor.primary
+                          : Colors.grey[400]!,
                       width: 2,
                     ),
                   ),
@@ -2641,6 +2655,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     bool isPinned,
     bool isStarred,
   ) {
+    final themeColor = ref.watch(themeColorProvider);
     final swipeAnimation = _swipeAnimations[message.id];
 
     if (swipeAnimation != null) {
@@ -2663,7 +2678,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                         width: 32,
                         height: 32,
                         decoration: BoxDecoration(
-                          color: Colors.teal.withOpacity(0.8),
+                          color: themeColor.primary.withOpacity(0.8),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(
@@ -3049,19 +3064,31 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   // Add all missing media rendering methods
   Widget _buildImageMessage(MessageModel message, bool isMyMessage) {
-    return buildImageMessage(_buildMediaMessageConfig(message, isMyMessage));
+    return buildImageMessage(
+      _buildMediaMessageConfig(message, isMyMessage),
+      ref,
+    );
   }
 
   Widget _buildVideoMessage(MessageModel message, bool isMyMessage) {
-    return buildVideoMessage(_buildMediaMessageConfig(message, isMyMessage));
+    return buildVideoMessage(
+      _buildMediaMessageConfig(message, isMyMessage),
+      ref,
+    );
   }
 
   Widget _buildDocumentMessage(MessageModel message, bool isMyMessage) {
-    return buildDocumentMessage(_buildMediaMessageConfig(message, isMyMessage));
+    return buildDocumentMessage(
+      _buildMediaMessageConfig(message, isMyMessage),
+      ref,
+    );
   }
 
   Widget _buildAudioMessage(MessageModel message, bool isMyMessage) {
-    return buildAudioMessage(_buildMediaMessageConfig(message, isMyMessage));
+    return buildAudioMessage(
+      _buildMediaMessageConfig(message, isMyMessage),
+      ref,
+    );
   }
 
   void _sendVoiceNote() async {

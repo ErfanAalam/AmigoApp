@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../widgets/chat/searchable_list_widget.dart';
 import '../../../providers/draft_provider.dart';
 import '../../../providers/chat_provider.dart';
+import '../../../providers/theme_color_provider.dart';
+import '../../../config/app_colors.dart';
 import '../../../types/socket.type.dart';
 import '../../../widgets/chat/user_profile_modal.dart';
 import '../../../utils/route_transitions.dart';
@@ -133,11 +135,13 @@ class ChatsPageState extends ConsumerState<ChatsPage>
 
   @override
   Widget build(BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
+
     return Scaffold(
       appBar: PreferredSize(
         preferredSize: Size.fromHeight(60),
         child: AppBar(
-          backgroundColor: Colors.teal,
+          backgroundColor: themeColor.primary,
           leadingWidth: 60,
           leading: Container(
             margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
@@ -580,6 +584,7 @@ class ChatListItem extends ConsumerWidget {
     // Check for draft message
     final drafts = ref.watch(draftMessagesProvider);
     final draft = drafts[conversationId];
+    final themeColor = ref.watch(themeColorProvider);
 
     final hasUnreadMessages = (conversation.unreadCount ?? 0) > 0 && !isMuted;
 
@@ -612,7 +617,7 @@ class ChatListItem extends ConsumerWidget {
     return Container(
       height: 80,
       decoration: BoxDecoration(
-        color: isPinned ? Colors.teal.withOpacity(0.05) : Colors.white,
+        color: isPinned ? themeColor.primary.withOpacity(0.05) : Colors.white,
         border: Border(
           bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
           left: isPinned
@@ -621,7 +626,10 @@ class ChatListItem extends ConsumerWidget {
         ),
       ),
       child: ListTile(
-        leading: GestureDetector(onTap: onAvatarTap, child: _buildAvatar()),
+        leading: GestureDetector(
+          onTap: onAvatarTap,
+          child: _buildAvatar(themeColor),
+        ),
         title: Row(
           children: [
             if (isPinned) ...[
@@ -652,7 +660,7 @@ class ChatListItem extends ConsumerWidget {
           ],
         ),
         subtitle: isTyping
-            ? _buildTypingIndicator()
+            ? _buildTypingIndicator(themeColor)
             : Text(
                 draft != null && draft.isNotEmpty
                     ? 'Draft: $lastMessageText'
@@ -670,7 +678,7 @@ class ChatListItem extends ConsumerWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-        trailing: _buildUnreadCounts(timeText, hasUnreadMessages),
+        trailing: _buildUnreadCounts(timeText, hasUnreadMessages, themeColor),
         onTap: onTap,
         onLongPress: onLongPress,
         dense: true,
@@ -679,20 +687,20 @@ class ChatListItem extends ConsumerWidget {
     );
   }
 
-  Widget _buildAvatar() {
+  Widget _buildAvatar(ColorTheme themeColor) {
     return Stack(
       children: [
         CircleAvatar(
           radius: 25,
-          backgroundColor: Colors.teal[100],
+          backgroundColor: themeColor.primaryLight.withOpacity(0.3),
           backgroundImage: conversation.recipientProfilePic != null
               ? CachedNetworkImageProvider(conversation.recipientProfilePic!)
               : null,
           child: conversation.recipientProfilePic == null
               ? Text(
                   _getInitials(conversation.recipientName),
-                  style: const TextStyle(
-                    color: Colors.teal,
+                  style: TextStyle(
+                    color: themeColor.primary,
                     fontWeight: FontWeight.bold,
                     fontSize: 18,
                   ),
@@ -718,13 +726,13 @@ class ChatListItem extends ConsumerWidget {
     );
   }
 
-  Widget _buildTypingIndicator() {
+  Widget _buildTypingIndicator(ColorTheme themeColor) {
     return Row(
       children: [
         Text(
           'Typing',
           style: TextStyle(
-            color: Colors.teal[600],
+            color: themeColor.primary,
             fontSize: 14,
             fontWeight: FontWeight.w500,
           ),
@@ -750,7 +758,11 @@ class ChatListItem extends ConsumerWidget {
     );
   }
 
-  Widget _buildUnreadCounts(String timeText, bool hasUnreadMessages) {
+  Widget _buildUnreadCounts(
+    String timeText,
+    bool hasUnreadMessages,
+    ColorTheme themeColor,
+  ) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -762,9 +774,7 @@ class ChatListItem extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
             decoration: BoxDecoration(
-              color: isMuted
-                  ? Colors.grey
-                  : const Color.fromARGB(255, 9, 117, 103),
+              color: isMuted ? Colors.grey : themeColor.primary,
               shape: BoxShape.circle,
             ),
             child: Text(
@@ -782,16 +792,16 @@ class ChatListItem extends ConsumerWidget {
   }
 }
 
-class _TypingDot extends StatefulWidget {
+class _TypingDot extends ConsumerStatefulWidget {
   final int delay;
 
   const _TypingDot({required this.delay});
 
   @override
-  State<_TypingDot> createState() => _TypingDotState();
+  ConsumerState<_TypingDot> createState() => _TypingDotState();
 }
 
-class _TypingDotState extends State<_TypingDot>
+class _TypingDotState extends ConsumerState<_TypingDot>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _animation;
@@ -825,6 +835,7 @@ class _TypingDotState extends State<_TypingDot>
 
   @override
   Widget build(BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
     return AnimatedBuilder(
       animation: _animation,
       builder: (context, child) {
@@ -832,7 +843,7 @@ class _TypingDotState extends State<_TypingDot>
           width: 3,
           height: 3,
           decoration: BoxDecoration(
-            color: Colors.teal[600]!.withOpacity(_animation.value),
+            color: themeColor.primary.withOpacity(_animation.value),
             shape: BoxShape.circle,
           ),
         );

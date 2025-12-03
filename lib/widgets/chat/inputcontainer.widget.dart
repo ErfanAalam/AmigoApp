@@ -4,8 +4,10 @@ import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/socket.type.dart';
 import 'package:flutter/material.dart';
 import '../../models/community_model.dart';
+import '../../providers/theme_color_provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class MessageInputContainer extends StatelessWidget {
+class MessageInputContainer extends ConsumerWidget {
   final TextEditingController messageController;
   final ValueNotifier<bool> isOtherTypingNotifier;
   final Widget? typingIndicator;
@@ -48,7 +50,9 @@ class MessageInputContainer extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) => Consumer(
+    builder: (context, ref, child) {
+    final themeColor = ref.watch(themeColorProvider);
     // Check if this is a community group and if sending is allowed
     final isCommunityGroupActive = _isCommunityGroupActive();
     final shouldDisableSending = isCommunityGroup && !isCommunityGroupActive;
@@ -71,7 +75,7 @@ class MessageInputContainer extends StatelessWidget {
         ),
 
         // Reply container
-        if (isReplying && replyToMessageData != null) _buildReplyContainer(),
+        if (isReplying && replyToMessageData != null) _buildReplyContainer(ref),
 
         Container(
           padding: const EdgeInsets.all(6),
@@ -123,7 +127,7 @@ class MessageInputContainer extends StatelessWidget {
                     : (messageController.text.isNotEmpty
                           ? () => onSendMessage!(MessageType.text)
                           : () => onSendVoiceNote!()),
-                backgroundColor: Colors.teal,
+                backgroundColor: themeColor.primary,
                 mini: true,
                 child: messageController.text.isNotEmpty
                     ? Icon(Icons.send, color: Colors.white)
@@ -134,9 +138,10 @@ class MessageInputContainer extends StatelessWidget {
         ),
       ],
     );
-  }
+  },);
 
-  Widget _buildReplyContainer() {
+  Widget _buildReplyContainer(WidgetRef ref) {
+    final themeColor = ref.watch(themeColorProvider);
     final replyMessage = replyToMessageData!;
 
     // Determine if replied message is from current user
@@ -168,11 +173,11 @@ class MessageInputContainer extends StatelessWidget {
             width: 3,
             height: 40,
             decoration: BoxDecoration(
-              color: Colors.teal,
+              color: themeColor.primary,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-          const SizedBox(width: 12),
+          SizedBox(width: 12),
 
           // Reply content
           Expanded(
@@ -181,19 +186,19 @@ class MessageInputContainer extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.reply, size: 16, color: Colors.teal),
+                    Icon(Icons.reply, size: 16, color: themeColor.primary),
                     const SizedBox(width: 4),
                     Text(
                       isRepliedMessageMine ? 'You' : replyMessage.senderName!,
-                      style: const TextStyle(
-                        color: Colors.teal,
+                      style: TextStyle(
+                        color: themeColor.primary,
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
+                SizedBox(height: 4),
                 if (replyMessage.body?.isNotEmpty ?? false) ...[
                   Text(
                     replyMessage.body!.length > 50
@@ -208,7 +213,7 @@ class MessageInputContainer extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ] else ...[
-                  const Text(
+                  Text(
                     '📎 media',
                     style: TextStyle(
                       color: Colors.grey,
@@ -226,7 +231,7 @@ class MessageInputContainer extends StatelessWidget {
           // Cancel reply button
           IconButton(
             onPressed: onCancelReply,
-            icon: Icon(Icons.close, size: 20, color: Colors.grey[600]),
+            icon: Icon(Icons.close, size: 20, color: themeColor.primary),
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             padding: EdgeInsets.zero,
           ),

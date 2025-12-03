@@ -8,6 +8,8 @@ import '../../../widgets/chat_action_menu.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../providers/draft_provider.dart';
 import '../../../providers/chat_provider.dart';
+import '../../../providers/theme_color_provider.dart';
+import '../../../config/app_colors.dart';
 import '../../../types/socket.type.dart';
 import '../../../utils/route_transitions.dart';
 import 'messaging.dart';
@@ -95,11 +97,13 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
+
     return Scaffold(
       appBar: PreferredSize(
         preferredSize: Size.fromHeight(60),
         child: AppBar(
-          backgroundColor: Colors.teal,
+          backgroundColor: themeColor.primary,
           leadingWidth: 60,
           leading: Container(
             margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
@@ -169,7 +173,7 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
             _refreshData();
           }
         },
-        backgroundColor: Colors.teal,
+        backgroundColor: themeColor.primary,
         child: Icon(Icons.group_add, color: Colors.white),
       ),
     );
@@ -520,10 +524,12 @@ class GroupListItem extends ConsumerWidget {
               ? 'Draft: $lastMessageText'
               : lastMessageText);
 
+    final themeColor = ref.watch(themeColorProvider);
+
     return Container(
       height: 80,
       decoration: BoxDecoration(
-        color: isPinned ? Colors.teal.withOpacity(0.05) : Colors.white,
+        color: isPinned ? themeColor.primary.withOpacity(0.05) : Colors.white,
         border: Border(
           bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
           left: isPinned
@@ -544,8 +550,8 @@ class GroupListItem extends ConsumerWidget {
                 height: 48,
                 child: CircleAvatar(
                   radius: 24,
-                  backgroundColor: Colors.teal[100],
-                  child: Icon(Icons.group, color: Colors.teal, size: 22),
+                  backgroundColor: themeColor.primaryLight.withOpacity(0.3),
+                  child: Icon(Icons.group, color: themeColor.primary, size: 22),
                 ),
               ),
               const SizedBox(width: 16),
@@ -590,7 +596,7 @@ class GroupListItem extends ConsumerWidget {
                     ),
                     const SizedBox(height: 4),
                     isTyping
-                        ? _buildTypingIndicator()
+                        ? _buildTypingIndicator(themeColor)
                         : Text(
                             displayText,
                             style: TextStyle(
@@ -627,7 +633,7 @@ class GroupListItem extends ConsumerWidget {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color.fromARGB(255, 9, 117, 103),
+                        color: themeColor.primary,
                         shape: BoxShape.circle,
                       ),
                       child: Text(
@@ -649,7 +655,7 @@ class GroupListItem extends ConsumerWidget {
     );
   }
 
-  Widget _buildTypingIndicator() {
+  Widget _buildTypingIndicator(ColorTheme themeColor) {
     if (typingUsers.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -661,7 +667,7 @@ class GroupListItem extends ConsumerWidget {
           Text(
             '${typingUsers.length} people typing',
             style: TextStyle(
-              color: Colors.teal[600],
+              color: themeColor.primary,
               fontSize: 14,
               fontWeight: FontWeight.w500,
             ),
@@ -688,13 +694,13 @@ class GroupListItem extends ConsumerWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(
-                color: Colors.teal[600]!.withAlpha(20),
+                color: themeColor.primary.withAlpha(20),
                 width: 1,
               ),
             ),
             child: CircleAvatar(
               radius: 8,
-              backgroundColor: Colors.teal[100]!.withAlpha(20),
+              backgroundColor: themeColor.primaryLight.withAlpha(20),
               backgroundImage: CachedNetworkImageProvider(typingUser.userPfp!),
             ),
           ),
@@ -707,7 +713,7 @@ class GroupListItem extends ConsumerWidget {
                     ? '${typingUser.userName} typing'
                     : 'member is typing'),
           style: TextStyle(
-            color: Colors.teal[600],
+            color: themeColor.primary,
             fontSize: 14,
             fontWeight: FontWeight.w500,
           ),
@@ -734,16 +740,16 @@ class GroupListItem extends ConsumerWidget {
   }
 }
 
-class _TypingDot extends StatefulWidget {
+class _TypingDot extends ConsumerStatefulWidget {
   final int delay;
 
   const _TypingDot({required this.delay});
 
   @override
-  State<_TypingDot> createState() => _TypingDotState();
+  ConsumerState<_TypingDot> createState() => _TypingDotState();
 }
 
-class _TypingDotState extends State<_TypingDot>
+class _TypingDotState extends ConsumerState<_TypingDot>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _animation;
@@ -777,6 +783,7 @@ class _TypingDotState extends State<_TypingDot>
 
   @override
   Widget build(BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
     return AnimatedBuilder(
       animation: _animation,
       builder: (context, child) {
@@ -784,7 +791,7 @@ class _TypingDotState extends State<_TypingDot>
           width: 3,
           height: 3,
           decoration: BoxDecoration(
-            color: Colors.teal[600]!.withOpacity(_animation.value),
+            color: themeColor.primary.withOpacity(_animation.value),
             shape: BoxShape.circle,
           ),
         );

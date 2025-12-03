@@ -11,6 +11,7 @@ import 'profile/profile_info.dart';
 import 'call/call_logs.dart';
 import '../widgets/badge_widget.dart';
 import '../providers/notification_badge_provider.dart';
+import '../providers/theme_color_provider.dart';
 
 class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
@@ -105,6 +106,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     final badgeState = ref.watch(notificationBadgeProvider);
     final unreadDMs = ref.watch(chatProvider).unreadDmCount;
     final unreadGroups = ref.watch(chatProvider).unreadGroupCount;
+    final themeColor = ref.watch(themeColorProvider);
 
     return Scaffold(
       body: PageView(
@@ -128,7 +130,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
       ),
       bottomNavigationBar: NavigationBar(
         onDestinationSelected: _onTabSelected,
-        indicatorColor: Colors.teal.withAlpha(20),
+        indicatorColor: themeColor.primary.withAlpha(20),
         selectedIndex: _currentPageIndex,
         backgroundColor: Colors.grey[100],
         labelTextStyle: WidgetStateProperty.all(
@@ -142,7 +144,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
           NavigationDestination(
             selectedIcon: BadgeWidget(
               count: unreadDMs,
-              child: const Icon(Icons.message, color: Colors.teal),
+              child: Icon(Icons.message, color: themeColor.primary),
             ),
             icon: BadgeWidget(
               count: unreadDMs,
@@ -156,7 +158,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
           NavigationDestination(
             selectedIcon: BadgeWidget(
               count: unreadGroups,
-              child: const Icon(Icons.group, color: Colors.teal),
+              child: Icon(Icons.group, color: themeColor.primary),
             ),
             icon: BadgeWidget(
               count: unreadGroups,
@@ -167,9 +169,12 @@ class _MainScreenState extends ConsumerState<MainScreen> {
             ),
             label: 'Groups',
           ),
-          const NavigationDestination(
-            selectedIcon: Icon(Icons.contacts_rounded, color: Colors.teal),
-            icon: Icon(
+          NavigationDestination(
+            selectedIcon: Icon(
+              Icons.contacts_rounded,
+              color: themeColor.primary,
+            ),
+            icon: const Icon(
               Icons.contacts_outlined,
               color: Color.fromARGB(255, 65, 64, 64),
             ),
@@ -178,7 +183,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
           NavigationDestination(
             selectedIcon: BadgeWidget(
               count: badgeState.callCount,
-              child: const Icon(Icons.call, color: Colors.teal),
+              child: Icon(Icons.call, color: themeColor.primary),
             ),
             icon: BadgeWidget(
               count: badgeState.callCount,
@@ -189,9 +194,9 @@ class _MainScreenState extends ConsumerState<MainScreen> {
             ),
             label: 'Calls',
           ),
-          const NavigationDestination(
-            selectedIcon: Icon(Icons.person_rounded, color: Colors.teal),
-            icon: Icon(
+          NavigationDestination(
+            selectedIcon: Icon(Icons.person_rounded, color: themeColor.primary),
+            icon: const Icon(
               Icons.person_outline,
               color: Color.fromARGB(255, 65, 64, 64),
             ),

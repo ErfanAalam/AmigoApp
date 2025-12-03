@@ -3,11 +3,13 @@ import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/socket.type.dart';
 import 'package:amigo/utils/chat/chat_helpers.utils.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../utils/chat/cachedImage_widget.dart';
 import '../../utils/chat/preview_media.utils.dart';
 import '../../utils/chat/audio_playback.utils.dart';
 import '../../widgets/chat/messagewidget.dart';
 import '../../widgets/chat/voice_recording_widget.dart';
+import '../../providers/theme_color_provider.dart';
 
 /// Configuration class for media message widgets
 class MediaMessageConfig {
@@ -62,7 +64,8 @@ class MediaMessageConfig {
 }
 
 /// Reusable Image Message Widget
-Widget buildImageMessage(MediaMessageConfig config) {
+Widget buildImageMessage(MediaMessageConfig config, WidgetRef ref) {
+  final themeColor = ref.watch(themeColorProvider);
   if (config.message.attachments == null) {
     return Text(
       'Image not available',
@@ -102,7 +105,7 @@ Widget buildImageMessage(MediaMessageConfig config) {
       width: 200,
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border.all(color: const Color(0xFF008080), width: 4),
+        border: Border.all(color: themeColor.primary, width: 4),
         borderRadius: BorderRadius.only(
           topLeft: const Radius.circular(14),
           topRight: const Radius.circular(14),
@@ -272,7 +275,8 @@ Widget buildImageMessage(MediaMessageConfig config) {
 }
 
 /// Reusable Video Message Widget
-Widget buildVideoMessage(MediaMessageConfig config) {
+Widget buildVideoMessage(MediaMessageConfig config, WidgetRef ref) {
+  final themeColor = ref.watch(themeColorProvider);
   if (config.message.attachments == null) {
     return Text(
       'Video not available',
@@ -312,7 +316,7 @@ Widget buildVideoMessage(MediaMessageConfig config) {
       width: 200,
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border.all(color: const Color(0xFF008080), width: 4),
+        border: Border.all(color: themeColor.primary, width: 4),
         borderRadius: BorderRadius.only(
           topLeft: const Radius.circular(14),
           topRight: const Radius.circular(14),
@@ -549,12 +553,13 @@ Widget buildVideoMessage(MediaMessageConfig config) {
 }
 
 /// Reusable Document Message Widget
-Widget buildDocumentMessage(MediaMessageConfig config) {
+Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
+  final themeColor = ref.watch(themeColorProvider);
   if (config.message.attachments == null) {
     return Text(
       'Document not available',
       style: TextStyle(
-        color: config.isMyMessage ? Colors.teal : Colors.grey[600],
+        color: config.isMyMessage ? themeColor.primary : Colors.grey[600],
         fontSize: 14,
         fontStyle: FontStyle.italic,
       ),
@@ -628,7 +633,9 @@ Widget buildDocumentMessage(MediaMessageConfig config) {
                   width: 280,
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: config.isMyMessage ? Colors.teal : Colors.white,
+                    color: config.isMyMessage
+                        ? themeColor.primary
+                        : Colors.white,
                     borderRadius: BorderRadius.only(
                       topLeft: const Radius.circular(14),
                       topRight: const Radius.circular(14),
@@ -637,7 +644,7 @@ Widget buildDocumentMessage(MediaMessageConfig config) {
                     ),
                     border: Border.all(
                       color: config.isMyMessage
-                          ? Colors.teal
+                          ? themeColor.primary
                           : Colors.grey[300]!,
                       width: 1,
                     ),
@@ -655,8 +662,8 @@ Widget buildDocumentMessage(MediaMessageConfig config) {
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
                           color: config.isMyMessage
-                              ? Colors.teal.withAlpha(25)
-                              : Colors.teal.withAlpha(10),
+                              ? themeColor.primary.withAlpha(25)
+                              : themeColor.primary.withAlpha(10),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Icon(
@@ -664,7 +671,7 @@ Widget buildDocumentMessage(MediaMessageConfig config) {
                           size: 24,
                           color: config.isMyMessage
                               ? Colors.white
-                              : Colors.teal[700],
+                              : themeColor.primary,
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -710,7 +717,7 @@ Widget buildDocumentMessage(MediaMessageConfig config) {
                                       valueColor: AlwaysStoppedAnimation<Color>(
                                         config.isMyMessage
                                             ? Colors.white70
-                                            : Colors.teal,
+                                            : themeColor.primary,
                                       ),
                                     ),
                                   ),
@@ -749,7 +756,9 @@ Widget buildDocumentMessage(MediaMessageConfig config) {
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
                             valueColor: AlwaysStoppedAnimation<Color>(
-                              config.isMyMessage ? Colors.white70 : Colors.teal,
+                              config.isMyMessage
+                                  ? Colors.white70
+                                  : themeColor.primary,
                             ),
                           ),
                         )
@@ -759,7 +768,7 @@ Widget buildDocumentMessage(MediaMessageConfig config) {
                           size: 22,
                           color: config.isMyMessage
                               ? Colors.white
-                              : Colors.teal[600],
+                              : themeColor.primary,
                         ),
                     ],
                   ),
@@ -871,14 +880,14 @@ Widget buildDocumentMessage(MediaMessageConfig config) {
                   ? _RotatingRefreshIcon(
                       size: 20,
                       color: config.isMyMessage
-                          ? Colors.teal[600] ?? Colors.teal
+                          ? themeColor.primary
                           : Colors.grey[600] ?? Colors.grey,
                     )
                   : Icon(
                       Icons.refresh,
                       size: 20,
                       color: config.isMyMessage
-                          ? Colors.teal[600] ?? Colors.teal
+                          ? themeColor.primary
                           : Colors.grey[600] ?? Colors.grey,
                     ),
             ),
@@ -901,7 +910,8 @@ Widget buildDocumentMessage(MediaMessageConfig config) {
 }
 
 /// Reusable Audio Message Widget
-Widget buildAudioMessage(MediaMessageConfig config) {
+Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
+  final themeColor = ref.watch(themeColorProvider);
   if (config.message.attachments == null) {
     return Text(
       'Audio not available',
@@ -989,7 +999,7 @@ Widget buildAudioMessage(MediaMessageConfig config) {
                 width: 250,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: config.isMyMessage ? Colors.teal : Colors.white,
+                  color: config.isMyMessage ? themeColor.primary : Colors.white,
                   borderRadius: BorderRadius.only(
                     topLeft: const Radius.circular(14),
                     topRight: const Radius.circular(14),
@@ -1116,7 +1126,7 @@ Widget buildAudioMessage(MediaMessageConfig config) {
                                     valueColor: AlwaysStoppedAnimation<Color>(
                                       config.isMyMessage
                                           ? Colors.white70
-                                          : Colors.teal,
+                                          : themeColor.primary,
                                     ),
                                   ),
                                 )
@@ -1182,14 +1192,14 @@ Widget buildAudioMessage(MediaMessageConfig config) {
                       ? _RotatingRefreshIcon(
                           size: 20,
                           color: config.isMyMessage
-                              ? Colors.teal[600] ?? Colors.teal
+                              ? themeColor.primary
                               : Colors.grey[600] ?? Colors.grey,
                         )
                       : Icon(
                           Icons.refresh,
                           size: 20,
                           color: config.isMyMessage
-                              ? Colors.teal[600] ?? Colors.teal
+                              ? themeColor.primary
                               : Colors.grey[600] ?? Colors.grey,
                         ),
                 ),

@@ -3,9 +3,11 @@ import 'package:amigo/db/repositories/call.repo.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../models/call_model.dart';
 import '../../api/api_service.dart';
 import '../../providers/call.provider.dart';
+import '../../providers/theme_color_provider.dart';
 
 class CallsPage extends ConsumerStatefulWidget {
   const CallsPage({super.key});
@@ -29,7 +31,6 @@ class CallsPageState extends ConsumerState<CallsPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-
     // Load call history once on init (without showing loading if we have local data)
     _loadCallHistory(showLoading: false);
   }
@@ -40,7 +41,6 @@ class CallsPageState extends ConsumerState<CallsPage>
     _debounceTimer?.cancel();
     super.dispose();
   }
-
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -283,13 +283,15 @@ class CallsPageState extends ConsumerState<CallsPage>
       }
     });
 
+    final themeColor = ref.watch(themeColorProvider);
+
     return Scaffold(
       backgroundColor: Color(0xFFF8FAFB),
 
       appBar: PreferredSize(
         preferredSize: Size.fromHeight(60),
         child: AppBar(
-          backgroundColor: Colors.teal,
+          backgroundColor: themeColor.primary,
           leadingWidth: 60,
           leading: Container(
             margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
@@ -347,8 +349,12 @@ class CallsPageState extends ConsumerState<CallsPage>
   }
 
   Widget _buildBody() {
+    final themeColor = ref.watch(themeColorProvider);
+
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator(color: Colors.teal));
+      return Center(
+        child: CircularProgressIndicator(color: themeColor.primary),
+      );
     }
 
     if (_error != null) {
@@ -366,7 +372,9 @@ class CallsPageState extends ConsumerState<CallsPage>
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: _loadCallHistory,
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: themeColor.primary,
+              ),
               child: const Text('Retry', style: TextStyle(color: Colors.white)),
             ),
           ],
@@ -461,10 +469,12 @@ class CallsPageState extends ConsumerState<CallsPage>
           builder: (context, ref, child) {
             final callServiceState = ref.watch(callServiceProvider);
             final bool canCall = !callServiceState.hasActiveCall;
+            final themeColor = ref.watch(themeColorProvider);
+
             return IconButton(
               icon: Icon(
                 Icons.call,
-                color: canCall ? Colors.teal : Colors.grey,
+                color: canCall ? themeColor.primary : Colors.grey,
               ),
               onPressed: canCall
                   ? () => _initiateCall(call.contactId, call.contactName)

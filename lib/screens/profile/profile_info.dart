@@ -13,18 +13,19 @@ import 'edit_profile.dart';
 import 'deleted_dms.dart';
 import '../../api/api_service.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:drift_db_viewer/drift_db_viewer.dart';
-import '../../db/sqlite.db.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/theme_color_provider.dart';
+import '../../config/app_colors.dart';
 // import 'package:cached_network_image/cached_network_image.dart';
 
-class ProfilePage extends StatefulWidget {
+class ProfilePage extends ConsumerStatefulWidget {
   const ProfilePage({super.key});
 
   @override
-  State<ProfilePage> createState() => _ProfilePageState();
+  ConsumerState<ProfilePage> createState() => _ProfilePageState();
 }
 
-class _ProfilePageState extends State<ProfilePage> {
+class _ProfilePageState extends ConsumerState<ProfilePage> {
   final AuthService _authService = AuthService();
   // final CookieService _cookieService = CookieService();
   final UserService _userService = UserService();
@@ -216,6 +217,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   void _showImageSourceDialog() {
+    final themeColor = ref.read(themeColorProvider);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -224,7 +226,7 @@ class _ProfilePageState extends State<ProfilePage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: Icon(Icons.photo_library, color: Colors.teal),
+              leading: Icon(Icons.photo_library, color: themeColor.primary),
               title: Text('Choose from Gallery'),
               onTap: () {
                 Navigator.pop(context);
@@ -232,7 +234,7 @@ class _ProfilePageState extends State<ProfilePage> {
               },
             ),
             ListTile(
-              leading: Icon(Icons.camera_alt, color: Colors.teal),
+              leading: Icon(Icons.camera_alt, color: themeColor.primary),
               title: Text('Take Photo'),
               onTap: () {
                 Navigator.pop(context);
@@ -261,6 +263,100 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  void _showColorPickerDialog() {
+    final currentTheme = ref.read(themeColorProvider);
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Dismiss',
+      barrierColor: Colors.black54,
+      transitionDuration: Duration(milliseconds: 300),
+      pageBuilder: (context, animation, secondaryAnimation) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Text('Select Theme Color'),
+          content: SingleChildScrollView(
+            child: Wrap(
+              spacing: 16,
+              runSpacing: 16,
+              alignment: WrapAlignment.center,
+              children: AppColors.allThemes.map((theme) {
+                final isSelected = currentTheme.name == theme.name;
+                return GestureDetector(
+                  onTap: () {
+                    // Close dialog first to allow closing animation
+                    Navigator.pop(context);
+                    // Wait for closing animation to complete before changing theme
+                    // This prevents the theme change from interrupting the animation
+                    Future.delayed(Duration(milliseconds: 300), () {
+                      if (context.mounted) {
+                        ref.read(themeColorProvider.notifier).setTheme(theme);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Theme changed to ${theme.name}'),
+                            backgroundColor: theme.primary,
+                            behavior: SnackBarBehavior.floating,
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    });
+                  },
+                  child: Container(
+                    width: 70,
+                    height: 70,
+                    decoration: BoxDecoration(
+                      color: theme.primary,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isSelected ? Colors.black : Colors.grey[300]!,
+                        width: isSelected ? 4 : 2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: theme.primary.withOpacity(0.4),
+                          spreadRadius: isSelected ? 3 : 1,
+                          blurRadius: isSelected ? 10 : 5,
+                          offset: Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: isSelected
+                        ? Icon(Icons.check, color: Colors.white, size: 30)
+                        : null,
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Close'),
+            ),
+          ],
+        );
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curvedAnimation = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+
+        return FadeTransition(
+          opacity: curvedAnimation,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.8, end: 1.0).animate(curvedAnimation),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _requestPermissions() async {
     // try {
     await Permission.contacts.request();
@@ -271,6 +367,7 @@ class _ProfilePageState extends State<ProfilePage> {
     required String title,
     required List<Widget> children,
   }) {
+    final themeColor = ref.watch(themeColorProvider);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -281,7 +378,7 @@ class _ProfilePageState extends State<ProfilePage> {
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
-              color: Colors.teal,
+              color: themeColor.primary,
             ),
           ),
         ),
@@ -297,6 +394,7 @@ class _ProfilePageState extends State<ProfilePage> {
     Color? valueColor,
     Widget? trailing,
   }) {
+    final themeColor = ref.watch(themeColorProvider);
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
@@ -304,10 +402,10 @@ class _ProfilePageState extends State<ProfilePage> {
           Container(
             padding: EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.teal.withOpacity(0.1),
+              color: themeColor.primary.withOpacity(0.1),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(icon, color: Colors.teal, size: 20),
+            child: Icon(icon, color: themeColor.primary, size: 20),
           ),
           SizedBox(width: 12),
           Expanded(
@@ -342,11 +440,13 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
+
     return Scaffold(
       appBar: PreferredSize(
         preferredSize: Size.fromHeight(60),
         child: AppBar(
-          backgroundColor: Colors.teal,
+          backgroundColor: themeColor.primary,
           leadingWidth: 60,
           leading: Container(
             margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
@@ -436,7 +536,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [Colors.teal, Colors.teal[300]!],
+                    colors: [themeColor.primary, themeColor.primaryLight],
                   ),
                 ),
                 child: Column(
@@ -449,7 +549,8 @@ class _ProfilePageState extends State<ProfilePage> {
                           backgroundColor: Colors.white,
                           child: CircleAvatar(
                             radius: 47,
-                            backgroundColor: Colors.teal[100],
+                            backgroundColor: themeColor.primaryLight
+                                .withOpacity(0.3),
                             backgroundImage: userData?['profile_pic'] != null
                                 ? CachedNetworkImageProvider(
                                     userData!['profile_pic'],
@@ -463,7 +564,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                             userData?['name'] ?? 'User',
                                           ),
                                     style: TextStyle(
-                                      color: Colors.teal,
+                                      color: themeColor.primary,
                                       fontWeight: FontWeight.bold,
                                       fontSize: 24,
                                     ),
@@ -489,7 +590,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                         strokeWidth: 2,
                                         valueColor:
                                             AlwaysStoppedAnimation<Color>(
-                                              Colors.teal,
+                                              themeColor.primary,
                                             ),
                                       ),
                                     ),
@@ -497,7 +598,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                 : IconButton(
                                     icon: Icon(
                                       Icons.camera_alt,
-                                      color: Colors.teal,
+                                      color: themeColor.primary,
                                     ),
                                     onPressed: _showImageSourceDialog,
                                   ),
@@ -580,7 +681,7 @@ class _ProfilePageState extends State<ProfilePage> {
                           value: (userData?['role'] ?? 'user')
                               .toString()
                               .toUpperCase(),
-                          valueColor: Colors.teal,
+                          valueColor: themeColor.primary,
                         ),
                       ],
                     ),
@@ -654,6 +755,95 @@ class _ProfilePageState extends State<ProfilePage> {
                             }
                           },
                         ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // App Theme Color Section
+              Container(
+                margin: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.grey.withOpacity(0.1),
+                      spreadRadius: 1,
+                      blurRadius: 5,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    _buildInfoSection(
+                      title: 'App Appearance',
+                      children: [
+                        InkWell(
+                          onTap: () => _showColorPickerDialog(),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: ref
+                                        .watch(themeColorProvider)
+                                        .primary
+                                        .withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Icon(
+                                    Icons.palette,
+                                    color: ref
+                                        .watch(themeColorProvider)
+                                        .primary,
+                                    size: 20,
+                                  ),
+                                ),
+                                SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Theme Color',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey[600],
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      SizedBox(height: 2),
+                                      Text(
+                                        'Select your preferred app color',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.black87,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Icon(
+                                  Icons.arrow_forward_ios,
+                                  color: Colors.grey[400],
+                                  size: 16,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 8),
                       ],
                     ),
                   ],
@@ -748,21 +938,21 @@ class _ProfilePageState extends State<ProfilePage> {
                               : 'Loading...',
                           valueColor: Colors.grey[700],
                         ),
-                        ProfileOption(
-                          icon: Icons.storage,
-                          title: 'Database Viewer',
-                          subtitle: 'View and inspect database contents',
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => DriftDbViewer(
-                                  SqliteDatabase.instance.database,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+                        // ProfileOption(
+                        //   icon: Icons.storage,
+                        //   title: 'Database Viewer',
+                        //   subtitle: 'View and inspect database contents',
+                        //   onTap: () {
+                        //     Navigator.push(
+                        //       context,
+                        //       MaterialPageRoute(
+                        //         builder: (context) => DriftDbViewer(
+                        //           SqliteDatabase.instance.database,
+                        //         ),
+                        //       ),
+                        //     );
+                        //   },
+                        // ),
                       ],
                     ),
                   ],
@@ -778,7 +968,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 }
 
-class ProfileOption extends StatelessWidget {
+class ProfileOption extends ConsumerWidget {
   final IconData icon;
   final String title;
   final String subtitle;
@@ -795,9 +985,10 @@ class ProfileOption extends StatelessWidget {
   }) : super(key: key);
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeColor = ref.watch(themeColorProvider);
     return ListTile(
-      leading: Icon(icon, color: textColor ?? Colors.teal, size: 24),
+      leading: Icon(icon, color: textColor ?? themeColor.primary, size: 24),
       title: Text(
         title,
         style: TextStyle(
