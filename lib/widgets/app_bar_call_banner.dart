@@ -1,153 +1,148 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../services/call_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/call.provider.dart';
 import '../models/call_model.dart';
 
 /// A call banner that integrates with the app bar system
 /// This version positions the banner like a proper app bar
-class AppBarCallBanner extends StatelessWidget implements PreferredSizeWidget {
+class AppBarCallBanner extends ConsumerWidget implements PreferredSizeWidget {
   const AppBarCallBanner({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return Consumer<CallService>(
-      builder: (context, callService, child) {
-        final activeCall = callService.activeCall;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final callServiceState = ref.watch(callServiceProvider);
+    final callServiceNotifier = ref.read(callServiceProvider.notifier);
+    final activeCall = callServiceState.activeCall;
 
-        // Only show banner if there's an ongoing call (answered status)
-        if (activeCall == null || activeCall.status != CallStatus.answered) {
-          return const SizedBox.shrink();
-        }
+    // Only show banner if there's an ongoing call (answered status)
+    if (activeCall == null || activeCall.status != CallStatus.answered) {
+      return const SizedBox.shrink();
+    }
 
-        return Container(
-          height: 50,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Colors.green.shade600, Colors.green.shade700],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
-              ),
-            ],
+    return Container(
+      height: 50,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.green.shade600, Colors.green.shade700],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
           ),
-          child: SafeArea(
-            child: InkWell(
-              onTap: () => _navigateToCall(context),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 6,
-                ),
-                child: Row(
-                  children: [
-                    // Call icon with pulse animation
-                    _PulsingCallIcon(),
+        ],
+      ),
+      child: SafeArea(
+        child: InkWell(
+          onTap: () => _navigateToCall(context),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Row(
+              children: [
+                // Call icon with pulse animation
+                _PulsingCallIcon(),
 
-                    const SizedBox(width: 12),
+                const SizedBox(width: 12),
 
-                    // Call info
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
+                // Call info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Row(
                         children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 6,
-                                height: 6,
-                                decoration: const BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Live Call',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                            ),
                           ),
-                          const SizedBox(height: 2),
+                          const SizedBox(width: 6),
                           Text(
-                            activeCall.userName,
+                            'Live Call',
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
-                          if (activeCall.duration != null)
-                            Text(
-                              _formatDuration(activeCall.duration!),
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.9),
-                                fontSize: 10,
-                              ),
-                            ),
                         ],
                       ),
+                      const SizedBox(height: 2),
+                      Text(
+                        activeCall.userName,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (activeCall.duration != null)
+                        Text(
+                          _formatDuration(activeCall.duration!),
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.9),
+                            fontSize: 10,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+
+                // Quick controls
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Mute button
+                    _buildQuickButton(
+                      icon: activeCall.isMuted ? Icons.mic_off : Icons.mic,
+                      onPressed: () => callServiceNotifier.toggleMute(),
+                      isActive: activeCall.isMuted,
                     ),
 
-                    // Quick controls
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Mute button
-                        _buildQuickButton(
-                          icon: activeCall.isMuted ? Icons.mic_off : Icons.mic,
-                          onPressed: () => callService.toggleMute(),
-                          isActive: activeCall.isMuted,
-                        ),
+                    const SizedBox(width: 6),
 
-                        const SizedBox(width: 6),
-
-                        // Speaker button
-                        _buildQuickButton(
-                          icon: activeCall.isSpeakerOn
-                              ? Icons.volume_up
-                              : Icons.volume_down,
-                          onPressed: () => callService.toggleSpeaker(),
-                          isActive: activeCall.isSpeakerOn,
-                        ),
-
-                        const SizedBox(width: 6),
-
-                        // End call button
-                        _buildQuickButton(
-                          icon: Icons.call_end,
-                          onPressed: () => _endCall(context, callService),
-                          isDestructive: true,
-                        ),
-                      ],
+                    // Speaker button
+                    _buildQuickButton(
+                      icon: activeCall.isSpeakerOn
+                          ? Icons.volume_up
+                          : Icons.volume_down,
+                      onPressed: () => callServiceNotifier.toggleSpeaker(),
+                      isActive: activeCall.isSpeakerOn,
                     ),
 
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
 
-                    // Expand indicator
-                    Icon(
-                      Icons.keyboard_arrow_up,
-                      color: Colors.white.withOpacity(0.7),
-                      size: 18,
+                    // End call button
+                    _buildQuickButton(
+                      icon: Icons.call_end,
+                      onPressed: () => _endCall(context, callServiceNotifier),
+                      isDestructive: true,
                     ),
                   ],
                 ),
-              ),
+
+                const SizedBox(width: 8),
+
+                // Expand indicator
+                Icon(
+                  Icons.keyboard_arrow_up,
+                  color: Colors.white.withOpacity(0.7),
+                  size: 18,
+                ),
+              ],
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -186,9 +181,12 @@ class AppBarCallBanner extends StatelessWidget implements PreferredSizeWidget {
     Navigator.of(context).pushNamed('/call');
   }
 
-  void _endCall(BuildContext context, CallService callService) async {
+  void _endCall(
+    BuildContext context,
+    CallServiceNotifier callServiceNotifier,
+  ) async {
     try {
-      await callService.endCall();
+      await callServiceNotifier.endCall();
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(

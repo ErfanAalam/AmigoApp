@@ -111,6 +111,7 @@ enum WSMessageType {
   messageForward('message:forward'),
   messageDelete('message:delete'),
   callInit('call:init'),
+  callInitAck('call:init:ack'),
   callOffer('call:offer'),
   callAnswer('call:answer'),
   callIce('call:ice'),
@@ -119,6 +120,7 @@ enum WSMessageType {
   callEnd('call:end'),
   callRinging('call:ringing'),
   callMissed('call:missed'),
+  callError('call:error'),
   socketHealthCheck('socket:health_check'),
   ping('ping'),
   pong('pong'),
@@ -657,6 +659,77 @@ class MessageForwardPayload {
   }
 }
 
+/// Call payload
+class CallPayload {
+  final int? callId;
+  final int callerId;
+  final String? callerName;
+  final String? callerPfp;
+  final int calleeId;
+  final String? calleeName;
+  final String? calleePfp;
+  final dynamic data;
+  final dynamic error;
+  final DateTime? timestamp;
+
+  CallPayload({
+    this.callId,
+    required this.callerId,
+    this.callerName,
+    this.callerPfp,
+    required this.calleeId,
+    this.calleeName,
+    this.calleePfp,
+    this.data,
+    this.error,
+    this.timestamp,
+  });
+
+  factory CallPayload.fromJson(Map<String, dynamic> json) {
+    DateTime? timestamp;
+    try {
+      final timestampData = json['timestamp'];
+      if (timestampData != null) {
+        if (timestampData is String) {
+          timestamp = DateTime.parse(timestampData);
+        } else if (timestampData is DateTime) {
+          timestamp = timestampData;
+        }
+      }
+    } catch (e) {
+      // Ignore timestamp parsing errors
+    }
+
+    return CallPayload(
+      callId: json['call_id'] as int?,
+      callerId: json['caller_id'] as int,
+      callerName: json['caller_name'] as String?,
+      callerPfp: json['caller_pfp'] as String?,
+      calleeId: json['callee_id'] as int,
+      calleeName: json['callee_name'] as String?,
+      calleePfp: json['callee_pfp'] as String?,
+      data: json['data'],
+      error: json['error'],
+      timestamp: timestamp,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      if (callId != null) 'call_id': callId,
+      'caller_id': callerId,
+      if (callerName != null) 'caller_name': callerName,
+      if (callerPfp != null) 'caller_pfp': callerPfp,
+      'callee_id': calleeId,
+      if (calleeName != null) 'callee_name': calleeName,
+      if (calleePfp != null) 'callee_pfp': calleePfp,
+      if (data != null) 'data': data,
+      if (error != null) 'error': error,
+      if (timestamp != null) 'timestamp': timestamp!.toIso8601String(),
+    };
+  }
+}
+
 /// Media response type from the server
 
 class MediaResponse {
@@ -768,6 +841,23 @@ class WSMessage {
         return MessageForwardPayload.fromJson(payloadJson);
       case WSMessageType.messageDelete:
         return DeleteMessagePayload.fromJson(payloadJson);
+      case WSMessageType.callInit:
+      case WSMessageType.callInitAck:
+      case WSMessageType.callOffer:
+      case WSMessageType.callAnswer:
+      case WSMessageType.callIce:
+      case WSMessageType.callAccept:
+      case WSMessageType.callDecline:
+      case WSMessageType.callEnd:
+      case WSMessageType.callRinging:
+      case WSMessageType.callMissed:
+      case WSMessageType.callError:
+        try {
+          return CallPayload.fromJson(payloadJson);
+        } catch (e) {
+          // If parsing fails, return raw payload
+          return payloadJson;
+        }
       case WSMessageType.ping:
       case WSMessageType.pong:
       case WSMessageType.socketHealthCheck:
@@ -798,6 +888,7 @@ class WSMessage {
     if (payload is MiscPayload) return payload.toJson();
     if (payload is MessagePinPayload) return payload.toJson();
     if (payload is MessageForwardPayload) return payload.toJson();
+    if (payload is CallPayload) return payload.toJson();
     return payload;
   }
 
@@ -829,4 +920,6 @@ class WSMessage {
 
   MessageForwardPayload? get messageForwardPayload =>
       payload is MessageForwardPayload ? payload : null;
+
+  CallPayload? get callPayload => payload is CallPayload ? payload : null;
 }

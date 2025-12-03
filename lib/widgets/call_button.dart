@@ -1,13 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_callkit_incoming/entities/android_params.dart';
-import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
-import 'package:flutter_callkit_incoming/entities/ios_params.dart';
-import 'package:flutter_callkit_incoming/entities/notification_params.dart';
-import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
-import 'package:provider/provider.dart';
-import '../services/call_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class CallButton extends StatelessWidget {
+import '../providers/call.provider.dart';
+
+class CallButton extends ConsumerWidget {
   final int userId;
   final String userName;
   final String? userProfilePic;
@@ -22,43 +18,44 @@ class CallButton extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    return Consumer<CallService>(
-      builder: (context, callService, child) {
-        final hasActiveCall = callService.hasActiveCall;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final callServiceState = ref.watch(callServiceProvider);
+    final callServiceNotifier = ref.read(callServiceProvider.notifier);
+    final hasActiveCall = callServiceState.hasActiveCall;
 
-        if (isIconOnly) {
-          return IconButton(
-            onPressed: hasActiveCall
-                ? null
-                : () => _initiateCall(context, callService),
-            icon: Icon(
-              Icons.call,
-              color: hasActiveCall ? Colors.grey : Colors.green,
-            ),
-            tooltip: hasActiveCall ? 'Already in a call' : 'Start audio call',
-          );
-        }
+    if (isIconOnly) {
+      return IconButton(
+        onPressed: hasActiveCall
+            ? null
+            : () => _initiateCall(context, callServiceNotifier),
+        icon: Icon(
+          Icons.call,
+          color: hasActiveCall ? Colors.grey : Colors.green,
+        ),
+        tooltip: hasActiveCall ? 'Already in a call' : 'Start audio call',
+      );
+    }
 
-        return ElevatedButton.icon(
-          onPressed: hasActiveCall
-              ? null
-              : () => _initiateCall(context, callService),
-          icon: const Icon(Icons.call),
-          label: const Text('Call'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.green,
-            foregroundColor: Colors.white,
-            disabledBackgroundColor: Colors.grey,
-          ),
-        );
-      },
+    return ElevatedButton.icon(
+      onPressed: hasActiveCall
+          ? null
+          : () => _initiateCall(context, callServiceNotifier),
+      icon: const Icon(Icons.call),
+      label: const Text('Call'),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.green,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: Colors.grey,
+      ),
     );
   }
 
-  void _initiateCall(BuildContext context, CallService callService) async {
+  void _initiateCall(
+    BuildContext context,
+    CallServiceNotifier callServiceNotifier,
+  ) async {
     try {
-      await callService.initiateCall(userId, userName, userProfilePic);
+      await callServiceNotifier.initiateCall(userId, userName, userProfilePic);
       // CallKitParams params = CallKitParams(
       //   id: userId.toString(),
       //   nameCaller: userName,

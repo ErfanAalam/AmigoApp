@@ -5,7 +5,7 @@ import '../../api/chats.services.dart';
 import '../../api/user.service.dart';
 
 class DeletedChatsPage extends StatefulWidget {
-  const DeletedChatsPage({Key? key}) : super(key: key);
+  const DeletedChatsPage({super.key});
 
   @override
   State<DeletedChatsPage> createState() => _DeletedChatsPageState();

@@ -1,173 +1,169 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../services/call_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/call.provider.dart';
 import '../models/call_model.dart';
 
-class PersistentCallBanner extends StatelessWidget {
+class PersistentCallBanner extends ConsumerWidget {
   const PersistentCallBanner({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return Consumer<CallService>(
-      builder: (context, callService, child) {
-        final activeCall = callService.activeCall;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final callServiceState = ref.watch(callServiceProvider);
+    final callServiceNotifier = ref.read(callServiceProvider.notifier);
+    final activeCall = callServiceState.activeCall;
 
-        // Only show banner if there's an ongoing call (answered status)
-        if (activeCall == null || activeCall.status != CallStatus.answered) {
-          return const SizedBox.shrink();
-        }
+    // Only show banner if there's an ongoing call (answered status)
+    if (activeCall == null || activeCall.status != CallStatus.answered) {
+      return const SizedBox.shrink();
+    }
 
-        return Container(
-          decoration: BoxDecoration(
-            color: Colors.teal,
-          ),
-          child: SafeArea(
-            top: true,
-            bottom: false,
-            child: Material(
-              elevation: 8,
-              child: Container(
-                height: 80,
-                decoration: BoxDecoration(
-                  color: const Color.fromARGB(255, 1, 107, 97),
-                  // borderRadius: BorderRadius.circular(10),
+    return Container(
+      decoration: BoxDecoration(color: Colors.teal),
+      child: SafeArea(
+        top: true,
+        bottom: false,
+        child: Material(
+          elevation: 8,
+          child: Container(
+            height: 80,
+            decoration: BoxDecoration(
+              color: const Color.fromARGB(255, 1, 107, 97),
+              // borderRadius: BorderRadius.circular(10),
+            ),
+            child: InkWell(
+              onTap: () => _navigateToCall(context),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
                 ),
-                child: InkWell(
-                  onTap: () => _navigateToCall(context),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    child: Row(
-                      children: [
-                        // Call icon with pulse animation
-                        _PulsingCallIcon(),
+                child: Row(
+                  children: [
+                    // Call icon with pulse animation
+                    _PulsingCallIcon(),
 
-                        const SizedBox(width: 12),
+                    const SizedBox(width: 12),
 
-                        // Call info
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.center,
+                    // Call info
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Row(
                             children: [
-                              Row(
-                                children: [
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(
-                                      color: Colors.green.shade400,
-                                      shape: BoxShape.circle,
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.green.shade400
-                                              .withOpacity(0.5),
-                                          blurRadius: 4,
-                                          spreadRadius: 1,
-                                        ),
-                                      ],
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: Colors.green.shade400,
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.green.shade400.withOpacity(
+                                        0.5,
+                                      ),
+                                      blurRadius: 4,
+                                      spreadRadius: 1,
                                     ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Live Call',
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.95),
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      letterSpacing: 0.5,
-                                    ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(width: 8),
                               Text(
-                                activeCall.userName,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.2,
+                                'Live Call',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.95),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.5,
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
                               ),
-                              if (activeCall.duration != null) ...[
-                                const SizedBox(height: 2),
-                                Text(
-                                  _formatDuration(activeCall.duration!),
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(0.85),
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
                             ],
                           ),
-                        ),
-
-                        // Quick controls
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // Mute button
-                            _buildQuickButton(
-                              icon: activeCall.isMuted
-                                  ? Icons.mic_off
-                                  : Icons.mic,
-                              onPressed: () => callService.toggleMute(),
-                              isActive: activeCall.isMuted,
+                          const SizedBox(height: 4),
+                          Text(
+                            activeCall.userName,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.2,
                             ),
-
-                            const SizedBox(width: 12),
-
-                            // Speaker button
-                            _buildQuickButton(
-                              icon: activeCall.isSpeakerOn
-                                  ? Icons.volume_up
-                                  : Icons.volume_down,
-                              onPressed: () => callService.toggleSpeaker(),
-                              isActive: activeCall.isSpeakerOn,
-                            ),
-
-                            const SizedBox(width: 12),
-
-                            // End call button
-                            _buildQuickButton(
-                              icon: Icons.call_end,
-                              onPressed: () => _endCall(context, callService),
-                              isDestructive: true,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (activeCall.duration != null) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              _formatDuration(activeCall.duration!),
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.85),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ],
+                        ],
+                      ),
+                    ),
+
+                    // Quick controls
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Mute button
+                        _buildQuickButton(
+                          icon: activeCall.isMuted ? Icons.mic_off : Icons.mic,
+                          onPressed: () => callServiceNotifier.toggleMute(),
+                          isActive: activeCall.isMuted,
                         ),
 
                         const SizedBox(width: 12),
 
-                        // Expand indicator
-                        Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.white.withOpacity(0.1),
-                          ),
-                          child: Icon(
-                            Icons.keyboard_arrow_up,
-                            color: Colors.white.withOpacity(0.8),
-                            size: 18,
-                          ),
+                        // Speaker button
+                        _buildQuickButton(
+                          icon: activeCall.isSpeakerOn
+                              ? Icons.volume_up
+                              : Icons.volume_down,
+                          onPressed: () => callServiceNotifier.toggleSpeaker(),
+                          isActive: activeCall.isSpeakerOn,
+                        ),
+
+                        const SizedBox(width: 12),
+
+                        // End call button
+                        _buildQuickButton(
+                          icon: Icons.call_end,
+                          onPressed: () =>
+                              _endCall(context, callServiceNotifier),
+                          isDestructive: true,
                         ),
                       ],
                     ),
-                  ),
+
+                    const SizedBox(width: 12),
+
+                    // Expand indicator
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withOpacity(0.1),
+                      ),
+                      child: Icon(
+                        Icons.keyboard_arrow_up,
+                        color: Colors.white.withOpacity(0.8),
+                        size: 18,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -220,9 +216,12 @@ class PersistentCallBanner extends StatelessWidget {
     Navigator.of(context).pushNamed('/call');
   }
 
-  void _endCall(BuildContext context, CallService callService) async {
+  void _endCall(
+    BuildContext context,
+    CallServiceNotifier callServiceNotifier,
+  ) async {
     try {
-      await callService.endCall();
+      await callServiceNotifier.endCall();
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(

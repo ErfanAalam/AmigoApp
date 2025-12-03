@@ -4,9 +4,7 @@ import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/material.dart';
-// import 'package:flutter/widgets.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
-import 'package:provider/provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
@@ -18,14 +16,13 @@ import 'screens/chat/dm/messaging.dart';
 import 'screens/chat/group/messaging.dart';
 import 'screens/share/external_share.dart';
 import 'services/auth/auth.service.dart';
+import 'services/call.service.dart';
 import 'services/cookie_service.dart';
 import 'services/socket/websocket_service.dart';
 import 'services/user_status_service.dart';
 import 'services/socket/websocket_message_handler.dart';
-import 'services/call_service.dart';
 import 'services/notification_service.dart';
 import 'services/call_foreground_service.dart';
-// import 'services/call_notification_handler.dart';
 import 'widgets/call_manager.dart';
 import 'api/api_service.dart';
 import 'utils/navigation_helper.dart';
@@ -60,15 +57,8 @@ void main() async {
 
   // await TestBGService().initializeService();
 
-  // Run the app (with CallService provider and Riverpod)
-  material.runApp(
-    ProviderScope(
-      child: ChangeNotifierProvider<CallService>(
-        create: (_) => CallService()..initialize(),
-        child: MyApp(),
-      ),
-    ),
-  );
+  // Run the app (with Riverpod)
+  material.runApp(const ProviderScope(child: MyApp()));
 }
 
 class MyApp extends material.StatefulWidget {

@@ -1,231 +1,243 @@
+import 'package:amigo/providers/call.provider.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../../services/call_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/call_model.dart';
 
-class InCallScreen extends StatefulWidget {
+class InCallScreen extends ConsumerStatefulWidget {
   const InCallScreen({super.key});
 
   @override
-  State<InCallScreen> createState() => _InCallScreenState();
+  ConsumerState<InCallScreen> createState() => _InCallScreenState();
 }
 
-class _InCallScreenState extends State<InCallScreen> {
+class _InCallScreenState extends ConsumerState<InCallScreen> {
   @override
   Widget build(BuildContext context) {
-    return Consumer<CallService>(
-      builder: (context, callService, child) {
-        final activeCall = callService.activeCall;
+    final callServiceState = ref.watch(callServiceProvider);
+    final callServiceNotifier = ref.read(callServiceProvider.notifier);
+    final activeCall = callServiceState.activeCall;
 
-        if (activeCall == null || activeCall.status == CallStatus.ended) {
-          // If no active call, navigate back to previous screen (chat page)
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (context.mounted) {
-              // Pop all call-related screens and return to main chat
-              Navigator.of(context).popUntil((route) => route.isFirst);
-            }
-          });
-
-          // Show a loading indicator instead of black screen
-          return Scaffold(
-            backgroundColor: Colors.black,
-            body: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const CircularProgressIndicator(color: Colors.white),
-                  const SizedBox(height: 20),
-                  Text(
-                    activeCall?.status == CallStatus.ended
-                        ? 'Call ended'
-                        : 'Closing call...',
-                    style: const TextStyle(color: Colors.white, fontSize: 16),
-                  ),
-                ],
-              ),
-            ),
-          );
+    if (activeCall == null || 
+        activeCall.status == CallStatus.ended ||
+        activeCall.status == CallStatus.declined ||
+        activeCall.status == CallStatus.missed) {
+      // If no active call or call is ended/declined/missed, navigate back to previous screen (chat page)
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) {
+          // Pop all call-related screens and return to main chat
+          Navigator.of(context).popUntil((route) => route.isFirst);
         }
+      });
 
-        return Scaffold(
-          backgroundColor: Colors.black,
-          body: SafeArea(
-            child: Column(
-              children: [
-                // Top bar with minimize button
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      // Minimize button
-                      GestureDetector(
-                        onTap: () => _minimizeCall(context),
-                        child: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.white.withOpacity(0.1),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.3),
-                              width: 1,
-                            ),
-                          ),
-                          child: const Icon(
-                            Icons.arrow_back,
-                            color: Colors.white,
-                            size: 20,
-                          ),
+      // Show a loading indicator instead of black screen
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(color: Colors.white),
+              const SizedBox(height: 20),
+              Text(
+                activeCall?.status == CallStatus.ended
+                    ? 'Call ended'
+                    : activeCall?.status == CallStatus.declined
+                        ? 'Call declined'
+                        : activeCall?.status == CallStatus.missed
+                            ? 'Call missed'
+                            : 'Closing call...',
+                style: const TextStyle(color: Colors.white, fontSize: 16),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Top bar with minimize button
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // Minimize button
+                  GestureDetector(
+                    onTap: () => _minimizeCall(context),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withOpacity(0.1),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.3),
+                          width: 1,
                         ),
                       ),
-                      // Call status indicator
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.green.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: Colors.green.withOpacity(0.5),
-                            width: 1,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: const BoxDecoration(
-                                color: Colors.green,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              _getCallStatusText(activeCall.status),
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w300,
-                              ),
-                            ),
-                          ],
-                        ),
+                      child: const Icon(
+                        Icons.arrow_back,
+                        color: Colors.white,
+                        size: 20,
                       ),
-                      // Placeholder for symmetry
-                      const SizedBox(width: 40),
-                    ],
+                    ),
                   ),
-                ),
-
-                // Top section - call info
-                Expanded(
-                  flex: 3,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const SizedBox(height: 0),
-
-                      // User avatar
-                      Container(
-                        width: 120,
-                        height: 120,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.3),
-                            width: 2,
+                  // Call status indicator
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: Colors.green.withOpacity(0.5),
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: Colors.green,
+                            shape: BoxShape.circle,
                           ),
                         ),
-                        child: ClipOval(
-                          child: activeCall.userProfilePic != null
-                              ? Image.network(
-                                  activeCall.userProfilePic!,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      _buildDefaultAvatar(activeCall.userName),
-                                )
-                              : _buildDefaultAvatar(activeCall.userName),
-                        ),
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      // User name
-                      Text(
-                        activeCall.userName,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      // Call duration
-                      if (activeCall.duration != null)
+                        const SizedBox(width: 6),
                         Text(
-                          _formatDuration(activeCall.duration!),
+                          _getCallStatusText(activeCall.status),
                           style: const TextStyle(
                             color: Colors.white70,
                             fontSize: 16,
                             fontWeight: FontWeight.w300,
                           ),
-                        )
-                      else
-                        const Text(
-                          'Connecting...',
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w300,
-                          ),
                         ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-
-                // Middle section - call controls
-                Expanded(
-                  flex: 1,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      // Mute button
-                      _buildControlButton(
-                        icon: activeCall.isMuted ? Icons.mic_off : Icons.mic,
-                        isActive: activeCall.isMuted,
-                        onPressed: () => callService.toggleMute(),
-                      ),
-
-                      // Speaker button
-                      _buildControlButton(
-                        icon: activeCall.isSpeakerOn
-                            ? Icons.volume_up
-                            : Icons.volume_down,
-                        isActive: activeCall.isSpeakerOn,
-                        onPressed: () => callService.toggleSpeaker(),
-                      ),
-
-                      // End call button
-                      _buildEndCallButton(
-                        onPressed: () => _endCall(context, callService),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 40),
-              ],
+                  // Placeholder for symmetry
+                  const SizedBox(width: 40),
+                ],
+              ),
             ),
-          ),
-        );
-      },
+
+            // Top section - call info
+            Expanded(
+              flex: 3,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SizedBox(height: 0),
+
+                  // User avatar
+                  Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.3),
+                        width: 2,
+                      ),
+                    ),
+                    child: ClipOval(
+                      child: activeCall.userProfilePic != null
+                          ? Image.network(
+                              activeCall.userProfilePic!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  _buildDefaultAvatar(activeCall.userName),
+                            )
+                          : _buildDefaultAvatar(activeCall.userName),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // User name
+                  Text(
+                    activeCall.userName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // Call duration or status
+                  if (activeCall.status == CallStatus.answered)
+                    activeCall.duration != null
+                        ? Text(
+                            _formatDuration(activeCall.duration!),
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w300,
+                            ),
+                          )
+                        : const Text(
+                            'Connected',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w300,
+                            ),
+                          )
+                  else
+                    Text(
+                      _getCallStatusText(activeCall.status),
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w300,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+            // Middle section - call controls
+            Expanded(
+              flex: 1,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  // Mute button
+                  _buildControlButton(
+                    icon: activeCall.isMuted ? Icons.mic_off : Icons.mic,
+                    isActive: activeCall.isMuted,
+                    onPressed: () => callServiceNotifier.toggleMute(),
+                  ),
+
+                  // Speaker button
+                  _buildControlButton(
+                    icon: activeCall.isSpeakerOn
+                        ? Icons.volume_up
+                        : Icons.volume_down,
+                    isActive: activeCall.isSpeakerOn,
+                    onPressed: () => callServiceNotifier.toggleSpeaker(),
+                  ),
+
+                  // End call button
+                  _buildEndCallButton(onPressed: () => _endCall(context)),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 40),
+          ],
+        ),
+      ),
     );
   }
 
@@ -324,13 +336,13 @@ class _InCallScreenState extends State<InCallScreen> {
     Navigator.of(context).pop();
   }
 
-  void _endCall(BuildContext context, CallService callService) async {
+  void _endCall(BuildContext context) async {
     try {
-      await callService.endCall();
+      await ref.read(callServiceProvider.notifier).endCall();
       // Don't manually navigate here - let the Consumer handle it
       // when activeCall becomes null or status becomes ended
     } catch (e) {
-      print('[IN_CALL] Error ending call: $e');
+      debugPrint('[IN_CALL] Error ending call: $e');
       // Still try to clean up the call state
       if (context.mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);

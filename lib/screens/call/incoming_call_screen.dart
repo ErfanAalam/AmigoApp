@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../../services/call_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/call.provider.dart';
 import '../../models/call_model.dart';
 
-class IncomingCallScreen extends StatefulWidget {
+class IncomingCallScreen extends ConsumerStatefulWidget {
   const IncomingCallScreen({super.key});
 
   @override
-  State<IncomingCallScreen> createState() => _IncomingCallScreenState();
+  ConsumerState<IncomingCallScreen> createState() => _IncomingCallScreenState();
 }
 
-class _IncomingCallScreenState extends State<IncomingCallScreen>
+class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
     with TickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _pulseAnimation;
@@ -37,178 +37,171 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<CallService>(
-      builder: (context, callService, child) {
-        final activeCall = callService.activeCall;
+    final callServiceState = ref.watch(callServiceProvider);
+    final callServiceNotifier = ref.read(callServiceProvider.notifier);
+    final activeCall = callServiceState.activeCall;
 
-        print('[IncomingCallScreen] 📱 Build called');
-        print('[IncomingCallScreen] activeCall: $activeCall');
-        if (activeCall != null) {
-          print(
-            '[IncomingCallScreen] activeCall.callType: ${activeCall.callType}',
-          );
-          print('[IncomingCallScreen] activeCall.status: ${activeCall.status}');
-          print('[IncomingCallScreen] CallType.incoming: ${CallType.incoming}');
-          print(
-            '[IncomingCallScreen] CallStatus.ringing: ${CallStatus.ringing}',
-          );
+    print('[IncomingCallScreen] 📱 Build called');
+    print('[IncomingCallScreen] activeCall: $activeCall');
+    if (activeCall != null) {
+      print('[IncomingCallScreen] activeCall.callType: ${activeCall.callType}');
+      print('[IncomingCallScreen] activeCall.status: ${activeCall.status}');
+      print('[IncomingCallScreen] CallType.incoming: ${CallType.incoming}');
+      print('[IncomingCallScreen] CallStatus.ringing: ${CallStatus.ringing}');
+    }
+
+    // If no active call or call was declined/ended, close the screen
+    if (activeCall == null ||
+        activeCall.callType != CallType.incoming ||
+        activeCall.status != CallStatus.ringing) {
+      print(
+        '[IncomingCallScreen] ❌ Invalid call state - navigating to chats page',
+      );
+      print('[IncomingCallScreen] activeCall == null: ${activeCall == null}');
+      print(
+        '[IncomingCallScreen] callType != incoming: ${activeCall?.callType != CallType.incoming}',
+      );
+      print(
+        '[IncomingCallScreen] status != ringing: ${activeCall?.status != CallStatus.ringing}',
+      );
+
+      // Navigate back to main screen (which will show chats page by default)
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
         }
+      });
 
-        // If no active call or call was declined/ended, close the screen
-        if (activeCall == null ||
-            activeCall.callType != CallType.incoming ||
-            activeCall.status != CallStatus.ringing) {
-          print(
-            '[IncomingCallScreen] ❌ Invalid call state - navigating to chats page',
-          );
-          print(
-            '[IncomingCallScreen] activeCall == null: ${activeCall == null}',
-          );
-          print(
-            '[IncomingCallScreen] callType != incoming: ${activeCall?.callType != CallType.incoming}',
-          );
-          print(
-            '[IncomingCallScreen] status != ringing: ${activeCall?.status != CallStatus.ringing}',
-          );
+      // Return a loading screen while navigating
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator(color: Colors.white)),
+      );
+    }
 
-          // Navigate back to main screen (which will show chats page by default)
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (context.mounted) {
-              Navigator.of(context).popUntil((route) => route.isFirst);
-            }
-          });
+    print('[IncomingCallScreen] ✅ Valid incoming call - showing UI');
 
-          // Return a loading screen while navigating
-          return const Scaffold(
-            backgroundColor: Colors.black,
-            body: Center(child: CircularProgressIndicator(color: Colors.white)),
-          );
-        }
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Top section - caller info
+            Expanded(
+              flex: 3,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    'Incoming call',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w300,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
 
-        print('[IncomingCallScreen] ✅ Valid incoming call - showing UI');
-
-        return Scaffold(
-          backgroundColor: Colors.black,
-          body: SafeArea(
-            child: Column(
-              children: [
-                // Top section - caller info
-                Expanded(
-                  flex: 3,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text(
-                        'Incoming call',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w300,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // Caller avatar with pulse animation
-                      AnimatedBuilder(
-                        animation: _pulseAnimation,
-                        builder: (context, child) {
-                          return Transform.scale(
-                            scale: _pulseAnimation.value,
-                            child: Container(
-                              width: 150,
-                              height: 150,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: Colors.white.withOpacity(0.3),
-                                  width: 3,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.white.withOpacity(0.2),
-                                    blurRadius: 20,
-                                    spreadRadius: 5,
-                                  ),
-                                ],
-                              ),
-                              child: ClipOval(
-                                child: activeCall.userProfilePic != null
-                                    ? Image.network(
-                                        activeCall.userProfilePic!,
-                                        fit: BoxFit.cover,
-                                        errorBuilder:
-                                            (context, error, stackTrace) =>
-                                                _buildDefaultAvatar(
-                                                  activeCall.userName,
-                                                ),
-                                      )
-                                    : _buildDefaultAvatar(activeCall.userName),
-                              ),
+                  // Caller avatar with pulse animation
+                  AnimatedBuilder(
+                    animation: _pulseAnimation,
+                    builder: (context, child) {
+                      return Transform.scale(
+                        scale: _pulseAnimation.value,
+                        child: Container(
+                          width: 150,
+                          height: 150,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.3),
+                              width: 3,
                             ),
-                          );
-                        },
-                      ),
-
-                      const SizedBox(height: 30),
-
-                      // Caller name
-                      Text(
-                        activeCall.userName,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      // Call type
-                      const Text(
-                        'Audio call',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w300,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Bottom section - call actions
-                Expanded(
-                  flex: 1,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          // Decline button
-                          _buildCallActionButton(
-                            icon: Icons.call_end,
-                            color: Colors.red,
-                            onPressed: () => _declineCall(context, callService),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.white.withOpacity(0.2),
+                                blurRadius: 20,
+                                spreadRadius: 5,
+                              ),
+                            ],
                           ),
-
-                          // Accept button
-                          _buildCallActionButton(
-                            icon: Icons.call,
-                            color: Colors.green,
-                            onPressed: () => _acceptCall(context, callService),
+                          child: ClipOval(
+                            child: activeCall.userProfilePic != null
+                                ? Image.network(
+                                    activeCall.userProfilePic!,
+                                    fit: BoxFit.cover,
+                                    errorBuilder:
+                                        (context, error, stackTrace) =>
+                                            _buildDefaultAvatar(
+                                              activeCall.userName,
+                                            ),
+                                  )
+                                : _buildDefaultAvatar(activeCall.userName),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 40),
-                    ],
+                        ),
+                      );
+                    },
                   ),
-                ),
-              ],
+
+                  const SizedBox(height: 30),
+
+                  // Caller name
+                  Text(
+                    activeCall.userName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // Call type
+                  const Text(
+                    'Audio call',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w300,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        );
-      },
+
+            // Bottom section - call actions
+            Expanded(
+              flex: 1,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      // Decline button
+                      _buildCallActionButton(
+                        icon: Icons.call_end,
+                        color: Colors.red,
+                        onPressed: () =>
+                            _declineCall(context, callServiceNotifier),
+                      ),
+
+                      // Accept button
+                      _buildCallActionButton(
+                        icon: Icons.call,
+                        color: Colors.green,
+                        onPressed: () => _acceptCall(context),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 40),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -257,9 +250,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     );
   }
 
-  void _acceptCall(BuildContext context, CallService callService) async {
+  void _acceptCall(BuildContext context) async {
     try {
-      await callService.acceptCall();
+      await ref.read(callServiceProvider.notifier).acceptCall();
       // Navigate to in-call screen
       if (context.mounted) {
         Navigator.of(context).pushReplacementNamed('/call');
@@ -274,9 +267,12 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     }
   }
 
-  void _declineCall(BuildContext context, CallService callService) async {
+  void _declineCall(
+    BuildContext context,
+    CallServiceNotifier callServiceNotifier,
+  ) async {
     try {
-      await callService.declineCall();
+      await callServiceNotifier.declineCall();
       if (context.mounted) {
         Navigator.of(context).pop();
       }

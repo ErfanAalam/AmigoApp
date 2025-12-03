@@ -2,19 +2,20 @@ import 'dart:async';
 import 'package:amigo/db/repositories/call.repo.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/call_model.dart';
 import '../../api/api_service.dart';
-import '../../services/call_service.dart';
+import '../../providers/call.provider.dart';
 
-class CallsPage extends StatefulWidget {
+class CallsPage extends ConsumerStatefulWidget {
   const CallsPage({super.key});
 
   @override
-  State<CallsPage> createState() => CallsPageState();
+  ConsumerState<CallsPage> createState() => CallsPageState();
 }
 
-class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
+class CallsPageState extends ConsumerState<CallsPage>
+    with WidgetsBindingObserver {
   final ApiService _apiService = ApiService();
   List<CallHistoryItem> _callHistory = [];
   bool _isLoading =
@@ -22,17 +23,12 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
   String? _error;
   Timer? _debounceTimer;
   bool _isLoadingInProgress = false;
-  CallService? _callService;
   bool _hasLoadedOnce = false; // Track if we've loaded at least once
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-
-    // Listen to CallService changes to refresh when calls end
-    _callService = Provider.of<CallService>(context, listen: false);
-    _callService?.addListener(_onCallServiceChanged);
 
     // Load call history once on init (without showing loading if we have local data)
     _loadCallHistory(showLoading: false);
@@ -42,21 +38,9 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _debounceTimer?.cancel();
-    _callService?.removeListener(_onCallServiceChanged);
     super.dispose();
   }
 
-  void _onCallServiceChanged() {
-    // Refresh call history when call service state changes (e.g., call ends)
-    // Use debouncing to avoid too many refreshes
-    // Add a delay to allow server to update call status
-    _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 1500), () {
-      if (mounted && !_isLoadingInProgress) {
-        _loadCallHistory(showLoading: false);
-      }
-    });
-  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -284,8 +268,20 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    // Remove the post-frame callback from build() to prevent flickering
-    // The page will refresh when CallService notifies changes or when user manually refreshes
+    // Watch for call service state changes
+    ref.listen<CallServiceState>(callServiceProvider, (previous, next) {
+      // Refresh call history when call service state changes (e.g., call ends)
+      // Use debouncing to avoid too many refreshes
+      // Add a delay to allow server to update call status
+      if (previous?.hasActiveCall == true && next.hasActiveCall == false) {
+        _debounceTimer?.cancel();
+        _debounceTimer = Timer(const Duration(milliseconds: 1500), () {
+          if (mounted && !_isLoadingInProgress) {
+            _loadCallHistory(showLoading: false);
+          }
+        });
+      }
+    });
 
     return Scaffold(
       backgroundColor: Color(0xFFF8FAFB),
@@ -461,9 +457,10 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
             ),
           ],
         ),
-        trailing: Consumer<CallService>(
-          builder: (context, callService, child) {
-            final bool canCall = !callService.hasActiveCall;
+        trailing: Consumer(
+          builder: (context, ref, child) {
+            final callServiceState = ref.watch(callServiceProvider);
+            final bool canCall = !callServiceState.hasActiveCall;
             return IconButton(
               icon: Icon(
                 Icons.call,
@@ -559,8 +556,8 @@ class CallsPageState extends State<CallsPage> with WidgetsBindingObserver {
 
   Future<void> _initiateCall(int userId, String userName) async {
     try {
-      final callService = Provider.of<CallService>(context, listen: false);
-      await callService.initiateCall(userId, userName, null);
+      final callServiceNotifier = ref.read(callServiceProvider.notifier);
+      await callServiceNotifier.initiateCall(userId, userName, null);
 
       if (context.mounted) {
         Navigator.of(context).pushNamed('/call');

@@ -4,9 +4,9 @@ import '../services/draft_message_service.dart';
 /// Riverpod provider for draft messages state
 /// Maps conversationId -> draft text
 final draftMessagesProvider =
-    NotifierProvider<DraftMessagesNotifier, Map<int, String>>(() {
-  return DraftMessagesNotifier();
-});
+    NotifierProvider<DraftMessagesNotifier, Map<int, String>>(
+      () => DraftMessagesNotifier(),
+    );
 
 class DraftMessagesNotifier extends Notifier<Map<int, String>> {
   final DraftMessageService _draftService = DraftMessageService();
@@ -29,7 +29,7 @@ class DraftMessagesNotifier extends Notifier<Map<int, String>> {
   /// Save draft for a conversation
   Future<void> saveDraft(int conversationId, String draftText) async {
     await _draftService.saveDraft(conversationId, draftText);
-    
+
     if (draftText.trim().isEmpty) {
       // Remove from state if empty
       final newState = Map<int, String>.from(state);
@@ -59,4 +59,3 @@ class DraftMessagesNotifier extends Notifier<Map<int, String>> {
     state = {};
   }
 }
-

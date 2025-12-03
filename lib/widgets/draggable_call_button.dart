@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../services/call_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/call.provider.dart';
 import '../models/call_model.dart';
 
-class DraggableCallButton extends StatefulWidget {
+class DraggableCallButton extends ConsumerStatefulWidget {
   const DraggableCallButton({super.key});
 
   @override
-  State<DraggableCallButton> createState() => _DraggableCallButtonState();
+  ConsumerState<DraggableCallButton> createState() =>
+      _DraggableCallButtonState();
 }
 
-class _DraggableCallButtonState extends State<DraggableCallButton>
+class _DraggableCallButtonState extends ConsumerState<DraggableCallButton>
     with TickerProviderStateMixin {
   late AnimationController _pulseController;
   late AnimationController _expandController;
@@ -52,39 +53,40 @@ class _DraggableCallButtonState extends State<DraggableCallButton>
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<CallService>(
-      builder: (context, callService, child) {
-        final activeCall = callService.activeCall;
+    final callServiceState = ref.watch(callServiceProvider);
+    final callServiceNotifier = ref.read(callServiceProvider.notifier);
+    final activeCall = callServiceState.activeCall;
 
-        // Only show button if there's an ongoing call (answered status)
-        if (activeCall == null || activeCall.status != CallStatus.answered) {
-          return const SizedBox.shrink();
-        }
+    // Only show button if there's an ongoing call (answered status)
+    if (activeCall == null || activeCall.status != CallStatus.answered) {
+      return const SizedBox.shrink();
+    }
 
-        return Positioned(
-          right: 0,
-          bottom: 100,
-          child: Material(
-            color: Colors.transparent,
-            child: GestureDetector(
-              onTap: _onTap,
-              child: AnimatedBuilder(
-                animation: _expandAnimation,
-                builder: (context, child) {
-                  return Transform.scale(
-                    scale: _isExpanded ? 1.0 : 0.5,
-                    child: _buildCallButton(activeCall, callService),
-                  );
-                },
-              ),
-            ),
+    return Positioned(
+      right: 0,
+      bottom: 100,
+      child: Material(
+        color: Colors.transparent,
+        child: GestureDetector(
+          onTap: _onTap,
+          child: AnimatedBuilder(
+            animation: _expandAnimation,
+            builder: (context, child) {
+              return Transform.scale(
+                scale: _isExpanded ? 1.0 : 0.5,
+                child: _buildCallButton(activeCall, callServiceNotifier),
+              );
+            },
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
-  Widget _buildCallButton(ActiveCallState activeCall, CallService callService) {
+  Widget _buildCallButton(
+    ActiveCallState activeCall,
+    CallServiceNotifier callServiceNotifier,
+  ) {
     if (_isExpanded) {
       return Container(
         width: 250,
@@ -100,7 +102,7 @@ class _DraggableCallButtonState extends State<DraggableCallButton>
             ),
           ],
         ),
-        child: _buildExpandedButton(activeCall, callService),
+        child: _buildExpandedButton(activeCall, callServiceNotifier),
       );
     } else {
       return _buildCollapsedButton(activeCall);
@@ -150,7 +152,7 @@ class _DraggableCallButtonState extends State<DraggableCallButton>
 
   Widget _buildExpandedButton(
     ActiveCallState activeCall,
-    CallService callService,
+    CallServiceNotifier callServiceNotifier,
   ) {
     return InkWell(
       onTap: _navigateToCall,
@@ -264,7 +266,7 @@ class _DraggableCallButtonState extends State<DraggableCallButton>
                 // Mute button
                 _buildQuickButton(
                   icon: activeCall.isMuted ? Icons.mic_off : Icons.mic,
-                  onPressed: () => callService.toggleMute(),
+                  onPressed: () => callServiceNotifier.toggleMute(),
                   isActive: activeCall.isMuted,
                 ),
 
@@ -275,7 +277,7 @@ class _DraggableCallButtonState extends State<DraggableCallButton>
                   icon: activeCall.isSpeakerOn
                       ? Icons.volume_up
                       : Icons.volume_down,
-                  onPressed: () => callService.toggleSpeaker(),
+                  onPressed: () => callServiceNotifier.toggleSpeaker(),
                   isActive: activeCall.isSpeakerOn,
                 ),
 
@@ -284,7 +286,7 @@ class _DraggableCallButtonState extends State<DraggableCallButton>
                 // End call button
                 _buildQuickButton(
                   icon: Icons.call_end,
-                  onPressed: () => _endCall(callService),
+                  onPressed: () => _endCall(callServiceNotifier),
                   isDestructive: true,
                 ),
               ],
@@ -358,9 +360,9 @@ class _DraggableCallButtonState extends State<DraggableCallButton>
     }
   }
 
-  void _endCall(CallService callService) async {
+  void _endCall(CallServiceNotifier callServiceNotifier) async {
     try {
-      await callService.endCall();
+      await callServiceNotifier.endCall();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(

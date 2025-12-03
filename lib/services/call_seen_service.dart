@@ -62,4 +62,3 @@ class CallSeenService {
     await _prefs!.remove(_seenCallsKey);
   }
 }
-

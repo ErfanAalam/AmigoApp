@@ -45,6 +45,40 @@ class WebSocketMessageHandler {
   final StreamController<JoinLeavePayload> _leaveConversationController =
       StreamController<JoinLeavePayload>.broadcast();
 
+  // Call message stream controllers
+  final StreamController<CallPayload> _callInitController =
+      StreamController<CallPayload>.broadcast();
+
+  final StreamController<CallPayload> _callInitAckController =
+      StreamController<CallPayload>.broadcast();
+
+  final StreamController<CallPayload> _callOfferController =
+      StreamController<CallPayload>.broadcast();
+
+  final StreamController<CallPayload> _callAnswerController =
+      StreamController<CallPayload>.broadcast();
+
+  final StreamController<CallPayload> _callIceController =
+      StreamController<CallPayload>.broadcast();
+
+  final StreamController<CallPayload> _callAcceptController =
+      StreamController<CallPayload>.broadcast();
+
+  final StreamController<CallPayload> _callDeclineController =
+      StreamController<CallPayload>.broadcast();
+
+  final StreamController<CallPayload> _callEndController =
+      StreamController<CallPayload>.broadcast();
+
+  final StreamController<CallPayload> _callRingingController =
+      StreamController<CallPayload>.broadcast();
+
+  final StreamController<CallPayload> _callMissedController =
+      StreamController<CallPayload>.broadcast();
+
+  final StreamController<CallPayload> _callErrorController =
+      StreamController<CallPayload>.broadcast();
+
   bool _isInitialized = false;
 
   /// Get stream for online status (type: 'connection:status')
@@ -82,6 +116,39 @@ class WebSocketMessageHandler {
   Stream<JoinLeavePayload> get leaveConversationStream =>
       _leaveConversationController.stream;
 
+  /// Get stream for call init events (type: 'call:init')
+  Stream<CallPayload> get callInitStream => _callInitController.stream;
+
+  /// Get stream for call init ack events (type: 'call:init:ack')
+  Stream<CallPayload> get callInitAckStream => _callInitAckController.stream;
+
+  /// Get stream for call offer events (type: 'call:offer')
+  Stream<CallPayload> get callOfferStream => _callOfferController.stream;
+
+  /// Get stream for call answer events (type: 'call:answer')
+  Stream<CallPayload> get callAnswerStream => _callAnswerController.stream;
+
+  /// Get stream for call ice events (type: 'call:ice')
+  Stream<CallPayload> get callIceStream => _callIceController.stream;
+
+  /// Get stream for call accept events (type: 'call:accept')
+  Stream<CallPayload> get callAcceptStream => _callAcceptController.stream;
+
+  /// Get stream for call decline events (type: 'call:decline')
+  Stream<CallPayload> get callDeclineStream => _callDeclineController.stream;
+
+  /// Get stream for call end events (type: 'call:end')
+  Stream<CallPayload> get callEndStream => _callEndController.stream;
+
+  /// Get stream for call ringing events (type: 'call:ringing')
+  Stream<CallPayload> get callRingingStream => _callRingingController.stream;
+
+  /// Get stream for call missed events (type: 'call:missed')
+  Stream<CallPayload> get callMissedStream => _callMissedController.stream;
+
+  /// Get stream for call error events (type: 'call:error')
+  Stream<CallPayload> get callErrorStream => _callErrorController.stream;
+
   /// Initialize the handler - call this once when app starts
   void initialize() {
     if (_isInitialized) {
@@ -98,6 +165,90 @@ class WebSocketMessageHandler {
 
     _isInitialized = true;
   }
+
+  /// Helper to convert payload to CallPayload
+  // CallPayload? _payloadToCallPayload(dynamic payload, WSMessage message) {
+  //   if (payload == null) return null;
+  //
+  //   Map<String, dynamic>? payloadMap;
+  //   if (payload is Map<String, dynamic>) {
+  //     payloadMap = payload;
+  //   } else if (payload is Map) {
+  //     payloadMap = Map<String, dynamic>.from(payload);
+  //   } else if (payload is CallPayload) {
+  //     return payload;
+  //   } else {
+  //     try {
+  //       payloadMap = payload.toJson() as Map<String, dynamic>?;
+  //     } catch (e) {
+  //       return null;
+  //     }
+  //   }
+  //
+  //   if (payloadMap == null) return null;
+  //
+  //   // Try to extract call information from the payload
+  //   // Different call message types have different structures
+  //   try {
+  //     // Extract common fields
+  //     final callId = payloadMap['callId'] ??
+  //                    payloadMap['call_id'] ??
+  //                    payloadMap['data']?['callId'] ??
+  //                    payloadMap['data']?['call_id'];
+  //
+  //     final callerId = payloadMap['callerId'] ??
+  //                      payloadMap['caller_id'] ??
+  //                      payloadMap['from'] ??
+  //                      payloadMap['from_id'] ??
+  //                      payloadMap['sender_id'];
+  //
+  //     final calleeId = payloadMap['calleeId'] ??
+  //                      payloadMap['callee_id'] ??
+  //                      payloadMap['to'] ??
+  //                      payloadMap['to_id'];
+  //
+  //     // If we don't have basic info, return null
+  //     if (callerId == null && calleeId == null) {
+  //       return null;
+  //     }
+  //
+  //     // Parse IDs with proper null handling
+  //     int? parsedCallerId;
+  //     if (callerId is int) {
+  //       parsedCallerId = callerId;
+  //     } else if (callerId is String) {
+  //       parsedCallerId = int.tryParse(callerId);
+  //     }
+  //
+  //     int? parsedCalleeId;
+  //     if (calleeId is int) {
+  //       parsedCalleeId = calleeId;
+  //     } else if (calleeId is String) {
+  //       parsedCalleeId = int.tryParse(calleeId);
+  //     }
+  //
+  //     // At least one ID must be present
+  //     if (parsedCallerId == null && parsedCalleeId == null) {
+  //       return null;
+  //     }
+  //
+  //     return CallPayload(
+  //       callId: callId is int ? callId : (callId is String ? int.tryParse(callId) : null),
+  //       callerId: parsedCallerId ?? 0,
+  //       callerName: payloadMap['callerName'] ?? payloadMap['caller_name'],
+  //       callerPfp: payloadMap['callerProfilePic'] ?? payloadMap['caller_pfp'] ?? payloadMap['caller_profile_pic'],
+  //       calleeId: parsedCalleeId ?? 0,
+  //       calleeName: payloadMap['calleeName'] ?? payloadMap['callee_name'],
+  //       calleePfp: payloadMap['calleeProfilePic'] ?? payloadMap['callee_pfp'] ?? payloadMap['callee_profile_pic'],
+  //       data: payloadMap,
+  //       error: payloadMap['error'],
+  //       timestamp: message.wsTimestamp ?? DateTime.now(),
+  //     );
+  //   } catch (e) {
+  //     debugPrint('⚠️ Error converting payload to CallPayload: $e');
+  //     return null;
+  //   }
+  // }
 
   /// Handle incoming WebSocket messages and route them to appropriate streams
   void _handleMessage(WSMessage message) async {
@@ -202,22 +353,85 @@ class WebSocketMessageHandler {
           debugPrint('❌ WebSocket error: ${message.miscPayload?.message}');
           break;
 
-        // Call-related messages (handled elsewhere or can be added here)
+        // Call-related messages
         case WSMessageType.callInit:
+          final payload = message.callPayload;
+          if (payload != null) {
+            _callInitController.add(payload);
+          }
+          break;
+
+        case WSMessageType.callInitAck:
+          final payload = message.callPayload;
+          if (payload != null) {
+            _callInitAckController.add(payload);
+          }
+          break;
+
         case WSMessageType.callOffer:
+          final payload = message.callPayload;
+          if (payload != null) {
+            _callOfferController.add(payload);
+          }
+          break;
+
         case WSMessageType.callAnswer:
+          final payload = message.callPayload;
+          if (payload != null) {
+            _callAnswerController.add(payload);
+          }
+          break;
+
         case WSMessageType.callIce:
+          final payload = message.callPayload;
+          if (payload != null) {
+            _callIceController.add(payload);
+          }
+          break;
+
         case WSMessageType.callAccept:
+          final payload = message.callPayload;
+          if (payload != null) {
+            _callAcceptController.add(payload);
+          }
+          break;
+
         case WSMessageType.callDecline:
+          final payload = message.callPayload;
+          if (payload != null) {
+            _callDeclineController.add(payload);
+          }
+          break;
+
         case WSMessageType.callEnd:
+          final payload = message.callPayload;
+          if (payload != null) {
+            _callEndController.add(payload);
+          }
+          break;
+
         case WSMessageType.callRinging:
+          final payload = message.callPayload;
+          if (payload != null) {
+            _callRingingController.add(payload);
+          }
+          break;
+
         case WSMessageType.callMissed:
-          // Call messages are handled by call service
-          debugPrint('📞 Call message received: ${message.type.value}');
+          final payload = message.callPayload;
+          if (payload != null) {
+            _callMissedController.add(payload);
+          }
+          break;
+
+        case WSMessageType.callError:
+          final payload = message.callPayload;
+          if (payload != null) {
+            _callErrorController.add(payload);
+          }
           break;
 
         case WSMessageType.messageForward:
-          // Forward messages can be handled if needed
           debugPrint('↩️ Message forward: ${message.type.value}');
           break;
       }
@@ -343,6 +557,19 @@ class WebSocketMessageHandler {
     _onlineStatusController.close();
     _conversationAddedController.close();
     _messageDeleteController.close();
+    _joinConversationController.close();
+    _leaveConversationController.close();
+    _callInitController.close();
+    _callInitAckController.close();
+    _callOfferController.close();
+    _callAnswerController.close();
+    _callIceController.close();
+    _callAcceptController.close();
+    _callDeclineController.close();
+    _callEndController.close();
+    _callRingingController.close();
+    _callMissedController.close();
+    _callErrorController.close();
     _isInitialized = false;
   }
 }

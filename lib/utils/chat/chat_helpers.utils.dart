@@ -6,9 +6,8 @@ import 'package:amigo/services/socket/websocket_service.dart';
 import 'package:amigo/types/socket.type.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:provider/provider.dart' as material_provider;
 import '../animations.utils.dart';
-import '../../services/call_service.dart';
+import '../../services/call.service.dart';
 
 class ChatHelpers {
   static final MessageRepository messageRepo = MessageRepository();
@@ -481,7 +480,6 @@ class ChatHelpers {
     }
   }
 
-
   /// Bulk star/unstar messages
   ///
   /// [conversationId] - The conversation ID
@@ -576,10 +574,8 @@ class ChatHelpers {
     String? userProfilePic,
   }) async {
     try {
-      final callService = material_provider.Provider.of<CallService>(
-        context,
-        listen: false,
-      );
+      // Use CallService singleton directly (Riverpod provider wraps it)
+      final callService = CallService();
 
       // Check WebSocket connection status
       if (!websocketService.isConnected) {

@@ -1,7 +1,9 @@
 import 'dart:async';
-import 'package:amigo/utils/navigation_helper.dart';
 import 'package:amigo/env.dart';
+import 'package:amigo/models/user_model.dart';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
@@ -17,12 +19,13 @@ import 'package:proximity_screen_lock/proximity_screen_lock.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import '../models/call_model.dart';
 import 'socket/websocket_service.dart';
+import 'socket/websocket_message_handler.dart';
 import '../services/call_foreground_service.dart';
 import '../api/user.service.dart';
 import '../utils/ringing_tone.dart';
 import '../types/socket.type.dart';
 
-class CallService extends ChangeNotifier {
+class CallService {
   static final CallService _instance = CallService._internal();
   factory CallService() => _instance;
   CallService._internal();
@@ -34,16 +37,31 @@ class CallService extends ChangeNotifier {
 
   // Services
   // final NotificationService _notificationService = NotificationService();
+  UserModel? _currentUser;
 
   // Call state
   ActiveCallState? _activeCall;
   bool _isInitialized = false;
+  bool get isInitialized => _isInitialized;
   Timer? _callDurationTimer;
-  StreamSubscription? _webSocketSubscription;
-
   Timer? _callStartedTimer;
   Timer? _statusPollingTimer;
   int? _pollingCallId;
+
+  final WebSocketService _webSocketService = WebSocketService();
+
+  // Call stream subscriptions
+  StreamSubscription<CallPayload>? _callInitSubscription;
+  StreamSubscription<CallPayload>? _callInitAckSubscription;
+  StreamSubscription<CallPayload>? _callOfferSubscription;
+  StreamSubscription<CallPayload>? _callAnswerSubscription;
+  StreamSubscription<CallPayload>? _callIceSubscription;
+  StreamSubscription<CallPayload>? _callAcceptSubscription;
+  StreamSubscription<CallPayload>? _callDeclineSubscription;
+  StreamSubscription<CallPayload>? _callEndSubscription;
+  StreamSubscription<CallPayload>? _callRingingSubscription;
+  StreamSubscription<CallPayload>? _callMissedSubscription;
+  StreamSubscription<CallPayload>? _callErrorSubscription;
 
   // Proximity control for global screen lock
   StreamSubscription<dynamic>? _proximitySubscription;
@@ -103,27 +121,69 @@ class CallService extends ChangeNotifier {
     if (_isInitialized) return;
 
     try {
-      // Setup WebSocket message listener
-      _webSocketSubscription = WebSocketService().messageStream.listen(
-        handleWebSocketMessage,
+      _currentUser = await UserUtils().getUserDetails();
+
+      final handler = WebSocketMessageHandler();
+
+      // Setup individual call stream listeners
+      _callInitSubscription = handler.callInitStream.listen(_handleCallInit);
+      _callInitAckSubscription = handler.callInitAckStream.listen(
+        _handleCallInitAck,
       );
+      _callOfferSubscription = handler.callOfferStream.listen(_handleCallOffer);
+      _callAnswerSubscription = handler.callAnswerStream.listen(
+        _handleCallAnswer,
+      );
+      _callIceSubscription = handler.callIceStream.listen(_handleCallIce);
+      _callAcceptSubscription = handler.callAcceptStream.listen(
+        _handleCallAccept,
+      );
+      _callDeclineSubscription = handler.callDeclineStream.listen(
+        _handleCallDecline,
+      );
+      _callEndSubscription = handler.callEndStream.listen(_handleCallEnd);
+      _callRingingSubscription = handler.callRingingStream.listen(
+        _handleIncomingCall,
+      );
+      _callMissedSubscription = handler.callMissedStream.listen(
+        _handleCallMissed,
+      );
+      _callErrorSubscription = handler.callErrorStream.listen(_handleCallError);
 
       _isInitialized = true;
 
       FlutterCallkitIncoming.onEvent.listen((CallEvent? event) async {
         switch (event?.event) {
           case Event.actionCallAccept:
-            acceptCall();
-
-            Navigator.popUntil(
-              NavigationHelper.navigator!.context,
-              (route) => route.isFirst,
+            // Get call details from event or SharedPreferences
+            final prefs = await SharedPreferences.getInstance();
+            final callIdStr = prefs.getString('current_call_id');
+            final callerIdStr = prefs.getString('current_caller_id');
+            final callerName = prefs.getString('current_caller_name');
+            final callerProfilePic = prefs.getString(
+              'current_caller_profile_pic',
             );
+
+            await acceptCall(
+              callId: callIdStr != null ? int.tryParse(callIdStr) : null,
+              callerId: callerIdStr != null ? int.tryParse(callerIdStr) : null,
+              callerName: callerName,
+              callerProfilePic: callerProfilePic,
+            );
+
+            // Navigator.popUntil(
+            //   NavigationHelper.navigator!.context,
+            //   (route) => route.isFirst,
+            // );
 
             break;
 
           case Event.actionCallDecline:
-            declineCall();
+            final prefs = await SharedPreferences.getInstance();
+            final callIdStr = prefs.getString('current_call_id');
+            await declineCall(
+              callId: callIdStr != null ? int.tryParse(callIdStr) : null,
+            );
             break;
 
           case Event.actionCallEnded:
@@ -152,30 +212,39 @@ class CallService extends ChangeNotifier {
       if (hasActiveCall) return;
 
       // Check if WebSocket is connected
-      if (!WebSocketService().isConnected) {
-        await WebSocketService().connect();
+      if (!_webSocketService.isConnected) {
+        await _webSocketService.connect();
       }
 
       // Enable wakelock
-      WakelockPlus.enable();
+      await WakelockPlus.enable();
 
       // Get user media
       await _setupLocalMedia();
 
       // Get current user info (for now using a simple approach)
-      final currentUserName = await _getCurrentUserName();
+      if (_currentUser == null) return;
 
-      // Send call initiation message
-      final message = {
-        'type': 'call:init',
-        'to': calleeId,
-        'payload': {
-          'callerName': currentUserName,
-          'callerProfilePic': calleeProfilePic,
-        },
-        'timestamp': DateTime.now().toIso8601String(),
-      };
-      await WebSocketService().sendMessage(message);
+      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      final callInitPayload = CallPayload(
+        callerId: _currentUser!.id,
+        callerName: _currentUser!.name,
+        callerPfp: _currentUser!.profilePic,
+        calleeId: calleeId,
+        calleeName: calleeName,
+        calleePfp: calleeProfilePic,
+        timestamp: DateTime.now(),
+      );
+
+      final wsmsg = WSMessage(
+        type: WSMessageType.callInit,
+        payload: callInitPayload,
+        wsTimestamp: DateTime.now(),
+      ).toJson();
+
+      _webSocketService.sendMessage(wsmsg).catchError((e) {
+        debugPrint('❌ Error sending call:init: $e');
+      });
 
       // Set up local call state (will be updated when backend confirms)
       _activeCall = ActiveCallState(
@@ -187,8 +256,6 @@ class CallService extends ChangeNotifier {
         status: CallStatus.initiated,
         startTime: DateTime.now(),
       );
-
-      notifyListeners();
 
       // Start the 30-second timeout timer
       _startCallStartedTimer();
@@ -224,8 +291,6 @@ class CallService extends ChangeNotifier {
         status: CallStatus.ringing,
         startTime: DateTime.now(),
       );
-
-      notifyListeners();
     } catch (e) {
       debugPrint('[CALL] Error restoring call state');
     }
@@ -261,7 +326,6 @@ class CallService extends ChangeNotifier {
 
       if (callId != null && _activeCall != null) {
         _activeCall = _activeCall?.copyWith(callId: callId);
-        notifyListeners();
       }
 
       // Enable wakelock
@@ -275,14 +339,25 @@ class CallService extends ChangeNotifier {
         await _setupLocalMedia();
       }
 
-      // Send accept message
-      final message = {
-        'type': 'call:accept',
-        'callId': _activeCall!.callId,
-        'timestamp': DateTime.now().toIso8601String(),
-      };
+      if (_currentUser == null) return;
 
-      await WebSocketService().sendMessage(message);
+      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      final callAcceptPayload = CallPayload(
+        callId: _activeCall!.callId,
+        callerId: _activeCall!.userId, // Use caller from active call
+        calleeId: _currentUser!.id,
+        timestamp: DateTime.now(),
+      );
+
+      final wsmsg = WSMessage(
+        type: WSMessageType.callAccept,
+        payload: callAcceptPayload,
+        wsTimestamp: DateTime.now(),
+      ).toJson();
+
+      _webSocketService.sendMessage(wsmsg).catchError((e) {
+        debugPrint('❌ Error sending call:accept: $e');
+      });
 
       // Cancel the call started timer since call is now accepted
       _callStartedTimer?.cancel();
@@ -304,8 +379,6 @@ class CallService extends ChangeNotifier {
       await prefs.remove('current_caller_name');
       await prefs.remove('current_caller_profile_pic');
       await prefs.remove('call_status');
-
-      notifyListeners();
     } catch (e) {
       debugPrint('[CALL] Error accepting call');
     }
@@ -315,23 +388,60 @@ class CallService extends ChangeNotifier {
   Future<void> declineCall({String? reason, int? callId}) async {
     try {
       if (_activeCall == null && callId == null) {
-        debugPrint('No active call to accept');
+        debugPrint('No active call to decline');
         return;
       }
 
-      if (callId != null) {
-        _activeCall = _activeCall?.copyWith(callId: callId);
-        notifyListeners();
+      // If we have callId but no active call, try to restore from SharedPreferences
+      if (_activeCall == null && callId != null) {
+        final prefs = await SharedPreferences.getInstance();
+        final callerIdStr = prefs.getString('current_caller_id');
+        final callerName = prefs.getString('current_caller_name');
+        final callerProfilePic = prefs.getString('current_caller_profile_pic');
+
+        if (callerIdStr != null && callerName != null) {
+          await restoreCallState(
+            callId!,
+            int.parse(callerIdStr),
+            callerName,
+            callerProfilePic,
+          );
+        } else {
+          debugPrint('Cannot decline call: missing caller information');
+          return;
+        }
       }
 
-      final message = {
-        'type': 'call:decline',
-        'callId': _activeCall!.callId,
-        'payload': {'reason': reason ?? 'user_declined'},
-        'timestamp': DateTime.now().toIso8601String(),
-      };
+      if (callId != null && _activeCall != null) {
+        _activeCall = _activeCall!.copyWith(callId: callId);
+      }
 
-      await WebSocketService().sendMessage(message);
+      if (_currentUser == null) return;
+      if (_activeCall == null) return;
+
+      // Determine caller/callee based on call type
+      final isOutgoing = _activeCall!.callType == CallType.outgoing;
+      final callerId = isOutgoing ? _currentUser!.id : _activeCall!.userId;
+      final calleeId = isOutgoing ? _activeCall!.userId : _currentUser!.id;
+
+      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      final callDeclinePayload = CallPayload(
+        callId: _activeCall!.callId,
+        callerId: callerId,
+        calleeId: calleeId,
+        data: {'reason': reason ?? 'user_declined'},
+        timestamp: DateTime.now(),
+      );
+
+      final wsmsg = WSMessage(
+        type: WSMessageType.callDecline,
+        payload: callDeclinePayload,
+        wsTimestamp: DateTime.now(),
+      ).toJson();
+
+      _webSocketService.sendMessage(wsmsg).catchError((e) {
+        debugPrint('❌ Error sending call:decline: $e');
+      });
 
       // Cancel the call started timer since call is being declined
       _callStartedTimer?.cancel();
@@ -358,14 +468,31 @@ class CallService extends ChangeNotifier {
     try {
       if (_activeCall == null) return;
 
-      final message = {
-        'type': 'call:end',
-        'callId': _activeCall!.callId,
-        'payload': {'reason': reason ?? 'user_hangup'},
-        'timestamp': DateTime.now().toIso8601String(),
-      };
+      if (_currentUser == null) return;
 
-      await WebSocketService().sendMessage(message);
+      // Determine caller/callee based on call type
+      final isOutgoing = _activeCall!.callType == CallType.outgoing;
+      final callerId = isOutgoing ? _currentUser!.id : _activeCall!.userId;
+      final calleeId = isOutgoing ? _activeCall!.userId : _currentUser!.id;
+
+      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      final callEndPayload = CallPayload(
+        callId: _activeCall!.callId,
+        callerId: callerId,
+        calleeId: calleeId,
+        data: {'reason': reason ?? 'user_hangup'},
+        timestamp: DateTime.now(),
+      );
+
+      final wsmsg = WSMessage(
+        type: WSMessageType.callEnd,
+        payload: callEndPayload,
+        wsTimestamp: DateTime.now(),
+      ).toJson();
+
+      _webSocketService.sendMessage(wsmsg).catchError((e) {
+        debugPrint('❌ Error sending call:end: $e');
+      });
 
       try {
         await RingtoneManager.stopRingtone();
@@ -397,7 +524,6 @@ class CallService extends ChangeNotifier {
       track.enabled = !track.enabled;
 
       _activeCall = _activeCall?.copyWith(isMuted: !track.enabled);
-      notifyListeners();
     }
   }
 
@@ -409,7 +535,6 @@ class CallService extends ChangeNotifier {
     await Helper.setSpeakerphoneOn(newSpeakerState);
 
     _activeCall = _activeCall!.copyWith(isSpeakerOn: newSpeakerState);
-    notifyListeners();
   }
 
   /// Setup local media stream
@@ -448,7 +573,6 @@ class CallService extends ChangeNotifier {
       // Handle remote stream (Plan B compatible)
       _peerConnection!.onAddStream = (MediaStream stream) {
         _remoteStream = stream;
-        notifyListeners();
       };
 
       // Handle ICE candidates
@@ -475,22 +599,36 @@ class CallService extends ChangeNotifier {
       final offer = await _peerConnection!.createOffer();
       await _peerConnection!.setLocalDescription(offer);
 
-      final message = {
-        'type': 'call:offer',
-        'callId': _activeCall!.callId,
-        'to': _activeCall!.userId,
-        'payload': {'sdp': offer.sdp, 'type': offer.type},
-        'timestamp': DateTime.now().toIso8601String(),
-      };
+      if (_currentUser == null) return;
 
-      await WebSocketService().sendMessage(message);
+      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      final callOfferPayload = CallPayload(
+        callId: _activeCall!.callId,
+        callerId: _currentUser!.id,
+        calleeId: _activeCall!.userId,
+        data: {'sdp': offer.sdp, 'type': offer.type},
+        timestamp: DateTime.now(),
+      );
+
+      final wsmsg = WSMessage(
+        type: WSMessageType.callOffer,
+        payload: callOfferPayload,
+        wsTimestamp: DateTime.now(),
+      ).toJson();
+
+      _webSocketService.sendMessage(wsmsg).catchError((e) {
+        debugPrint('❌ Error sending call:offer: $e');
+      });
     } catch (e) {
       debugPrint('[CALL] Error creating offer');
     }
   }
 
   /// Handle incoming offer
-  Future<void> _handleOffer(Map<String, dynamic> payload) async {
+  Future<void> _handleOffer(
+    Map<String, dynamic> payload,
+    CallPayload callPayload,
+  ) async {
     try {
       if (_peerConnection == null) {
         await _createPeerConnection();
@@ -503,15 +641,27 @@ class CallService extends ChangeNotifier {
       final answer = await _peerConnection!.createAnswer();
       await _peerConnection!.setLocalDescription(answer);
 
-      final message = {
-        'type': 'call:answer',
-        'callId': _activeCall!.callId,
-        'to': _activeCall!.userId,
-        'payload': {'sdp': answer.sdp, 'type': answer.type},
-        'timestamp': DateTime.now().toIso8601String(),
-      };
+      if (_currentUser == null) return;
 
-      await WebSocketService().sendMessage(message);
+      // Use caller/callee from the received payload
+      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      final callAnswerPayload = CallPayload(
+        callId: callPayload.callId ?? _activeCall?.callId,
+        callerId: callPayload.callerId, // Caller from received offer
+        calleeId: callPayload.calleeId, // Callee (should be us)
+        data: {'sdp': answer.sdp, 'type': answer.type},
+        timestamp: DateTime.now(),
+      );
+
+      final wsmsg = WSMessage(
+        type: WSMessageType.callAnswer,
+        payload: callAnswerPayload,
+        wsTimestamp: DateTime.now(),
+      ).toJson();
+
+      _webSocketService.sendMessage(wsmsg).catchError((e) {
+        debugPrint('❌ Error sending call:answer: $e');
+      });
     } catch (e) {
       debugPrint('[CALL] Error handling offer');
     }
@@ -549,21 +699,30 @@ class CallService extends ChangeNotifier {
   /// Send ICE candidate
   Future<void> _sendIceCandidate(RTCIceCandidate candidate) async {
     try {
-      if (_activeCall == null) return;
+      if (_activeCall == null || _currentUser == null) return;
 
-      final message = {
-        'type': 'call:ice',
-        'callId': _activeCall!.callId,
-        'to': _activeCall!.userId,
-        'payload': {
+      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      final callIcePayload = CallPayload(
+        callId: _activeCall!.callId,
+        callerId: _currentUser!.id,
+        calleeId: _activeCall!.userId,
+        data: {
           'candidate': candidate.candidate,
           'sdpMid': candidate.sdpMid,
           'sdpMLineIndex': candidate.sdpMLineIndex,
         },
-        'timestamp': DateTime.now().toIso8601String(),
-      };
+        timestamp: DateTime.now(),
+      );
 
-      await WebSocketService().sendMessage(message);
+      final wsmsg = WSMessage(
+        type: WSMessageType.callIce,
+        payload: callIcePayload,
+        wsTimestamp: DateTime.now(),
+      ).toJson();
+
+      _webSocketService.sendMessage(wsmsg).catchError((e) {
+        debugPrint('❌ Error sending call:ice: $e');
+      });
     } catch (e) {
       debugPrint('[CALL] Error sending ICE candidate');
     }
@@ -580,7 +739,6 @@ class CallService extends ChangeNotifier {
       if (_activeCall != null && _activeCall!.status == CallStatus.answered) {
         final duration = DateTime.now().difference(_activeCall!.startTime);
         _activeCall = _activeCall!.copyWith(duration: duration);
-        notifyListeners();
       }
     });
   }
@@ -602,176 +760,184 @@ class CallService extends ChangeNotifier {
     });
   }
 
-  /// Handle WebSocket messages
-  void handleWebSocketMessage(WSMessage message) async {
-    final type = message.type.value;
-
-    // if (!type.startsWith('call:')) {
-    //   // Not a call-related message - ignore silently
-    //   return;
-    // }
-
-    // Helper to convert payload to Map
-    Map<String, dynamic>? _payloadToMap(dynamic payload) {
-      if (payload == null) return null;
-      if (payload is Map<String, dynamic>) return payload;
-      if (payload is Map) {
-        return Map<String, dynamic>.from(payload);
-      }
-      // If it's a typed payload object, try to convert to JSON
-      try {
-        return payload.toJson() as Map<String, dynamic>?;
-      } catch (e) {
-        return null;
-      }
+  /// Helper to convert CallPayload data to Map
+  Map<String, dynamic>? _payloadDataToMap(CallPayload payload) {
+    if (payload.data == null) return null;
+    if (payload.data is Map<String, dynamic>) {
+      return payload.data as Map<String, dynamic>;
     }
-
-    // Helper to create message map for methods that expect it
-    Map<String, dynamic> _createMessageMap() {
-      final payloadMap = _payloadToMap(message.payload);
-      return {
-        'type': type,
-        'payload': payloadMap ?? {},
-        if (payloadMap != null) ...payloadMap,
-      };
+    if (payload.data is Map) {
+      return Map<String, dynamic>.from(payload.data as Map);
     }
-
-    switch (type) {
-      case 'call:init':
-        // Acknowledgment from server with callId
-        final payloadMap = _payloadToMap(message.payload);
-        if (payloadMap?['success'] == true ||
-            payloadMap?['data']?['success'] == true) {
-          final callId =
-              payloadMap?['callId'] ?? payloadMap?['data']?['callId'];
-          if (callId != null) {
-            _activeCall = _activeCall?.copyWith(callId: callId);
-
-            // Start status polling as fallback when WebSocket might not be reliable
-            _startStatusPolling(callId);
-
-            notifyListeners();
-          }
-        } else {
-          _cleanup();
-        }
-        break;
-
-      case 'call:ringing':
-        // Incoming call notification
-        final payloadMap = _payloadToMap(message.payload);
-        if (payloadMap != null) {
-          _handleIncomingCall({
-            'callId': payloadMap['callId'] ?? payloadMap['call_id'],
-            'from':
-                payloadMap['from'] ??
-                payloadMap['from_id'] ??
-                payloadMap['sender_id'],
-            'payload': payloadMap,
-          });
-        }
-        break;
-
-      case 'call:accept':
-        // Call was accepted, start WebRTC
-        if (_activeCall?.callType == CallType.outgoing) {
-          // Cancel the call started timer since call is now accepted
-          _callStartedTimer?.cancel();
-          _callStartedTimer = null;
-
-          // Stop status polling since call is now accepted
-          _stopStatusPolling();
-
-          _activeCall = _activeCall?.copyWith(status: CallStatus.answered);
-
-          // Enable global proximity control for outgoing calls
-          _initializeProximityControl();
-
-          _createOffer();
-          try {
-            await RingtoneManager.stopRingtone();
-          } catch (e) {
-            debugPrint('[CALL] Error stopping ringtone in accept');
-          }
-          // Start timer immediately when call is accepted
-          _startCallTimer();
-
-          // Start foreground service to keep microphone active in background
-          await CallForegroundService.startService(
-            callerName: _activeCall!.userName,
-          );
-
-          notifyListeners();
-        }
-        break;
-
-      case 'call:offer':
-        final offerPayload = _payloadToMap(message.payload);
-        if (offerPayload != null) {
-          _handleOffer(offerPayload);
-        }
-        break;
-
-      case 'call:answer':
-        final answerPayload = _payloadToMap(message.payload);
-        if (answerPayload != null) {
-          _handleAnswer(answerPayload);
-        }
-        break;
-
-      case 'call:ice':
-        final icePayload = _payloadToMap(message.payload);
-        if (icePayload != null) {
-          _handleIceCandidate(icePayload);
-        }
-        break;
-
-      case 'call:decline':
-        // Cancel the call started timer since call is being declined
-        _callStartedTimer?.cancel();
-        _callStartedTimer = null;
-        // Stop status polling since call is being declined
-        _stopStatusPolling();
-        _handleCallDeclined(_createMessageMap());
-        await FlutterCallkitIncoming.endAllCalls();
-        break;
-
-      case 'call:end':
-        // Cancel the call started timer since call is ending
-        _callStartedTimer?.cancel();
-        _callStartedTimer = null;
-        // Stop status polling since call is ending
-        _stopStatusPolling();
-        _handleCallEnded(_createMessageMap());
-        await FlutterCallkitIncoming.endAllCalls();
-        break;
-
-      case 'call:missed':
-        // Cancel the call started timer since call is missed
-        _callStartedTimer?.cancel();
-        _callStartedTimer = null;
-        // Stop status polling since call is missed
-        _stopStatusPolling();
-        _handleCallMissed(_createMessageMap());
-        await FlutterCallkitIncoming.endAllCalls();
-        break;
-
-      default:
-        return;
+    try {
+      return payload.data.toJson() as Map<String, dynamic>?;
+    } catch (e) {
+      return null;
     }
   }
 
-  /// Handle incoming call
-  void _handleIncomingCall(Map<String, dynamic> message) async {
-    final callId = message['callId'];
-    final from = message['from'];
-    final payload = message['payload'];
+  /// Helper to create message map for methods that expect it
+  Map<String, dynamic> _createMessageMap(CallPayload payload) {
+    final payloadMap = _payloadDataToMap(payload);
+    return {
+      'callId': payload.callId,
+      'payload': payloadMap ?? {},
+      if (payloadMap != null) ...payloadMap,
+    };
+  }
 
+  /// Handle call init message
+  void _handleCallInit(CallPayload payload) async {
+    final payloadMap = _payloadDataToMap(payload);
+    if (payloadMap?['success'] == true || payload.data?['success'] == true) {
+      final callId = payload.callId;
+      if (callId != null) {
+        _activeCall = _activeCall?.copyWith(callId: callId);
+
+        // Start status polling as fallback when WebSocket might not be reliable
+        _startStatusPolling(callId);
+      }
+    } else {
+      _cleanup();
+    }
+  }
+
+  /// Handle call init ack message
+  void _handleCallInitAck(CallPayload payload) async {
+    // Similar to call init, handle acknowledgment
+    final callId = payload.callId;
+    if (callId != null) {
+      _activeCall = _activeCall?.copyWith(callId: callId);
+      _startStatusPolling(callId);
+    }
+  }
+
+  /// Handle call accept message
+  void _handleCallAccept(CallPayload payload) async {
+    if (_activeCall == null) return;
+
+    // Update callId if provided
+    if (payload.callId != null) {
+      _activeCall = _activeCall!.copyWith(callId: payload.callId);
+    }
+
+    // Cancel the call started timer since call is now accepted
+    _callStartedTimer?.cancel();
+    _callStartedTimer = null;
+
+    // Stop status polling since call is now accepted
+    _stopStatusPolling();
+
+    // Update status to answered - this is critical for UI updates
+    _activeCall = _activeCall!.copyWith(status: CallStatus.answered);
+
+    // Enable global proximity control
+    _initializeProximityControl();
+
+    try {
+      await RingtoneManager.stopRingtone();
+    } catch (e) {
+      debugPrint('[CALL] Error stopping ringtone in accept');
+    }
+
+    // Start timer immediately when call is accepted
+    // This sets the startTime and starts updating duration every second
+    _startCallTimer();
+
+    // Start foreground service to keep microphone active in background
+    await CallForegroundService.startService(callerName: _activeCall!.userName);
+
+    // For outgoing calls, create offer immediately
+    // For incoming calls, wait for offer from caller
+    if (_activeCall!.callType == CallType.outgoing) {
+      _createOffer();
+    }
+    // For incoming calls, the peer connection will be created when offer arrives
+  }
+
+  /// Handle call offer message
+  void _handleCallOffer(CallPayload payload) async {
+    final offerPayload = _payloadDataToMap(payload);
+    if (offerPayload != null) {
+      // Update active call with callId if not set
+      if (payload.callId != null && _activeCall != null) {
+        _activeCall = _activeCall!.copyWith(callId: payload.callId);
+      }
+      _handleOffer(offerPayload, payload);
+    }
+  }
+
+  /// Handle call answer message
+  void _handleCallAnswer(CallPayload payload) async {
+    final answerPayload = _payloadDataToMap(payload);
+    if (answerPayload != null) {
+      // Update active call with callId if not set
+      if (payload.callId != null && _activeCall != null) {
+        _activeCall = _activeCall!.copyWith(callId: payload.callId);
+      }
+      _handleAnswer(answerPayload);
+    }
+  }
+
+  /// Handle call ice message
+  void _handleCallIce(CallPayload payload) async {
+    final icePayload = _payloadDataToMap(payload);
+    if (icePayload != null) {
+      // Update active call with callId if not set
+      if (payload.callId != null && _activeCall != null) {
+        _activeCall = _activeCall!.copyWith(callId: payload.callId);
+      }
+      _handleIceCandidate(icePayload);
+    }
+  }
+
+  /// Handle call decline message
+  void _handleCallDecline(CallPayload payload) async {
+    // Cancel the call started timer since call is being declined
+    _callStartedTimer?.cancel();
+    _callStartedTimer = null;
+    // Stop status polling since call is being declined
+    _stopStatusPolling();
+    _handleCallDeclinedInternal(_createMessageMap(payload));
+    await FlutterCallkitIncoming.endAllCalls();
+  }
+
+  /// Handle call end message
+  void _handleCallEnd(CallPayload payload) async {
+    // Cancel the call started timer since call is ending
+    _callStartedTimer?.cancel();
+    _callStartedTimer = null;
+    // Stop status polling since call is ending
+    _stopStatusPolling();
+    _handleCallEndedInternal(_createMessageMap(payload));
+    await FlutterCallkitIncoming.endAllCalls();
+  }
+
+  /// Handle call missed message
+  void _handleCallMissed(CallPayload payload) async {
+    // Cancel the call started timer since call is missed
+    _callStartedTimer?.cancel();
+    _callStartedTimer = null;
+    // Stop status polling since call is missed
+    _stopStatusPolling();
+    _handleCallMissedInternal(_createMessageMap(payload));
+    await FlutterCallkitIncoming.endAllCalls();
+  }
+
+  /// Handle call error message
+  void _handleCallError(CallPayload payload) async {
+    debugPrint('[CALL] Call error received: ${payload.error}');
+    // Handle call error as needed
+    _cleanup();
+  }
+
+  /// Handle incoming call
+  void _handleIncomingCall(CallPayload payload) async {
     CallKitParams params = CallKitParams(
-      id: callId.toString(),
-      nameCaller: payload['callerName'] ?? 'Unknown',
+      id: payload.callId.toString(),
+      nameCaller: payload.callerName ?? 'Unknown',
       appName: 'amigo',
-      avatar: payload['callerProfilePic'] ?? '',
+      avatar: payload.callerPfp ?? '',
       handle: '1234567890',
       type: 0,
       duration: 30000,
@@ -783,7 +949,7 @@ class CallService extends ChangeNotifier {
         subtitle: 'Missed call',
         callbackText: 'Call back',
       ),
-      extra: <String, dynamic>{'userId': from},
+      extra: <String, dynamic>{'userId': payload.calleeId},
       android: const AndroidParams(
         isCustomNotification: true,
         isShowLogo: false,
@@ -815,7 +981,8 @@ class CallService extends ChangeNotifier {
     final storageCallStatus = prefs.getString('call_status');
     final storageCallId = prefs.getString('current_call_id');
 
-    if (storageCallStatus != 'answered' && storageCallId != callId.toString()) {
+    if (storageCallStatus != 'answered' &&
+        storageCallId != payload.callId.toString()) {
       await FlutterCallkitIncoming.showCallkitIncoming(params);
     }
 
@@ -824,11 +991,15 @@ class CallService extends ChangeNotifier {
       return;
     }
 
+    if (payload.callId == null) {
+      debugPrint('[CALL] Incoming call missing callId or callerId');
+      return;
+    }
     _activeCall = ActiveCallState(
-      callId: callId,
-      userId: from,
-      userName: payload['callerName'] ?? 'Unknown',
-      userProfilePic: payload['callerProfilePic'],
+      callId: payload.callId!,
+      userId: payload.callerId,
+      userName: payload.callerName ?? 'Unknown',
+      userProfilePic: payload.callerPfp,
       callType: CallType.incoming,
       status: CallStatus.ringing,
       startTime: DateTime.now(),
@@ -838,14 +1009,13 @@ class CallService extends ChangeNotifier {
     _startCallStartedTimer();
 
     // Start status polling as fallback for incoming calls too
-    _startStatusPolling(callId);
+    _startStatusPolling(payload.callId!);
 
     // CallKit notification is already shown above, no need for additional notification
-    notifyListeners();
   }
 
-  /// Handle call declined
-  void _handleCallDeclined(Map<String, dynamic> message) async {
+  /// Handle call declined (internal helper)
+  void _handleCallDeclinedInternal(Map<String, dynamic> message) async {
     try {
       await RingtoneManager.stopRingtone();
     } catch (e) {
@@ -854,8 +1024,8 @@ class CallService extends ChangeNotifier {
     _cleanup();
   }
 
-  /// Handle call ended
-  void _handleCallEnded(Map<String, dynamic> message) async {
+  /// Handle call ended (internal helper)
+  void _handleCallEndedInternal(Map<String, dynamic> message) async {
     try {
       await RingtoneManager.stopRingtone();
     } catch (e) {
@@ -864,8 +1034,8 @@ class CallService extends ChangeNotifier {
     _cleanup();
   }
 
-  /// Handle call missed
-  void _handleCallMissed(Map<String, dynamic> message) {
+  /// Handle call missed (internal helper)
+  void _handleCallMissedInternal(Map<String, dynamic> message) {
     _cleanup();
   }
 
@@ -910,8 +1080,6 @@ class CallService extends ChangeNotifier {
       await prefs.remove('current_caller_name');
       await prefs.remove('current_caller_profile_pic');
       await prefs.remove('call_status');
-
-      notifyListeners();
     } catch (e) {
       debugPrint('[CALL] Error during cleanup');
     }
@@ -998,12 +1166,12 @@ class CallService extends ChangeNotifier {
 
           // Handle the call decline/end as if it came from WebSocket
           if (status == 'declined') {
-            _handleCallDeclined({
+            _handleCallDeclinedInternal({
               'callId': callId,
               'payload': {'reason': 'declined_via_polling'},
             });
           } else if (status == 'ended') {
-            _handleCallEnded({
+            _handleCallEndedInternal({
               'callId': callId,
               'payload': {'reason': 'ended_via_polling'},
             });
@@ -1106,10 +1274,18 @@ class CallService extends ChangeNotifier {
   bool get isProximityControlActive => _proximitySubscription != null;
 
   /// Dispose service
-  @override
   void dispose() {
-    _webSocketSubscription?.cancel();
+    _callInitSubscription?.cancel();
+    _callInitAckSubscription?.cancel();
+    _callOfferSubscription?.cancel();
+    _callAnswerSubscription?.cancel();
+    _callIceSubscription?.cancel();
+    _callAcceptSubscription?.cancel();
+    _callDeclineSubscription?.cancel();
+    _callEndSubscription?.cancel();
+    _callRingingSubscription?.cancel();
+    _callMissedSubscription?.cancel();
+    _callErrorSubscription?.cancel();
     _cleanup();
-    super.dispose();
   }
 }

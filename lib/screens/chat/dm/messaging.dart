@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/db/repositories/messageStatus.repo.dart';
-import 'package:amigo/models/message_status.model.dart' as status_model;
 import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/message.model.dart';
