@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:amigo/env.dart';
 import 'package:amigo/services/notification_service.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
+import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/types/socket.type.dart';
 import 'package:amigo/models/message.model.dart';
 import 'package:dio/dio.dart';
@@ -128,7 +129,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     // Handle regular message notifications in background
     // Store message in local DB if chat_message is present
     await _storeMessageFromNotificationBackground(data);
-    
+
     // Show notification
     await notifcations.showMessageNotification(
       title: message.notification?.title ?? 'New Message',
@@ -291,7 +292,9 @@ void _stopBackgroundStatusPolling() {
 }
 
 /// Store message from FCM notification data to local database (background handler)
-Future<void> _storeMessageFromNotificationBackground(Map<String, dynamic> data) async {
+Future<void> _storeMessageFromNotificationBackground(
+  Map<String, dynamic> data,
+) async {
   try {
     // Check if chat_message is present in the notification data
     final chatMessageStr = data['chat_message'];
@@ -323,7 +326,8 @@ Future<void> _storeMessageFromNotificationBackground(Map<String, dynamic> data) 
       senderName: chatMessagePayload.senderName,
       type: chatMessagePayload.msgType,
       body: chatMessagePayload.body,
-      status: MessageStatusType.delivered, // Messages from notifications are delivered
+      status: MessageStatusType
+          .delivered, // Messages from notifications are delivered
       attachments: chatMessagePayload.attachments,
       metadata: chatMessagePayload.metadata,
       isStarred: false,
@@ -336,9 +340,42 @@ Future<void> _storeMessageFromNotificationBackground(Map<String, dynamic> data) 
     // Store in local database
     final messageRepo = MessageRepository();
     await messageRepo.insertMessage(messageModel);
+
+    // Update conversation's last message and unread count
+    final conversationRepo = ConversationRepository();
+    final conversationId = chatMessagePayload.convId;
+    // Use canonicalId if available, otherwise use optimisticId (which is always present)
+    final messageId = chatMessagePayload.canonicalId ?? chatMessagePayload.optimisticId;
+
+    // Get current conversation to check unread count
+    final conversation = await conversationRepo.getConversationById(conversationId);
     
-    debugPrint('✅ [BACKGROUND] Stored message from FCM notification: ${chatMessagePayload.canonicalId ?? chatMessagePayload.optimisticId}');
+    if (conversation != null) {
+      // Increment unread count (messages from notifications are unread)
+      final currentUnreadCount = conversation.unreadCount ?? 0;
+      final newUnreadCount = currentUnreadCount + 1;
+
+      // Update last message ID
+      await conversationRepo.updateLastMessage(conversationId, messageId);
+
+      // Update unread count
+      await conversationRepo.updateUnreadCount(conversationId, newUnreadCount);
+
+      debugPrint(
+        '✅ [BACKGROUND] Updated conversation $conversationId: lastMessageId=$messageId, unreadCount=$newUnreadCount',
+      );
+    } else {
+      debugPrint(
+        '⚠️ [BACKGROUND] Conversation $conversationId not found in database',
+      );
+    }
+
+    debugPrint(
+      '✅ [BACKGROUND] Stored message from FCM notification: ${chatMessagePayload.canonicalId ?? chatMessagePayload.optimisticId}',
+    );
   } catch (e) {
-    debugPrint('❌ [BACKGROUND] Error storing message from FCM notification: $e');
+    debugPrint(
+      '❌ [BACKGROUND] Error storing message from FCM notification: $e',
+    );
   }
 }

@@ -594,12 +594,16 @@ class ChatHelpers {
         return;
       }
 
-      // Initiate the call
+      // Initiate the call - this will throw if it fails
       await callService.initiateCall(userId, userName, userProfilePic);
 
-      // Navigate to in-call screen
-      if (context.mounted) {
+      // Check if we have an active call after initiation
+      if (callService.hasActiveCall && context.mounted) {
+        // Navigate to call screen
         Navigator.of(context).pushNamed('/call');
+      } else {
+        // If no active call, something went wrong
+        debugPrint('[ChatHelpers] No active call after initiation');
       }
     } catch (e) {
       if (context.mounted) {

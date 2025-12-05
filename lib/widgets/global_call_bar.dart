@@ -59,9 +59,11 @@ class _GlobalCallBarState extends ConsumerState<GlobalCallBar>
     final ModalRoute<dynamic>? currentRoute = ModalRoute.of(context);
     final bool isOnCallScreen = currentRoute?.settings.name == '/call';
 
-    // Check if call is ongoing (answered status) and not on call screen
+    // Check if call is ongoing (initiated, ringing, or answered) and not on call screen
     final bool shouldShow = activeCall != null &&
-        activeCall.status == CallStatus.answered &&
+        (activeCall.status == CallStatus.initiated ||
+         activeCall.status == CallStatus.ringing ||
+         activeCall.status == CallStatus.answered) &&
         !isOnCallScreen;
     
     // Debug logging

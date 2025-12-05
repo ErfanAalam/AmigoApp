@@ -3,9 +3,11 @@ import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/models/user_model.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:drift_db_viewer/drift_db_viewer.dart' show DriftDbViewer;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
+import '../../db/sqlite.db.dart';
 import '../../services/auth/auth.service.dart';
 // import '../../services/cookie_service.dart';
 import '../auth/login_screen.dart';
@@ -938,21 +940,21 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                               : 'Loading...',
                           valueColor: Colors.grey[700],
                         ),
-                        // ProfileOption(
-                        //   icon: Icons.storage,
-                        //   title: 'Database Viewer',
-                        //   subtitle: 'View and inspect database contents',
-                        //   onTap: () {
-                        //     Navigator.push(
-                        //       context,
-                        //       MaterialPageRoute(
-                        //         builder: (context) => DriftDbViewer(
-                        //           SqliteDatabase.instance.database,
-                        //         ),
-                        //       ),
-                        //     );
-                        //   },
-                        // ),
+                        ProfileOption(
+                          icon: Icons.storage,
+                          title: 'Database Viewer',
+                          subtitle: 'View and inspect database contents',
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => DriftDbViewer(
+                                  SqliteDatabase.instance.database,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
                       ],
                     ),
                   ],

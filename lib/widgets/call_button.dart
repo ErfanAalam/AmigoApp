@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/call.provider.dart';
+import '../services/call.service.dart';
 
 class CallButton extends ConsumerWidget {
   final int userId;
@@ -55,37 +57,29 @@ class CallButton extends ConsumerWidget {
     CallServiceNotifier callServiceNotifier,
   ) async {
     try {
+      // Initiate call - this will throw if it fails
       await callServiceNotifier.initiateCall(userId, userName, userProfilePic);
-      // CallKitParams params = CallKitParams(
-      //   id: userId.toString(),
-      //   nameCaller: userName,
-      //   handle: '0123456789',
-      //   type: 0,
-      //   extra: <String, dynamic>{'userId': userId},
-      //   ios: IOSParams(handleType: 'generic'),
-      //   callingNotification: const NotificationParams(
-      //     showNotification: true,
-      //     isShowCallback: true,
-      //     subtitle: 'Calling...',
-      //     callbackText: 'Hang Up',
-      //   ),
-      //   android: const AndroidParams(
-      //     isCustomNotification: true,
-      //     isShowCallID: true,
-      //   ),
-      // );
-      // await FlutterCallkitIncoming.startCall(params);
-
-      // Navigate to in-call screen
-      if (context.mounted) {
+      
+      // Sync state to get latest call status
+      callServiceNotifier.syncState();
+      
+      // Check if we have an active call after initiation
+      final callService = CallService();
+      if (callService.hasActiveCall && context.mounted) {
+        // Navigate to call screen
         Navigator.of(context).pushNamed('/call');
+      } else {
+        // If no active call, something went wrong
+        debugPrint('[CallButton] No active call after initiation');
       }
     } catch (e) {
+      debugPrint('[CallButton] Error initiating call: $e');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to start call: $e'),
+            content: Text('Failed to start call: ${e.toString()}'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
           ),
         );
       }

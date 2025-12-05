@@ -531,6 +531,46 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     // start silent message sync (from server to local DB)
     await _syncMessagesFromServer();
+
+    // resend any failed messages
+    final failedMessages = messaagesFromLocal
+        .where(
+          (msg) =>
+              msg.metadata != null &&
+              msg.metadata!['upload_failed'] == true &&
+              msg.senderId == _currentUserDetails?.id,
+        )
+        .toList();
+    if (failedMessages.isNotEmpty) {
+      // Update UI to show loading state for all failed messages before resending
+      if (mounted) {
+        setState(() {
+          for (final failedMessage in failedMessages) {
+            final msgIndex = _messages.indexWhere(
+              (msg) =>
+                  msg.id == failedMessage.id ||
+                  msg.optimisticId == failedMessage.optimisticId,
+            );
+            if (msgIndex != -1) {
+              final uploadingMetadata = Map<String, dynamic>.from(
+                failedMessage.metadata ?? {},
+              );
+              uploadingMetadata.remove('upload_failed');
+              uploadingMetadata['is_uploading'] = true;
+              _messages[msgIndex] = failedMessage.copyWith(
+                status: MessageStatusType.sent,
+                metadata: uploadingMetadata,
+              );
+            }
+          }
+        });
+      }
+      
+      // Now resend each failed message
+      for (final failedMessage in failedMessages) {
+        await _resendFailedMessage(failedMessage);
+      }
+    }
   }
 
   Future<void> _loadMoreMessages() async {
@@ -1353,19 +1393,58 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         sentAt: payload.sentAt.toIso8601String(),
       );
 
+      // If this is a message from the current user, check if we have an optimistic message
+      // that matches by optimisticId and update it instead of adding a duplicate
+      int existingIndex = -1;
+      if (payload.senderId == _currentUserDetails?.id && payload.optimisticId != null) {
+        existingIndex = _messages.indexWhere(
+          (msg) =>
+              msg.optimisticId == payload.optimisticId ||
+              (msg.id == payload.optimisticId && msg.senderId == payload.senderId),
+        );
+
+        if (existingIndex != -1) {
+          // Update existing message with server response
+          if (mounted) {
+            setState(() {
+              // Clear uploading state and update with server message
+              final updatedMetadata = Map<String, dynamic>.from(
+                message.metadata ?? {},
+              );
+              updatedMetadata['is_uploading'] = false;
+              updatedMetadata.remove('upload_failed');
+              
+              final updatedMessage = message.copyWith(
+                optimisticId: _messages[existingIndex].optimisticId,
+                metadata: updatedMetadata,
+              );
+              _messages[existingIndex] = updatedMessage;
+              _sortMessagesBySentAt();
+            });
+          }
+          
+          // Save to DB
+          await _messagesRepo.insertMessage(message);
+          return;
+        }
+      }
+
       // Check if message already exists (avoid duplicates)
-      final existingIndex = _messages.indexWhere(
-        (msg) =>
-            msg.canonicalId == message.canonicalId ||
-            msg.id == message.id ||
-            (msg.optimisticId != null &&
-                msg.optimisticId == message.optimisticId),
-      );
+      int duplicateIndex = existingIndex;
+      if (duplicateIndex == -1) {
+        duplicateIndex = _messages.indexWhere(
+          (msg) =>
+              msg.canonicalId == message.canonicalId ||
+              msg.id == message.id ||
+              (msg.optimisticId != null &&
+                  msg.optimisticId == message.optimisticId),
+        );
+      }
 
       // Add message to UI immediately with animation
       if (mounted) {
         setState(() {
-          if (existingIndex == -1) {
+          if (duplicateIndex == -1) {
             // New message - check if it should be at the end
             if (_messages.isEmpty) {
               _messages.add(message);
@@ -1392,7 +1471,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             }
           } else {
             // Message already exists - update it in place
-            _messages[existingIndex] = message;
+            _messages[duplicateIndex] = message;
           }
         });
 
@@ -1743,6 +1822,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   /// Resend a failed message
   Future<void> _resendFailedMessage(MessageModel failedMessage) async {
+    // Find the message index in the UI
+    final index = _messages.indexWhere(
+      (msg) =>
+          msg.id == failedMessage.id ||
+          msg.optimisticId == failedMessage.optimisticId,
+    );
+
     // Set uploading state immediately for visual feedback
     final uploadingMetadata = Map<String, dynamic>.from(
       failedMessage.metadata ?? {},
@@ -1756,11 +1842,6 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     );
 
     // Update in UI immediately to show uploading state
-    final index = _messages.indexWhere(
-      (msg) =>
-          msg.id == failedMessage.id ||
-          msg.optimisticId == failedMessage.optimisticId,
-    );
     if (index != -1 && mounted) {
       setState(() {
         _messages[index] = uploadingMessage;
@@ -1770,7 +1851,114 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // Save uploading state to DB
     await _messagesRepo.insertMessage(uploadingMessage);
 
-    // Resend the message
+    // Handle media messages differently - need to upload first
+    if (failedMessage.type != MessageType.text) {
+      try {
+        // Get the local file path from either localMediaPath or attachments
+        String? localPath = failedMessage.localMediaPath;
+        if (localPath == null || localPath.isEmpty) {
+          localPath = failedMessage.attachments?['local_path'] as String?;
+        }
+
+        if (localPath == null || localPath.isEmpty) {
+          debugPrint('Error: No local path found for failed media message');
+          await _markMessageAsFailed(
+            failedMessage.optimisticId ?? failedMessage.id,
+          );
+          return;
+        }
+
+        final mediaFile = File(localPath);
+        if (!mediaFile.existsSync()) {
+          debugPrint('Error: Media file not found at path: $localPath');
+          await _markMessageAsFailed(
+            failedMessage.optimisticId ?? failedMessage.id,
+          );
+          return;
+        }
+
+        // Upload the media to server first
+        final response = await _chatsServices.sendMediaMessage(mediaFile);
+        
+        if (response['success'] == true && response['data'] != null) {
+          final mediaData = MediaResponse.fromJson(response['data']);
+
+          // Update message with the new attachments (server URLs)
+          final updatedMessage = uploadingMessage.copyWith(
+            attachments: mediaData.toJson(),
+          );
+
+          // Update in UI
+          if (index != -1 && mounted) {
+            setState(() {
+              _messages[index] = updatedMessage;
+            });
+          }
+
+          // Save to DB
+          await _messagesRepo.insertMessage(updatedMessage);
+
+          // Use current time for the resent message
+          final newSentAt = DateTime.now().toUtc();
+
+          // Now send the message with proper MediaResponse
+          final messagePayload = ChatMessagePayload(
+            optimisticId: failedMessage.optimisticId ?? failedMessage.id,
+            convId: failedMessage.conversationId,
+            senderId: failedMessage.senderId,
+            senderName: failedMessage.senderName,
+            attachments: mediaData,
+            convType: ChatType.group,
+            msgType: failedMessage.type,
+            body: failedMessage.body,
+            replyToMessageId: failedMessage.metadata?['reply_to']?['message_id'],
+            sentAt: newSentAt,
+          );
+
+          final wsmsg = WSMessage(
+            type: WSMessageType.messageNew,
+            payload: messagePayload,
+            wsTimestamp: DateTime.now(),
+          ).toJson();
+
+          await _webSocket.sendMessage(wsmsg).then((_) {
+            // Keep the message in the list with loading state
+            // The server will send back the message via WebSocket and we'll update it
+            // Save success state to DB (server will send back the actual message)
+            final successMetadata = Map<String, dynamic>.from(
+              updatedMessage.metadata ?? {},
+            );
+            successMetadata['is_uploading'] = true; // Keep loading until server responds
+            successMetadata.remove('upload_failed');
+            final successMessage = updatedMessage.copyWith(
+              sentAt: newSentAt.toIso8601String(),
+              metadata: successMetadata,
+            );
+            _messagesRepo.insertMessage(successMessage);
+          }).catchError((e) async {
+            debugPrint('Error resending media message: $e');
+            // Mark as failed again
+            await _markMessageAsFailed(
+              failedMessage.optimisticId ?? failedMessage.id,
+            );
+          });
+        } else {
+          debugPrint('Error: Failed to upload media for resend');
+          await _markMessageAsFailed(
+            failedMessage.optimisticId ?? failedMessage.id,
+          );
+        }
+      } catch (e) {
+        debugPrint('Error resending media message: $e');
+        // Mark as failed again
+        await _markMessageAsFailed(
+          failedMessage.optimisticId ?? failedMessage.id,
+        );
+      }
+      return;
+    }
+
+    // Handle text messages
     try {
       // Use current time for the resent message
       final newSentAt = DateTime.now().toUtc();
@@ -1797,46 +1985,35 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       await _webSocket
           .sendMessage(wsmsg)
           .then((_) {
-            // Clear uploading state on success
+            // Keep the message in the list with loading state
+            // The server will send back the message via WebSocket and we'll update it
+            // Save success state to DB (server will send back the actual message)
             final successMetadata = Map<String, dynamic>.from(
               uploadingMessage.metadata ?? {},
             );
-            successMetadata['is_uploading'] = false;
+            successMetadata['is_uploading'] = true; // Keep loading until server responds
             successMetadata.remove(
               'upload_failed',
             ); // Explicitly remove upload_failed
-            // Update message with new timestamp and clear upload flags
             final successMessage = uploadingMessage.copyWith(
               sentAt: newSentAt.toIso8601String(),
               metadata: successMetadata,
             );
-            // Recalculate index to ensure we update the correct message
-            final currentIndex = _messages.indexWhere(
-              (msg) =>
-                  msg.id == failedMessage.id ||
-                  msg.optimisticId == failedMessage.optimisticId,
-            );
-            if (currentIndex != -1 && mounted) {
-              setState(() {
-                // Update the message with new timestamp
-                _messages[currentIndex] = successMessage;
-                // Re-sort messages so the resent message appears at the bottom
-                _sortMessagesBySentAt();
-                // Scroll to bottom to show the resent message
-                _scrollToBottom();
-              });
-            }
             _messagesRepo.insertMessage(successMessage);
           })
           .catchError((e) async {
             debugPrint('Error resending message: $e');
             // Mark as failed again
-            await _markMessageAsFailed(failedMessage.id);
+            await _markMessageAsFailed(
+              failedMessage.optimisticId ?? failedMessage.id,
+            );
           });
     } catch (e) {
       debugPrint('Error resending message: $e');
       // Mark as failed again
-      await _markMessageAsFailed(failedMessage.id);
+      await _markMessageAsFailed(
+        failedMessage.optimisticId ?? failedMessage.id,
+      );
     }
   }
 

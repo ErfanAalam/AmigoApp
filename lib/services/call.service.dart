@@ -23,6 +23,7 @@ import 'socket/websocket_message_handler.dart';
 import '../services/call_foreground_service.dart';
 import '../api/user.service.dart';
 import '../utils/ringing_tone.dart';
+import '../utils/navigation_helper.dart';
 import '../types/socket.type.dart';
 
 class CallService {
@@ -207,13 +208,45 @@ class CallService {
     String? calleeProfilePic,
   ) async {
     try {
-      if (!_isInitialized) await initialize();
+      // Ensure initialization completes before proceeding
+      if (!_isInitialized) {
+        await initialize();
+        // Wait a bit for initialization to fully complete
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
 
-      if (hasActiveCall) return;
+      // Double-check initialization
+      if (!_isInitialized) {
+        debugPrint('[CALL] CallService not initialized, cannot initiate call');
+        throw Exception('CallService not initialized');
+      }
+
+      if (hasActiveCall) {
+        debugPrint('[CALL] Already has active call, cannot initiate new call');
+        return;
+      }
 
       // Check if WebSocket is connected
       if (!_webSocketService.isConnected) {
+        debugPrint('[CALL] WebSocket not connected, connecting...');
         await _webSocketService.connect();
+        // Wait for connection to stabilize
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+
+      // Verify WebSocket is still connected
+      if (!_webSocketService.isConnected) {
+        debugPrint('[CALL] WebSocket connection failed');
+        throw Exception('WebSocket not connected');
+      }
+
+      // Get current user info - must be available
+      if (_currentUser == null) {
+        _currentUser = await UserUtils().getUserDetails();
+        if (_currentUser == null) {
+          debugPrint('[CALL] Current user not available');
+          throw Exception('User not logged in');
+        }
       }
 
       // Enable wakelock
@@ -221,9 +254,6 @@ class CallService {
 
       // Get user media
       await _setupLocalMedia();
-
-      // Get current user info (for now using a simple approach)
-      if (_currentUser == null) return;
 
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
       final callInitPayload = CallPayload(
@@ -242,11 +272,18 @@ class CallService {
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      _webSocketService.sendMessage(wsmsg).catchError((e) {
+      // Send message and handle errors
+      try {
+        await _webSocketService.sendMessage(wsmsg);
+        debugPrint('[CALL] Call init message sent successfully');
+      } catch (e) {
         debugPrint('❌ Error sending call:init: $e');
-      });
+        await _cleanup();
+        rethrow;
+      }
 
-      // Set up local call state (will be updated when backend confirms)
+      // Set up local call state AFTER successfully sending message
+      // This will be updated when backend confirms via call:init:ack or call:ringing
       _activeCall = ActiveCallState(
         callId: 0, // Will be updated from backend response
         userId: calleeId,
@@ -269,8 +306,9 @@ class CallService {
         await RingtoneManager.playSystemRingtone();
       }
     } catch (e) {
+      debugPrint('[CALL] Failed to initiate call: $e');
       await _cleanup();
-      debugPrint('Failed to initiate call');
+      rethrow;
     }
   }
 
@@ -387,13 +425,29 @@ class CallService {
   /// Decline an incoming call
   Future<void> declineCall({String? reason, int? callId}) async {
     try {
-      if (_activeCall == null && callId == null) {
-        debugPrint('No active call to decline');
+      // Get callId from parameter, active call, or SharedPreferences
+      int? actualCallId = callId;
+      
+      if (actualCallId == null && _activeCall != null) {
+        actualCallId = _activeCall!.callId;
+      }
+      
+      if (actualCallId == null) {
+        final prefs = await SharedPreferences.getInstance();
+        final callIdStr = prefs.getString('current_call_id');
+        if (callIdStr != null) {
+          actualCallId = int.tryParse(callIdStr);
+        }
+      }
+
+      if (actualCallId == null) {
+        debugPrint('[CALL] No callId available to decline');
+        await _cleanup();
         return;
       }
 
       // If we have callId but no active call, try to restore from SharedPreferences
-      if (_activeCall == null && callId != null) {
+      if (_activeCall == null) {
         final prefs = await SharedPreferences.getInstance();
         final callerIdStr = prefs.getString('current_caller_id');
         final callerName = prefs.getString('current_caller_name');
@@ -401,33 +455,54 @@ class CallService {
 
         if (callerIdStr != null && callerName != null) {
           await restoreCallState(
-            callId!,
+            actualCallId,
             int.parse(callerIdStr),
             callerName,
             callerProfilePic,
           );
         } else {
-          debugPrint('Cannot decline call: missing caller information');
-          return;
+          debugPrint('[CALL] Cannot restore call state, but will still send decline with callId=$actualCallId');
         }
       }
 
-      if (callId != null && _activeCall != null) {
-        _activeCall = _activeCall!.copyWith(callId: callId);
+      // Update callId if we have it
+      if (_activeCall != null && _activeCall!.callId != actualCallId) {
+        _activeCall = _activeCall!.copyWith(callId: actualCallId);
       }
 
-      if (_currentUser == null) return;
-      if (_activeCall == null) return;
+      if (_currentUser == null) {
+        debugPrint('[CALL] Current user not available, cannot decline');
+        await _cleanup();
+        return;
+      }
 
       // Determine caller/callee based on call type
-      final isOutgoing = _activeCall!.callType == CallType.outgoing;
-      final callerId = isOutgoing ? _currentUser!.id : _activeCall!.userId;
-      final calleeId = isOutgoing ? _activeCall!.userId : _currentUser!.id;
+      // For incoming calls, we are the callee
+      final callerId = _activeCall != null ? _activeCall!.userId : null;
+      final calleeId = _currentUser!.id;
+
+      // If we don't have callerId from active call, try to get it from SharedPreferences
+      int? actualCallerId = callerId;
+      if (actualCallerId == null) {
+        final prefs = await SharedPreferences.getInstance();
+        final callerIdStr = prefs.getString('current_caller_id');
+        if (callerIdStr != null) {
+          actualCallerId = int.tryParse(callerIdStr);
+        }
+      }
+
+      if (actualCallerId == null) {
+        debugPrint('[CALL] Cannot determine callerId, cannot send decline');
+        await _cleanup();
+        return;
+      }
+
+      debugPrint('[CALL] Declining call: callId=$actualCallId, callerId=$actualCallerId, calleeId=$calleeId');
 
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
       final callDeclinePayload = CallPayload(
-        callId: _activeCall!.callId,
-        callerId: callerId,
+        callId: actualCallId,
+        callerId: actualCallerId,
         calleeId: calleeId,
         data: {'reason': reason ?? 'user_declined'},
         timestamp: DateTime.now(),
@@ -439,14 +514,27 @@ class CallService {
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      _webSocketService.sendMessage(wsmsg).catchError((e) {
+      // Send decline message and wait for it
+      try {
+        await _webSocketService.sendMessage(wsmsg);
+        debugPrint('[CALL] Decline message sent successfully');
+      } catch (e) {
         debugPrint('❌ Error sending call:decline: $e');
-      });
+      }
 
       // Cancel the call started timer since call is being declined
       _callStartedTimer?.cancel();
       _callStartedTimer = null;
+      _stopStatusPolling();
 
+      // Stop ringtone
+      try {
+        await RingtoneManager.stopRingtone();
+      } catch (e) {
+        debugPrint('[CALL] Error stopping ringtone in decline: $e');
+      }
+
+      // Clean up state
       await _cleanup();
 
       final prefs = await SharedPreferences.getInstance();
@@ -455,10 +543,8 @@ class CallService {
       await prefs.remove('current_caller_name');
       await prefs.remove('current_caller_profile_pic');
       await prefs.remove('call_status');
-
-      // notifyListeners();
     } catch (e) {
-      debugPrint('[CALL] Error declining call');
+      debugPrint('[CALL] Error declining call: $e');
       await _cleanup();
     }
   }
@@ -927,7 +1013,67 @@ class CallService {
   /// Handle call error message
   void _handleCallError(CallPayload payload) async {
     debugPrint('[CALL] Call error received: ${payload.error}');
-    // Handle call error as needed
+    
+    // Extract error code and message
+    String errorMessage = 'Call failed';
+    String? errorCode;
+    
+    if (payload.error != null) {
+      if (payload.error is Map) {
+        final errorMap = payload.error as Map;
+        errorCode = errorMap['code']?.toString();
+        errorMessage = errorMap['message']?.toString() ?? errorMessage;
+        debugPrint('[CALL] Error code: $errorCode, message: $errorMessage');
+      } else if (payload.error is String) {
+        errorMessage = payload.error as String;
+      }
+    }
+    
+    // Stop ringtone if playing
+    try {
+      await RingtoneManager.stopRingtone();
+    } catch (e) {
+      debugPrint('[CALL] Error stopping ringtone in error handler: $e');
+    }
+    
+    // Stop timers
+    _callStartedTimer?.cancel();
+    _callStartedTimer = null;
+    _stopStatusPolling();
+    
+    // Navigate back from call screen if we're on it
+    if (NavigationHelper.navigator != null) {
+      try {
+        final navigator = NavigationHelper.navigator!;
+        
+        // Pop back if we navigated to call screen
+        if (navigator.canPop()) {
+          navigator.pop();
+        }
+      } catch (e) {
+        debugPrint('[CALL] Error navigating back from call screen: $e');
+      }
+    }
+    
+    // Show error message to user
+    if (NavigationHelper.navigatorKey.currentContext != null) {
+      final context = NavigationHelper.navigatorKey.currentContext!;
+      
+      // Special handling for USER_BUSY - might be stale backend state
+      if (errorCode == 'USER_BUSY') {
+        errorMessage = 'User is busy. If this persists, please restart the app.';
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: const Color(0xFFEF4444), // Red color
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+    
+    // Clean up call state - IMPORTANT: do this last
     _cleanup();
   }
 
@@ -981,20 +1127,39 @@ class CallService {
     final storageCallStatus = prefs.getString('call_status');
     final storageCallId = prefs.getString('current_call_id');
 
+    if (payload.callId == null) {
+      debugPrint('[CALL] Incoming call missing callId');
+      return;
+    }
+
+    // If we already have an active call, check if it's the same call or a stale one
+    if (_activeCall != null) {
+      // If it's the same call, don't process again
+      if (_activeCall!.callId == payload.callId) {
+        debugPrint('[CALL] Already processing this incoming call');
+        return;
+      }
+      // If it's a different call, clean up the stale one first
+      debugPrint('[CALL] Cleaning up stale call before processing new incoming call');
+      await _cleanup();
+    }
+
+    // Store call info in SharedPreferences for CallKit
+    await prefs.setString('current_call_id', payload.callId.toString());
+    await prefs.setString('current_caller_id', payload.callerId.toString());
+    await prefs.setString('current_caller_name', payload.callerName ?? 'Unknown');
+    if (payload.callerPfp != null) {
+      await prefs.setString('current_caller_profile_pic', payload.callerPfp!);
+    }
+    await prefs.setString('call_status', 'ringing');
+
+    // Show CallKit notification if not already answered
     if (storageCallStatus != 'answered' &&
         storageCallId != payload.callId.toString()) {
       await FlutterCallkitIncoming.showCallkitIncoming(params);
     }
 
-    // Check if we already have an active call
-    if (_activeCall != null) {
-      return;
-    }
-
-    if (payload.callId == null) {
-      debugPrint('[CALL] Incoming call missing callId or callerId');
-      return;
-    }
+    // Set up the new incoming call state
     _activeCall = ActiveCallState(
       callId: payload.callId!,
       userId: payload.callerId,
@@ -1011,7 +1176,7 @@ class CallService {
     // Start status polling as fallback for incoming calls too
     _startStatusPolling(payload.callId!);
 
-    // CallKit notification is already shown above, no need for additional notification
+    debugPrint('[CALL] Incoming call processed: callId=${payload.callId}, callerId=${payload.callerId}');
   }
 
   /// Handle call declined (internal helper)

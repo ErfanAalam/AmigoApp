@@ -1,4 +1,5 @@
 // import 'dart:convert';
+import 'dart:ui';
 import 'package:amigo/db/repositories/contacts.repo.dart';
 import 'package:amigo/db/repositories/conversation_member.repo.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
@@ -305,6 +306,53 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
     }
   }
 
+  SnackBar _createBlurredSnackBar({
+    required String message,
+    Color? backgroundColor,
+    Duration duration = const Duration(seconds: 3),
+  }) {
+    return SnackBar(
+      content: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: (backgroundColor ?? Colors.blue[400])!.withOpacity(0.7),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.2),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    message,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      behavior: SnackBarBehavior.floating,
+      margin: EdgeInsets.all(10),
+      duration: duration,
+      showCloseIcon: false,
+      closeIconColor: Colors.white,
+    );
+  }
+
   void startConversation(UserModel user) async {
     final response = await _chatsServices.createChat(user.id.toString());
     if (response['success'] && response['data'] != null) {
@@ -318,10 +366,32 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
           final dm = await _conversationRepository.getDmByConversationId(
             conversationData['id'],
           );
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => InnerChatPage(dm: dm!)),
-          );
+          if (dm == null) {
+            if (mounted) {
+              try {
+                final messenger = ScaffoldMessenger.maybeOf(context);
+                if (messenger != null) {
+                  messenger.showSnackBar(
+                    _createBlurredSnackBar(
+                      message:
+                          'Cannot start conversation. The chat maybe deleted. Try restoring the chat.',
+                      backgroundColor: Colors.blue[400],
+                      duration: Duration(seconds: 3),
+                    ),
+                  );
+                }
+              } catch (_) {
+                // Context is invalid, ignore
+              }
+            }
+            return;
+          }
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => InnerChatPage(dm: dm)),
+            );
+          }
           return;
         }
 
@@ -375,27 +445,48 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
         // Add the new DM to the chat provider state
         await ref.read(chatProvider.notifier).addNewDm(dm);
 
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => InnerChatPage(dm: dm)),
-        );
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => InnerChatPage(dm: dm)),
+          );
+        }
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to start conversation: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        if (mounted) {
+          try {
+            final messenger = ScaffoldMessenger.maybeOf(context);
+            if (messenger != null) {
+              messenger.showSnackBar(
+                _createBlurredSnackBar(
+                  message: 'Failed to start conversation: $e',
+                  backgroundColor: Colors.red,
+                  duration: Duration(seconds: 3),
+                ),
+              );
+            }
+          } catch (_) {
+            // Context is invalid, ignore
+          }
+        }
       }
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Failed to create chat: ${response['message'] ?? 'Unknown error'}',
-          ),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        try {
+          final messenger = ScaffoldMessenger.maybeOf(context);
+          if (messenger != null) {
+            messenger.showSnackBar(
+              _createBlurredSnackBar(
+                message:
+                    'Failed to create chat: ${response['message'] ?? 'Unknown error'}',
+                backgroundColor: Colors.red,
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+        } catch (_) {
+          // Context is invalid, ignore
+        }
+      }
     }
   }
 

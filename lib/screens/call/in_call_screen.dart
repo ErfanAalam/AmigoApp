@@ -17,11 +17,8 @@ class _InCallScreenState extends ConsumerState<InCallScreen> {
     final callServiceNotifier = ref.read(callServiceProvider.notifier);
     final activeCall = callServiceState.activeCall;
 
-    if (activeCall == null || 
-        activeCall.status == CallStatus.ended ||
-        activeCall.status == CallStatus.declined ||
-        activeCall.status == CallStatus.missed) {
-      // If no active call or call is ended/declined/missed, navigate back to previous screen (chat page)
+    if (activeCall == null || activeCall.status == CallStatus.ended) {
+      // If no active call, navigate back to previous screen (chat page)
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (context.mounted) {
           // Pop all call-related screens and return to main chat
@@ -41,11 +38,7 @@ class _InCallScreenState extends ConsumerState<InCallScreen> {
               Text(
                 activeCall?.status == CallStatus.ended
                     ? 'Call ended'
-                    : activeCall?.status == CallStatus.declined
-                        ? 'Call declined'
-                        : activeCall?.status == CallStatus.missed
-                            ? 'Call missed'
-                            : 'Closing call...',
+                    : 'Closing call...',
                 style: const TextStyle(color: Colors.white, fontSize: 16),
               ),
             ],

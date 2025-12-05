@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import '../models/call_model.dart';
@@ -38,10 +39,12 @@ class CallServiceNotifier extends Notifier<CallServiceState> {
 
   @override
   CallServiceState build() {
-    // Initialize
+    // Initialize asynchronously but don't block build
     _callService.initialize().then((_) {
       _syncState();
       _startDurationUpdates();
+    }).catchError((e) {
+      debugPrint('[CallProvider] Error initializing CallService: $e');
     });
 
     // Also start timer immediately to catch any existing calls

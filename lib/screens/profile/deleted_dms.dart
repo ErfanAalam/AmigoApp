@@ -1,11 +1,14 @@
 import 'package:amigo/config/app_colors.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
+import 'package:amigo/providers/chat_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../api/chats.services.dart';
 import '../../api/user.service.dart';
+import '../../models/conversations.model.dart';
 import '../../providers/theme_color_provider.dart';
+import '../../types/socket.type.dart';
 
 class DeletedChatsPage extends ConsumerStatefulWidget {
   const DeletedChatsPage({super.key});
@@ -53,28 +56,42 @@ class _DeletedChatsPageState extends ConsumerState<DeletedChatsPage> {
       await _conversationRepo.markAsDeleted(conversationId, false);
       await _chatsServices.reviveChat(conversationId);
 
-      setState(() {
-        _deletedChats.removeWhere(
-          (chat) => chat['conversationId'] == conversationId,
-        );
-      });
+      if (mounted) {
+        setState(() {
+          _deletedChats.removeWhere(
+            (chat) => chat['conversationId'] == conversationId,
+          );
+        });
 
-      _showSnackBar('Chat restored successfully', Colors.green);
+        // update the UI
+        ref
+            .read(chatProvider.notifier)
+            .toggleDeleteChat(conversationId, ChatType.dm);
+
+        _showSnackBar('Chat restored successfully', Colors.green);
+      }
     } catch (e) {
       debugPrint('❌ Error restoring chat: $e');
-      _showSnackBar('Failed to restore chat', Colors.red);
+      if (mounted) {
+        _showSnackBar('Failed to restore chat', Colors.red);
+      }
     }
   }
 
   void _showSnackBar(String message, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 2),
-      ),
-    );
+    if (!mounted) return;
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: color,
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      debugPrint('❌ Error showing snackbar: $e');
+    }
   }
 
   String _getInitials(String name) {

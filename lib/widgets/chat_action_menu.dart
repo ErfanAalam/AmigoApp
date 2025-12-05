@@ -18,7 +18,10 @@ class ChatActionMenu extends StatelessWidget {
     this.isPinned = false,
     this.isMuted = false,
     this.isFavorite = false,
-  }) : assert(dm != null || group != null, 'Either dm or group must be provided');
+  }) : assert(
+         dm != null || group != null,
+         'Either dm or group must be provided',
+       );
 
   @override
   Widget build(BuildContext context) {
@@ -73,17 +76,17 @@ class ChatActionMenu extends StatelessWidget {
                           ),
                         )
                       : (!isDm
-                          ? Text(
-                              displayName.isNotEmpty
-                                  ? displayName[0].toUpperCase()
-                                  : 'G',
-                              style: TextStyle(
-                                color: Colors.teal,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
-                            )
-                          : null),
+                            ? Text(
+                                displayName.isNotEmpty
+                                    ? displayName[0].toUpperCase()
+                                    : 'G',
+                                style: TextStyle(
+                                  color: Colors.teal,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              )
+                            : null),
                 ),
                 SizedBox(width: 12),
                 Expanded(
@@ -292,12 +295,15 @@ class ChatActionPopupMenu extends StatelessWidget {
     this.isPinned = false,
     this.isMuted = false,
     this.isFavorite = false,
-  }) : assert(dm != null || group != null, 'Either dm or group must be provided');
+  }) : assert(
+         dm != null || group != null,
+         'Either dm or group must be provided',
+       );
 
   @override
   Widget build(BuildContext context) {
     final isDm = dm != null;
-    
+
     return PopupMenuButton<String>(
       icon: Icon(Icons.more_vert, color: Colors.grey[600]),
       onSelected: onActionSelected,

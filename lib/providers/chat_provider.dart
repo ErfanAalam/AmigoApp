@@ -832,6 +832,55 @@ class ChatNotifier extends Notifier<ChatState> {
     return filteredGroups;
   }
 
+  void toggleDeleteChat(int conversationId, ChatType convType) async {
+    if (convType == ChatType.dm) {
+      final convIndex = state.dmList.indexWhere(
+        (conv) => conv.conversationId == conversationId,
+      );
+      if (convIndex == -1) return;
+
+      final conv = state.dmList[convIndex];
+
+      final updatedConv = conv.copyWith(
+        isDeleted: conv.isDeleted != null ? !conv.isDeleted! : true,
+      );
+      // print(
+      //   "--------------------------------------------------------------------------------",
+      // );
+      // print("updatedConv -> ${updatedConv.toJson()}");
+      // print(
+      //   "--------------------------------------------------------------------------------",
+      // );
+      final updatedDmList = List<DmModel>.from(state.dmList);
+      updatedDmList[convIndex] = updatedConv;
+
+      // Sort conversations
+      final sortedConversations = await filterAndSortConversations(
+        updatedDmList,
+      );
+
+      state = state.copyWith(dmList: sortedConversations);
+    }
+    // else if (convType == ChatType.group) {
+    //   final convIndex = state.groupList.indexWhere(
+    //     (group) => group.conversationId == conversationId,
+    //   );
+    //   if (convIndex == -1) return;
+    //   final group = state.groupList[convIndex];
+    //   final updatedGroup =
+    //       group.copyWith(isDeleted: !(group.isDeleted ?? false));
+    //   final updatedGroupList = List<GroupModel>.from(state.groupList);
+    //   updatedGroupList[convIndex] = updatedGroup;
+    //
+    //   state = state.copyWith(groupList: updatedGroupList);
+    //   await _conversationsRepo.toggleDeleteConversation(
+    //     conversationId,
+    //     convType,
+    //     updatedGroup.isDeleted ?? false,
+    //   );
+    // }
+  }
+
   /// Set active conversation
   void setActiveConversation(int? conversationId, ChatType? convType) {
     final shouldClear = conversationId == null;
@@ -1021,26 +1070,16 @@ class ChatNotifier extends Notifier<ChatState> {
           case 'delete':
             final response = await _chatsServices.deleteDm(conversationId);
             if (response['success']) {
-              // final newDeleted = Set<int>.from(state.deletedChats);
-              // newDeleted.add(conversationId);
-              // final updatedConversations = state.dmList
-              //     .where((conv) => conv.conversationId != conversationId)
-              //     .toList();
-              // final newPinned = Set<int>.from(state.pinnedChats);
-              // newPinned.remove(conversationId);
-              // final newMuted = Set<int>.from(state.mutedChats);
-              // newMuted.remove(conversationId);
-              // final newFavorite = Set<int>.from(state.favoriteChats);
-              // newFavorite.remove(conversationId);
-              //
-              // state = state.copyWith(
-              //   dmList: updatedConversations,
-              //   deletedChats: newDeleted,
-              //   pinnedChats: newPinned,
-              //   mutedChats: newMuted,
-              //   favoriteChats: newFavorite,
-              // );
+              // delete from local DB
               await _conversationsRepo.deleteConversation(conversationId);
+
+              // update the UI
+              // final updatedConversations = List<DmModel>.from(state.dmList);
+              // updatedConversations.removeAt(convIndex);
+              // state = state.copyWith(dmList: updatedConversations);
+              // return;
+
+              toggleDeleteChat(conversationId, ChatType.dm);
             }
             break;
         }
