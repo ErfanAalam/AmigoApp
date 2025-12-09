@@ -8,6 +8,7 @@ import '../../api/auth.api-client.dart';
 import '../../models/call.model.dart';
 import '../../providers/call.provider.dart';
 import '../../providers/theme-color.provider.dart';
+import '../../ui/snackbar.dart';
 
 class CallsPage extends ConsumerStatefulWidget {
   const CallsPage({super.key});
@@ -69,42 +70,6 @@ class CallsPageState extends ConsumerState<CallsPage>
       }
     });
   }
-
-  // Future<void> _loadCallHistory({bool showLoading = true}) async {
-  //   if (showLoading) {
-  //     setState(() {
-  //       _isLoading = true;
-  //       _error = null;
-  //     });
-  //   }
-
-  //   try {
-  //     final response = await _apiService.authenticatedGet(
-  //       '/call/history?limit=50',
-  //     );
-  //     final data = response.data;
-
-  //     if (data['success'] == true && data['data'] != null) {
-  //       final List<dynamic> callsData = data['data'];
-  //       setState(() {
-  //         _callHistory = callsData
-  //             .map((call) => CallHistoryItem.fromJson(call))
-  //             .toList();
-  //         _isLoading = false;
-  //       });
-  //     } else {
-  //       setState(() {
-  //         _error = data['message'] ?? 'Failed to load call history';
-  //         _isLoading = false;
-  //       });
-  //     }
-  //   } catch (e) {
-  //     setState(() {
-  //       _error = 'Error loading call history: $e';
-  //       _isLoading = false;
-  //     });
-  //   }
-  // }
 
   Future<void> _loadCallHistory({bool showLoading = true}) async {
     // Prevent multiple simultaneous loads
@@ -574,14 +539,8 @@ class CallsPageState extends ConsumerState<CallsPage>
       }
     } catch (e) {
       if (context.mounted) {
-        final themeColor = ref.watch(themeColorProvider);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Failed to start call: Please check your internet connection',
-            ),
-            backgroundColor: themeColor.primary,
-          ),
+        Snack.error(
+          'Failed to start call: Please check your internet connection',
         );
       }
     }

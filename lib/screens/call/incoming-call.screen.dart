@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/call.provider.dart';
 import '../../models/call.model.dart';
+import '../../ui/snackbar.dart';
 
 class IncomingCallScreen extends ConsumerStatefulWidget {
   const IncomingCallScreen({super.key});
@@ -319,9 +320,7 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
     } catch (e) {
       // Show error
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to accept call: $e')));
+        Snack.error('Failed to accept call: $e');
       }
     }
   }

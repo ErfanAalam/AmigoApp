@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../db/repositories/message.repo.dart';
 import '../../services/media-cache.service.dart';
 import '../../ui/media-preview.widget.dart';
+import '../../ui/snackbar.dart';
 import 'chat-helpers.utils.dart';
 
 /// Opens an image preview screen with caching support
@@ -86,12 +87,7 @@ Future<void> openImagePreview({
 
     // Show error message
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to open image: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      Snack.error('Failed to open image: $e');
     }
   }
 }
@@ -193,12 +189,7 @@ Future<void> openVideoPreview({
 
     // Show error message
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to open video: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      Snack.error('Failed to open video: $e');
     }
   }
 }

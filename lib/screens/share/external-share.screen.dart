@@ -19,6 +19,7 @@ import '../../models/user.model.dart';
 import '../../providers/chat.provider.dart';
 import '../../services/socket/websocket.service.dart';
 import '../../types/socket.types.dart';
+import '../../ui/snackbar.dart';
 
 /// Unified model for displaying conversations (both DMs and Groups)
 class ShareableConversation {
@@ -209,20 +210,7 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
       debugPrint('❌ Error loading conversations: $e');
       // If API fails and we don't have local conversations, show helpful message
       if (mounted && _availableDms.isEmpty && _availableGroups.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Could not load chats. Please check your connection.',
-            ),
-            backgroundColor: Colors.orange,
-            duration: const Duration(seconds: 3),
-            action: SnackBarAction(
-              label: 'Retry',
-              textColor: Colors.white,
-              onPressed: _loadAvailableConversations,
-            ),
-          ),
-        );
+        Snack.warning('Could not load chats. Please check your connection.');
       }
     } finally {
       if (mounted) {
@@ -281,22 +269,12 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
   /// Send shared media to selected conversations
   Future<void> _sendToSelectedConversations() async {
     if (_selectedConversations.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select at least one chat'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      Snack.warning('Please select at least one chat');
       return;
     }
 
     if (_sharedFiles.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No files to share'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      Snack.warning('No files to share');
       return;
     }
 
@@ -430,16 +408,13 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
 
       // Show success message
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Sent $successCount file(s) to ${_selectedConversations.length} chat(s)' +
-                  (failCount > 0 ? ' ($failCount failed)' : ''),
-            ),
-            backgroundColor: successCount > 0 ? Colors.green : Colors.red,
-            duration: const Duration(seconds: 3),
-          ),
-        );
+        final message = 'Sent $successCount file(s) to ${_selectedConversations.length} chat(s)' +
+            (failCount > 0 ? ' ($failCount failed)' : '');
+        if (successCount > 0) {
+          Snack.success(message);
+        } else {
+          Snack.error(message);
+        }
 
         // Clear and go back if successful
         if (successCount > 0) {
@@ -456,12 +431,7 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to send files'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        Snack.error('Failed to send files');
       }
     }
   }

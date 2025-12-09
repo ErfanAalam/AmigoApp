@@ -1,5 +1,6 @@
 import 'dart:ui';
-import 'package:flutter/material.dart';
+// import 'package:flutter/material.dart';
+import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../utils/navigation-helper.util.dart';
 
@@ -31,7 +32,7 @@ class Snack {
     _currentEntry = OverlayEntry(
       builder: (context) => _SnackOverlay(
         message: message,
-        backgroundColor: backgroundColor ?? Colors.blue[400]!,
+        backgroundColor: backgroundColor ?? Colors.blue[700]!,
         duration: duration,
         onDismiss: _dismiss,
       ),
@@ -144,7 +145,7 @@ class _SnackOverlayState extends State<_SnackOverlay>
     return Positioned(
       left: 10,
       right: 10,
-      bottom: bottomPadding + 20,
+      bottom: bottomPadding + 80,
       child: SlideTransition(
         position: _slideAnimation,
         child: FadeTransition(
@@ -157,19 +158,22 @@ class _SnackOverlayState extends State<_SnackOverlay>
               }
             },
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(14),
               child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
-                    vertical: 12,
+                    vertical: 16,
                   ),
                   decoration: BoxDecoration(
-                    color: widget.backgroundColor.withOpacity(0.7),
-                    borderRadius: BorderRadius.circular(12),
+                    color: widget.backgroundColor
+                        .withAlpha(150)
+                        .withLuminance(0.96),
+                    // color: Colors.white.withAlpha(150),
+                    borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                      color: Colors.white.withOpacity(0.2),
+                      color: widget.backgroundColor.withAlpha(150),
                       width: 1,
                     ),
                   ),
@@ -178,10 +182,9 @@ class _SnackOverlayState extends State<_SnackOverlay>
                       Expanded(
                         child: Text(
                           widget.message,
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: widget.backgroundColor,
                             fontSize: 14,
-                            fontWeight: FontWeight.w500,
                             decoration: TextDecoration.none,
                           ),
                         ),

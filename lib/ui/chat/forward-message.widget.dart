@@ -6,6 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../config/app-colors.config.dart';
 import '../../models/group.model.dart';
 import '../../providers/theme-color.provider.dart';
+import '../../ui/snackbar.dart';
 
 /// Forward Message Modal widget for both DM and group chats
 class ForwardMessageModal extends ConsumerStatefulWidget {
@@ -137,12 +138,7 @@ class _ForwardMessageModalState extends ConsumerState<ForwardMessageModal>
 
   Future<void> _handleForward() async {
     if (_selectedConversations.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select at least one chat to forward to'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      Snack.warning('Please select at least one chat to forward to');
       return;
     }
 

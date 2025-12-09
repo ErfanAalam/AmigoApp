@@ -9,6 +9,7 @@ import '../../../providers/chat.provider.dart';
 import '../../../providers/theme-color.provider.dart';
 import '../../../types/socket.types.dart';
 import '../../../utils/user.utils.dart';
+import '../../../ui/snackbar.dart';
 
 class DmDetailsScreen extends ConsumerStatefulWidget {
   final DmModel dm;
@@ -127,17 +128,10 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
 
       setState(() => _isLoading = false);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(isPinned ? 'Chat unpinned' : 'Chat pinned to top'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      Snack.show(isPinned ? 'Chat unpinned' : 'Chat pinned to top');
     } catch (e) {
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to update pin status')),
-      );
+      Snack.error('Failed to update pin status');
     }
   }
 
@@ -156,17 +150,10 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
 
       setState(() => _isLoading = false);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(isMuted ? 'Chat unmuted' : 'Chat muted'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      Snack.show(isMuted ? 'Chat unmuted' : 'Chat muted');
     } catch (e) {
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to update mute status')),
-      );
+      Snack.error('Failed to update mute status');
     }
   }
 
@@ -185,19 +172,12 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
 
       setState(() => _isLoading = false);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            isFavorite ? 'Removed from favorites' : 'Added to favorites',
-          ),
-          duration: const Duration(seconds: 2),
-        ),
+      Snack.show(
+        isFavorite ? 'Removed from favorites' : 'Added to favorites',
       );
     } catch (e) {
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to update favorite')),
-      );
+      Snack.error('Failed to update favorite');
     }
   }
 
@@ -236,9 +216,7 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to delete chat')),
-          );
+          Snack.error('Failed to delete chat');
         }
       }
     }
@@ -246,9 +224,7 @@ class _DmDetailsScreenState extends ConsumerState<DmDetailsScreen> {
 
   void _navigateToMedia() {
     // TODO: Navigate to media messages screen
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Media messages feature coming soon')),
-    );
+    Snack.show('Media messages feature coming soon');
   }
 
   @override

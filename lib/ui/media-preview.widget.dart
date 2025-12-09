@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:path/path.dart' as path;
 
 import '../services/download.service.dart';
+import '../ui/snackbar.dart';
 
 class ImagePreviewScreen extends StatefulWidget {
   final List<String> imageUrls;
@@ -215,33 +216,12 @@ class _ImagePreviewScreenState extends State<ImagePreviewScreen> {
           // Close progress dialog
           Navigator.of(context).pop();
 
-          // Show detailed error message with appropriate actions
+          // Show detailed error message
           if (error.contains('permanently denied') ||
               error.contains('app settings')) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(error),
-                backgroundColor: Colors.red,
-                duration: const Duration(seconds: 5),
-                action: SnackBarAction(
-                  label: 'Settings',
-                  textColor: Colors.white,
-                  onPressed: () => _openAppSettings(),
-                ),
-              ),
-            );
+            Snack.error(error);
           } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Download failed: $error'),
-                backgroundColor: Colors.red,
-                action: SnackBarAction(
-                  label: 'Retry',
-                  textColor: Colors.white,
-                  onPressed: () => _downloadImage(imageUrl),
-                ),
-              ),
-            );
+            Snack.error('Download failed: $error');
           }
         },
       );
@@ -255,45 +235,18 @@ class _ImagePreviewScreenState extends State<ImagePreviewScreen> {
           'image',
         );
 
-        // Show success message with options
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Image downloaded successfully!'),
-                if (directoryPath != null)
-                  Text(
-                    'Saved to: ${directoryPath.replaceAll('\\', '/')}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-              ],
-            ),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'Open',
-              textColor: Colors.white,
-              onPressed: () => downloadService.openFile(filePath),
-            ),
-          ),
-        );
+        // Show success message
+        final message = directoryPath != null
+            ? 'Image downloaded successfully! Saved to: ${directoryPath.replaceAll('\\', '/')}'
+            : 'Image downloaded successfully!';
+        Snack.success(message);
       }
     } catch (e) {
       // Close progress dialog if it's still open
       if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Download failed: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      Snack.error('Download failed: $e');
     }
   }
 
@@ -314,12 +267,7 @@ class _ImagePreviewScreenState extends State<ImagePreviewScreen> {
         fileType: 'image',
         onError: (error) {
           Navigator.of(context).pop();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to prepare image for sharing: $error'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          Snack.error('Failed to prepare image for sharing: $error');
         },
       );
 
@@ -332,12 +280,7 @@ class _ImagePreviewScreenState extends State<ImagePreviewScreen> {
       if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to share image: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      Snack.error('Failed to share image: $e');
     }
   }
 
@@ -346,12 +289,7 @@ class _ImagePreviewScreenState extends State<ImagePreviewScreen> {
       final downloadService = DownloadService();
       await downloadService.openAppSettingsForPermissions();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to open settings: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      Snack.error('Failed to open settings: $e');
     }
   }
 }
@@ -660,33 +598,12 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
         onError: (error) {
           Navigator.of(context).pop();
 
-          // Show detailed error message with appropriate actions
+          // Show detailed error message
           if (error.contains('permanently denied') ||
               error.contains('app settings')) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(error),
-                backgroundColor: Colors.red,
-                duration: const Duration(seconds: 5),
-                action: SnackBarAction(
-                  label: 'Settings',
-                  textColor: Colors.white,
-                  onPressed: () => _openAppSettings(),
-                ),
-              ),
-            );
+            Snack.error(error);
           } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Video download failed: $error'),
-                backgroundColor: Colors.red,
-                action: SnackBarAction(
-                  label: 'Retry',
-                  textColor: Colors.white,
-                  onPressed: () => _downloadVideo(),
-                ),
-              ),
-            );
+            Snack.error('Video download failed: $error');
           }
         },
       );
@@ -699,43 +616,16 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
           'video',
         );
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Video downloaded successfully!'),
-                if (directoryPath != null)
-                  Text(
-                    'Saved to: ${directoryPath.replaceAll('\\', '/')}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-              ],
-            ),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'Open',
-              textColor: Colors.white,
-              onPressed: () => downloadService.openFile(filePath),
-            ),
-          ),
-        );
+        final message = directoryPath != null
+            ? 'Video downloaded successfully! Saved to: ${directoryPath.replaceAll('\\', '/')}'
+            : 'Video downloaded successfully!';
+        Snack.success(message);
       }
     } catch (e) {
       if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Video download failed: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      Snack.error('Video download failed: $e');
     }
   }
 
@@ -757,12 +647,7 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
         fileType: 'video',
         onError: (error) {
           Navigator.of(context).pop();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to prepare video for sharing: $error'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          Snack.error('Failed to prepare video for sharing: $error');
         },
       );
 
@@ -775,12 +660,7 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
       if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to share video: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      Snack.error('Failed to share video: $e');
     }
   }
 
@@ -789,12 +669,7 @@ class _VideoPreviewScreenState extends State<VideoPreviewScreen> {
       final downloadService = DownloadService();
       await downloadService.openAppSettingsForPermissions();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to open settings: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      Snack.error('Failed to open settings: $e');
     }
   }
 }
@@ -1071,9 +946,7 @@ class _DocumentPreviewScreenState extends State<DocumentPreviewScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error opening document: $e')));
+        Snack.error('Error opening document: $e');
       }
     }
   }
@@ -1136,15 +1009,11 @@ class _DocumentPreviewScreenState extends State<DocumentPreviewScreen> {
       // Import clipboard functionality
       await Clipboard.setData(ClipboardData(text: widget.documentUrl));
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Document URL copied to clipboard')),
-        );
+        Snack.success('Document URL copied to clipboard');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to copy URL: $e')));
+        Snack.error('Failed to copy URL: $e');
       }
     }
   }
@@ -1155,9 +1024,7 @@ class _DocumentPreviewScreenState extends State<DocumentPreviewScreen> {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to open in browser: $e')),
-        );
+        Snack.error('Failed to open in browser: $e');
       }
     }
   }
@@ -1188,33 +1055,12 @@ class _DocumentPreviewScreenState extends State<DocumentPreviewScreen> {
         onError: (error) {
           Navigator.of(context).pop();
 
-          // Show detailed error message with appropriate actions
+          // Show detailed error message
           if (error.contains('permanently denied') ||
               error.contains('app settings')) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(error),
-                backgroundColor: Colors.red,
-                duration: const Duration(seconds: 5),
-                action: SnackBarAction(
-                  label: 'Settings',
-                  textColor: Colors.white,
-                  onPressed: () => _openAppSettings(),
-                ),
-              ),
-            );
+            Snack.error(error);
           } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Document download failed: $error'),
-                backgroundColor: Colors.red,
-                action: SnackBarAction(
-                  label: 'Retry',
-                  textColor: Colors.white,
-                  onPressed: () => _downloadDocument(),
-                ),
-              ),
-            );
+            Snack.error('Document download failed: $error');
           }
         },
       );
@@ -1227,43 +1073,16 @@ class _DocumentPreviewScreenState extends State<DocumentPreviewScreen> {
           'document',
         );
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Document downloaded successfully!'),
-                if (directoryPath != null)
-                  Text(
-                    'Saved to: ${directoryPath.replaceAll('\\', '/')}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-              ],
-            ),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'Open',
-              textColor: Colors.white,
-              onPressed: () => downloadService.openFile(filePath),
-            ),
-          ),
-        );
+        final message = directoryPath != null
+            ? 'Document downloaded successfully! Saved to: ${directoryPath.replaceAll('\\', '/')}'
+            : 'Document downloaded successfully!';
+        Snack.success(message);
       }
     } catch (e) {
       if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Document download failed: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      Snack.error('Document download failed: $e');
     }
   }
 
@@ -1287,12 +1106,7 @@ class _DocumentPreviewScreenState extends State<DocumentPreviewScreen> {
         fileType: 'document',
         onError: (error) {
           Navigator.of(context).pop();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to prepare document for sharing: $error'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          Snack.error('Failed to prepare document for sharing: $error');
         },
       );
 
@@ -1305,12 +1119,7 @@ class _DocumentPreviewScreenState extends State<DocumentPreviewScreen> {
       if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to share document: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      Snack.error('Failed to share document: $e');
     }
   }
 
@@ -1319,12 +1128,7 @@ class _DocumentPreviewScreenState extends State<DocumentPreviewScreen> {
       final downloadService = DownloadService();
       await downloadService.openAppSettingsForPermissions();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to open settings: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      Snack.error('Failed to open settings: $e');
     }
   }
 }

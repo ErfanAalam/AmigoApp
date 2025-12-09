@@ -8,6 +8,7 @@ import '../../config/app-colors.config.dart';
 import '../../providers/chat.provider.dart';
 import '../../providers/theme-color.provider.dart';
 import '../../types/socket.types.dart';
+import '../../ui/snackbar.dart';
 
 class DeletedChatsPage extends ConsumerStatefulWidget {
   const DeletedChatsPage({super.key});
@@ -80,14 +81,13 @@ class _DeletedChatsPageState extends ConsumerState<DeletedChatsPage> {
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;
     try {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: color,
-          behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 2),
-        ),
-      );
+      if (color == Colors.green) {
+        Snack.success(message);
+      } else if (color == Colors.red) {
+        Snack.error(message);
+      } else {
+        Snack.show(message);
+      }
     } catch (e) {
       debugPrint('❌ Error showing snackbar: $e');
     }

@@ -12,6 +12,7 @@ import '../../services/auth/auth.service.dart';
 import '../../services/socket/websocket.service.dart';
 import '../../ui/country-selector.modal.dart';
 import '../../ui/setup-loading.popup.dart';
+import '../../ui/snackbar.dart';
 import '../home.layout.dart';
 
 class SignUpScreen extends ConsumerStatefulWidget {
@@ -101,11 +102,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
         _lastNameController.text.isEmpty ||
         _phoneController.text.isEmpty ||
         _phoneController.text.length < 8) {
-      material.ScaffoldMessenger.of(context).showSnackBar(
-        const material.SnackBar(
-          content: material.Text('Please fill all fields correctly.'),
-        ),
-      );
+      Snack.warning('Please fill all fields correctly.');
       return;
     }
 
@@ -117,37 +114,21 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       setState(() {
         _isOtpSent = true;
         _isLoading = false;
-        material.ScaffoldMessenger.of(context).showSnackBar(
-          const material.SnackBar(
-            content: material.Text('Signup OTP sent successfully'),
-          ),
-        );
+        Snack.success('Signup OTP sent successfully');
       });
     } else if (response['success'] == false && response['code'] == 409) {
-      material.ScaffoldMessenger.of(context).showSnackBar(
-        const material.SnackBar(
-          content: material.Text('Phone number already exists! Please Login'),
-        ),
-      );
+      Snack.warning('Phone number already exists! Please Login');
     } else {
       setState(() {
         _isLoading = false;
-        material.ScaffoldMessenger.of(context).showSnackBar(
-          const material.SnackBar(
-            content: material.Text('Error sending Signup OTP'),
-          ),
-        );
+        Snack.error('Error sending Signup OTP');
       });
     }
   }
 
   void handleVerifyOtp() async {
     if (_otpController.text.isEmpty || _otpController.text.length < 6) {
-      material.ScaffoldMessenger.of(context).showSnackBar(
-        const material.SnackBar(
-          content: material.Text('Please enter the OTP.'),
-        ),
-      );
+      Snack.warning('Please enter the OTP.');
       return;
     }
 
@@ -167,11 +148,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       _showSetupLoadingPopup();
 
       if (mounted) {
-        material.ScaffoldMessenger.of(context).showSnackBar(
-          const material.SnackBar(
-            content: material.Text('Account created successfully'),
-          ),
-        );
+        Snack.success('Account created successfully');
       }
 
       final appVersion = await UserUtils().getAppVersion();
@@ -193,11 +170,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       await authService.sendFCMTokenToBackend(3);
     } else {
       if (mounted) {
-        material.ScaffoldMessenger.of(context).showSnackBar(
-          const material.SnackBar(
-            content: material.Text('Error verifying Signup OTP'),
-          ),
-        );
+        Snack.error('Error verifying Signup OTP');
       }
     }
 

@@ -21,6 +21,7 @@ import '../../models/user.model.dart';
 import '../../types/socket.types.dart';
 import '../../utils/navigation-helper.util.dart';
 import '../../utils/ringtone.util.dart';
+import '../../ui/snackbar.dart';
 import '../socket/websocket.service.dart';
 import '../socket/ws-message.handler.dart';
 import 'call-foreground.service.dart';
@@ -1089,13 +1090,7 @@ class CallService {
             'User is busy. If this persists, please restart the app.';
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(errorMessage),
-          backgroundColor: const Color(0xFFEF4444), // Red color
-          duration: const Duration(seconds: 4),
-        ),
-      );
+      Snack.error(errorMessage);
     }
 
     // Clean up call state - IMPORTANT: do this last

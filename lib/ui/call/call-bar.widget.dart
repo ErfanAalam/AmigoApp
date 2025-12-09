@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/call.model.dart';
 import '../../providers/call.provider.dart';
+import '../../ui/snackbar.dart';
 
 /// Global call bar that appears above all app bars when a call is ongoing
 class GlobalCallBar extends ConsumerStatefulWidget {
@@ -234,9 +235,7 @@ class _GlobalCallBarState extends ConsumerState<GlobalCallBar>
       await notifier.endCall();
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to end call: $e')));
+        Snack.error('Failed to end call: $e');
       }
     }
   }

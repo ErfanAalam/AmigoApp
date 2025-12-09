@@ -14,6 +14,7 @@ import '../../../models/group.model.dart';
 import '../../../models/user.model.dart';
 import '../../../providers/theme-color.provider.dart';
 import '../../../services/contact.service.dart';
+import '../../../ui/snackbar.dart';
 
 class GroupInfoPage extends ConsumerStatefulWidget {
   final GroupModel group;
@@ -2022,15 +2023,11 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
   }
 
   void _showSnackBar(String message, {bool isError = false}) {
-    final themeColor = ref.watch(themeColorProvider);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isError ? themeColor.primary : Colors.green,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
-    );
+    if (isError) {
+      Snack.error(message);
+    } else {
+      Snack.success(message);
+    }
   }
 
   @override
@@ -2604,106 +2601,65 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                             children: [
                               const SizedBox(height: 16),
                               Card(
-                                elevation: 2,
+                                color: Colors.red.withAlpha(20),
+                                elevation: 0,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(16),
                                 ),
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(
-                                      color: Colors.red.shade200,
-                                      width: 1,
-                                    ),
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(16),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
+                                margin: const EdgeInsets.all(6),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(10),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(2),
+                                    // decoration: BoxDecoration(
+                                    //   color: Colors.red.shade50,
+                                    //   borderRadius: BorderRadius.circular(12),
+                                    // ),
+                                    child: Row(
                                       children: [
-                                        Row(
-                                          children: [
-                                            Icon(
-                                              Icons.warning_amber_rounded,
-                                              color: Colors.red.shade400,
-                                              size: 20,
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Text(
-                                              'Danger Zone',
-                                              style: TextStyle(
-                                                fontSize: 18,
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.red.shade700,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 12),
-                                        Container(
-                                          padding: const EdgeInsets.all(12),
-                                          decoration: BoxDecoration(
-                                            color: Colors.red.shade50,
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                          ),
-                                          child: Row(
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    Text(
-                                                      'Delete Group',
-                                                      style: TextStyle(
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                        fontSize: 16,
-                                                        color:
-                                                            Colors.red.shade900,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(height: 4),
-                                                    Text(
-                                                      'Permanently delete this group and all its messages',
-                                                      style: TextStyle(
-                                                        fontSize: 13,
-                                                        color:
-                                                            Colors.red.shade700,
-                                                      ),
-                                                    ),
-                                                  ],
+                                              Text(
+                                                'Delete Group',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 16,
+                                                  color: Colors.red.shade900,
                                                 ),
                                               ),
-                                              const SizedBox(width: 12),
-                                              ElevatedButton.icon(
-                                                onPressed:
-                                                    _showDeleteGroupDialog,
-                                                icon: const Icon(
-                                                  Icons.delete_forever,
-                                                  size: 20,
-                                                ),
-                                                label: const Text('Delete'),
-                                                style: ElevatedButton.styleFrom(
-                                                  backgroundColor: Colors.red,
-                                                  foregroundColor: Colors.white,
-                                                  shape: RoundedRectangleBorder(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          10,
-                                                        ),
-                                                  ),
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 16,
-                                                        vertical: 10,
-                                                      ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                'Permanently delete this group and all its messages',
+                                                style: TextStyle(
+                                                  fontSize: 13,
+                                                  color: Colors.red.shade700,
                                                 ),
                                               ),
                                             ],
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        ElevatedButton.icon(
+                                          onPressed: _showDeleteGroupDialog,
+                                          icon: const Icon(
+                                            Icons.delete_forever,
+                                            size: 20,
+                                          ),
+                                          label: const Text('Delete'),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.red,
+                                            foregroundColor: Colors.white,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 16,
+                                              vertical: 10,
+                                            ),
                                           ),
                                         ),
                                       ],

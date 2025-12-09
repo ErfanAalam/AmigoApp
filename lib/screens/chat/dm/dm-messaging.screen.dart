@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+
 import '../../../api/chat.api-client.dart';
 import '../../../db/repositories/message-status.repo.dart';
 import '../../../models/user.model.dart';
@@ -28,6 +29,7 @@ import '../../../types/socket.types.dart';
 import '../../../ui/chat/attachment.action-sheet.dart';
 import '../../../ui/chat/date.widgets.dart';
 import '../../../ui/chat/forward-message.widget.dart';
+import '../../../ui/snackbar.dart';
 import '../../../ui/chat/input-container.widget.dart';
 import '../../../ui/chat/media-messages.widget.dart';
 import '../../../ui/chat/message.action-sheet.dart';
@@ -37,7 +39,6 @@ import '../../../ui/chat/scroll-to-bottom.button.dart';
 import '../../../ui/chat/voice-recording.widget.dart';
 import '../../../utils/animations.utils.dart';
 import '../../../utils/chat/attachments.utils.dart';
-
 import '../../../utils/chat/audio-playback.utils.dart';
 import '../../../utils/chat/chat-helpers.utils.dart';
 import '../../../utils/chat/forward-message.utils.dart';
@@ -1449,13 +1450,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       if (!messageFound) {
         // Show a user-friendly message
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Message not found'),
-              backgroundColor: Colors.orange,
-              duration: Duration(seconds: 2),
-            ),
-          );
+          Snack.warning('Message not found');
         }
         return;
       }

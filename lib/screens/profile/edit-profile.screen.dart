@@ -8,6 +8,7 @@ import '../../api/auth.api-client.dart';
 import '../../api/user.api-client.dart';
 import '../../models/user.model.dart';
 import '../../providers/theme-color.provider.dart';
+import '../../ui/snackbar.dart';
 
 class EditProfileModal extends ConsumerStatefulWidget {
   final Map<String, dynamic> userData;
@@ -165,23 +166,11 @@ class _EditProfileModalState extends ConsumerState<EditProfileModal>
   }
 
   void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    Snack.error(message);
   }
 
   void _showSuccessSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    Snack.success(message);
   }
 
   String _getInitials(String name) {

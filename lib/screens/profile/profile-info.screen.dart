@@ -15,6 +15,7 @@ import '../../db/sqlite.db.dart';
 import '../../models/user.model.dart';
 import '../../providers/theme-color.provider.dart';
 import '../../services/auth/auth.service.dart';
+import '../../ui/snackbar.dart';
 import '../auth/login.screen.dart';
 import 'deleted-dms.screen.dart';
 import 'edit-profile.screen.dart';
@@ -255,13 +256,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    Snack.error(message);
   }
 
   void _showColorPickerDialog() {
@@ -294,14 +289,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                     Future.delayed(Duration(milliseconds: 300), () {
                       if (context.mounted) {
                         ref.read(themeColorProvider.notifier).setTheme(theme);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Theme changed to ${theme.name}'),
-                            backgroundColor: theme.primary,
-                            behavior: SnackBarBehavior.floating,
-                            duration: Duration(seconds: 2),
-                          ),
-                        );
+                        Snack.show('Theme changed to ${theme.name}');
                       }
                     });
                   },

@@ -15,6 +15,7 @@ import '../../../services/contact.service.dart';
 import '../../../services/socket/websocket.service.dart';
 import '../../../types/socket.types.dart';
 import '../../../utils/route-transitions.util.dart';
+import '../../../ui/snackbar.dart';
 import 'group-messaging.screen.dart';
 
 class CreateGroupPage extends ConsumerStatefulWidget {
@@ -104,14 +105,8 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
       });
 
       if (mounted) {
-        final themeColor = ref.watch(themeColorProvider);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'NO Contact found please add some contacts to your phone: ${e.toString()}',
-            ),
-            backgroundColor: themeColor.primary,
-          ),
+        Snack.error(
+          'NO Contact found please add some contacts to your phone: ${e.toString()}',
         );
       }
     }
@@ -131,22 +126,12 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
     final groupName = _groupNameController.text.trim();
 
     if (groupName.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter a group name'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      Snack.warning('Please enter a group name');
       return;
     }
 
     if (_selectedUserIds.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select at least one member'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      Snack.warning('Please select at least one member');
       return;
     }
 
@@ -162,12 +147,7 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
 
       if (response['success']) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Group "$groupName" created successfully!'),
-              backgroundColor: Colors.teal,
-            ),
-          );
+          Snack.success('Group "$groupName" created successfully!');
 
           final newGroupConversation = GroupModel(
             conversationId: response['data']['id'],
@@ -236,14 +216,7 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Error creating group please try again: ${e.toString()}',
-            ),
-            backgroundColor: Colors.teal,
-          ),
-        );
+        Snack.error('Error creating group please try again: ${e.toString()}');
       }
     } finally {
       if (mounted) {

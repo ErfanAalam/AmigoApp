@@ -2,6 +2,7 @@ import 'package:amigo/types/socket.types.dart';
 import 'package:flutter/material.dart';
 
 import '../../services/socket/websocket.service.dart';
+import '../../ui/snackbar.dart';
 
 /// Configuration for handling forward to conversations
 class HandleForwardToConversationsConfig {
@@ -61,14 +62,8 @@ Future<void> handleForwardToConversations(
 
     // Show success message
     if (config.mounted) {
-      ScaffoldMessenger.of(config.context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Forwarded ${config.messagesToForward.length} message${config.messagesToForward.length > 1 ? 's' : ''} to ${config.selectedConversationIds.length} chat${config.selectedConversationIds.length > 1 ? 's' : ''}',
-          ),
-          backgroundColor: Colors.green[600],
-          duration: const Duration(seconds: 3),
-        ),
+      Snack.success(
+        'Forwarded ${config.messagesToForward.length} message${config.messagesToForward.length > 1 ? 's' : ''} to ${config.selectedConversationIds.length} chat${config.selectedConversationIds.length > 1 ? 's' : ''}',
       );
     }
 

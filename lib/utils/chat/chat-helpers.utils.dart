@@ -609,12 +609,7 @@ class ChatHelpers {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to start call: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        Snack.error('Failed to start call: $e');
       }
     }
   }
