@@ -1,4 +1,4 @@
-import 'package:amigo/db/type_converters.dart';
+import 'package:amigo/db/type-converters.dart';
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:path_provider/path_provider.dart';
@@ -149,7 +149,7 @@ class AppDatabase extends _$AppDatabase {
               GROUP BY message_id, user_id
             )
           ''');
-          
+
           // Create unique index on messageId and userId
           await m.database.customStatement(
             'CREATE UNIQUE INDEX IF NOT EXISTS unique_user_message ON message_status_model(message_id, user_id)',

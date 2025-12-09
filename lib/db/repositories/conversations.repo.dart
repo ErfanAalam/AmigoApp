@@ -1,11 +1,11 @@
 import 'package:amigo/models/conversations.model.dart';
-import 'package:amigo/models/group_model.dart';
-import 'package:amigo/types/socket.type.dart';
 import 'package:drift/drift.dart';
+import '../../models/group.model.dart';
+import '../../types/socket.types.dart';
 import '../../utils/user.utils.dart';
 import '../sqlite.db.dart';
 import '../sqlite.schema.dart';
-import 'conversation_member.repo.dart';
+import 'conversation-member.repo.dart';
 
 /// Helper function to get preview text for media messages
 String _getMessagePreviewText(

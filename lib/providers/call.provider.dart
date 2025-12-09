@@ -2,8 +2,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import '../models/call_model.dart';
-import '../services/call.service.dart';
+import '../models/call.model.dart';
+import '../services/call/call.service.dart';
 
 /// State class for CallService
 class CallServiceState {
@@ -40,12 +40,15 @@ class CallServiceNotifier extends Notifier<CallServiceState> {
   @override
   CallServiceState build() {
     // Initialize asynchronously but don't block build
-    _callService.initialize().then((_) {
-      _syncState();
-      _startDurationUpdates();
-    }).catchError((e) {
-      debugPrint('[CallProvider] Error initializing CallService: $e');
-    });
+    _callService
+        .initialize()
+        .then((_) {
+          _syncState();
+          _startDurationUpdates();
+        })
+        .catchError((e) {
+          debugPrint('[CallProvider] Error initializing CallService: $e');
+        });
 
     // Also start timer immediately to catch any existing calls
     _startDurationUpdates();
@@ -66,19 +69,21 @@ class CallServiceNotifier extends Notifier<CallServiceState> {
     if (_durationUpdateTimer != null && _durationUpdateTimer!.isActive) {
       return;
     }
-    
+
     _durationUpdateTimer?.cancel();
-    
+
     // Update every 200ms to catch state changes quickly
     // This ensures we catch state changes from _handleCallAccept, CallKit, etc. immediately
-    _durationUpdateTimer = Timer.periodic(const Duration(milliseconds: 200), (timer) {
+    _durationUpdateTimer = Timer.periodic(const Duration(milliseconds: 200), (
+      timer,
+    ) {
       // Always sync state to catch any updates from CallService
       // This is important because CallService can be updated directly (e.g., from CallKit)
       // or from websocket handlers (_handleCallAccept, etc.)
       _syncState();
     });
   }
-  
+
   /// Manually sync state (useful when CallService updates state directly)
   /// This should be called whenever CallService state might have changed
   void syncState() {

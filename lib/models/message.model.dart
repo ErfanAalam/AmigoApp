@@ -1,4 +1,4 @@
-import 'package:amigo/types/socket.type.dart';
+import 'package:amigo/types/socket.types.dart';
 
 class MessageModel {
   final int? canonicalId;

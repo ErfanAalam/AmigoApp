@@ -1,24 +1,25 @@
-import 'package:amigo/api/api_service.dart';
 import 'package:amigo/db/sqlite.db.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
-import '../cookie_service.dart';
-import '../socket/websocket_service.dart';
-import '../notification_service.dart';
-import '../contact_service.dart';
-import '../user_status_service.dart';
-import 'package:amigo/utils/navigation_helper.dart';
+import '../../api/auth.api-client.dart';
+import '../../providers/chat.provider.dart';
+import '../../providers/draft.provider.dart';
+import '../../providers/notification-badge.provider.dart';
+import '../../screens/auth/login.screen.dart';
+import '../../utils/navigation-helper.util.dart';
+import '../contact.service.dart';
+import '../cookies.service.dart';
+import '../media-cache.service.dart';
+import '../notification.service.dart';
 import 'package:flutter/material.dart';
-import 'package:amigo/screens/auth/login_screen.dart';
-import '../media_cache_service.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:amigo/providers/chat_provider.dart';
-import 'package:amigo/providers/draft_provider.dart';
-import 'package:amigo/providers/notification_badge_provider.dart';
+
+import '../socket/websocket.service.dart';
+import '../user-status.service.dart';
 
 class AuthService {
   static const String _authStatusKey = 'auth_status';
@@ -182,7 +183,7 @@ class AuthService {
         final context = NavigationHelper.navigatorKey.currentContext;
         if (context != null) {
           final container = ProviderScope.containerOf(context);
-          
+
           // Clear chat provider - reset dmList and groupList
           try {
             container.read(chatProvider.notifier).clearAllState();
@@ -207,7 +208,9 @@ class AuthService {
             debugPrint('⚠️ Error clearing notification badge provider: $e');
           }
         } else {
-          debugPrint('⚠️ Navigator context not available for clearing providers');
+          debugPrint(
+            '⚠️ Navigator context not available for clearing providers',
+          );
         }
       } catch (e) {
         debugPrint('⚠️ Error clearing provider states: $e');

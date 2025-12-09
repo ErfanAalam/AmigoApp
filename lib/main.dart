@@ -8,28 +8,27 @@ import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
-import 'screens/auth/login_screen.dart';
-import 'screens/home_layout.dart';
-import 'screens/call/in_call_screen.dart';
-import 'screens/call/incoming_call_screen.dart';
-import 'screens/chat/dm/messaging.dart';
-import 'screens/chat/group/messaging.dart';
-import 'screens/share/external_share.dart';
+import 'api/auth.api-client.dart';
+import 'api/user.api-client.dart';
+import 'models/group.model.dart';
+import 'screens/auth/login.screen.dart';
+import 'screens/call/in-call.screen.dart';
+import 'screens/call/incoming-call.screen.dart';
+import 'screens/chat/dm/dm-messaging.screen.dart';
+import 'screens/chat/group/group-messaging.screen.dart';
+import 'screens/home.layout.dart';
+import 'screens/share/external-share.screen.dart';
 import 'services/auth/auth.service.dart';
-import 'services/call.service.dart';
-import 'services/cookie_service.dart';
-import 'services/socket/websocket_service.dart';
-import 'services/user_status_service.dart';
-import 'services/socket/websocket_message_handler.dart';
-import 'services/notification_service.dart';
-import 'services/call_foreground_service.dart';
-import 'widgets/call_manager.dart';
-import 'api/api_service.dart';
-import 'utils/navigation_helper.dart';
-import 'utils/ringing_tone.dart';
-import 'models/group_model.dart';
-import 'api/user.service.dart';
-import 'widgets/loading_dots_animation.dart';
+import 'services/call/call-foreground.service.dart';
+import 'services/call/call.service.dart';
+import 'services/cookies.service.dart';
+import 'services/notification.service.dart';
+import 'services/socket/websocket.service.dart';
+import 'services/socket/ws-message.handler.dart';
+import 'services/user-status.service.dart';
+import 'ui/loading-dots.widget.dart';
+import 'utils/navigation-helper.util.dart';
+import 'utils/ringtone.util.dart';
 
 void main() async {
   material.WidgetsFlutterBinding.ensureInitialized();
@@ -452,13 +451,15 @@ class _MyAppState extends material.State<MyApp> {
         visualDensity: material.VisualDensity.adaptivePlatformDensity,
         useMaterial3: true,
       ),
-      home: CallEnabledApp(
-        child: _isLoading
-            ? _buildLoadingScreen()
-            : _isAuthenticated
-            ? MainScreen()
-            : LoginScreen(),
-      ),
+      home:
+          // CallEnabledApp(
+          //   child:
+          _isLoading
+          ? _buildLoadingScreen()
+          : _isAuthenticated
+          ? MainScreen()
+          : LoginScreen(),
+      // ),
       routes: {
         '/call': (context) => const InCallScreen(),
         '/incoming-call': (context) => const IncomingCallScreen(),

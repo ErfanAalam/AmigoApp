@@ -1,5 +1,5 @@
-import 'package:amigo/models/call_model.dart';
 import 'package:drift/drift.dart';
+import '../../models/call.model.dart';
 import '../sqlite.db.dart';
 import '../sqlite.schema.dart';
 

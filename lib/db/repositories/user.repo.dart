@@ -1,4 +1,4 @@
-import 'package:amigo/models/user_model.dart';
+import 'package:amigo/models/user.model.dart';
 import 'package:drift/drift.dart';
 import '../sqlite.db.dart';
 import '../sqlite.schema.dart';

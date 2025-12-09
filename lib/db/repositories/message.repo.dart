@@ -1,5 +1,5 @@
 import 'package:amigo/models/message.model.dart';
-import 'package:amigo/types/socket.type.dart';
+import 'package:amigo/types/socket.types.dart';
 import 'package:drift/drift.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../sqlite.db.dart';

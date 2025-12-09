@@ -1,8 +1,9 @@
 import 'dart:convert';
-import 'package:amigo/models/user_model.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../models/user.model.dart';
 
 class UserUtils {
   Future<String> getAppVersion() async {
