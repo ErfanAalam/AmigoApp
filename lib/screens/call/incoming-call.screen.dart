@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/call.provider.dart';
 import '../../models/call.model.dart';
+import '../../services/call/call.service.dart';
 import '../../ui/snackbar.dart';
 
 class IncomingCallScreen extends ConsumerStatefulWidget {
@@ -15,6 +16,7 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
     with TickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _pulseAnimation;
+  bool _hasWaitedForState = false;
 
   @override
   void initState() {
@@ -28,6 +30,15 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
     _animationController.repeat(reverse: true);
+    
+    // Wait a bit for Riverpod state to sync before checking
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (mounted) {
+        setState(() {
+          _hasWaitedForState = true;
+        });
+      }
+    });
   }
 
   @override
@@ -40,10 +51,48 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
   Widget build(BuildContext context) {
     final callServiceState = ref.watch(callServiceProvider);
     final callServiceNotifier = ref.read(callServiceProvider.notifier);
-    final activeCall = callServiceState.activeCall;
+    var activeCall = callServiceState.activeCall;
 
     print('[IncomingCallScreen] 📱 Build called');
-    print('[IncomingCallScreen] activeCall: $activeCall');
+    print('[IncomingCallScreen] activeCall from Riverpod: $activeCall');
+    
+    // If activeCall is null, schedule sync after build completes
+    // We can't modify providers during build, so we do it after
+    if (activeCall == null) {
+      print('[IncomingCallScreen] ⚠️ activeCall is null - will sync state after build');
+      
+      // Schedule sync after current build frame completes
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        
+        print('[IncomingCallScreen] Manually syncing state');
+        callServiceNotifier.syncState();
+        
+        // Re-read state after sync
+        final syncedCall = ref.read(callServiceProvider).activeCall;
+        print('[IncomingCallScreen] activeCall after manual sync: $syncedCall');
+        
+        // If still null, read directly from CallService as fallback
+        if (syncedCall == null) {
+          final callService = CallService();
+          final directCall = callService.activeCall;
+          if (directCall != null) {
+            print('[IncomingCallScreen] ✅ Found activeCall directly from CallService (callId=${directCall.callId}) - forcing sync');
+            // Force sync and trigger rebuild
+            callServiceNotifier.syncState();
+            if (mounted) {
+              setState(() {});
+            }
+          } else {
+            print('[IncomingCallScreen] ❌ No activeCall found in CallService either');
+          }
+        } else if (mounted) {
+          // State was synced, trigger rebuild to show the call
+          setState(() {});
+        }
+      });
+    }
+    
     if (activeCall != null) {
       print('[IncomingCallScreen] activeCall.callType: ${activeCall.callType}');
       print('[IncomingCallScreen] activeCall.status: ${activeCall.status}');
@@ -80,12 +129,25 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
       );
     }
 
+    // Wait for state to sync before making decisions
+    // If we haven't waited yet and activeCall is null, show loading
+    if (!_hasWaitedForState && activeCall == null) {
+      print('[IncomingCallScreen] ⏳ Waiting for state to sync...');
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: CircularProgressIndicator(color: Colors.white),
+        ),
+      );
+    }
+
     // If no active call or call was declined/ended, close the screen
-    if (activeCall == null ||
+    // But only after we've waited for state
+    if (_hasWaitedForState && (activeCall == null ||
         activeCall.callType != CallType.incoming ||
         activeCall.status == CallStatus.ended ||
         activeCall.status == CallStatus.declined ||
-        activeCall.status == CallStatus.missed) {
+        activeCall.status == CallStatus.missed)) {
       print('[IncomingCallScreen] ❌ Call ended/declined - navigating back');
       print('[IncomingCallScreen] activeCall == null: ${activeCall == null}');
       if (activeCall != null) {
@@ -122,9 +184,26 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
       );
     }
 
+    // Ensure we have activeCall before proceeding
+    final currentCall = activeCall;
+    if (currentCall == null) {
+      if (_hasWaitedForState) {
+        print('[IncomingCallScreen] ⚠️ Still no activeCall after waiting - closing screen');
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (context.mounted) {
+            Navigator.of(context).popUntil((route) => route.isFirst);
+          }
+        });
+      }
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator(color: Colors.white)),
+      );
+    }
+
     // Additional check: if call type is not incoming or status is not ringing, navigate back
-    if (activeCall.callType != CallType.incoming ||
-        activeCall.status != CallStatus.ringing) {
+    if (currentCall.callType != CallType.incoming ||
+        currentCall.status != CallStatus.ringing) {
       print('[IncomingCallScreen] ❌ Invalid call state for incoming screen');
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -186,17 +265,17 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
                             ],
                           ),
                           child: ClipOval(
-                            child: activeCall.userProfilePic != null
+                            child: currentCall.userProfilePic != null
                                 ? Image.network(
-                                    activeCall.userProfilePic!,
+                                    currentCall.userProfilePic!,
                                     fit: BoxFit.cover,
                                     errorBuilder:
                                         (context, error, stackTrace) =>
                                             _buildDefaultAvatar(
-                                              activeCall.userName,
+                                              currentCall.userName,
                                             ),
                                   )
-                                : _buildDefaultAvatar(activeCall.userName),
+                                : _buildDefaultAvatar(currentCall.userName),
                           ),
                         ),
                       );
@@ -207,7 +286,7 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
 
                   // Caller name
                   Text(
-                    activeCall.userName,
+                    currentCall.userName,
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 28,

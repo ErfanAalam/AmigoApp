@@ -1,4 +1,5 @@
 import 'package:amigo/db/repositories/conversations.repo.dart';
+import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:drift_db_viewer/drift_db_viewer.dart' show DriftDbViewer;
@@ -927,21 +928,29 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                               : 'Loading...',
                           valueColor: Colors.grey[700],
                         ),
-                        ProfileOption(
-                          icon: Icons.storage,
-                          title: 'Database Viewer',
-                          subtitle: 'View and inspect database contents',
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => DriftDbViewer(
-                                  SqliteDatabase.instance.database,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+                        // ProfileOption(
+                        //   icon: Icons.storage,
+                        //   title: 'Database Viewer',
+                        //   subtitle: 'View and inspect database contents',
+                        //   onTap: () {
+                        //     Navigator.push(
+                        //       context,
+                        //       MaterialPageRoute(
+                        //         builder: (context) => DriftDbViewer(
+                        //           SqliteDatabase.instance.database,
+                        //         ),
+                        //       ),
+                        //     );
+                        //   },
+                        // ),
+                        // ProfileOption(
+                        //   icon: Icons.delete_outline,
+                        //   title: 'Delete All Messages',
+                        //   subtitle: 'Delete all messages from the database',
+                        //   onTap: () async {
+                        //     await MessageRepository().deleteAllMessagesLessThanOrEqualTo0();
+                        //   },
+                        // ),
                       ],
                     ),
                   ],

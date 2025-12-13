@@ -18,6 +18,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../types/socket.types.dart';
 import '../notification.service.dart';
+import 'call.service.dart';
 
 // Global variables for background polling
 Timer? _backgroundPollingTimer;
@@ -27,7 +28,7 @@ int? _backgroundPollingCallId;
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  // final CallService _callService = CallService();
+  final CallService callService = CallService();
   final NotificationService notifcations = NotificationService();
   await notifcations.initialize();
 
@@ -67,6 +68,10 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
         // Stop background polling since call is declined
         _stopBackgroundStatusPolling();
+        callService.endCall();
+
+         await FlutterCallkitIncoming.endCall(event?.body['id'] ?? '');
+          await FlutterCallkitIncoming.endAllCalls();
 
         // Initialize Dio and make API request
         final dio = Dio();

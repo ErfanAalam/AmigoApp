@@ -65,21 +65,23 @@ class CallServiceNotifier extends Notifier<CallServiceState> {
 
   /// Start periodic updates to sync duration changes
   void _startDurationUpdates() {
-    // Don't cancel if already running - just let it continue
-    if (_durationUpdateTimer != null && _durationUpdateTimer!.isActive) {
-      return;
-    }
-
+    // IMPORTANT: Always restart the timer to ensure it keeps running
+    // Even if it's already running, restart it to ensure it doesn't stop
+    // This is critical after cleanup when state is cleared and new calls start
     _durationUpdateTimer?.cancel();
+    _durationUpdateTimer = null;
 
-    // Update every 200ms to catch state changes quickly
+    // Update every 100ms to catch state changes more quickly
     // This ensures we catch state changes from _handleCallAccept, CallKit, etc. immediately
-    _durationUpdateTimer = Timer.periodic(const Duration(milliseconds: 200), (
+    // Reduced from 200ms to 100ms for faster UI updates when calls are accepted/declined
+    // IMPORTANT: Keep timer running even when there's no active call to catch new calls immediately
+    _durationUpdateTimer = Timer.periodic(const Duration(milliseconds: 100), (
       timer,
     ) {
       // Always sync state to catch any updates from CallService
       // This is important because CallService can be updated directly (e.g., from CallKit)
       // or from websocket handlers (_handleCallAccept, etc.)
+      // This ensures UI updates even after cleanup when a new call starts
       _syncState();
     });
   }
@@ -88,10 +90,9 @@ class CallServiceNotifier extends Notifier<CallServiceState> {
   /// This should be called whenever CallService state might have changed
   void syncState() {
     _syncState();
-    // Restart duration updates if there's an active call
-    if (_callService.hasActiveCall && _callService.isInCall) {
-      _startDurationUpdates();
-    }
+    // Always restart duration updates to ensure we catch all state changes
+    // This is important after cleanup when timer might have stopped
+    _startDurationUpdates();
   }
 
   /// Cleanup method to be called when provider is disposed
@@ -113,7 +114,9 @@ class CallServiceNotifier extends Notifier<CallServiceState> {
     String? calleeProfilePic,
   ) async {
     await _callService.initiateCall(calleeId, calleeName, calleeProfilePic);
+    // Sync state immediately and restart timer to ensure UI updates
     _syncState();
+    _startDurationUpdates(); // Ensure timer is running for new call
   }
 
   Future<void> restoreCallState(
@@ -154,9 +157,16 @@ class CallServiceNotifier extends Notifier<CallServiceState> {
 
   Future<void> endCall({String? reason}) async {
     await _callService.endCall(reason: reason);
+    // Sync state immediately after ending call to ensure UI updates
     _syncState();
-    _durationUpdateTimer?.cancel();
-    _durationUpdateTimer = null;
+    // Wait a bit and sync again to catch any delayed cleanup
+    Future.delayed(const Duration(milliseconds: 300), () {
+      _syncState();
+      // IMPORTANT: Restart timer after cleanup to catch new calls
+      _startDurationUpdates();
+    });
+    // Don't cancel timer - keep it running to catch new calls immediately
+    // The timer will continue syncing even when there's no active call
   }
 
   Future<void> toggleMute() async {

@@ -5,6 +5,7 @@ import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/message.model.dart';
+import 'package:amigo/providers/call.provider.dart';
 import 'package:amigo/utils/snowflake.util.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
@@ -90,6 +91,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   String _syncStatus = '';
   int _syncedMessageCount = 0;
   int _totalMessageCount = 0;
+
+  // Automatic resend state variable - initialized to true to disable manual resend until initialization completes
+  bool _isResendingFailedMessages = true;
 
   // Typing animation controllers
   late AnimationController _typingAnimationController;
@@ -474,6 +478,13 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         )
         .toList();
     if (failedMessages.isNotEmpty) {
+      // Set flag to indicate automatic resend is in progress
+      if (_canSetState) {
+        _safeSetState(() {
+          _isResendingFailedMessages = true;
+        });
+      }
+
       // Update UI to show loading state for all failed messages before resending
       if (_canSetState) {
         _safeSetState(() {
@@ -501,6 +512,32 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       // Now resend each failed message
       for (final failedMessage in failedMessages) {
         await _resendFailedMessage(failedMessage);
+      }
+
+      // Wait a bit for WebSocket handlers to process the responses
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Reload messages from DB to ensure UI reflects latest state
+      final updatedMessages = await _messagesRepo.getMessagesByConversation(
+        widget.dm.conversationId,
+        limit: 100,
+        offset: 0,
+      );
+
+      // Clear flag after all automatic resends are complete
+      if (_canSetState) {
+        _safeSetState(() {
+          _messages = updatedMessages;
+          _sortMessagesBySentAt();
+          _isResendingFailedMessages = false;
+        });
+      }
+    } else {
+      // No failed messages - enable manual resend immediately
+      if (_canSetState) {
+        _safeSetState(() {
+          _isResendingFailedMessages = false;
+        });
       }
     }
   }
@@ -1046,8 +1083,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       }
 
       // Update the message with canonicalId, status, and cleared uploading state
+      // Preserve optimisticId so insertMessage can find and delete the optimistic message
       final updatedMessage = currentMessage.copyWith(
         canonicalId: payload.canonicalId,
+        optimisticId: currentMessage.optimisticId, // Preserve optimisticId for duplicate prevention
         status: status, // Update to delivered when acknowledged
         metadata: updatedMetadata,
       );
@@ -1065,7 +1104,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         );
       });
 
-      // Save to DB
+      // Save to DB - insertMessage will handle deleting the optimistic message
       try {
         await _messagesRepo.insertMessage(updatedMessage);
       } catch (e) {
@@ -1679,7 +1718,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                 if (_currentUserDetails?.callAccess == true)
                   IconButton(
                     icon: const Icon(Icons.call, color: Colors.white),
-                    onPressed: () => _initiateCall(context),
+                    onPressed: () => _initiateCall(widget.dm.recipientId, widget.dm.recipientName, widget.dm.recipientProfilePic),
                   ),
               ],
       ),
@@ -2236,7 +2275,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         buildMessageContent: _buildMessageContent,
         isMediaMessage: _isMediaMessage,
         buildMessageStatusTicks: _buildMessageStatusTicks,
-        onRetryFailedMessage: _resendFailedMessage,
+        onRetryFailedMessage: _isResendingFailedMessages ? null : _resendFailedMessage,
         isGroupChat: false,
         nonMyMessageBackgroundColor: Colors.white,
         useIntrinsicWidth: true,
@@ -3222,14 +3261,21 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   /// Initiate audio call
-  Future<void> _initiateCall(BuildContext context) async {
-    await ChatHelpers.initiateCall(
-      context: context,
-      websocketService: _webSocket,
-      userId: widget.dm.recipientId,
-      userName: widget.dm.recipientName,
-      userProfilePic: widget.dm.recipientProfilePic,
-    );
+Future<void> _initiateCall(int userId, String userName, String? userProfilePic) async {
+    try {
+      final callServiceNotifier = ref.read(callServiceProvider.notifier);
+      await callServiceNotifier.initiateCall(widget.dm.recipientId, widget.dm.recipientName, widget.dm.recipientProfilePic);
+
+      if (context.mounted) {
+        Navigator.of(context).pushNamed('/call');
+      }
+    } catch (e) {
+      if (context.mounted) {
+        Snack.error(
+          'Failed to start call: Please check your internet connection',
+        );
+      }
+    }
   }
 
   @override

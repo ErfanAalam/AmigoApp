@@ -92,8 +92,9 @@ class MessageBubble extends ConsumerWidget {
     final themeColor = ref.watch(themeColorProvider);
     final isFailed = config.message.status == MessageStatusType.failed;
     final isUploading = config.message.metadata?['is_uploading'] == true;
-    final showRetry =
-        isFailed && config.isMyMessage && config.onRetryFailedMessage != null;
+    final showRetry = isFailed &&
+        config.isMyMessage &&
+        config.onRetryFailedMessage != null;
 
     Widget messageContent = RepaintBoundary(
       child: Padding(
@@ -144,7 +145,7 @@ class MessageBubble extends ConsumerWidget {
                       ? themeColor.primary
                       : Colors.grey[600] ?? Colors.grey,
                 )
-              else
+              else if (showRetry && config.onRetryFailedMessage != null)
                 GestureDetector(
                   onTap: () => config.onRetryFailedMessage!(config.message),
                   child: Icon(
@@ -154,6 +155,13 @@ class MessageBubble extends ConsumerWidget {
                         ? themeColor.primary
                         : Colors.grey[600] ?? Colors.grey,
                   ),
+                )
+              else if (showRetry)
+                // Show disabled retry icon when automatic resend is in progress
+                Icon(
+                  Icons.refresh,
+                  size: 20,
+                  color: Colors.grey[400] ?? Colors.grey,
                 ),
             ],
           ],

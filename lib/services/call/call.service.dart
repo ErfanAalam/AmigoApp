@@ -221,9 +221,24 @@ class CallService {
         throw Exception('CallService not initialized');
       }
 
-      if (hasActiveCall) {
-        debugPrint('[CALL] Already has active call, cannot initiate new call');
-        return;
+      // IMPORTANT: Clean up any stale state before initiating new call
+      // This ensures we start with a clean slate after ending a previous call
+      if (hasActiveCall || _statusPollingTimer != null || _pollingCallId != null || _callDurationTimer != null || _callStartedTimer != null) {
+        debugPrint('[CALL] Found stale call state before initiating new call - cleaning up');
+        debugPrint('[CALL] Stale state - hasActiveCall: $hasActiveCall, pollingTimer: ${_statusPollingTimer != null}, pollingCallId: $_pollingCallId, durationTimer: ${_callDurationTimer != null}, startedTimer: ${_callStartedTimer != null}');
+        await _cleanup();
+        // Wait a bit to ensure cleanup is complete
+        await Future.delayed(const Duration(milliseconds: 200));
+        
+        // Double-check cleanup - force clear if still exists
+        if (_activeCall != null) {
+          debugPrint('[CALL] WARNING: _activeCall still exists after cleanup - forcing clear');
+          _activeCall = null;
+        }
+        if (_statusPollingTimer != null || _pollingCallId != null) {
+          debugPrint('[CALL] WARNING: Status polling still active - forcing stop');
+          _stopStatusPolling();
+        }
       }
 
       // Check if WebSocket is connected
@@ -255,6 +270,9 @@ class CallService {
       // Get user media
       await _setupLocalMedia();
 
+      // Enable speaker by default for outgoing calls
+      await Helper.setSpeakerphoneOn(true);
+
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
       final callInitPayload = CallPayload(
         callerId: _currentUser!.id,
@@ -284,6 +302,14 @@ class CallService {
 
       // Set up local call state AFTER successfully sending message
       // This will be updated when backend confirms via call:init:ack or call:ringing
+      // IMPORTANT: Ensure _activeCall is null before setting new call
+      if (_activeCall != null) {
+        debugPrint('[CALL] WARNING: _activeCall was not null before setting new call - clearing it');
+        _activeCall = null;
+        // Small delay to ensure state is cleared and provider syncs
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+      
       _activeCall = ActiveCallState(
         callId: 0, // Will be updated from backend response
         userId: calleeId,
@@ -292,7 +318,11 @@ class CallService {
         callType: CallType.outgoing,
         status: CallStatus.initiated,
         startTime: DateTime.now(),
+        isSpeakerOn: true, // Speaker enabled by default for outgoing calls
       );
+      
+      debugPrint('[CALL] ✅ New call state set: callId=${_activeCall!.callId}, status=${_activeCall!.status}, callType=${_activeCall!.callType}');
+      debugPrint('[CALL] Provider should sync within 100ms - UI should update soon');
 
       // Start the 30-second timeout timer
       _startCallStartedTimer();
@@ -401,8 +431,19 @@ class CallService {
       _callStartedTimer?.cancel();
       _callStartedTimer = null;
 
-      // Update call state
-      _activeCall = _activeCall!.copyWith(status: CallStatus.answered);
+      // Enable speaker by default when call is accepted
+      await Helper.setSpeakerphoneOn(true);
+      // Small delay to ensure speaker is actually enabled before updating state
+      await Future.delayed(const Duration(milliseconds: 50));
+      
+      // Update call state with speaker enabled
+      _activeCall = _activeCall!.copyWith(
+        status: CallStatus.answered,
+        isSpeakerOn: true,
+      );
+      
+      debugPrint('[CALL] Call accepted - status: ${_activeCall!.status}, isSpeakerOn: ${_activeCall!.isSpeakerOn}');
+      
       // Start timer immediately when call is accepted
       _startCallTimer();
 
@@ -594,6 +635,7 @@ class CallService {
         data: {'reason': reason ?? 'user_hangup'},
         timestamp: DateTime.now(),
       );
+      
 
       final wsmsg = WSMessage(
         type: WSMessageType.callEnd,
@@ -611,6 +653,13 @@ class CallService {
         debugPrint('[CALL] Error stopping ringtone: $e');
       }
 
+      // End all CallKit calls FIRST before cleanup
+    try {
+      await FlutterCallkitIncoming.endAllCalls();
+    } catch (e) {
+      debugPrint('[CALL] Error ending CallKit calls: $e');
+    }
+
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('current_call_id');
       await prefs.remove('current_caller_id');
@@ -618,10 +667,28 @@ class CallService {
       await prefs.remove('current_caller_profile_pic');
       await prefs.remove('call_status');
 
+      // IMPORTANT: Cleanup and wait to ensure everything is cleared
       await _cleanup();
+      
+      // Wait a bit to ensure cleanup is complete and state is fully cleared
+      await Future.delayed(const Duration(milliseconds: 200));
+      
+      debugPrint('[CALL] Call ended and cleanup completed. _activeCall: ${_activeCall == null ? "null" : "still exists (should be null)"}');
+      
+      // Double-check cleanup - force clear if still exists
+      if (_activeCall != null) {
+        debugPrint('[CALL] WARNING: _activeCall still exists after cleanup - forcing clear');
+        _activeCall = null;
+        _stopStatusPolling();
+      }
     } catch (e) {
-      debugPrint('[CALL] Error ending call');
+      debugPrint('[CALL] Error ending call: $e');
       await _cleanup();
+      // Force clear on error too
+      _activeCall = null;
+      _pollingCallId = null;
+      _statusPollingTimer?.cancel();
+      _statusPollingTimer = null;
     }
   }
 
@@ -925,10 +992,30 @@ class CallService {
 
   /// Handle call accept message
   void _handleCallAccept(CallPayload payload) async {
-    if (_activeCall == null) return;
+    // For outgoing calls, we might receive accept even if callId doesn't match exactly
+    // Check if we have an active outgoing call
+    if (_activeCall == null) {
+      debugPrint('[CALL] Ignoring call:accept - no active call');
+      return;
+    }
 
-    // Update callId if provided
-    if (payload.callId != null) {
+    // For outgoing calls, be more lenient with callId matching
+    // The callId might be 0 initially and get updated later
+    final isOutgoingCall = _activeCall!.callType == CallType.outgoing;
+    final callIdMatches = payload.callId == null || 
+                         _activeCall!.callId == payload.callId || 
+                         _activeCall!.callId == 0;
+
+    if (!callIdMatches && !isOutgoingCall) {
+      debugPrint('[CALL] Ignoring call:accept - callId mismatch. Active: ${_activeCall!.callId}, Payload: ${payload.callId}');
+      return;
+    }
+
+    debugPrint('[CALL] Handling call:accept for callId=${payload.callId ?? _activeCall!.callId}, ActiveCallId: ${_activeCall!.callId}');
+
+    // Update callId if provided and different (or if it was 0)
+    if (payload.callId != null && (_activeCall!.callId != payload.callId || _activeCall!.callId == 0)) {
+      debugPrint('[CALL] Updating callId from ${_activeCall!.callId} to ${payload.callId}');
       _activeCall = _activeCall!.copyWith(callId: payload.callId);
     }
 
@@ -939,8 +1026,29 @@ class CallService {
     // Stop status polling since call is now accepted
     _stopStatusPolling();
 
-    // Update status to answered - this is critical for UI updates
-    _activeCall = _activeCall!.copyWith(status: CallStatus.answered);
+      // Enable speaker by default when call is accepted
+      await Helper.setSpeakerphoneOn(true);
+      // Small delay to ensure speaker is actually enabled before updating state
+      await Future.delayed(const Duration(milliseconds: 50));
+      
+      // Update status to answered - this is critical for UI updates
+      // This works for both incoming and outgoing calls
+      // IMPORTANT: Update status with speaker state in single atomic operation
+    _activeCall = _activeCall!.copyWith(
+      status: CallStatus.answered,
+      isSpeakerOn: true,
+    );
+    
+    // Verify state was set correctly
+    if (_activeCall!.isSpeakerOn != true) {
+      debugPrint('[CALL] WARNING: isSpeakerOn was not set correctly in _handleCallAccept! Retrying...');
+      _activeCall = _activeCall!.copyWith(isSpeakerOn: true);
+    }
+
+    debugPrint('[CALL] Call status updated to answered for callId=${_activeCall!.callId}, isSpeakerOn=${_activeCall!.isSpeakerOn}');
+    
+    // Small delay to ensure UI has time to react to status change
+    await Future.delayed(const Duration(milliseconds: 100));
 
     // Enable global proximity control
     _initializeProximityControl();
@@ -1004,17 +1112,57 @@ class CallService {
 
   /// Handle call decline message
   void _handleCallDecline(CallPayload payload) async {
+    // For outgoing calls, be more lenient with callId matching
+    if (_activeCall == null) {
+      debugPrint('[CALL] Ignoring call:decline for callId=${payload.callId} - no active call');
+      return;
+    }
+
+    final isOutgoingCall = _activeCall!.callType == CallType.outgoing;
+    final callIdMatches = payload.callId == null || 
+                         _activeCall!.callId == payload.callId || 
+                         _activeCall!.callId == 0;
+
+    if (!callIdMatches && !isOutgoingCall) {
+      debugPrint('[CALL] Ignoring call:decline for callId=${payload.callId} - callId mismatch. Active: ${_activeCall!.callId}');
+      return;
+    }
+
+    debugPrint('[CALL] Handling call:decline for callId=${payload.callId}, ActiveCallId: ${_activeCall!.callId}');
+    
+    // Update callId if provided and different (or if it was 0)
+    if (payload.callId != null && (_activeCall!.callId != payload.callId || _activeCall!.callId == 0)) {
+      debugPrint('[CALL] Updating callId from ${_activeCall!.callId} to ${payload.callId}');
+      _activeCall = _activeCall!.copyWith(callId: payload.callId);
+    }
+    
+    // IMPORTANT: Update status to declined BEFORE cleanup so UI can show it
+    // This is especially important for outgoing calls where the caller needs to see "declined"
+    _activeCall = _activeCall!.copyWith(status: CallStatus.declined);
+    debugPrint('[CALL] Call status updated to declined for callId=${_activeCall!.callId}');
+    
     // Cancel the call started timer since call is being declined
     _callStartedTimer?.cancel();
     _callStartedTimer = null;
     // Stop status polling since call is being declined
     _stopStatusPolling();
+    
+    // Wait a bit to allow UI to update before cleanup
+    await Future.delayed(const Duration(milliseconds: 500));
+    
     _handleCallDeclinedInternal(_createMessageMap(payload));
     await FlutterCallkitIncoming.endAllCalls();
   }
 
   /// Handle call end message
   void _handleCallEnd(CallPayload payload) async {
+    // Only process if this call matches the active call
+    if (_activeCall == null || _activeCall!.callId != payload.callId) {
+      debugPrint('[CALL] Ignoring call:end for callId=${payload.callId} - not active call or no active call');
+      return;
+    }
+
+    debugPrint('[CALL] Handling call:end for callId=${payload.callId}');
     // Cancel the call started timer since call is ending
     _callStartedTimer?.cancel();
     _callStartedTimer = null;
@@ -1026,6 +1174,13 @@ class CallService {
 
   /// Handle call missed message
   void _handleCallMissed(CallPayload payload) async {
+    // Only process if this call matches the active call
+    if (_activeCall == null || _activeCall!.callId != payload.callId) {
+      debugPrint('[CALL] Ignoring call:missed for callId=${payload.callId} - not active call or no active call');
+      return;
+    }
+
+    debugPrint('[CALL] Handling call:missed for callId=${payload.callId}');
     // Cancel the call started timer since call is missed
     _callStartedTimer?.cancel();
     _callStartedTimer = null;
@@ -1082,8 +1237,6 @@ class CallService {
 
     // Show error message to user
     if (NavigationHelper.navigatorKey.currentContext != null) {
-      final context = NavigationHelper.navigatorKey.currentContext!;
-
       // Special handling for USER_BUSY - might be stale backend state
       if (errorCode == 'USER_BUSY') {
         errorMessage =
@@ -1104,6 +1257,16 @@ class CallService {
       return;
     }
 
+    debugPrint('[CALL] Handling incoming call: callId=${payload.callId}, callerId=${payload.callerId}');
+    debugPrint('[CALL] Current state - _activeCall: ${_activeCall != null ? "exists (callId=${_activeCall!.callId})" : "null"}, _pollingCallId: $_pollingCallId');
+
+    // Stop any existing status polling FIRST to prevent it from clearing the new call
+    if (_statusPollingTimer != null || _pollingCallId != null) {
+      debugPrint('[CALL] Stopping existing status polling before processing new call');
+      _stopStatusPolling();
+      await Future.delayed(const Duration(milliseconds: 50)); // Small delay to ensure timer is cancelled
+    }
+
     // If we already have an active call, check if it's the same call or a stale one
     if (_activeCall != null) {
       // If it's the same call, don't process again
@@ -1112,10 +1275,13 @@ class CallService {
         return;
       }
       // If it's a different call, clean up the stale one first
+      final staleCallId = _activeCall!.callId;
       debugPrint(
-        '[CALL] Cleaning up stale call before processing new incoming call',
+        '[CALL] Cleaning up stale call (callId=$staleCallId) before processing new incoming call (callId=${payload.callId})',
       );
       await _cleanup();
+      // Wait a bit to ensure cleanup is complete
+      await Future.delayed(const Duration(milliseconds: 100));
     }
 
     final prefs = await SharedPreferences.getInstance();
@@ -1145,6 +1311,20 @@ class CallService {
       startTime: DateTime.now(),
     );
 
+    debugPrint('[CALL] Set _activeCall: callId=${_activeCall!.callId}, status=${_activeCall!.status}');
+
+    // IMPORTANT: Wait for Riverpod provider to sync state before navigation
+    // The provider syncs every 200ms, but we need to wait longer to ensure sync happens
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // Verify _activeCall is still set (wasn't cleared by stale polling/handlers)
+    if (_activeCall == null || _activeCall!.callId != payload.callId) {
+      debugPrint('[CALL] ERROR: _activeCall was cleared before navigation! callId=${payload.callId}, _activeCall=${_activeCall?.callId}');
+      return;
+    }
+
+    debugPrint('[CALL] Verified _activeCall is still set after delay: callId=${_activeCall!.callId}');
+
     // Check if app is in foreground - if so, navigate to incoming call screen instead of showing notification
     // The navigator being available indicates the app is in foreground
     final bool isAppInForeground =
@@ -1159,14 +1339,24 @@ class CallService {
         '[CALL] 📱 App is in foreground - navigating to incoming call screen',
       );
 
+      // IMPORTANT: End any existing CallKit calls first to prevent green bar
+      try {
+        await FlutterCallkitIncoming.endAllCalls();
+        debugPrint('[CALL] Ended any existing CallKit calls');
+      } catch (e) {
+        debugPrint('[CALL] Error ending CallKit calls: $e');
+      }
+
       // Play ringtone for incoming call
       try {
-        await RingtoneManager.playRingtone();
-      } catch (e) {
         await RingtoneManager.playSystemRingtone();
+        debugPrint('[CALL] Playing system ringtone for incoming call');
+      } catch (e) {
+        debugPrint('[CALL] Error playing system ringtone: $e');
       }
 
       // Navigate to incoming call screen
+      await Future.delayed(const Duration(milliseconds: 100));
       NavigationHelper.pushNamed('/incoming-call');
     } else {
       // App is in background or closed - show CallKit notification
@@ -1228,8 +1418,17 @@ class CallService {
     // Start the 30-second timeout timer for incoming calls
     _startCallStartedTimer();
 
-    // Start status polling as fallback for incoming calls too
-    _startStatusPolling(payload.callId!);
+    // Delay status polling start to avoid 404 errors for new calls
+    // Status polling will start after a delay to give the server time to create the call record
+    Future.delayed(const Duration(milliseconds: 1000), () {
+      // Verify call is still active before starting polling
+      if (_activeCall != null && _activeCall!.callId == payload.callId) {
+        debugPrint('[CALL] Starting status polling for callId=${payload.callId}');
+        _startStatusPolling(payload.callId!);
+      } else {
+        debugPrint('[CALL] Skipping status polling - call no longer active');
+      }
+    });
 
     debugPrint(
       '[CALL] Incoming call processed: callId=${payload.callId}, callerId=${payload.callerId}',
@@ -1238,6 +1437,14 @@ class CallService {
 
   /// Handle call declined (internal helper)
   void _handleCallDeclinedInternal(Map<String, dynamic> message) async {
+    final messageCallId = message['callId'];
+    // Only cleanup if this matches the active call
+    if (_activeCall == null || _activeCall!.callId != messageCallId) {
+      debugPrint('[CALL] Ignoring call declined internal - callId mismatch or no active call. MessageCallId: $messageCallId, ActiveCallId: ${_activeCall?.callId}');
+      return;
+    }
+
+    debugPrint('[CALL] Processing call declined internal for callId=$messageCallId');
     try {
       await RingtoneManager.stopRingtone();
     } catch (e) {
@@ -1248,6 +1455,14 @@ class CallService {
 
   /// Handle call ended (internal helper)
   void _handleCallEndedInternal(Map<String, dynamic> message) async {
+    final messageCallId = message['callId'];
+    // Only cleanup if this matches the active call
+    if (_activeCall == null || _activeCall!.callId != messageCallId) {
+      debugPrint('[CALL] Ignoring call ended internal - callId mismatch or no active call. MessageCallId: $messageCallId, ActiveCallId: ${_activeCall?.callId}');
+      return;
+    }
+
+    debugPrint('[CALL] Processing call ended internal for callId=$messageCallId');
     try {
       await RingtoneManager.stopRingtone();
     } catch (e) {
@@ -1258,30 +1473,45 @@ class CallService {
 
   /// Handle call missed (internal helper)
   void _handleCallMissedInternal(Map<String, dynamic> message) {
+    final messageCallId = message['callId'];
+    // Only cleanup if this matches the active call
+    if (_activeCall == null || _activeCall!.callId != messageCallId) {
+      debugPrint('[CALL] Ignoring call missed internal - callId mismatch or no active call. MessageCallId: $messageCallId, ActiveCallId: ${_activeCall?.callId}');
+      return;
+    }
+
+    debugPrint('[CALL] Processing call missed internal for callId=$messageCallId');
     _cleanup();
   }
 
   /// Cleanup call resources
   Future<void> _cleanup() async {
     try {
+      debugPrint('[CALL] Starting cleanup...');
+      
+      // Stop status polling FIRST to prevent any further API calls
+      _stopStatusPolling();
+      debugPrint('[CALL] Status polling stopped during cleanup');
+
       // Stop foreground service first to remove notification
       await CallForegroundService.stopService();
+      debugPrint('[CALL] Foreground service stopped');
 
       // Stop proximity control
       await _disableProximityControl();
+      debugPrint('[CALL] Proximity control disabled');
 
       // Stop timers
       _callDurationTimer?.cancel();
       _callDurationTimer = null;
       _callStartedTimer?.cancel();
       _callStartedTimer = null;
-
-      // Stop status polling
-      _stopStatusPolling();
+      debugPrint('[CALL] Timers cancelled');
 
       // Close peer connection
       await _peerConnection?.close();
       _peerConnection = null;
+      debugPrint('[CALL] Peer connection closed');
 
       // Stop local stream
       _localStream?.getTracks().forEach((track) {
@@ -1289,21 +1519,41 @@ class CallService {
       });
       _localStream = null;
       _remoteStream = null;
+      debugPrint('[CALL] Media streams stopped and cleared');
 
       // Clear call state
+      final clearedCallId = _activeCall?.callId;
       _activeCall = null;
+      debugPrint('[CALL] _activeCall cleared (was callId: $clearedCallId)');
 
       // Disable wakelock
       WakelockPlus.disable();
+      debugPrint('[CALL] Wakelock disabled');
 
+      // Clear SharedPreferences
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('current_call_id');
       await prefs.remove('current_caller_id');
       await prefs.remove('current_caller_name');
       await prefs.remove('current_caller_profile_pic');
       await prefs.remove('call_status');
+      debugPrint('[CALL] SharedPreferences cleared');
+
+      debugPrint('[CALL] Cleanup completed successfully - _activeCall is now: ${_activeCall == null ? "null" : "NOT null (ERROR!)"}');
+      
+      // IMPORTANT: After cleanup, ensure state is truly null
+      // Sometimes async operations might have set it again
+      if (_activeCall != null) {
+        debugPrint('[CALL] ERROR: _activeCall was set again during cleanup - forcing null');
+        _activeCall = null;
+      }
     } catch (e) {
-      debugPrint('[CALL] Error during cleanup');
+      debugPrint('[CALL] Error during cleanup: $e');
+      // Force clear active call even on error
+      _activeCall = null;
+      _pollingCallId = null;
+      _statusPollingTimer?.cancel();
+      _statusPollingTimer = null;
     }
   }
 
@@ -1321,10 +1571,21 @@ class CallService {
         debugPrint(
           '[CALL] Failed to fetch call status: ${response.statusCode}',
         );
+        // If call not found (404), stop polling as call no longer exists
+        if (response.statusCode == 404) {
+          debugPrint('[CALL] Call $callId not found (404) - stopping status polling');
+          _stopStatusPolling();
+        }
         return null;
       }
     } catch (e) {
       debugPrint('[CALL] Error fetching call status');
+      debugPrint('error fetching call status: $e');
+      // Check if it's a 404 error
+      if (e is DioException && e.response?.statusCode == 404) {
+        debugPrint('[CALL] Call $callId not found (404) - stopping status polling');
+        _stopStatusPolling();
+      }
       return null;
     }
   }
@@ -1336,6 +1597,7 @@ class CallService {
     }
 
     _pollingCallId = callId;
+    debugPrint('[CALL] Starting status polling for callId: $callId');
 
     int pollCount = 0;
     const maxPolls = 15; // 30 seconds / 2 seconds = 15 polls
@@ -1343,8 +1605,20 @@ class CallService {
     _statusPollingTimer = Timer.periodic(const Duration(seconds: 2), (
       timer,
     ) async {
-      if (_pollingCallId == null) {
+      // Check if polling was stopped or call ID changed
+      if (_pollingCallId == null || _pollingCallId != callId) {
+        debugPrint('[CALL] Status polling stopped - callId mismatch or null. Current _pollingCallId: $_pollingCallId, Expected: $callId');
         timer.cancel();
+        _statusPollingTimer = null;
+        return;
+      }
+
+      // Check if active call still matches
+      if (_activeCall == null || _activeCall!.callId != callId) {
+        debugPrint('[CALL] Status polling stopped - active call changed or cleared. ActiveCallId: ${_activeCall?.callId}, Expected: $callId');
+        timer.cancel();
+        _statusPollingTimer = null;
+        _pollingCallId = null;
         return;
       }
 
@@ -1352,6 +1626,7 @@ class CallService {
 
       // Stop polling after 30 seconds (15 polls)
       if (pollCount > maxPolls) {
+        debugPrint('[CALL] Status polling stopped - max polls reached for callId: $callId');
         timer.cancel();
         _statusPollingTimer = null;
         _pollingCallId = null;
@@ -1359,11 +1634,30 @@ class CallService {
       }
 
       final statusResponse = await _fetchCallStatus(callId);
+      
+      // Check again if polling was stopped during fetch (e.g., by a 404 from _fetchCallStatus)
+      if (_pollingCallId == null || _pollingCallId != callId) {
+        debugPrint('[CALL] Status polling stopped during fetch - callId mismatch or null. Current _pollingCallId: $_pollingCallId, Expected: $callId');
+        timer.cancel();
+        _statusPollingTimer = null;
+        return;
+      }
+
       if (statusResponse != null && statusResponse['success'] == true) {
         final callData = statusResponse['data'];
         final status = callData['status'];
 
+        // Verify this is still the active call before processing
+        if (_activeCall == null || _activeCall!.callId != callId) {
+          debugPrint('[CALL] Status polling stopped - callId mismatch or no active call after fetch. ActiveCallId: ${_activeCall?.callId}, Expected: $callId');
+          timer.cancel();
+          _statusPollingTimer = null;
+          _pollingCallId = null;
+          return;
+        }
+
         if (status == 'declined' || status == 'ended') {
+          debugPrint('[CALL] Status polling detected call $status for callId: $callId - stopping');
           timer.cancel();
           _statusPollingTimer = null;
           _pollingCallId = null;

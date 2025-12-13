@@ -97,6 +97,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   int _syncedMessageCount = 0;
   int _totalMessageCount = 0;
 
+  // Automatic resend state variable - initialized to true to disable manual resend until initialization completes
+  bool _isResendingFailedMessages = true;
+
   List<UserModel> _conversationMembers = [];
 
   // bool _isLoadingMore = false;
@@ -549,6 +552,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         )
         .toList();
     if (failedMessages.isNotEmpty) {
+      // Set flag to indicate automatic resend is in progress
+      if (mounted) {
+        setState(() {
+          _isResendingFailedMessages = true;
+        });
+      }
+
       // Update UI to show loading state for all failed messages before resending
       if (mounted) {
         setState(() {
@@ -576,6 +586,32 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       // Now resend each failed message
       for (final failedMessage in failedMessages) {
         await _resendFailedMessage(failedMessage);
+      }
+
+      // Wait a bit for WebSocket handlers to process the responses
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Reload messages from DB to ensure UI reflects latest state
+      final updatedMessages = await _messagesRepo.getMessagesByConversation(
+        widget.group.conversationId,
+        limit: 100,
+        offset: 0,
+      );
+
+      // Clear flag after all automatic resends are complete
+      if (mounted) {
+        setState(() {
+          _messages = updatedMessages;
+          _sortMessagesBySentAt();
+          _isResendingFailedMessages = false;
+        });
+      }
+    } else {
+      // No failed messages - enable manual resend immediately
+      if (mounted) {
+        setState(() {
+          _isResendingFailedMessages = false;
+        });
       }
     }
   }
@@ -1520,8 +1556,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       updatedMetadata.remove('upload_failed');
 
       // Update the message with canonicalId, status, and cleared uploading state
+      // Preserve optimisticId so insertMessage can find and delete the optimistic message
       final updatedMessage = currentMessage.copyWith(
         canonicalId: payload.canonicalId,
+        optimisticId: currentMessage.optimisticId, // Preserve optimisticId for duplicate prevention
         status: MessageStatusType
             .delivered, // Update to delivered when acknowledged
         metadata: updatedMetadata,
@@ -1534,7 +1572,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         });
       }
 
-      // Save to DB
+      // Save to DB - insertMessage will handle deleting the optimistic message
       try {
         await _messagesRepo.insertMessage(updatedMessage);
       } catch (e) {
@@ -2933,7 +2971,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         context: context,
         buildMessageContent: _buildMessageContent,
         isMediaMessage: _isMediaMessage,
-        onRetryFailedMessage: _resendFailedMessage,
+        onRetryFailedMessage: _isResendingFailedMessages ? null : _resendFailedMessage,
         isGroupChat: true,
         nonMyMessageBackgroundColor: Colors.grey[100]!,
         useIntrinsicWidth: false,
