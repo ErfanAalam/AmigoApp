@@ -177,6 +177,8 @@ class ChatNotifier extends Notifier<ChatState> {
   StreamSubscription<NewConversationPayload>? _conversationAddedSubscription;
   StreamSubscription<DeleteMessagePayload>? _messageDeleteSubscription;
   StreamSubscription<JoinLeavePayload>? _joinConvSubscription;
+  StreamSubscription<ConversationActionPayload>?
+  _conversationActionSubscription;
 
   final Map<int, Timer?> _typingTimers = {};
   bool _listenersSetup = false;
@@ -611,6 +613,13 @@ class ChatNotifier extends Notifier<ChatState> {
       debugPrint('❌ Stack trace: $stackTrace');
       state = state.copyWith(isLoading: false);
     }
+  }
+
+  void removeGroupFromState(int conversationId) {
+    final updatedGroupList = state.groupList
+        .where((group) => group.conversationId != conversationId)
+        .toList();
+    state = state.copyWith(groupList: updatedGroupList);
   }
 
   /// Process conversations asynchronously
@@ -1181,6 +1190,14 @@ class ChatNotifier extends Notifier<ChatState> {
           },
         );
 
+    _conversationActionSubscription = _messageHandler.conversationActionStream
+        .listen(
+          _handleConversationAction,
+          onError: (error) {
+            debugPrint('❌ Conversation action stream error: $error');
+          },
+        );
+
     _typingSubscription = _messageHandler.typingStream.listen(
       _handleTypingMessage,
       onError: (error) {
@@ -1353,8 +1370,9 @@ class ChatNotifier extends Notifier<ChatState> {
 
         final dm = state.dmList[convIndex];
 
-        newDmUnreadCount = state.activeConvId == convId
-            ? 0
+        final shouldCountUnread = payload.msgType != MessageType.system;
+        newDmUnreadCount = state.activeConvId == convId || !shouldCountUnread
+            ? (dm.unreadCount ?? 0)
             : (dm.unreadCount ?? 0) + 1;
 
         final updatedConversation = dm.copyWith(
@@ -1386,8 +1404,9 @@ class ChatNotifier extends Notifier<ChatState> {
         final group = state.groupList[convIndex];
 
         // Update group's last message
-        newGrpUnreadCount = state.activeConvId == convId
-            ? 0
+        final shouldCountUnread = payload.msgType != MessageType.system;
+        newGrpUnreadCount = state.activeConvId == convId || !shouldCountUnread
+            ? group.unreadCount
             : group.unreadCount + 1;
 
         final updatedGroup = group.copyWith(
@@ -1985,6 +2004,112 @@ class ChatNotifier extends Notifier<ChatState> {
     }
   }
 
+  /// Handle conversation member/admin actions (add/remove/promote/demote)
+  Future<void> _handleConversationAction(
+    ConversationActionPayload payload,
+  ) async {
+    try {
+      switch (payload.action) {
+        case ConversationActionType.memberAdded:
+          final members = payload.members
+              .map(
+                (member) => ConversationMemberModel(
+                  conversationId: payload.convId,
+                  userId: member.userId,
+                  role: member.role.value,
+                  joinedAt: member.joinedAt.toIso8601String(),
+                ),
+              )
+              .toList();
+          await _conversationsMemberRepo.insertConversationMembers(members);
+          break;
+        case ConversationActionType.memberRemoved:
+          for (final member in payload.members) {
+            await _conversationsMemberRepo.deleteMemberByConversationAndUserId(
+              payload.convId,
+              member.userId,
+            );
+          }
+          break;
+        case ConversationActionType.memberPromoted:
+        case ConversationActionType.memberDemoted:
+          final roleValue =
+              payload.action == ConversationActionType.memberPromoted
+              ? ChatRoleType.admin.value
+              : ChatRoleType.member.value;
+          for (final member in payload.members) {
+            await _conversationsMemberRepo.updateMemberRole(
+              payload.convId,
+              member.userId,
+              roleValue,
+            );
+          }
+          break;
+      }
+
+      final systemMessage = MessageModel(
+        canonicalId: payload.eventId,
+        optimisticId: null,
+        conversationId: payload.convId,
+        senderId: payload.actorId ?? 0,
+        senderName: payload.actorName,
+        senderProfilePic: payload.actorPfp,
+        type: MessageType.system,
+        body: payload.message,
+        status: MessageStatusType.delivered,
+        attachments: null,
+        metadata: {
+          'action': payload.action.value,
+          'members': payload.members.map((m) => m.toJson()).toList(),
+        },
+        isStarred: false,
+        isReplied: false,
+        isForwarded: false,
+        isDeleted: false,
+        sentAt: payload.actionAt.toIso8601String(),
+      );
+
+      await _messageRepo.insertMessage(systemMessage);
+
+      final convIndex = state.groupList.indexWhere(
+        (group) => group.conversationId == payload.convId,
+      );
+
+      if (convIndex != -1) {
+        final group = state.groupList[convIndex];
+        final newUnread = state.activeConvId == payload.convId
+            ? 0
+            : group.unreadCount + 1;
+
+        final updatedGroup = group.copyWith(
+          lastMessageId: payload.eventId,
+          lastMessageType: MessageType.system.value,
+          lastMessageBody: payload.message,
+          lastMessageAt: payload.actionAt.toIso8601String(),
+          unreadCount: newUnread,
+        );
+
+        final updatedGroups = List<GroupModel>.from(state.groupList);
+        updatedGroups[convIndex] = updatedGroup;
+
+        final sortedGroups = await filterAndSortGroupConversations(
+          updatedGroups,
+        );
+
+        state = state.copyWith(groupList: sortedGroups);
+
+        await _conversationsRepo.updateUnreadCount(payload.convId, newUnread);
+
+        await _conversationsRepo.updateLastMessage(
+          payload.convId,
+          payload.eventId,
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error handling conversation action: $e');
+    }
+  }
+
   /// Clear all state (used during logout)
   void clearAllState() {
     state = state.copyWith(
@@ -2013,6 +2138,7 @@ class ChatNotifier extends Notifier<ChatState> {
     _messageDeleteSubscription?.cancel();
     _onlineStatusSubscription?.cancel();
     _joinConvSubscription?.cancel();
+    _conversationActionSubscription?.cancel();
 
     for (final timer in _typingTimers.values) {
       timer?.cancel();

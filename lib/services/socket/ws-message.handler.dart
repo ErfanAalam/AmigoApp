@@ -36,6 +36,10 @@ class WebSocketMessageHandler {
   final StreamController<NewConversationPayload> _conversationAddedController =
       StreamController<NewConversationPayload>.broadcast();
 
+  final StreamController<ConversationActionPayload>
+  _conversationActionController =
+      StreamController<ConversationActionPayload>.broadcast();
+
   final StreamController<DeleteMessagePayload> _messageDeleteController =
       StreamController<DeleteMessagePayload>.broadcast();
 
@@ -103,6 +107,10 @@ class WebSocketMessageHandler {
   /// Get stream for conversation added events (type: 'conversation:new')
   Stream<NewConversationPayload> get conversationAddedStream =>
       _conversationAddedController.stream;
+
+  /// Get stream for conversation member/admin actions (type: 'conversation:action')
+  Stream<ConversationActionPayload> get conversationActionStream =>
+      _conversationActionController.stream;
 
   /// Get stream for message delete events (type: 'message:delete')
   Stream<DeleteMessagePayload> get messageDeleteStream =>
@@ -268,6 +276,34 @@ class WebSocketMessageHandler {
           final newConvPayload = message.newConversationPayload;
           if (newConvPayload != null) {
             _conversationAddedController.add(newConvPayload);
+          }
+          break;
+
+        case WSMessageType.conversationAction:
+          final actionPayload = message.conversationActionPayload;
+          if (actionPayload != null) {
+            _conversationActionController.add(actionPayload);
+
+            // Push a synthetic system ChatMessagePayload so message listeners update in-place
+            final systemMessagePayload = ChatMessagePayload(
+              optimisticId: actionPayload.eventId,
+              canonicalId: actionPayload.eventId,
+              senderId: actionPayload.actorId ?? 0,
+              senderName: actionPayload.actorName,
+              convId: actionPayload.convId,
+              convType: actionPayload.convType,
+              msgType: MessageType.system,
+              body: actionPayload.message,
+              attachments: null,
+              metadata: {
+                'action': actionPayload.action.value,
+                'members':
+                    actionPayload.members.map((m) => m.toJson()).toList(),
+              },
+              replyToMessageId: null,
+              sentAt: actionPayload.actionAt,
+            );
+            _messageNewController.add(systemMessagePayload);
           }
           break;
 
@@ -522,7 +558,7 @@ class WebSocketMessageHandler {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (messageText.isNotEmpty) ...[
+              if (messageText != null) ...[
                 Text(
                   messageText,
                   style: const TextStyle(fontWeight: FontWeight.w500),
@@ -556,6 +592,7 @@ class WebSocketMessageHandler {
     _messagePinController.close();
     _onlineStatusController.close();
     _conversationAddedController.close();
+    _conversationActionController.close();
     _messageDeleteController.close();
     _joinConversationController.close();
     _leaveConversationController.close();

@@ -3,17 +3,16 @@ import 'package:amigo/db/repositories/contacts.repo.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
+import 'package:amigo/providers/chat.provider.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../api/group.api-client.dart';
-import '../../../api/user.api-client.dart';
 import '../../../db/repositories/conversation-member.repo.dart';
 import '../../../models/group.model.dart';
 import '../../../models/user.model.dart';
 import '../../../providers/theme-color.provider.dart';
-import '../../../services/contact.service.dart';
 import '../../../ui/snackbar.dart';
 
 class GroupInfoPage extends ConsumerStatefulWidget {
@@ -28,8 +27,6 @@ class GroupInfoPage extends ConsumerStatefulWidget {
 class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     with SingleTickerProviderStateMixin {
   final GroupsService _groupsService = GroupsService();
-  final UserService _userService = UserService();
-  final ContactService _contactService = ContactService();
 
   final ContactsRepository _contactsRepository = ContactsRepository();
 
@@ -200,13 +197,6 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
       // Start animation to show error message
       _animationController.forward();
     }
-
-    // print(
-    //   '######################groupInfo: ${_groupInfo?['group']['title']} ######################',
-    // );
-    print(
-      '######################groupInfo: $_groupInfo ######################',
-    );
   }
 
   Future<void> _loadAvailableUsers({bool forceRefresh = false}) async {
@@ -1105,34 +1095,18 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     if (userIds.isEmpty) return;
     // print('userIds: $userIds');
     try {
-      // Show loading indicator
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const AlertDialog(
-          content: Row(
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(width: 16),
-              Text('Adding members...'),
-            ],
-          ),
-        ),
-      );
+      final id = TaskSnack.show(message: 'Adding Members...');
 
       // Add all members at once
       final response = await _groupsService.addMember(
         widget.group.conversationId,
         userIds,
       );
-      // Close loading dialog
-      Navigator.pop(context);
 
       // Show result message
       if (response['success'] == true) {
-        _showSnackBar(
-          '${userIds.length} member${userIds.length > 1 ? 's' : ''} added successfully',
-        );
+        TaskSnack.resolve(id: id, isSuccess: true, message: 'Members Added');
+
         final members = userIds
             .map(
               (userId) => ConversationMemberModel(
@@ -1148,20 +1122,19 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
             .toList();
         await _conversationMemberRepository.insertConversationMembers(members);
       } else {
-        _showSnackBar(
-          response['message'] ?? 'Failed to add members',
-          isError: true,
+        TaskSnack.resolve(
+          id: id,
+          isSuccess: false,
+          message: response['message'] ?? 'Failed to add members',
         );
       }
 
       // Refresh group info
       await _loadGroupInfoFromLocal();
     } catch (e) {
+      TaskSnack.dismiss();
       // Close loading dialog if still open
-      if (Navigator.canPop(context)) {
-        Navigator.pop(context);
-      }
-      _showSnackBar('Error adding members: $e', isError: true);
+      Snack.error("Error adding members: $e");
     }
   }
 
@@ -1187,36 +1160,19 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     if (confirmed == true) {
       try {
         // Show loading indicator
-        final themeColor = ref.watch(themeColorProvider);
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            content: Row(
-              children: [
-                CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(themeColor.primary),
-                ),
-                const SizedBox(width: 16),
-                Expanded(child: Text('Promoting $userName to admin...')),
-              ],
-            ),
-          ),
-        );
+        final id = TaskSnack.show(message: 'Promoting $userName to admin...');
 
         final response = await _groupsService.promoteToAdmin(
           widget.group.conversationId,
           userId,
         );
 
-        // Close loading dialog
-        Navigator.pop(context);
-
         if (response['success'] == true) {
-          _showSnackBar('$userName is now an admin');
+          TaskSnack.resolve(
+            id: id,
+            isSuccess: true,
+            message: '$userName is now an admin',
+          );
 
           await _conversationMemberRepository.updateMemberRole(
             widget.group.conversationId,
@@ -1225,17 +1181,16 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
           );
           await _loadGroupInfoFromLocal(); // Refresh group info
         } else {
-          _showSnackBar(
-            response['message'] ?? 'Failed to promote member',
-            isError: true,
+          TaskSnack.resolve(
+            id: id,
+            isSuccess: false,
+            message: response['message'] ?? 'Failed to promote member',
           );
         }
       } catch (e) {
         // Close loading dialog if still open
-        if (Navigator.canPop(context)) {
-          Navigator.pop(context);
-        }
-        _showSnackBar('Error promoting member: $e', isError: true);
+        TaskSnack.dismiss();
+        Snack.error("Error promoting member: $e");
       }
     }
   }
@@ -1261,36 +1216,19 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     if (confirmed == true) {
       try {
         // Show loading indicator
-        final themeColor = ref.watch(themeColorProvider);
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            content: Row(
-              children: [
-                CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(themeColor.primary),
-                ),
-                const SizedBox(width: 16),
-                Expanded(child: Text('Demoting $userName to member...')),
-              ],
-            ),
-          ),
-        );
+        final id = TaskSnack.show(message: 'Demoting $userName to member');
 
         final response = await _groupsService.demoteToAdmin(
           widget.group.conversationId,
           userId,
         );
 
-        // Close loading dialog
-        Navigator.pop(context);
-
         if (response['success'] == true) {
-          _showSnackBar('$userName is now a member');
+          TaskSnack.resolve(
+            id: id,
+            isSuccess: true,
+            message: '$userName has been demoted to member',
+          );
           await _conversationMemberRepository.updateMemberRole(
             widget.group.conversationId,
             userId,
@@ -1298,17 +1236,16 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
           );
           await _loadGroupInfoFromLocal(); // Refresh group info
         } else {
-          _showSnackBar(
-            response['message'] ?? 'Failed to demote member',
-            isError: true,
+          TaskSnack.resolve(
+            id: id,
+            isSuccess: false,
+            message: response['message'] ?? 'Failed to demote member',
           );
         }
       } catch (e) {
         // Close loading dialog if still open
-        if (Navigator.canPop(context)) {
-          Navigator.pop(context);
-        }
-        _showSnackBar('Error demoting member: $e', isError: true);
+        TaskSnack.dismiss();
+        Snack.error("Error demoting member: $e");
       }
     }
   }
@@ -1970,31 +1907,11 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
   Future<void> _deleteGroup() async {
     try {
       // Show loading indicator
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          content: const Row(
-            children: [
-              CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
-              ),
-              SizedBox(width: 16),
-              Expanded(child: Text('Deleting group...')),
-            ],
-          ),
-        ),
-      );
+      final loadingId = TaskSnack.show(message: 'Deleting group');
 
       final response = await _groupsService.deleteGroup(
         widget.group.conversationId,
       );
-
-      // Close loading dialog
-      Navigator.pop(context);
 
       if (response['success'] == true) {
         // Delete from local database
@@ -2002,23 +1919,31 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
           widget.group.conversationId,
         );
 
-        _showSnackBar('Group deleted successfully');
+        // Update state to remove the group
+        ref
+            .read(chatProvider.notifier)
+            .removeGroupFromState(widget.group.conversationId);
+
+        TaskSnack.resolve(
+          id: loadingId,
+          isSuccess: true,
+          message: 'Group deleted successfully',
+        );
 
         // Navigate back with deletion result
         // This will be handled by InnerGroupChatPage
         Navigator.pop(context, {'action': 'deleted'});
       } else {
-        _showSnackBar(
-          response['message'] ?? 'Failed to delete group',
-          isError: true,
+        TaskSnack.resolve(
+          id: loadingId,
+          isSuccess: false,
+          message: response['message'] ?? 'Failed to delete group',
         );
       }
     } catch (e) {
       // Close loading dialog if still open
-      if (Navigator.canPop(context)) {
-        Navigator.pop(context);
-      }
-      _showSnackBar('Error deleting group: $e', isError: true);
+      TaskSnack.dismiss();
+      Snack.error("Error deleting group: $e");
     }
   }
 

@@ -210,3 +210,80 @@ class ActiveCallState {
     );
   }
 }
+
+class CallDetails {
+  final int? callId;
+  final int? callerId;
+  final String? callerName;
+  final String? callerProfilePic;
+  final String?
+  callStatus; // Stored as string: 'ringing', 'answered', 'declined', 'missed', 'ended'
+
+  CallDetails({
+    this.callId,
+    this.callerId,
+    this.callerName,
+    this.callerProfilePic,
+    this.callStatus,
+  });
+
+  factory CallDetails.fromJson(Map<String, dynamic> json) {
+    return CallDetails(
+      callId: json['call_id'] != null
+          ? (json['call_id'] is int
+                ? json['call_id']
+                : int.tryParse(json['call_id'].toString()))
+          : null,
+      callerId: json['caller_id'] != null
+          ? (json['caller_id'] is int
+                ? json['caller_id']
+                : int.tryParse(json['caller_id'].toString()))
+          : null,
+      callerName: json['caller_name']?.toString(),
+      callerProfilePic: json['caller_profile_pic']?.toString(),
+      callStatus: json['call_status']?.toString(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'call_id': callId,
+      'caller_id': callerId,
+      'caller_name': callerName,
+      'caller_profile_pic': callerProfilePic,
+      'call_status': callStatus,
+    };
+  }
+
+  CallDetails copyWith({
+    int? callId,
+    int? callerId,
+    String? callerName,
+    String? callerProfilePic,
+    String? callStatus,
+  }) {
+    return CallDetails(
+      callId: callId ?? this.callId,
+      callerId: callerId ?? this.callerId,
+      callerName: callerName ?? this.callerName,
+      callerProfilePic: callerProfilePic ?? this.callerProfilePic,
+      callStatus: callStatus ?? this.callStatus,
+    );
+  }
+
+  // Helper method to convert callStatus string to CallStatus enum
+  CallStatus? get statusEnum {
+    if (callStatus == null) return null;
+    return CallStatus.fromString(callStatus);
+  }
+
+  // Helper method to check if call is active
+  bool get isActive {
+    return callStatus == 'ringing' || callStatus == 'answered';
+  }
+
+  @override
+  String toString() {
+    return 'CallDetails(callId: $callId, callerId: $callerId, callerName: $callerName, callerProfilePic: $callerProfilePic, callStatus: $callStatus)';
+  }
+}

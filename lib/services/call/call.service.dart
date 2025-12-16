@@ -10,7 +10,6 @@ import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:proximity_sensor/proximity_sensor.dart';
 import 'package:proximity_screen_lock/proximity_screen_lock.dart';
@@ -21,6 +20,7 @@ import '../../models/user.model.dart';
 import '../../types/socket.types.dart';
 import '../../utils/navigation-helper.util.dart';
 import '../../utils/ringtone.util.dart';
+import '../../utils/call.utils.dart';
 import '../../ui/snackbar.dart';
 import '../socket/websocket.service.dart';
 import '../socket/ws-message.handler.dart';
@@ -157,19 +157,13 @@ class CallService {
         switch (event?.event) {
           case Event.actionCallAccept:
             // Get call details from event or SharedPreferences
-            final prefs = await SharedPreferences.getInstance();
-            final callIdStr = prefs.getString('current_call_id');
-            final callerIdStr = prefs.getString('current_caller_id');
-            final callerName = prefs.getString('current_caller_name');
-            final callerProfilePic = prefs.getString(
-              'current_caller_profile_pic',
-            );
+            final callDetails = await CallUtils().getCallDetails();
 
             await acceptCall(
-              callId: callIdStr != null ? int.tryParse(callIdStr) : null,
-              callerId: callerIdStr != null ? int.tryParse(callerIdStr) : null,
-              callerName: callerName,
-              callerProfilePic: callerProfilePic,
+              callId: callDetails?.callId,
+              callerId: callDetails?.callerId,
+              callerName: callDetails?.callerName,
+              callerProfilePic: callDetails?.callerProfilePic,
             );
 
             // Navigator.popUntil(
@@ -180,10 +174,9 @@ class CallService {
             break;
 
           case Event.actionCallDecline:
-            final prefs = await SharedPreferences.getInstance();
-            final callIdStr = prefs.getString('current_call_id');
+            final callId = await CallUtils().getCallId();
             await declineCall(
-              callId: callIdStr != null ? int.tryParse(callIdStr) : null,
+              callId: callId,
             );
             break;
 
@@ -452,12 +445,7 @@ class CallService {
         callerName: _activeCall!.userName,
       );
 
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('current_call_id');
-      await prefs.remove('current_caller_id');
-      await prefs.remove('current_caller_name');
-      await prefs.remove('current_caller_profile_pic');
-      await prefs.remove('call_status');
+      await CallUtils().clearCallDetails();
     } catch (e) {
       debugPrint('[CALL] Error accepting call');
     }
@@ -474,11 +462,7 @@ class CallService {
       }
 
       if (actualCallId == null) {
-        final prefs = await SharedPreferences.getInstance();
-        final callIdStr = prefs.getString('current_call_id');
-        if (callIdStr != null) {
-          actualCallId = int.tryParse(callIdStr);
-        }
+        actualCallId = await CallUtils().getCallId();
       }
 
       if (actualCallId == null) {
@@ -489,17 +473,14 @@ class CallService {
 
       // If we have callId but no active call, try to restore from SharedPreferences
       if (_activeCall == null) {
-        final prefs = await SharedPreferences.getInstance();
-        final callerIdStr = prefs.getString('current_caller_id');
-        final callerName = prefs.getString('current_caller_name');
-        final callerProfilePic = prefs.getString('current_caller_profile_pic');
+        final callDetails = await CallUtils().getCallDetails();
 
-        if (callerIdStr != null && callerName != null) {
+        if (callDetails?.callerId != null && callDetails?.callerName != null) {
           await restoreCallState(
             actualCallId,
-            int.parse(callerIdStr),
-            callerName,
-            callerProfilePic,
+            callDetails!.callerId!,
+            callDetails.callerName!,
+            callDetails.callerProfilePic,
           );
         } else {
           debugPrint(
@@ -541,10 +522,9 @@ class CallService {
         }
       } else {
         // Try to get from SharedPreferences (this is typically an incoming call)
-        final prefs = await SharedPreferences.getInstance();
-        final callerIdStr = prefs.getString('current_caller_id');
-        if (callerIdStr != null) {
-          actualCallerId = int.tryParse(callerIdStr);
+        final callerId = await CallUtils().getCallerId();
+        if (callerId != null) {
+          actualCallerId = callerId;
           actualCalleeId = _currentUser!.id;
         }
       }
@@ -604,12 +584,7 @@ class CallService {
       // Clean up state
       await _cleanup();
 
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('current_call_id');
-      await prefs.remove('current_caller_id');
-      await prefs.remove('current_caller_name');
-      await prefs.remove('current_caller_profile_pic');
-      await prefs.remove('call_status');
+      await CallUtils().clearCallDetails();
     } catch (e) {
       debugPrint('[CALL] Error declining call: $e');
       await _cleanup();
@@ -660,12 +635,7 @@ class CallService {
       debugPrint('[CALL] Error ending CallKit calls: $e');
     }
 
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('current_call_id');
-      await prefs.remove('current_caller_id');
-      await prefs.remove('current_caller_name');
-      await prefs.remove('current_caller_profile_pic');
-      await prefs.remove('call_status');
+      await CallUtils().clearCallDetails();
 
       // IMPORTANT: Cleanup and wait to ensure everything is cleared
       await _cleanup();
@@ -1284,21 +1254,20 @@ class CallService {
       await Future.delayed(const Duration(milliseconds: 100));
     }
 
-    final prefs = await SharedPreferences.getInstance();
-    final storageCallStatus = prefs.getString('call_status');
-    final storageCallId = prefs.getString('current_call_id');
+    final callUtils = CallUtils();
+    final existingCallDetails = await callUtils.getCallDetails();
+    final storageCallStatus = existingCallDetails?.callStatus;
+    final storageCallId = existingCallDetails?.callId;
 
     // Store call info in SharedPreferences for CallKit
-    await prefs.setString('current_call_id', payload.callId.toString());
-    await prefs.setString('current_caller_id', payload.callerId.toString());
-    await prefs.setString(
-      'current_caller_name',
-      payload.callerName ?? 'Unknown',
+    final callDetails = CallDetails(
+      callId: payload.callId,
+      callerId: payload.callerId,
+      callerName: payload.callerName ?? 'Unknown',
+      callerProfilePic: payload.callerPfp,
+      callStatus: 'ringing',
     );
-    if (payload.callerPfp != null) {
-      await prefs.setString('current_caller_profile_pic', payload.callerPfp!);
-    }
-    await prefs.setString('call_status', 'ringing');
+    await callUtils.saveCallDetails(callDetails);
 
     // Set up the new incoming call state FIRST so UI can react
     _activeCall = ActiveCallState(
@@ -1531,12 +1500,7 @@ class CallService {
       debugPrint('[CALL] Wakelock disabled');
 
       // Clear SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('current_call_id');
-      await prefs.remove('current_caller_id');
-      await prefs.remove('current_caller_name');
-      await prefs.remove('current_caller_profile_pic');
-      await prefs.remove('call_status');
+      await CallUtils().clearCallDetails();
       debugPrint('[CALL] SharedPreferences cleared');
 
       debugPrint('[CALL] Cleanup completed successfully - _activeCall is now: ${_activeCall == null ? "null" : "NOT null (ERROR!)"}');

@@ -2945,6 +2945,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     bool isPinned,
     bool isStarred,
   ) {
+    if (message.type == MessageType.system) {
+      return _buildSystemMessage(message);
+    }
+
     // Pre-calculate values for better performance
     final messageTime = ChatHelpers.formatMessageTime(message.sentAt);
 
@@ -2980,6 +2984,29 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         onReplyTap: _scrollToMessage,
         messagesRepo: _messagesRepo,
         userRepo: _userRepo,
+      ),
+    );
+  }
+
+  Widget _buildSystemMessage(MessageModel message) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.grey[200],
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Text(
+            message.body ?? '',
+            style: const TextStyle(
+              color: Colors.black87,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
       ),
     );
   }

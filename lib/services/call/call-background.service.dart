@@ -14,8 +14,9 @@ import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../models/call.model.dart';
+import '../../utils/call.utils.dart';
 import '../../types/socket.types.dart';
 import '../notification.service.dart';
 import 'call.service.dart';
@@ -33,22 +34,22 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await notifcations.initialize();
 
   FlutterCallkitIncoming.onEvent.listen((CallEvent? event) async {
-    final prefs = await SharedPreferences.getInstance();
+    final callUtils = CallUtils();
     switch (event?.event) {
       case Event.actionCallAccept:
         // _callService.initialize();
         // _callService.acceptCall();
 
-        prefs.setString('call_status', 'answered');
-        prefs.setString('current_call_id', event?.body['id'] ?? '');
-        prefs.setString(
-          'current_caller_id',
-          event?.body['extra']['callerId'] ?? '',
+        final callIdStr = event?.body['id']?.toString();
+        final callerIdStr = event?.body['extra']?['callerId']?.toString();
+        final callDetails = CallDetails(
+          callId: callIdStr != null ? int.tryParse(callIdStr) : null,
+          callerId: callerIdStr != null ? int.tryParse(callerIdStr) : null,
+          callerName: event?.body['extra']?['callerName']?.toString(),
+          callerProfilePic: null,
+          callStatus: 'answered',
         );
-        prefs.setString(
-          'current_caller_name',
-          event?.body['extra']['callerName'] ?? '',
-        );
+        await callUtils.saveCallDetails(callDetails);
 
         // Stop background polling since call is accepted
         _stopBackgroundStatusPolling();
@@ -59,12 +60,16 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         // _callService.initialize();
         // _callService..declineCall();
 
-        prefs.setString('call_status', 'declined');
-        prefs.setString('current_call_id', event?.body['id'] ?? '');
-        prefs.setString(
-          'current_caller_id',
-          event?.body['extra']['callerId'] ?? '',
+        final callIdStr = event?.body['id']?.toString();
+        final callerIdStr = event?.body['extra']?['callerId']?.toString();
+        final callDetails = CallDetails(
+          callId: callIdStr != null ? int.tryParse(callIdStr) : null,
+          callerId: callerIdStr != null ? int.tryParse(callerIdStr) : null,
+          callerName: null,
+          callerProfilePic: null,
+          callStatus: 'declined',
         );
+        await callUtils.saveCallDetails(callDetails);
 
         // Stop background polling since call is declined
         _stopBackgroundStatusPolling();
@@ -92,12 +97,16 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         break;
 
       case Event.actionCallTimeout:
-        prefs.setString('call_status', 'missed');
-        prefs.setString('current_call_id', event?.body['id'] ?? '');
-        prefs.setString(
-          'current_caller_id',
-          event?.body['extra']['callerId'] ?? '',
+        final callIdStr = event?.body['id']?.toString();
+        final callerIdStr = event?.body['extra']?['callerId']?.toString();
+        final callDetails = CallDetails(
+          callId: callIdStr != null ? int.tryParse(callIdStr) : null,
+          callerId: callerIdStr != null ? int.tryParse(callerIdStr) : null,
+          callerName: null,
+          callerProfilePic: null,
+          callStatus: 'missed',
         );
+        await callUtils.saveCallDetails(callDetails);
 
         // Stop background polling since call timed out
         _stopBackgroundStatusPolling();
@@ -276,13 +285,16 @@ void _startBackgroundStatusPolling(int callId) {
         await FlutterCallkitIncoming.endAllCalls();
 
         // Update shared preferences
-        final prefs = await SharedPreferences.getInstance();
-        if (status == 'declined') {
-          prefs.setString('call_status', 'declined');
-        } else if (status == 'ended') {
-          prefs.setString('call_status', 'ended');
-        }
-        prefs.setString('current_call_id', callId.toString());
+        final callUtils = CallUtils();
+        final existingCallDetails = await callUtils.getCallDetails();
+        final updatedCallDetails = existingCallDetails?.copyWith(
+          callId: callId,
+          callStatus: status == 'declined' ? 'declined' : (status == 'ended' ? 'ended' : existingCallDetails.callStatus),
+        ) ?? CallDetails(
+          callId: callId,
+          callStatus: status == 'declined' ? 'declined' : 'ended',
+        );
+        await callUtils.saveCallDetails(updatedCallDetails);
       }
     }
   });

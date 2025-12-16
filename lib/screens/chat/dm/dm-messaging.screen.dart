@@ -2031,6 +2031,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Widget _buildMessageWithActions(MessageModel message, bool isMyMessage) {
+    if (message.type == MessageType.system) {
+      return _buildSystemMessage(message);
+    }
+
     final themeColor = ref.watch(themeColorProvider);
     final isSelected = _selectedMessages.contains(message.id);
     final isPinned = _pinnedMessage?.canonicalId == message.id;
@@ -2083,6 +2087,29 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                   ),
                 ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSystemMessage(MessageModel message) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.grey[200],
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Text(
+            message.body ?? '',
+            style: const TextStyle(
+              color: Colors.black87,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       ),

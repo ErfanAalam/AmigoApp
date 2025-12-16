@@ -97,6 +97,25 @@ enum ChatRoleType {
   }
 }
 
+/// Conversation action type enum
+enum ConversationActionType {
+  memberAdded('member_added'),
+  memberRemoved('member_removed'),
+  memberPromoted('member_promoted'),
+  memberDemoted('member_demoted');
+
+  final String value;
+  const ConversationActionType(this.value);
+
+  static ConversationActionType? fromString(String? value) {
+    if (value == null) return null;
+    return ConversationActionType.values.firstWhere(
+      (e) => e.value == value,
+      orElse: () => ConversationActionType.memberAdded,
+    );
+  }
+}
+
 /// WebSocket message type enum
 enum WSMessageType {
   connectionStatus('connection:status'),
@@ -104,6 +123,7 @@ enum WSMessageType {
   conversationLeave('conversation:leave'),
   conversationNew('conversation:new'),
   conversationTyping('conversation:typing'),
+  conversationAction('conversation:action'),
   messageNew('message:new'),
   messageAck('message:ack'),
   messagePin('message:pin'),
@@ -471,6 +491,81 @@ class MembersType {
   }
 }
 
+/// Conversation action payload
+class ConversationActionPayload {
+  final int eventId;
+  final int convId;
+  final ChatType convType;
+  final ConversationActionType action;
+  final List<MembersType> members;
+  final int? actorId;
+  final String? actorName;
+  final String? actorPfp;
+  final String message;
+  final DateTime actionAt;
+
+  ConversationActionPayload({
+    required this.eventId,
+    required this.convId,
+    required this.convType,
+    required this.action,
+    required this.members,
+    this.actorId,
+    this.actorName,
+    this.actorPfp,
+    required this.message,
+    required this.actionAt,
+  });
+
+  factory ConversationActionPayload.fromJson(Map<String, dynamic> json) {
+    DateTime actionAt;
+    try {
+      final actionAtData = json['action_at'];
+      if (actionAtData is String) {
+        actionAt = DateTime.parse(actionAtData);
+      } else if (actionAtData is DateTime) {
+        actionAt = actionAtData;
+      } else {
+        actionAt = DateTime.now();
+      }
+    } catch (_) {
+      actionAt = DateTime.now();
+    }
+
+    return ConversationActionPayload(
+      eventId: json['event_id'] as int,
+      convId: json['conv_id'] as int,
+      convType:
+          ChatType.fromString(json['conv_type'] as String?) ?? ChatType.group,
+      action: ConversationActionType.fromString(json['action'] as String?) ??
+          ConversationActionType.memberAdded,
+      members: (json['members'] as List<dynamic>? ?? [])
+          .map((e) => MembersType.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      actorId: json['actor_id'] as int?,
+      actorName: json['actor_name'] as String?,
+      actorPfp: json['actor_pfp'] as String?,
+      message: json['message'] as String? ?? '',
+      actionAt: actionAt,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'event_id': eventId,
+      'conv_id': convId,
+      'conv_type': convType.value,
+      'action': action.value,
+      'members': members.map((e) => e.toJson()).toList(),
+      if (actorId != null) 'actor_id': actorId,
+      if (actorName != null) 'actor_name': actorName,
+      if (actorPfp != null) 'actor_pfp': actorPfp,
+      'message': message,
+      'action_at': actionAt.toIso8601String(),
+    };
+  }
+}
+
 /// New conversation payload
 class NewConversationPayload {
   final int convId;
@@ -545,12 +640,12 @@ class NewConversationPayload {
 
 /// Miscellaneous payload
 class MiscPayload {
-  final String message;
+  final String? message;
   final dynamic data;
   final int? code;
   final dynamic error;
 
-  MiscPayload({required this.message, this.data, this.code, this.error});
+  MiscPayload({this.message, this.data, this.code, this.error});
 
   factory MiscPayload.fromJson(Map<String, dynamic> json) {
     return MiscPayload(
@@ -831,6 +926,8 @@ class WSMessage {
         return NewConversationPayload.fromJson(payloadJson);
       case WSMessageType.conversationTyping:
         return TypingPayload.fromJson(payloadJson);
+      case WSMessageType.conversationAction:
+        return ConversationActionPayload.fromJson(payloadJson);
       case WSMessageType.messageNew:
         return ChatMessagePayload.fromJson(payloadJson);
       case WSMessageType.messageAck:
@@ -889,6 +986,7 @@ class WSMessage {
     if (payload is MessagePinPayload) return payload.toJson();
     if (payload is MessageForwardPayload) return payload.toJson();
     if (payload is CallPayload) return payload.toJson();
+    if (payload is ConversationActionPayload) return payload.toJson();
     return payload;
   }
 
@@ -922,4 +1020,7 @@ class WSMessage {
       payload is MessageForwardPayload ? payload : null;
 
   CallPayload? get callPayload => payload is CallPayload ? payload : null;
+
+  ConversationActionPayload? get conversationActionPayload =>
+      payload is ConversationActionPayload ? payload : null;
 }

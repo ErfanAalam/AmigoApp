@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/utils/user.utils.dart';
+import 'package:amigo/utils/call.utils.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/material.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
@@ -153,26 +154,24 @@ class _MyAppState extends material.State<MyApp> {
         await Future.delayed(const Duration(milliseconds: 500));
         await _requestPermissions();
 
-        final prefs = await SharedPreferences.getInstance();
-        final callStatus = prefs.getString('call_status');
-        final callId = prefs.getString('current_call_id');
-        final callerId = prefs.getString('current_caller_id');
+        final callUtils = CallUtils();
+        final callDetails = await callUtils.getCallDetails();
+        final callStatus = callDetails?.callStatus;
+        final callId = callDetails?.callId;
+        final callerId = callDetails?.callerId;
 
         if (callId != null) {
           // Get caller information from storage
-          final callerName =
-              prefs.getString('current_caller_name') ?? 'Unknown';
-          final callerProfilePic = prefs.getString(
-            'current_caller_profile_pic',
-          );
+          final callerName = callDetails?.callerName ?? 'Unknown';
+          final callerProfilePic = callDetails?.callerProfilePic;
 
           switch (callStatus) {
             case 'answered':
               // Call was answered, proceed to accept
               await CallService().initialize();
               await CallService().acceptCall(
-                callId: int.parse(callId),
-                callerId: callerId != null ? int.parse(callerId) : null,
+                callId: callId,
+                callerId: callerId,
                 callerName: callerName,
                 callerProfilePic: callerProfilePic,
               );
@@ -186,7 +185,7 @@ class _MyAppState extends material.State<MyApp> {
               await CallService().initialize();
               await CallService().declineCall(
                 reason: 'declined',
-                callId: int.parse(callId),
+                callId: callId,
               );
               return;
 
@@ -199,7 +198,7 @@ class _MyAppState extends material.State<MyApp> {
               await CallService().initialize();
               await CallService().declineCall(
                 reason: 'timeout',
-                callId: int.parse(callId),
+                callId: callId,
               );
               break;
 
