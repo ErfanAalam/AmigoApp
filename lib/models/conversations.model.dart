@@ -218,6 +218,17 @@ class ConversationMemberModel {
   });
 }
 
+// to json function for the coveersation member modal
+Map<String, dynamic> toJson(ConversationMemberModel conversationMemberModel) {
+  return {
+    'id': conversationMemberModel.id,
+    'conversationId': conversationMemberModel.conversationId,
+    'userId': conversationMemberModel.userId,
+    'role': conversationMemberModel.role,
+    'unreadCount': conversationMemberModel.unreadCount,
+  };
+}
+
 class ConversationWithMiscs extends ConversationModel {
   final String lastMessageBody;
   final String lastMessageType;

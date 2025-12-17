@@ -72,6 +72,80 @@ class UserRepository {
     }
   }
 
+  /// Insert or update users efficiently - only inserts new users and updates existing ones if data changed
+  Future<void> insertOrUpdateUsers(List<UserModel> users) async {
+    if (users.isEmpty) return;
+
+    final db = sqliteDatabase.database;
+    
+    // Batch fetch all existing users
+    final userIds = users.map((u) => u.id).toList();
+    final existingUsers = await getUsersByIds(userIds);
+    final existingUsersMap = {
+      for (var user in existingUsers) user.id: user
+    };
+
+    final List<UserModel> usersToInsert = [];
+    final List<UserModel> usersToUpdate = [];
+
+    for (final user in users) {
+      final existingUser = existingUsersMap[user.id];
+      
+      if (existingUser == null) {
+        // User doesn't exist, add to insert list
+        usersToInsert.add(user);
+      } else {
+        // User exists, check if any data has changed
+        bool hasChanged = 
+            user.name != existingUser.name ||
+            user.phone != existingUser.phone ||
+            user.role != existingUser.role ||
+            user.profilePic != existingUser.profilePic ||
+            user.callAccess != existingUser.callAccess;
+        
+        if (hasChanged) {
+          usersToUpdate.add(user);
+        }
+      }
+    }
+
+    // Insert new users
+    if (usersToInsert.isNotEmpty) {
+      for (final user in usersToInsert) {
+        final userCompanion = UsersCompanion.insert(
+          id: Value(user.id),
+          name: user.name,
+          phone: user.phone,
+          role: Value(user.role),
+          profilePic: Value(user.profilePic),
+          isOnline: user.isOnline,
+          callAccess: Value(user.callAccess ?? false),
+        );
+        await db.into(db.users).insert(userCompanion);
+      }
+    }
+
+    // Update existing users only if data changed
+    if (usersToUpdate.isNotEmpty) {
+      for (final user in usersToUpdate) {
+        final companion = UsersCompanion(
+          id: Value(user.id),
+          name: user.name.isNotEmpty ? Value(user.name) : const Value.absent(),
+          phone: user.phone.isNotEmpty ? Value(user.phone) : const Value.absent(),
+          role: user.role != null ? Value(user.role) : const Value.absent(),
+          profilePic: user.profilePic != null
+              ? Value(user.profilePic)
+              : const Value.absent(),
+          callAccess: user.callAccess != null
+              ? Value(user.callAccess)
+              : const Value.absent(),
+        );
+        await (db.update(db.users)..where((t) => t.id.equals(user.id)))
+            .write(companion);
+      }
+    }
+  }
+
   /// Insert multiple users (insert only, no update on conflict)
   /// Use this when you've already checked that users don't exist
   Future<void> insertUsersOnly(List<UserModel> users) async {

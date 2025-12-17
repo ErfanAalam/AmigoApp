@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'package:amigo/api/user.api-client.dart';
 import 'package:amigo/db/repositories/contacts.repo.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/providers/chat.provider.dart';
+import 'package:amigo/services/contact.service.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,7 +29,8 @@ class GroupInfoPage extends ConsumerStatefulWidget {
 class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     with SingleTickerProviderStateMixin {
   final GroupsService _groupsService = GroupsService();
-
+  final ContactService _contactService = ContactService();
+  final UserService _userService = UserService();
   final ContactsRepository _contactsRepository = ContactsRepository();
 
   final ConversationRepository _conversationRepository =
@@ -244,6 +247,24 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
         setState(() {
           _availableUsers = localContacts;
         });
+      } else {
+        final contacts = await _contactService.fetchContacts();
+        if (contacts.isEmpty) {
+          return;
+        }
+        final contactsData = contacts
+            .map((contact) => contact.phoneNumber)
+            .toList();
+        final response = await _userService.getAvailableUsers(contactsData);
+        if (response['success'] == true && response['data'] != null) {
+          final usersData = response['data'] as List<dynamic>;
+          final users = usersData
+              .map((userJson) => UserModel.fromJson(userJson))
+              .toList();
+          setState(() {
+            _availableUsers = users;
+          });
+        }
       }
     } catch (_) {}
   }

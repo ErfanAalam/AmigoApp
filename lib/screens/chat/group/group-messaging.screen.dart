@@ -655,6 +655,41 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         firstPageResponse['data'],
       );
 
+      final List<ConversationMemberModel> membersOfConversation =
+          firstPageHistory.members
+              .map(
+                (e) => ConversationMemberModel(
+                  conversationId: widget.group.conversationId,
+                  userId: e['user_id'],
+                  role: e['group_role'],
+                  unreadCount: e['unread_count'] ?? 0,
+                  joinedAt: e['joined_at'],
+                  removedAt: e['removed_at'],
+                ),
+              )
+              .toList();
+
+
+      await _conversationMemberRepo.insertOrUpdateConversationMembers(
+        membersOfConversation,
+      );
+
+      await _userRepo.insertOrUpdateUsers(
+        firstPageHistory.members
+            .map(
+              (e) => UserModel(
+                id: e['user_id'],
+                name: e['name'],
+                profilePic: e['profile_pic'],
+                phone: e['phone'],
+                isOnline: e['is_online'] ?? false,
+                role: e['user_role'],
+              ),
+            )
+            .toList(),
+      );
+
+
       // Process first page
       if (firstPageHistory.messages.isNotEmpty) {
         await _messagesRepo.insertMessages(firstPageHistory.messages);
@@ -723,6 +758,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       final firstPageHistory = ConversationHistoryResponse.fromJson(
         firstPageResponse['data'],
       );
+      print('-----ghdfghdfghdf--------------------------');
+      print(firstPageHistory);
+      print('-------------gfhfghfdgh------------------');
 
       final List<ConversationMemberModel> membersOfConversation =
           firstPageHistory.members
@@ -738,11 +776,15 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
               )
               .toList();
 
-      await _conversationMemberRepo.insertConversationMembers(
+              print('-------------------------------');
+              print(membersOfConversation);
+              print('-------------------------------');
+
+      await _conversationMemberRepo.insertOrUpdateConversationMembers(
         membersOfConversation,
       );
 
-      await _userRepo.insertUsers(
+      await _userRepo.insertOrUpdateUsers(
         firstPageHistory.members
             .map(
               (e) => UserModel(

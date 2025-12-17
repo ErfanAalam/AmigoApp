@@ -62,6 +62,86 @@ class ConversationMemberRepository {
     }
   }
 
+  /// Insert or update conversation members efficiently - only inserts new members and updates existing ones if data changed
+  Future<void> insertOrUpdateConversationMembers(
+    List<ConversationMemberModel> members,
+  ) async {
+    if (members.isEmpty) return;
+
+    final db = sqliteDatabase.database;
+
+    // Batch fetch all existing members for this conversation
+    final conversationId = members.first.conversationId;
+    final existingMembers = await getMembersByConversationId(conversationId);
+    final existingMembersMap = {
+      for (var member in existingMembers)
+        '${member.conversationId}_${member.userId}': member
+    };
+
+    final List<ConversationMemberModel> membersToInsert = [];
+    final List<ConversationMemberModel> membersToUpdate = [];
+
+    for (final member in members) {
+      final key = '${member.conversationId}_${member.userId}';
+      final existingMember = existingMembersMap[key];
+
+      if (existingMember == null) {
+        // Member doesn't exist, add to insert list
+        membersToInsert.add(member);
+      } else {
+        // Member exists, check if any data has changed
+        bool hasChanged = 
+            member.role != existingMember.role ||
+            member.joinedAt != existingMember.joinedAt ||
+            member.removedAt != existingMember.removedAt;
+        
+        if (hasChanged) {
+          membersToUpdate.add(member);
+        }
+      }
+    }
+
+    // Insert new members
+    if (membersToInsert.isNotEmpty) {
+      for (final member in membersToInsert) {
+        final memberCompanion = ConversationMembersCompanion.insert(
+          conversationId: member.conversationId,
+          userId: member.userId,
+          role: member.role,
+          unreadCount: Value(member.unreadCount ?? 0),
+          joinedAt: Value(member.joinedAt),
+          removedAt: Value(member.removedAt),
+          lastReadMessageId: Value(member.lastReadMessageId),
+          lastDeliveredMessageId: Value(member.lastDeliveredMessageId),
+        );
+        await db.into(db.conversationMembers).insert(memberCompanion);
+      }
+    }
+
+    // Update existing members only if data changed
+    if (membersToUpdate.isNotEmpty) {
+      for (final member in membersToUpdate) {
+        final companion = ConversationMembersCompanion(
+          conversationId: Value(member.conversationId),
+          userId: Value(member.userId),
+          role: Value(member.role),
+          joinedAt: member.joinedAt != null
+              ? Value(member.joinedAt!)
+              : const Value.absent(),
+          removedAt: member.removedAt != null
+              ? Value(member.removedAt!)
+              : const Value.absent(),
+        );
+        await (db.update(db.conversationMembers)..where(
+              (t) =>
+                  t.conversationId.equals(member.conversationId) &
+                  t.userId.equals(member.userId),
+            ))
+            .write(companion);
+      }
+    }
+  }
+
   /// Insert multiple conversation members (insert only, no update on conflict)
   /// Use this when you've already checked that members don't exist
   Future<void> insertConversationMembersOnly(
