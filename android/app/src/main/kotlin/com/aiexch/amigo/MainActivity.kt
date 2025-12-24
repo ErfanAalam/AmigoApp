@@ -1,4 +1,4 @@
-package com.example.amigo
+package com.aiexch.amigo
 
 import android.os.Bundle
 import android.view.WindowManager

@@ -44,14 +44,15 @@ class BadgeWidget extends ConsumerWidget {
           child: Container(
             padding:
                 padding ??
-                (count > 9
-                    ? EdgeInsets.symmetric(horizontal: 5, vertical: 2)
-                    : EdgeInsets.all(4)),
+                EdgeInsets.symmetric(
+                  horizontal: _formatCount(count).length <= 2 ? 5 : 7,
+                  vertical: 1,
+                ),
+            constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
             decoration: BoxDecoration(
               color: badgeColor ?? themeColor.primary,
-              shape: BoxShape.circle,
+              borderRadius: BorderRadius.circular(12),
             ),
-            constraints: BoxConstraints(minWidth: 18, minHeight: 18),
             alignment: Alignment.center,
             child: Text(
               _formatCount(count),

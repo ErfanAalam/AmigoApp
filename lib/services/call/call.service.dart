@@ -26,6 +26,9 @@ import '../socket/websocket.service.dart';
 import '../socket/ws-message.handler.dart';
 import 'call-foreground.service.dart';
 
+import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
+
+
 class CallService {
   static final CallService _instance = CallService._internal();
   factory CallService() => _instance;
@@ -326,7 +329,8 @@ class CallService {
       try {
         await RingtoneManager.playRingtone();
       } catch (e) {
-        await RingtoneManager.playSystemRingtone();
+        debugPrint('[CALL] Error playing ringtone');
+        // await RingtoneManager.playSystemRingtone();
       }
     } catch (e) {
       debugPrint('[CALL] Failed to initiate call: $e');
@@ -575,6 +579,7 @@ class CallService {
       try {
         await RingtoneManager.stopRingtone();
       } catch (e) {
+        await RingtoneManager.dispose();
         debugPrint('[CALL] Error stopping ringtone in decline: $e');
       }
 
@@ -625,6 +630,7 @@ class CallService {
       try {
         await RingtoneManager.stopRingtone();
       } catch (e) {
+        await RingtoneManager.dispose();
         debugPrint('[CALL] Error stopping ringtone: $e');
       }
 
@@ -902,6 +908,7 @@ class CallService {
         try {
           await RingtoneManager.stopRingtone();
         } catch (e) {
+          await RingtoneManager.dispose();
           debugPrint('[CALL] Error stopping ringtone in timeout');
         }
       }
@@ -1025,7 +1032,9 @@ class CallService {
 
     try {
       await RingtoneManager.stopRingtone();
+      FlutterRingtonePlayer().stop();
     } catch (e) {
+      await RingtoneManager.dispose();
       debugPrint('[CALL] Error stopping ringtone in accept');
     }
 
@@ -1099,7 +1108,7 @@ class CallService {
     }
 
     debugPrint('[CALL] Handling call:decline for callId=${payload.callId}, ActiveCallId: ${_activeCall!.callId}');
-    
+    FlutterRingtonePlayer().stop();
     // Update callId if provided and different (or if it was 0)
     if (payload.callId != null && (_activeCall!.callId != payload.callId || _activeCall!.callId == 0)) {
       debugPrint('[CALL] Updating callId from ${_activeCall!.callId} to ${payload.callId}');
@@ -1122,6 +1131,7 @@ class CallService {
     
     _handleCallDeclinedInternal(_createMessageMap(payload));
     await FlutterCallkitIncoming.endAllCalls();
+    FlutterRingtonePlayer().stop();
   }
 
   /// Handle call end message
@@ -1131,7 +1141,7 @@ class CallService {
       debugPrint('[CALL] Ignoring call:end for callId=${payload.callId} - not active call or no active call');
       return;
     }
-
+    FlutterRingtonePlayer().stop();
     debugPrint('[CALL] Handling call:end for callId=${payload.callId}');
     // Cancel the call started timer since call is ending
     _callStartedTimer?.cancel();
@@ -1140,6 +1150,7 @@ class CallService {
     _stopStatusPolling();
     _handleCallEndedInternal(_createMessageMap(payload));
     await FlutterCallkitIncoming.endAllCalls();
+    FlutterRingtonePlayer().stop();
   }
 
   /// Handle call missed message
@@ -1158,6 +1169,7 @@ class CallService {
     _stopStatusPolling();
     _handleCallMissedInternal(_createMessageMap(payload));
     await FlutterCallkitIncoming.endAllCalls();
+    FlutterRingtonePlayer().stop();
   }
 
   /// Handle call error message
@@ -1182,7 +1194,9 @@ class CallService {
     // Stop ringtone if playing
     try {
       await RingtoneManager.stopRingtone();
+      FlutterRingtonePlayer().stop();
     } catch (e) {
+      await RingtoneManager.dispose();
       debugPrint('[CALL] Error stopping ringtone in error handler: $e');
     }
 
@@ -1190,7 +1204,7 @@ class CallService {
     _callStartedTimer?.cancel();
     _callStartedTimer = null;
     _stopStatusPolling();
-
+    FlutterRingtonePlayer().stop();
     // Navigate back from call screen if we're on it
     if (NavigationHelper.navigator != null) {
       try {
@@ -1318,7 +1332,8 @@ class CallService {
 
       // Play ringtone for incoming call
       try {
-        await RingtoneManager.playSystemRingtone();
+        // await RingtoneManager.playSystemRingtone();
+        FlutterRingtonePlayer().playRingtone();
         debugPrint('[CALL] Playing system ringtone for incoming call');
       } catch (e) {
         debugPrint('[CALL] Error playing system ringtone: $e');
@@ -1417,6 +1432,7 @@ class CallService {
     try {
       await RingtoneManager.stopRingtone();
     } catch (e) {
+      await RingtoneManager.dispose();
       debugPrint('[CALL] Error stopping ringtone in declined');
     }
     _cleanup();
@@ -1435,6 +1451,7 @@ class CallService {
     try {
       await RingtoneManager.stopRingtone();
     } catch (e) {
+      await RingtoneManager.dispose();
       debugPrint('[CALL] Error stopping ringtone in ended');
     }
     _cleanup();
@@ -1457,6 +1474,10 @@ class CallService {
   Future<void> _cleanup() async {
     try {
       debugPrint('[CALL] Starting cleanup...');
+
+      FlutterRingtonePlayer().stop();
+      await RingtoneManager.stopRingtone();
+      await RingtoneManager.dispose();
       
       // Stop status polling FIRST to prevent any further API calls
       _stopStatusPolling();

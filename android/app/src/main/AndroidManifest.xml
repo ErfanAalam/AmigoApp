@@ -28,7 +28,6 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
   <!-- Notification Permissions -->
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

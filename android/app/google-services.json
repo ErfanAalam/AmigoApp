@@ -7,6 +7,44 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:562549249203:android:32da8f8e821c9fda850cc6",
+        "android_client_info": {
+          "package_name": "com.aiexch.amigo"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCRC0fVjrJ_LydbKmTKk5GAiXA3V4jIvFg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:562549249203:android:a78ee2c55551aa92850cc6",
+        "android_client_info": {
+          "package_name": "com.amigo.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCRC0fVjrJ_LydbKmTKk5GAiXA3V4jIvFg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:562549249203:android:d696a2f4506da913850cc6",
         "android_client_info": {
           "package_name": "com.example.amigo"

@@ -772,10 +772,16 @@ class ChatListItem extends ConsumerWidget {
         if (hasUnreadMessages) ...[
           const SizedBox(height: 4),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            padding: EdgeInsets.symmetric(
+              horizontal: (conversation.unreadCount ?? 0).toString().length <= 2 ? 6 : 8,
+              vertical: 1.3,
+            ),
+            constraints: const BoxConstraints(
+              minWidth: 20,
+            ),
             decoration: BoxDecoration(
               color: isMuted ? Colors.grey : themeColor.primary,
-              shape: BoxShape.circle,
+              borderRadius: BorderRadius.circular(12),
             ),
             child: Text(
               (conversation.unreadCount ?? 0).toString(),
@@ -784,6 +790,7 @@ class ChatListItem extends ConsumerWidget {
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),
+              textAlign: TextAlign.center,
             ),
           ),
         ],

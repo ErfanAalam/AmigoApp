@@ -480,6 +480,11 @@ class ConversationRepository {
               ))
               .get();
 
+      // Skip if no members found
+      if (members.isEmpty) {
+        continue;
+      }
+
       // Skip if no valid recipient found
       if (members[0].userId == 0) {
         continue;
@@ -548,6 +553,11 @@ class ConversationRepository {
                 (t) => t.conversationId.equals(conv.id) & t.removedAt.isNull(),
               ))
               .get();
+
+      // Skip if no members found
+      if (members.isEmpty) {
+        continue;
+      }
 
       // Skip if no valid recipient found
       if (members[0].userId == 0) {
