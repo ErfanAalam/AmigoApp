@@ -48,7 +48,7 @@
   <!-- Audio Recording Feature -->
   <uses-feature android:name="android.hardware.microphone" android:required="false" />
   <application
-    android:label="amigo"
+    android:label="Amigo"
     android:name="${applicationName}"
     android:icon="@mipmap/launcher_icon">
     <activity
