@@ -1370,9 +1370,8 @@ class ChatNotifier extends Notifier<ChatState> {
 
         final dm = state.dmList[convIndex];
 
-        final shouldCountUnread = payload.msgType != MessageType.system;
-        newDmUnreadCount = state.activeConvId == convId || !shouldCountUnread
-            ? (dm.unreadCount ?? 0)
+        newDmUnreadCount = state.activeConvId == convId
+            ? 0
             : (dm.unreadCount ?? 0) + 1;
 
         final updatedConversation = dm.copyWith(
@@ -1404,9 +1403,8 @@ class ChatNotifier extends Notifier<ChatState> {
         final group = state.groupList[convIndex];
 
         // Update group's last message
-        final shouldCountUnread = payload.msgType != MessageType.system;
-        newGrpUnreadCount = state.activeConvId == convId || !shouldCountUnread
-            ? group.unreadCount
+        newGrpUnreadCount = state.activeConvId == convId
+            ? 0
             : group.unreadCount + 1;
 
         final updatedGroup = group.copyWith(
