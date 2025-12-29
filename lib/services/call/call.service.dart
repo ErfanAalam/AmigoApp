@@ -3,6 +3,7 @@ import 'package:amigo/env.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
@@ -53,6 +54,9 @@ class CallService {
   int? _pollingCallId;
 
   final WebSocketService _webSocketService = WebSocketService();
+  
+  // Method channel for lock screen flags
+  static const MethodChannel _lockScreenChannel = MethodChannel('com.aiexch.amigo/lock_screen');
 
   // Call stream subscriptions
   StreamSubscription<CallPayload>? _callInitSubscription;
@@ -181,10 +185,14 @@ class CallService {
             await declineCall(
               callId: callId,
             );
+            // FlutterCallkitIncoming.endCall(callId.toString());
+            FlutterCallkitIncoming.endAllCalls();
             break;
 
           case Event.actionCallEnded:
             endCall();
+            // FlutterCallkitIncoming.endCall(callId.toString());
+            FlutterCallkitIncoming.endAllCalls();
             break;
 
           default:
@@ -260,7 +268,7 @@ class CallService {
         }
       }
 
-      // Enable wakelock
+      // Enable wakelock only when initiating call (will be managed by lifecycle observer)
       await WakelockPlus.enable();
 
       // Get user media
@@ -393,8 +401,8 @@ class CallService {
         _activeCall = _activeCall?.copyWith(callId: callId);
       }
 
-      // Enable wakelock
-      WakelockPlus.enable();
+      // Enable wakelock when accepting call (will be managed by lifecycle observer)
+      await WakelockPlus.enable();
 
       // Enable global proximity control for screen lock
       _initializeProximityControl();
@@ -448,6 +456,9 @@ class CallService {
       await CallForegroundService.startService(
         callerName: _activeCall!.userName,
       );
+
+      // Enable lock screen flags for call
+      await _enableLockScreenFlags();
 
       await CallUtils().clearCallDetails();
     } catch (e) {
@@ -583,6 +594,9 @@ class CallService {
         debugPrint('[CALL] Error stopping ringtone in decline: $e');
       }
 
+      // Disable lock screen flags when call is declined
+      await _disableLockScreenFlags();
+
       // End all CallKit calls
       await FlutterCallkitIncoming.endAllCalls();
 
@@ -633,6 +647,9 @@ class CallService {
         await RingtoneManager.dispose();
         debugPrint('[CALL] Error stopping ringtone: $e');
       }
+
+      // Disable lock screen flags when call ends
+      await _disableLockScreenFlags();
 
       // End all CallKit calls FIRST before cleanup
     try {
@@ -1044,6 +1061,9 @@ class CallService {
 
     // Start foreground service to keep microphone active in background
     await CallForegroundService.startService(callerName: _activeCall!.userName);
+    
+    // Enable lock screen flags for call
+    await _enableLockScreenFlags();
 
     // For outgoing calls, create offer immediately
     // For incoming calls, wait for offer from caller
@@ -1516,9 +1536,19 @@ class CallService {
       _activeCall = null;
       debugPrint('[CALL] _activeCall cleared (was callId: $clearedCallId)');
 
-      // Disable wakelock
+      // Disable wakelock when call ends
       WakelockPlus.disable();
       debugPrint('[CALL] Wakelock disabled');
+      
+      // Double-check wakelock is disabled (sometimes it persists)
+      await Future.delayed(const Duration(milliseconds: 100));
+      if (await WakelockPlus.enabled) {
+        WakelockPlus.disable();
+        debugPrint('[CALL] Wakelock force-disabled after delay');
+      }
+
+      // Disable lock screen flags
+      await _disableLockScreenFlags();
 
       // Clear SharedPreferences
       await CallUtils().clearCallDetails();
@@ -1755,6 +1785,26 @@ class CallService {
 
   /// Check if proximity control is active
   bool get isProximityControlActive => _proximitySubscription != null;
+
+  /// Enable lock screen flags (show app on lock screen during calls)
+  Future<void> _enableLockScreenFlags() async {
+    try {
+      await _lockScreenChannel.invokeMethod('enableLockScreenFlags');
+      debugPrint('[CALL] Lock screen flags enabled');
+    } catch (e) {
+      debugPrint('[CALL] Error enabling lock screen flags: $e');
+    }
+  }
+
+  /// Disable lock screen flags (hide app from lock screen when no call)
+  Future<void> _disableLockScreenFlags() async {
+    try {
+      await _lockScreenChannel.invokeMethod('disableLockScreenFlags');
+      debugPrint('[CALL] Lock screen flags disabled');
+    } catch (e) {
+      debugPrint('[CALL] Error disabling lock screen flags: $e');
+    }
+  }
 
   /// Dispose service
   void dispose() {

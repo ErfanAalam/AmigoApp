@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:amigo/db/repositories/call.repo.dart';
 import 'package:amigo/utils/user.utils.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -197,6 +198,7 @@ class CallsPageState extends ConsumerState<CallsPage>
           calleeId: newCall.calleeId,
           contactId: newCall.contactId,
           contactName: newCall.contactName,
+          contactProfilePic: newCall.contactProfilePic,
           startedAt: newCall.startedAt,
           answeredAt: newCall.answeredAt,
           endedAt: newCall.endedAt,
@@ -389,8 +391,15 @@ class CallsPageState extends ConsumerState<CallsPage>
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: _getCallStatusColor(call.status),
-          child: Icon(_getCallIcon(call), color: Colors.white, size: 20),
+          backgroundColor: call.contactProfilePic != null
+              ? Colors.transparent
+              : _getCallStatusColor(call.status),
+          backgroundImage: call.contactProfilePic != null
+              ? CachedNetworkImageProvider(call.contactProfilePic!)
+              : null,
+          child: call.contactProfilePic == null
+              ? Icon(_getCallIcon(call), color: Colors.white, size: 20)
+              : null,
         ),
         title: Text(
           call.contactName,
@@ -425,7 +434,7 @@ class CallsPageState extends ConsumerState<CallsPage>
             ),
             const SizedBox(height: 2),
             Text(
-              _formatDateTime(call.startedAt),
+              _formatDateTime(call.startedAt.toLocal()),
               style: TextStyle(color: Colors.grey[600], fontSize: 12),
             ),
           ],
@@ -512,20 +521,21 @@ class CallsPageState extends ConsumerState<CallsPage>
   String _formatDateTime(DateTime dateTime) {
     final now = DateTime.now();
     final difference = now.difference(dateTime);
+    final timeStr = '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
 
     if (difference.inDays == 0) {
-      // Today
-      return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+      // Today - show time only
+      return timeStr;
     } else if (difference.inDays == 1) {
-      // Yesterday
-      return 'Yesterday';
+      // Yesterday - show "Yesterday" with time
+      return 'Yesterday $timeStr';
     } else if (difference.inDays < 7) {
-      // This week
+      // This week - show weekday with time
       final weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      return weekdays[dateTime.weekday - 1];
+      return '${weekdays[dateTime.weekday - 1]} $timeStr';
     } else {
-      // Older
-      return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
+      // Older - show full date and time
+      return '${dateTime.day}/${dateTime.month}/${dateTime.year} $timeStr';
     }
   }
 
@@ -554,6 +564,7 @@ class CallsPageState extends ConsumerState<CallsPage>
       calleeId: model.calleeId,
       contactId: model.contactId,
       contactName: model.contactName,
+      contactProfilePic: model.contactProfilePic,
       startedAt: model.startedAt,
       answeredAt: model.answeredAt,
       endedAt: model.endedAt,
@@ -572,6 +583,7 @@ class CallHistoryItem {
   final int calleeId;
   final int contactId; // The other person's ID
   final String contactName; // The other person's name
+  final String? contactProfilePic; // The other person's profile picture
   final DateTime startedAt;
   final DateTime? answeredAt;
   final DateTime? endedAt;
@@ -586,6 +598,7 @@ class CallHistoryItem {
     required this.calleeId,
     required this.contactId,
     required this.contactName,
+    this.contactProfilePic,
     required this.startedAt,
     this.answeredAt,
     this.endedAt,
@@ -602,6 +615,7 @@ class CallHistoryItem {
       calleeId: _parseInt(json['callee_id']),
       contactId: _parseInt(json['contact_id']),
       contactName: json['contact_name']?.toString() ?? 'Unknown',
+      contactProfilePic: json['contact_profile_pic']?.toString(),
       startedAt: DateTime.parse(json['started_at']),
       answeredAt: json['answered_at'] != null
           ? DateTime.parse(json['answered_at'])
