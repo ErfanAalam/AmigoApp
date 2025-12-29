@@ -20,6 +20,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../socket/websocket.service.dart';
 import '../user-status.service.dart';
+import '../../api/auth.api-client.dart' as api;
 
 class AuthService {
   static const String _authStatusKey = 'auth_status';
@@ -66,8 +67,20 @@ class AuthService {
         return false;
       }
 
+      // CRITICAL: Validate refresh token against server to detect if user logged in elsewhere
+      // This ensures that if Device A is closed and Device B logs in, Device A will be logged out
+      // when it opens the app again
+      final apiService = api.ApiService();
+      final isTokenValid = await apiService.validateRefreshToken();
+      if (!isTokenValid) {
+        debugPrint('🚪 Refresh token invalidated - user logged in on another device');
+        await logout();
+        return false;
+      }
+
       return true;
     } catch (e) {
+      debugPrint('❌ Error checking authentication: $e');
       return false;
     }
   }

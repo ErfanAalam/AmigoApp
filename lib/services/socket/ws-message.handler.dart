@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../types/socket.types.dart';
 import '../../utils/navigation-helper.util.dart';
 import '../user-status.service.dart';
+import '../auth/auth.service.dart';
 import 'websocket.service.dart';
 
 /// Centralized WebSocket message handler that processes all messages once
@@ -389,6 +390,12 @@ class WebSocketMessageHandler {
           debugPrint('❌ WebSocket error: ${message.miscPayload?.message}');
           break;
 
+        case WSMessageType.authForceLogout:
+          debugPrint('🚪 Force logout received: ${message.miscPayload?.message}');
+          // Handle force logout - user logged in on another device
+          _handleForceLogout(message.miscPayload);
+          break;
+
         // Call-related messages
         case WSMessageType.callInit:
           final payload = message.callPayload;
@@ -574,6 +581,48 @@ class WebSocketMessageHandler {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Handle force logout when user logs in on another device
+  void _handleForceLogout(MiscPayload? payload) async {
+    final messageText = payload?.message ?? 
+        'You have been logged out because you logged in on another device';
+
+    // Get the navigator context
+    final context = NavigationHelper.navigatorKey.currentContext;
+    if (context == null) {
+      debugPrint('⚠️ Cannot show force logout dialog: Navigator context is null');
+      // Still proceed with logout even without context
+      await AuthService().logout();
+      return;
+    }
+
+    // Show dialog first, then logout
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.logout, color: Colors.orange[600], size: 28),
+              const SizedBox(width: 12),
+              const Text('Logged Out'),
+            ],
+          ),
+          content: Text(messageText),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await AuthService().logout();
+              },
               child: const Text('OK'),
             ),
           ],

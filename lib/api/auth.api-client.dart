@@ -64,11 +64,41 @@ class ApiService {
             // will automatically include cookies in the request
             return handler.next(options);
           },
-          onResponse: (response, handler) {
+          onResponse: (response, handler) async {
             // Debug: Check for cookies in response headers
-            final cookies = response.headers['set-cookie'];
-            if (cookies != null && cookies.isNotEmpty) {
-              // Don't log the actual cookies for security reasons
+            // final cookies = response.headers['set-cookie'];
+            // if (cookies != null && cookies.isNotEmpty) {
+            //   // Don't log the actual cookies for security reasons
+            // }
+
+            if (response.statusCode == 401) {
+              // Don't try to refresh if we're already refreshing
+              // or if the failed request was the refresh endpoint itself
+              if (_isRefreshing ||
+                  response.requestOptions.path.contains(
+                    '/auth/refresh-mobile',
+                  )) {
+                _authService.logout();
+                _disconnectWebSocketOnLogout();
+                return handler.next(response);
+              }
+
+              // Try to refresh the token
+              final refreshSuccess = await _refreshToken();
+
+              if (refreshSuccess) {
+                // Retry the original request with new token
+                try {
+                  final res = await _dio.fetch(response.requestOptions);
+                  return handler.resolve(res);
+                } catch (retryError) {
+                  return handler.next(response);
+                }
+              } else {
+                _authService.logout();
+                _disconnectWebSocketOnLogout();
+                return handler.next(response);
+              }
             }
 
             // Check for authentication success
@@ -91,33 +121,9 @@ class ApiService {
           },
           onError: (DioException e, handler) async {
             // Handle auth errors - Token expired
-            if (e.response?.statusCode == 401) {
-              // Don't try to refresh if we're already refreshing
-              // or if the failed request was the refresh endpoint itself
-              if (_isRefreshing ||
-                  e.requestOptions.path.contains('/auth/refresh-mobile')) {
-                _authService.logout();
-                _disconnectWebSocketOnLogout();
-                return handler.next(e);
-              }
-
-              // Try to refresh the token
-              final refreshSuccess = await _refreshToken();
-
-              if (refreshSuccess) {
-                // Retry the original request with new token
-                try {
-                  final response = await _dio.fetch(e.requestOptions);
-                  return handler.resolve(response);
-                } catch (retryError) {
-                  return handler.next(e);
-                }
-              } else {
-                _authService.logout();
-                _disconnectWebSocketOnLogout();
-                return handler.next(e);
-              }
-            }
+            debugPrint(
+              '⚠️ DioException intercepted: ${e.response?.statusCode} for ${e.requestOptions.path}',
+            );
             return handler.next(e);
           },
         ),
@@ -174,10 +180,8 @@ class ApiService {
         // Check if we received new cookies
         final cookies = response.headers['set-cookie'];
         if (cookies != null && cookies.isNotEmpty) {
-          for (var cookie in cookies) {
-            // Log cookie names without values for security
-            final cookieName = cookie.split('=')[0];
-          }
+          // Cookies are automatically handled by CookieManager
+          debugPrint('✅ Received new cookies in refresh response');
         } else {
           debugPrint('⚠️ Warning: No set-cookie headers in refresh response');
         }
@@ -211,6 +215,34 @@ class ApiService {
     } catch (e) {
       debugPrint('❌ Unexpected error during token refresh: $e');
       _isRefreshing = false;
+      return false;
+    }
+  }
+
+  /// Validate if the refresh token is still valid (matches server)
+  /// Returns true if valid, false if invalid or error
+  Future<bool> validateRefreshToken() async {
+    try {
+      final response = await _dio.get(
+        '${Environment.baseUrl}/auth/validate-token',
+        options: Options(
+          validateStatus: (status) {
+            return status != null && (status >= 200 && status < 300 || status == 404 || status == 401);
+          },
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        return response.data['success'] == true;
+      } else {
+        // Token is invalid (404 or 401)
+        return false;
+      }
+    } on DioException catch (e) {
+      debugPrint('❌ Token validation DioException: ${e.message}');
+      return false;
+    } catch (e) {
+      debugPrint('❌ Unexpected error during token validation: $e');
       return false;
     }
   }

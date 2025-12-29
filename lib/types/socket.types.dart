@@ -142,6 +142,7 @@ enum WSMessageType {
   callMissed('call:missed'),
   callError('call:error'),
   socketHealthCheck('socket:health_check'),
+  authForceLogout('auth:force_logout'),
   ping('ping'),
   pong('pong'),
   socketError('socket:error');
