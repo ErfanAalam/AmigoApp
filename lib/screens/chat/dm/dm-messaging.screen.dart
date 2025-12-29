@@ -44,6 +44,7 @@ import '../../../utils/chat/audio-playback.utils.dart';
 import '../../../utils/chat/chat-helpers.utils.dart';
 import '../../../utils/chat/forward-message.utils.dart';
 import '../../../utils/chat/preview-media.utils.dart';
+import '../image-editor.screen.dart';
 
 class InnerChatPage extends ConsumerStatefulWidget {
   final DmModel dm;
@@ -2547,8 +2548,17 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     await handleCameraAttachment(
       imagePicker: _imagePicker,
       context: context,
-      onImageSelected: (imageFile, source) {
-        _sendMediaMessageToServer(imageFile, MessageType.image);
+      onImageSelected: (imageFile, source) async {
+        // Open image editor before sending
+        final editedFile = await Navigator.of(context).push<File>(
+          MaterialPageRoute(
+            builder: (context) => ImageEditorScreen(imageFile: imageFile),
+          ),
+        );
+        
+        if (editedFile != null) {
+          _sendMediaMessageToServer(editedFile, MessageType.image);
+        }
       },
       onError: (message) {
         _showErrorDialog(message);
@@ -2562,8 +2572,17 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   void _handleGalleryAttachment() async {
     await handleGalleryAttachment(
       context: context,
-      onImageSelected: (imageFile, source) {
-        _sendMediaMessageToServer(imageFile, MessageType.image);
+      onImageSelected: (imageFile, source) async {
+        // Open image editor before sending
+        final editedFile = await Navigator.of(context).push<File>(
+          MaterialPageRoute(
+            builder: (context) => ImageEditorScreen(imageFile: imageFile),
+          ),
+        );
+        
+        if (editedFile != null) {
+          _sendMediaMessageToServer(editedFile, MessageType.image);
+        }
       },
       onVideoSelected: (videoFile, source) {
         _sendMediaMessageToServer(videoFile, MessageType.video);

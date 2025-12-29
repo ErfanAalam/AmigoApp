@@ -44,11 +44,11 @@ class CallForegroundTaskHandler extends TaskHandler {
   }
 }
 
-class CallForegroundService {
+class CallForegroundService { 
   static bool _isRunning = false;
 
   /// Initialize foreground service (call this once at app startup)
-  static Future<void> initialize() async {
+    static Future<void> initialize() async {
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: 'call_foreground_service',
@@ -67,14 +67,14 @@ class CallForegroundService {
         ), // repeat every 5 seconds
         autoRunOnBoot: false,
         autoRunOnMyPackageReplaced: false,
-        allowWakeLock: true,
+        allowWakeLock: false, // Don't use wake lock in foreground service - let CallService manage it
         allowWifiLock: true,
       ),
     );
   }
 
   /// Start foreground service for a call
-  static Future<bool> startService({required String callerName}) async {
+  static Future<bool> startService({required String callerName}) async {        
     if (_isRunning) {
       print('[ForegroundService] Service already running');
       return true;

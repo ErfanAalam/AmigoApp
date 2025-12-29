@@ -9,6 +9,7 @@ import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'api/auth.api-client.dart';
 import 'api/user.api-client.dart';
 import 'models/group.model.dart';
@@ -68,7 +69,7 @@ class MyApp extends material.StatefulWidget {
   material.State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends material.State<MyApp> {
+class _MyAppState extends material.State<MyApp> with material.WidgetsBindingObserver {
   final AuthService _authService = AuthService();
   final WebSocketService _websocketService = WebSocketService();
   final UserStatusService _userStatusService = UserStatusService();
@@ -84,6 +85,8 @@ class _MyAppState extends material.State<MyApp> {
   @override
   void initState() {
     super.initState();
+    // Add lifecycle observer to handle app state changes
+    material.WidgetsBinding.instance.addObserver(this);
     _requestPermissions();
     _checkAuthentication();
     _setupWebSocketListeners();
@@ -96,6 +99,52 @@ class _MyAppState extends material.State<MyApp> {
     material.WidgetsBinding.instance.addPostFrameCallback((_) {
       _processInitialNotification();
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(material.AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    // Handle app lifecycle changes to manage wakelock properly
+    final callService = CallService();
+    final isInCall = callService.isInCall;
+    
+    switch (state) {
+      case material.AppLifecycleState.paused:
+      case material.AppLifecycleState.inactive:
+      case material.AppLifecycleState.detached:
+        // App is going to background or being closed
+        // Only keep wakelock if there's an active call in progress
+        if (!isInCall) {
+          // No active call - disable wakelock to allow screen to lock
+          WakelockPlus.disable();
+          debugPrint('[APP_LIFECYCLE] App going to background - disabled wakelock (no active call)');
+        } else {
+          debugPrint('[APP_LIFECYCLE] App going to background - keeping wakelock (active call in progress)');
+        }
+        break;
+        
+      case material.AppLifecycleState.resumed:
+        // App is coming to foreground
+        // Re-enable wakelock if there's an active call
+        if (isInCall) {
+          WakelockPlus.enable();
+          debugPrint('[APP_LIFECYCLE] App resumed - enabled wakelock (active call in progress)');
+        } else {
+          // Ensure wakelock is disabled when app resumes without active call
+          WakelockPlus.disable();
+          debugPrint('[APP_LIFECYCLE] App resumed - disabled wakelock (no active call)');
+        }
+        break;
+        
+      case material.AppLifecycleState.hidden:
+        // App is hidden (Android 12+)
+        if (!isInCall) {
+          WakelockPlus.disable();
+          debugPrint('[APP_LIFECYCLE] App hidden - disabled wakelock (no active call)');
+        }
+        break;
+    }
   }
 
   Future<void> _getCurrentUser() async {
@@ -432,6 +481,10 @@ class _MyAppState extends material.State<MyApp> {
 
   @override
   void dispose() {
+    // Remove lifecycle observer
+    material.WidgetsBinding.instance.removeObserver(this);
+    // Ensure wakelock is disabled when app is disposed
+    WakelockPlus.disable();
     _intentDataStreamSubscription?.cancel();
     _websocketService.dispose();
     WebSocketMessageHandler().dispose();

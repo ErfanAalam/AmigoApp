@@ -91,6 +91,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         break;
 
       case Event.actionCallEnded:
+        await FlutterCallkitIncoming.endCall(event?.body['id'] ?? '');
+          await FlutterCallkitIncoming.endAllCalls();
         // Stop background polling since call is ended
         _stopBackgroundStatusPolling();
 
@@ -125,19 +127,57 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     // Use CallKit for background call notifications
     await _handleBackgroundCallNotification(data);
   } else if (message.data['type'] == 'call_end') {
-    final callId = message.data['callId'];
+    // Ensure callId is a string (matching the format used when showing CallKit)
+    final callId = message.data['callId']?.toString() ?? '';
 
-    // Stop background polling since call is ended via FCM
+
+    // Stop background polling immediately since call is ended via FCM
     _stopBackgroundStatusPolling();
 
-    // 1. End call notification (system UI)
-    await FlutterCallkitIncoming.endCall(callId);
-    await FlutterCallkitIncoming.endAllCalls();
+    // Immediately dismiss CallKit UI - try both methods to ensure it works
+    try {
+      // First, try to end the specific call by ID
+      if (callId.isNotEmpty) {
+        await FlutterCallkitIncoming.endCall(callId);
+      }
+      // Always call endAllCalls as a fallback to ensure all calls are dismissed
+      await FlutterCallkitIncoming.endAllCalls();
+    } catch (e) {
+      debugPrint('[BACKGROUND] Error ending CallKit: $e');
+      // Try again with endAllCalls only
+      try {
+        await FlutterCallkitIncoming.endAllCalls();
+      } catch (e2) {
+        debugPrint('[BACKGROUND] Error calling endAllCalls: $e2');
+      }
+    }
 
-    // 2. Optionally show missed call notification
+    // 3. Update call details in SharedPreferences to mark call as ended
+    if (callId.isNotEmpty) {
+      try {
+        final callUtils = CallUtils();
+        final callIdInt = int.tryParse(callId);
+        if (callIdInt != null) {
+          final existingCallDetails = await callUtils.getCallDetails();
+          final updatedCallDetails = existingCallDetails?.copyWith(
+            callId: callIdInt,
+            callStatus: 'ended',
+          ) ?? CallDetails(
+            callId: callIdInt,
+            callStatus: 'ended',
+          );
+          await callUtils.saveCallDetails(updatedCallDetails);
+        }
+      } catch (e) {
+        debugPrint('[BACKGROUND] Error updating call details: $e');
+      }
+    }
+
+    // 4. Optionally show missed call notification
+    final callerName = message.data['callerName']?.toString() ?? 'Unknown';
     await notifcations.showMessageNotification(
       title: 'Missed Call',
-      body: 'You missed a call from ${message.data['callerName']}',
+      body: 'You missed a call from $callerName',
       data: {'type': 'missed_call', 'callId': callId},
     );
   } else if (data['type'] == 'message') {
