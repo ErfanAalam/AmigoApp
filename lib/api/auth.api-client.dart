@@ -290,6 +290,43 @@ class ApiService {
     }
   }
 
+  Future requestSignup(String firstName, String lastName, String phoneNumber) async {
+    try {
+      Response response = await _dio.post(
+        "${Environment.baseUrl}/auth/request-signup",
+        data: {'first_name': firstName, 'last_name': lastName, 'phone': phoneNumber},
+      );
+     if (response.data is String) {
+        return jsonDecode(response.data as String);
+      }
+      return response.data;
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Unexpected error occurred',
+      };
+    }
+  }
+
+  Future getSignupRequestStatus(String phoneNumber) async {
+    try {
+      Response response = await _dio.get(
+        "${Environment.baseUrl}/auth/signup-request-status/$phoneNumber",
+      );
+      if (response.data is String) {
+        return jsonDecode(response.data as String);
+      }
+      return response.data;
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Unexpected error occurred',
+      };
+    }
+  }
+
   Future sendLoginOtp(String phoneNumber) async {
     try {
       Response response = await _dio.post(
@@ -437,7 +474,10 @@ class ApiService {
   /// [onSendProgress] - Optional callback for upload progress
   ///
   /// Returns a Map with success status and response data
-  Future<Map<String, dynamic>> sendMedia({required File file}) async {
+  Future<Map<String, dynamic>> sendMedia({
+    required File file,
+    Function(int sent, int total)? onSendProgress,
+  }) async {
     try {
       // Validate file exists
       if (!await file.exists()) {
@@ -464,11 +504,10 @@ class ApiService {
       }
 
       // Read file as bytes to avoid content length issues
-      final fileBytes = await file.readAsBytes();
-
-      // Create multipart file from bytes instead of file path
-      final multipartFile = MultipartFile.fromBytes(
-        fileBytes,
+      // Use fromFile instead of fromBytes to enable proper progress tracking
+      // fromBytes loads entire file into memory and doesn't report progress properly
+      final multipartFile = await MultipartFile.fromFile(
+        file.path,
         filename: fileName,
         contentType: DioMediaType.parse(mimeType),
       );
@@ -487,6 +526,7 @@ class ApiService {
           ), // 5 minute timeout for large files
           sendTimeout: const Duration(minutes: 5),
         ),
+        onSendProgress: onSendProgress,
       );
 
       // Handle the response data properly

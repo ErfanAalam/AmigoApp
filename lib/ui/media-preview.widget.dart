@@ -8,8 +8,11 @@ import 'package:chewie/chewie.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:path/path.dart' as path;
 
+import '../models/message.model.dart';
 import '../services/download.service.dart';
 import '../ui/snackbar.dart';
+import '../types/socket.types.dart';
+import '../utils/chat/chat-helpers.utils.dart';
 
 class ImagePreviewScreen extends StatefulWidget {
   final List<String> imageUrls;
@@ -1190,6 +1193,539 @@ class _DownloadProgressDialogState extends State<DownloadProgressDialog> {
         _progress = progress;
         _status = status;
       });
+    }
+  }
+}
+
+/// Unified media preview screen supporting both images and videos with swiping
+class UnifiedMediaPreviewScreen extends StatefulWidget {
+  final List<MessageModel> messages;
+  final int initialIndex;
+  final List<String>? localPaths;
+  final bool isMyMessage;
+  final Widget Function(MessageModel)? buildMessageStatusTicks;
+  final Function(File, String, {MessageModel? failedMessage})? onRetryImage;
+  final Function(File, String, {MessageModel? failedMessage})? onRetryVideo;
+  final Function(String)? showErrorDialog;
+  final Set<int>? starredMessages;
+
+  const UnifiedMediaPreviewScreen({
+    super.key,
+    required this.messages,
+    this.initialIndex = 0,
+    this.localPaths,
+    this.isMyMessage = false,
+    this.buildMessageStatusTicks,
+    this.onRetryImage,
+    this.onRetryVideo,
+    this.showErrorDialog,
+    this.starredMessages,
+  });
+
+  @override
+  State<UnifiedMediaPreviewScreen> createState() =>
+      _UnifiedMediaPreviewScreenState();
+}
+
+class _UnifiedMediaPreviewScreenState
+    extends State<UnifiedMediaPreviewScreen> {
+  late PageController _pageController;
+  late int _currentIndex;
+  final Map<int, VideoPlayerController> _videoControllers = {};
+  final Map<int, ChewieController> _chewieControllers = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+    _initializeCurrentMedia();
+  }
+
+  void _initializeCurrentMedia() {
+    _loadMediaAtIndex(_currentIndex);
+  }
+
+  void _loadMediaAtIndex(int index) {
+    if (index < 0 || index >= widget.messages.length) return;
+
+    final message = widget.messages[index];
+    final isVideo = message.type.value.toLowerCase() == 'video' ||
+        (message.attachments != null &&
+            (message.attachments as Map<String, dynamic>)['category']
+                    ?.toString()
+                    .toLowerCase() ==
+                'videos');
+
+    if (isVideo && !_videoControllers.containsKey(index)) {
+      _initializeVideo(index);
+    }
+  }
+
+  void _initializeVideo(int index) async {
+    try {
+      final message = widget.messages[index];
+      final attachments = message.attachments as Map<String, dynamic>?;
+      final videoUrl = attachments?['url'] as String?;
+      final localPath = widget.localPaths != null &&
+              index < widget.localPaths!.length
+          ? widget.localPaths![index]
+          : attachments?['local_path'] as String?;
+
+      if (videoUrl == null && localPath == null) return;
+
+      VideoPlayerController controller;
+      if (localPath != null && File(localPath).existsSync()) {
+        controller = VideoPlayerController.file(File(localPath));
+      } else {
+        controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl!));
+      }
+
+      await controller.initialize();
+
+      if (mounted) {
+        final chewieController = ChewieController(
+          videoPlayerController: controller,
+          autoPlay: false,
+          looping: false,
+          allowFullScreen: true,
+          allowMuting: true,
+          showControls: true,
+          materialProgressColors: ChewieProgressColors(
+            playedColor: Colors.teal,
+            handleColor: Colors.teal,
+            backgroundColor: Colors.grey,
+            bufferedColor: Colors.lightGreen,
+          ),
+        );
+
+        setState(() {
+          _videoControllers[index] = controller;
+          _chewieControllers[index] = chewieController;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error initializing video at index $index: $e');
+    }
+  }
+
+  void _disposeMediaAtIndex(int index) {
+    _chewieControllers[index]?.dispose();
+    _chewieControllers.remove(index);
+    _videoControllers[index]?.dispose();
+    _videoControllers.remove(index);
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _chewieControllers.values) {
+      controller.dispose();
+    }
+    for (final controller in _videoControllers.values) {
+      controller.dispose();
+    }
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black.withOpacity(0.5),
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close, color: Colors.white),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        title: Text(
+          '${_currentIndex + 1} of ${widget.messages.length}',
+          style: const TextStyle(color: Colors.white),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.download, color: Colors.white),
+            onPressed: () => _downloadCurrentMedia(),
+          ),
+          IconButton(
+            icon: const Icon(Icons.share, color: Colors.white),
+            onPressed: () => _shareCurrentMedia(),
+          ),
+        ],
+      ),
+      body: PageView.builder(
+        controller: _pageController,
+        itemCount: widget.messages.length,
+        onPageChanged: (index) {
+          // Dispose previous media
+          _disposeMediaAtIndex(_currentIndex);
+          setState(() {
+            _currentIndex = index;
+          });
+          // Load new media
+          _loadMediaAtIndex(index);
+          // Preload adjacent media
+          if (index > 0) _loadMediaAtIndex(index - 1);
+          if (index < widget.messages.length - 1) {
+            _loadMediaAtIndex(index + 1);
+          }
+        },
+        itemBuilder: (context, index) {
+          return _buildMediaItem(widget.messages[index], index);
+        },
+      ),
+    );
+  }
+
+  Widget _buildMediaItem(MessageModel message, int index) {
+    final isVideo = message.type.value.toLowerCase() == 'video' ||
+        (message.attachments != null &&
+            (message.attachments as Map<String, dynamic>)['category']
+                    ?.toString()
+                    .toLowerCase() ==
+                'videos');
+
+    final attachments = message.attachments as Map<String, dynamic>?;
+    final mediaUrl = attachments?['url'] as String?;
+    final localPath = widget.localPaths != null && index < widget.localPaths!.length
+        ? widget.localPaths![index]
+        : attachments?['local_path'] as String?;
+
+    if (isVideo) {
+      return _buildVideoItem(mediaUrl, localPath, index, message);
+    } else {
+      return _buildImageItem(mediaUrl, localPath, message);
+    }
+  }
+
+  Widget _buildImageItem(String? imageUrl, String? localPath, MessageModel message) {
+    ImageProvider imageProvider;
+    if (localPath != null && File(localPath).existsSync()) {
+      imageProvider = FileImage(File(localPath));
+    } else if (imageUrl != null) {
+      imageProvider = NetworkImage(imageUrl);
+    } else {
+      return const Center(
+        child: Icon(Icons.broken_image, size: 64, color: Colors.white54),
+      );
+    }
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        PhotoView(
+          imageProvider: imageProvider,
+          initialScale: PhotoViewComputedScale.contained,
+          minScale: PhotoViewComputedScale.contained * 0.5,
+          maxScale: PhotoViewComputedScale.covered * 2.0,
+          heroAttributes: PhotoViewHeroAttributes(
+            tag: imageUrl ?? localPath ?? '',
+          ),
+          errorBuilder: (context, error, stackTrace) {
+            return Container(
+              color: Colors.black,
+              child: const Center(
+                child: Icon(Icons.broken_image, size: 64, color: Colors.white54),
+              ),
+            );
+          },
+        ),
+        // Metadata overlays
+        _buildMetadataOverlays(message, imageUrl, localPath, false),
+      ],
+    );
+  }
+
+  Widget _buildVideoItem(
+    String? videoUrl,
+    String? localPath,
+    int index,
+    MessageModel message,
+  ) {
+    Widget videoWidget;
+    if (_chewieControllers.containsKey(index)) {
+      videoWidget = Chewie(controller: _chewieControllers[index]!);
+    } else {
+      // Show loading indicator while initializing
+      videoWidget = Container(
+        color: Colors.black,
+        child: const Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+          ),
+        ),
+      );
+    }
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        videoWidget,
+        // Metadata overlays
+        _buildMetadataOverlays(message, videoUrl, localPath, true),
+      ],
+    );
+  }
+
+  Widget _buildMetadataOverlays(
+    MessageModel message,
+    String? mediaUrl,
+    String? localPath,
+    bool isVideo,
+  ) {
+    // Check upload status from metadata
+    final metadata = message.metadata ?? {};
+    final isUploading = metadata['is_uploading'] == true;
+    final isFailed = metadata['upload_failed'] == true || 
+        message.status == MessageStatusType.failed;
+    final isStarred = widget.starredMessages?.contains(message.id) ?? false;
+    final messageTime = ChatHelpers.formatMessageTime(message.sentAt);
+
+    return Stack(
+      children: [
+        // Background gradient that ignores pointer events
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 120,
+          child: IgnorePointer(
+            ignoring: true,
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    Colors.black.withOpacity(0.6),
+                    Colors.black.withOpacity(0.0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        // Timestamp and status ticks at bottom right
+        Positioned(
+          bottom: 16,
+          right: 16,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.6),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                      if (isUploading)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                value: (metadata['upload_progress'] as int?) != null
+                                    ? (metadata['upload_progress'] as int) / 100.0
+                                    : null,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            ),
+                            if ((metadata['upload_progress'] as int?) != null) ...[
+                              const SizedBox(width: 4),
+                              Text(
+                                '${metadata['upload_progress']}%',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ],
+                        )
+                else if (isFailed && widget.isMyMessage)
+                  GestureDetector(
+                    onTap: () {
+                      final localFilePath = localPath ?? mediaUrl;
+                      if (localFilePath != null) {
+                        final file = File(localFilePath);
+                        if (file.existsSync()) {
+                          if (isVideo && widget.onRetryVideo != null) {
+                            widget.onRetryVideo!(
+                              file,
+                              'video',
+                              failedMessage: message,
+                            );
+                          } else if (!isVideo && widget.onRetryImage != null) {
+                            widget.onRetryImage!(
+                              file,
+                              'image',
+                              failedMessage: message,
+                            );
+                          }
+                        } else if (widget.showErrorDialog != null) {
+                          widget.showErrorDialog!(
+                            'Original file not found. Please select the ${isVideo ? 'video' : 'image'} again.',
+                          );
+                        }
+                      } else if (widget.showErrorDialog != null) {
+                        widget.showErrorDialog!(
+                          'Original file not found. Please select the ${isVideo ? 'video' : 'image'} again.',
+                        );
+                      }
+                    },
+                    child: const Icon(Icons.refresh, size: 18, color: Colors.white),
+                  )
+                else ...[
+                  Text(
+                    messageTime,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
+                  if (widget.isMyMessage && !isFailed && widget.buildMessageStatusTicks != null) ...[
+                    const SizedBox(width: 6),
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: widget.buildMessageStatusTicks!(message),
+                    ),
+                  ],
+                ],
+              ],
+            ),
+          ),
+        ),
+        // Starred indicator at bottom left
+        if (isStarred)
+          Positioned(
+            bottom: 16,
+            left: 16,
+            child: IgnorePointer(
+              ignoring: true,
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.6),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(Icons.star, size: 16, color: Colors.yellow),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  void _downloadCurrentMedia() async {
+    final message = widget.messages[_currentIndex];
+    final attachments = message.attachments as Map<String, dynamic>?;
+    final mediaUrl = attachments?['url'] as String?;
+    final isVideo = message.type.value.toLowerCase() == 'video' ||
+        (message.attachments != null &&
+            (message.attachments as Map<String, dynamic>)['category']
+                    ?.toString()
+                    .toLowerCase() ==
+                'videos');
+
+    if (mediaUrl == null) return;
+
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => DownloadProgressDialog(
+          fileName: isVideo
+              ? (attachments?['file_name'] as String? ?? 'video')
+              : 'image',
+        ),
+      );
+
+      final downloadService = DownloadService();
+      final filePath = await downloadService.downloadToDownloadsFolder(
+        url: mediaUrl,
+        fileName: isVideo ? (attachments?['file_name'] as String?) : null,
+        fileType: isVideo ? 'video' : 'image',
+        onError: (error) {
+          Navigator.of(context).pop();
+          Snack.error('Download failed: $error');
+        },
+      );
+
+      Navigator.of(context).pop();
+
+      if (filePath != null && mounted) {
+        final directoryPath = await downloadService.getDownloadDirectoryPath(
+          isVideo ? 'video' : 'image',
+        );
+        final message = directoryPath != null
+            ? '${isVideo ? 'Video' : 'Image'} downloaded successfully! Saved to: ${directoryPath.replaceAll('\\', '/')}'
+            : '${isVideo ? 'Video' : 'Image'} downloaded successfully!';
+        Snack.success(message);
+      }
+    } catch (e) {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (mounted) {
+        Snack.error('Download failed: $e');
+      }
+    }
+  }
+
+  void _shareCurrentMedia() async {
+    final message = widget.messages[_currentIndex];
+    final attachments = message.attachments as Map<String, dynamic>?;
+    final mediaUrl = attachments?['url'] as String?;
+    final isVideo = message.type.value.toLowerCase() == 'video' ||
+        (message.attachments != null &&
+            (message.attachments as Map<String, dynamic>)['category']
+                    ?.toString()
+                    .toLowerCase() ==
+                'videos');
+
+    if (mediaUrl == null) return;
+
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => DownloadProgressDialog(
+          fileName: isVideo
+              ? (attachments?['file_name'] as String? ?? 'video')
+              : 'image',
+        ),
+      );
+
+      final downloadService = DownloadService();
+      final filePath = await downloadService.downloadToDownloadsFolder(
+        url: mediaUrl,
+        fileName: isVideo ? (attachments?['file_name'] as String?) : null,
+        fileType: isVideo ? 'video' : 'image',
+        onError: (error) {
+          Navigator.of(context).pop();
+          Snack.error('Failed to prepare for sharing: $error');
+        },
+      );
+
+      Navigator.of(context).pop();
+
+      if (filePath != null) {
+        await downloadService.shareFile(filePath, text: 'Shared from Amigo');
+      }
+    } catch (e) {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (mounted) {
+        Snack.error('Failed to share: $e');
+      }
     }
   }
 }

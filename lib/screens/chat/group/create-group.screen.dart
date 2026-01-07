@@ -122,6 +122,25 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
     });
   }
 
+  void _selectAllUsers() {
+    setState(() {
+      // Select all users in the filtered list
+      _selectedUserIds.addAll(_filteredUsers.map((user) => user.id));
+    });
+  }
+
+  void _deselectAllUsers() {
+    setState(() {
+      // Deselect all users
+      _selectedUserIds.clear();
+    });
+  }
+
+  bool get _areAllFilteredUsersSelected {
+    if (_filteredUsers.isEmpty) return false;
+    return _filteredUsers.every((user) => _selectedUserIds.contains(user.id));
+  }
+
   Future<void> _createGroup() async {
     final groupName = _groupNameController.text.trim();
 
@@ -302,22 +321,56 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
               ),
             ),
 
-          // Search Bar
+          // Search Bar and Select All Button
           Container(
             padding: const EdgeInsets.all(16),
             color: Colors.white,
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Search users...',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(25),
-                  borderSide: BorderSide.none,
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search users...',
+                      prefixIcon: const Icon(Icons.search),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(25),
+                        borderSide: BorderSide.none,
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey[100],
+                    ),
+                  ),
                 ),
-                filled: true,
-                fillColor: Colors.grey[100],
-              ),
+                const SizedBox(width: 12),
+                if (_filteredUsers.isNotEmpty)
+                  TextButton.icon(
+                    onPressed: _areAllFilteredUsersSelected
+                        ? _deselectAllUsers
+                        : _selectAllUsers,
+                    icon: Icon(
+                      _areAllFilteredUsersSelected
+                          ? Icons.deselect
+                          : Icons.select_all,
+                      color: themeColor.primary,
+                      size: 20,
+                    ),
+                    label: Text(
+                      _areAllFilteredUsersSelected ? 'Deselect All' : 'Select All',
+                      style: TextStyle(
+                        color: themeColor.primary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
 
@@ -422,7 +475,7 @@ class UserListItem extends ConsumerWidget {
     final themeColor = ref.watch(themeColorProvider);
     return Container(
       decoration: BoxDecoration(
-        color: isSelected ? themeColor.primaryLight : Colors.white,
+        // color: isSelected ? themeColor.primaryLight : Colors.white,
         border: Border(
           bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
         ),

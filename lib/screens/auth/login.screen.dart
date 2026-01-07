@@ -12,6 +12,7 @@ import '../../ui/country-selector.modal.dart';
 import '../../ui/snackbar.dart';
 import '../home.layout.dart';
 import 'signup.screen.dart';
+import 'signup-status.screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -216,19 +217,81 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ),
         ),
         child: material.SafeArea(
-          child: material.SingleChildScrollView(
-            padding: const material.EdgeInsets.symmetric(horizontal: 24.0),
-            child: material.ConstrainedBox(
-              constraints: material.BoxConstraints(
-                minHeight:
-                    material.MediaQuery.of(context).size.height -
-                    material.MediaQuery.of(context).padding.top -
-                    material.MediaQuery.of(context).padding.bottom,
+          child: material.Column(
+            children: [
+              // Status Check Button in Upper Right
+              material.Padding(
+                padding: const material.EdgeInsets.only(
+                  top: 8,
+                  right: 8,
+                ),
+                child: material.Align(
+                  alignment: material.Alignment.topRight,
+                  child: material.Material(
+                    color: material.Colors.transparent,
+                    child: material.InkWell(
+                      onTap: () {
+                        material.Navigator.push(
+                          context,
+                          material.MaterialPageRoute(
+                            builder: (context) => const SignupStatusScreen(),
+                          ),
+                        );
+                      },
+                      borderRadius: material.BorderRadius.circular(12),
+                      child: material.Container(
+                        padding: const material.EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: material.BoxDecoration(
+                          color: material.Colors.white.withOpacity(0.2),
+                          borderRadius: material.BorderRadius.circular(12),
+                          border: material.Border.all(
+                            color: material.Colors.white.withOpacity(0.3),
+                            width: 1,
+                          ),
+                        ),
+                        child: material.Row(
+                          mainAxisSize: material.MainAxisSize.min,
+                          children: [
+                            const material.Icon(
+                              material.Icons.info_outline_rounded,
+                              color: material.Colors.white,
+                              size: 18,
+                            ),
+                            const material.SizedBox(width: 6),
+                            const material.Text(
+                              'Check Status',
+                              style: material.TextStyle(
+                                color: material.Colors.white,
+                                fontSize: 13,
+                                fontWeight: material.FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
-              child: material.IntrinsicHeight(
-                child: material.Column(
-                  children: [
-                    const material.SizedBox(height: 60),
+              // Main Content
+              material.Expanded(
+                child: material.SingleChildScrollView(
+                  padding: const material.EdgeInsets.symmetric(horizontal: 24.0),
+                  child: material.ConstrainedBox(
+                    constraints: material.BoxConstraints(
+                      minHeight:
+                          material.MediaQuery.of(context).size.height -
+                          material.MediaQuery.of(context).padding.top -
+                          material.MediaQuery.of(context).padding.bottom -
+                          60,
+                    ),
+                    child: material.IntrinsicHeight(
+                      child: material.Column(
+                        children: [
+                          const material.SizedBox(height: 20),
 
                     // App Logo Section
                     material.Container(
@@ -717,10 +780,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ),
 
                     const material.SizedBox(height: 20),
-                  ],
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
         ),
       ),

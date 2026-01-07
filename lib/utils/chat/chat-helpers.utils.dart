@@ -613,4 +613,78 @@ class ChatHelpers {
       }
     }
   }
+
+  /// Check if a message is an image or video (for grid grouping)
+  static bool isImageOrVideoMessage(MessageModel message) {
+    final type = message.type.value.toLowerCase();
+    if (type == 'image' || type == 'video') {
+      return true;
+    }
+    
+    // Check attachments category
+    if (message.attachments != null) {
+      final attachmentData = message.attachments as Map<String, dynamic>;
+      final category = attachmentData['category'] as String?;
+      if (category != null) {
+        final categoryLower = category.toLowerCase();
+        return categoryLower == 'images' || categoryLower == 'videos';
+      }
+    }
+    
+    return false;
+  }
+
+  /// Find consecutive media message groups (4 or more images/videos)
+  /// Returns a list of ranges [startIndex, endIndex] for each group
+  static List<MediaGroup> findConsecutiveMediaGroups(List<MessageModel> messages) {
+    final groups = <MediaGroup>[];
+    int? groupStart;
+    int consecutiveCount = 0;
+
+    for (int i = 0; i < messages.length; i++) {
+      final message = messages[i];
+      
+      if (isImageOrVideoMessage(message)) {
+        if (groupStart == null) {
+          groupStart = i;
+        }
+        consecutiveCount++;
+      } else {
+        // Non-media message breaks the sequence
+        if (consecutiveCount >= 4 && groupStart != null) {
+          groups.add(MediaGroup(
+            startIndex: groupStart,
+            endIndex: i - 1,
+            messages: messages.sublist(groupStart, i),
+          ));
+        }
+        groupStart = null;
+        consecutiveCount = 0;
+      }
+    }
+
+    // Check if the last messages form a group
+    if (consecutiveCount >= 4 && groupStart != null) {
+      groups.add(MediaGroup(
+        startIndex: groupStart,
+        endIndex: messages.length - 1,
+        messages: messages.sublist(groupStart),
+      ));
+    }
+
+    return groups;
+  }
+}
+
+/// Represents a group of consecutive media messages
+class MediaGroup {
+  final int startIndex;
+  final int endIndex;
+  final List<MessageModel> messages;
+
+  MediaGroup({
+    required this.startIndex,
+    required this.endIndex,
+    required this.messages,
+  });
 }

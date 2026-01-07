@@ -20,6 +20,8 @@ class MessageInputContainer extends ConsumerWidget {
   final VoidCallback? onAttachmentTap;
   final ValueChanged<String>? onTyping;
   final VoidCallback? onCancelReply;
+  final FocusNode? focusNode;
+  final ValueChanged<bool>? onFocusChange;
 
   // For community group restrictions
   final bool isCommunityGroup;
@@ -43,6 +45,8 @@ class MessageInputContainer extends ConsumerWidget {
     this.onAttachmentTap,
     this.onTyping,
     this.onCancelReply,
+    this.focusNode,
+    this.onFocusChange,
     this.isCommunityGroup = false,
     this.communityGroupMetadata,
     this.dm,
@@ -96,6 +100,7 @@ class MessageInputContainer extends ConsumerWidget {
                 Expanded(
                   child: TextField(
                     controller: messageController,
+                    focusNode: focusNode,
                     enabled: !shouldDisableSending,
                     decoration: InputDecoration(
                       hintText: shouldDisableSending
@@ -118,7 +123,20 @@ class MessageInputContainer extends ConsumerWidget {
                     minLines: 1,
                     textInputAction: TextInputAction.newline,
                     textCapitalization: TextCapitalization.sentences,
-                    onChanged: shouldDisableSending ? null : onTyping,
+                    onChanged: shouldDisableSending ? null : (value) {
+                      if (onTyping != null) {
+                        onTyping!(value);
+                      }
+                      // Update focus state when text changes
+                      if (onFocusChange != null) {
+                        onFocusChange!(focusNode?.hasFocus ?? false);
+                      }
+                    },
+                    onTap: () {
+                      if (onFocusChange != null) {
+                        onFocusChange!(true);
+                      }
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),

@@ -1,4 +1,5 @@
 import 'dart:io' as io;
+import 'dart:io';
 import 'package:amigo/models/message.model.dart';
 import 'package:flutter/material.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
@@ -240,12 +241,12 @@ Future<String?> generateVideoThumbnail(String videoUrl) async {
   }
 }
 
-/// Generate video thumbnail with caching support
-///
-/// [videoUrl] - URL or local path of the video file
-/// [thumbnailCache] - Map to cache thumbnail paths by video URL
-/// [thumbnailFutures] - Map to track ongoing thumbnail generation futures
-/// Returns the path to the generated thumbnail file, or null if generation fails
+  /// Generate video thumbnail with caching support
+  ///
+  /// [videoUrl] - URL or local path of the video file
+  /// [thumbnailCache] - Map to cache thumbnail paths by video URL
+  /// [thumbnailFutures] - Map to track ongoing thumbnail generation futures
+  /// Returns the path to the generated thumbnail file, or null if generation fails
 Future<String?> generateVideoThumbnailWithCache(
   String videoUrl,
   Map<String, String?> thumbnailCache,
@@ -274,5 +275,83 @@ Future<String?> generateVideoThumbnailWithCache(
     thumbnailFutures.remove(videoUrl);
     thumbnailCache[videoUrl] = null;
     return null;
+  }
+}
+
+/// Opens unified media preview for multiple images/videos with swiping
+///
+/// [context] - BuildContext for navigation
+/// [messages] - List of media messages to preview
+/// [initialIndex] - Initial index to show
+/// [mediaCacheService] - Service for caching media files
+/// [messagesRepo] - Repository for message operations
+/// [mounted] - Whether the widget is still mounted
+Future<void> openUnifiedMediaPreview({
+  required BuildContext context,
+  required List<MessageModel> messages,
+  required int initialIndex,
+  required MediaCacheService mediaCacheService,
+  required MessageRepository messagesRepo,
+  required bool mounted,
+  bool isMyMessage = false,
+  Widget Function(MessageModel)? buildMessageStatusTicks,
+  Function(File, String, {MessageModel? failedMessage})? onRetryImage,
+  Function(File, String, {MessageModel? failedMessage})? onRetryVideo,
+  Function(String)? showErrorDialog,
+  Set<int>? starredMessages,
+}) async {
+  if (!mounted || messages.isEmpty) return;
+
+  try {
+    // Collect local paths for all messages
+    final List<String?> localPaths = [];
+    for (final message in messages) {
+      String? localPath = message.localMediaPath;
+      
+      if (localPath == null || !io.File(localPath).existsSync()) {
+        final attachments = message.attachments as Map<String, dynamic>?;
+        final mediaUrl = attachments?['url'] as String?;
+        
+        if (mediaUrl != null) {
+          localPath = await mediaCacheService.getCachedFilePath(mediaUrl);
+          
+          if (localPath == null) {
+            // Start caching in background
+            ChatHelpers.cacheMediaForMessage(
+              url: mediaUrl,
+              messageId: message.canonicalId ?? message.id,
+              mediaCacheService: mediaCacheService,
+              checkExistingCache: false,
+              debugPrefix: 'unified preview',
+            );
+          }
+        }
+      }
+      
+      localPaths.add(localPath);
+    }
+
+    if (!mounted) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => UnifiedMediaPreviewScreen(
+          messages: messages,
+          initialIndex: initialIndex,
+          localPaths: localPaths.whereType<String>().toList(),
+          isMyMessage: isMyMessage,
+          buildMessageStatusTicks: buildMessageStatusTicks,
+          onRetryImage: onRetryImage,
+          onRetryVideo: onRetryVideo,
+          showErrorDialog: showErrorDialog,
+          starredMessages: starredMessages,
+        ),
+      ),
+    );
+  } catch (e) {
+    debugPrint('❌ Error opening unified media preview: $e');
+    if (mounted) {
+      Snack.error('Failed to open media preview: $e');
+    }
   }
 }

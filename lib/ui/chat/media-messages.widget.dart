@@ -86,6 +86,7 @@ Widget buildImageMessage(MediaMessageConfig config, WidgetRef ref) {
   final metadata = config.message.metadata ?? {};
   final isUploading = metadata['is_uploading'] == true;
   final isFailed = metadata['upload_failed'] == true;
+  final uploadProgress = metadata['upload_progress'] as int?;
 
   // Use local path if available (for uploading/failed messages)
   final displayImagePath = localPath ?? imageUrl;
@@ -208,13 +209,30 @@ Widget buildImageMessage(MediaMessageConfig config, WidgetRef ref) {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (isUploading)
-                    SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            value: uploadProgress != null ? uploadProgress / 100.0 : null,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        ),
+                        if (uploadProgress != null) ...[
+                          const SizedBox(width: 4),
+                          Text(
+                            '$uploadProgress%',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ],
                     )
                   else if (isFailed && config.isMyMessage)
                     GestureDetector(
@@ -297,6 +315,7 @@ Widget buildVideoMessage(MediaMessageConfig config, WidgetRef ref) {
   final metadata = config.message.metadata ?? {};
   final isUploading = metadata['is_uploading'] == true;
   final isFailed = metadata['upload_failed'] == true;
+  final uploadProgress = metadata['upload_progress'] as int?;
 
   // Use local path if available (for uploading/failed messages)
   final displayVideoPath = localPath ?? videoUrl;
@@ -424,6 +443,35 @@ Widget buildVideoMessage(MediaMessageConfig config, WidgetRef ref) {
                                   bottomRight: Radius.circular(
                                     config.isMyMessage ? 0 : 10,
                                   ),
+                                ),
+                              ),
+                              child: Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        value: uploadProgress != null ? uploadProgress / 100.0 : null,
+                                        valueColor: AlwaysStoppedAnimation<Color>(
+                                          Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                    if (uploadProgress != null) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '$uploadProgress%',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
                             ),
@@ -578,6 +626,7 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
   final metadata = config.message.metadata ?? {};
   final isUploading = metadata['is_uploading'] == true;
   final isFailed = metadata['upload_failed'] == true;
+  final uploadProgress = metadata['upload_progress'] as int?;
 
   // Use local path if available (for uploading/failed messages)
   final displayDocumentPath = localPath ?? documentUrl;
@@ -706,35 +755,6 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
                                   fontWeight: FontWeight.w400,
                                 ),
                               ),
-                            ] else if (isUploading) ...[
-                              const SizedBox(height: 2),
-                              Row(
-                                children: [
-                                  SizedBox(
-                                    width: 12,
-                                    height: 12,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(
-                                        config.isMyMessage
-                                            ? Colors.white70
-                                            : themeColor.primary,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    'Uploading...',
-                                    style: TextStyle(
-                                      color: config.isMyMessage
-                                          ? Colors.white70
-                                          : Colors.grey[600],
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w400,
-                                    ),
-                                  ),
-                                ],
-                              ),
                             ] else if (isFailed) ...[
                               const SizedBox(height: 2),
                               Text(
@@ -750,20 +770,7 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
                         ),
                       ),
                       // Show loading or view icon (retry moved outside)
-                      if (isUploading)
-                        SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              config.isMyMessage
-                                  ? Colors.white70
-                                  : themeColor.primary,
-                            ),
-                          ),
-                        )
-                      else if (!isFailedStatus)
+                      if (!isFailedStatus && !isUploading)
                         Icon(
                           Icons.visibility,
                           size: 22,
@@ -793,15 +800,32 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (isUploading)
-                          SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                Colors.white,
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  value: uploadProgress != null ? uploadProgress / 100.0 : null,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.white,
+                                  ),
+                                ),
                               ),
-                            ),
+                              if (uploadProgress != null) ...[
+                                const SizedBox(width: 4),
+                                Text(
+                                  '$uploadProgress%',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ],
                           )
                         else ...[
                           Text(
@@ -933,6 +957,7 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
   final metadata = config.message.metadata ?? {};
   final isUploading = metadata['is_uploading'] == true;
   final isFailed = metadata['upload_failed'] == true;
+  final uploadProgress = metadata['upload_progress'] as int?;
 
   // Use local path if available (for uploading/failed messages)
   final displayAudioPath = localPath ?? audioUrl;
@@ -1119,17 +1144,36 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
                                   color: Colors.yellow,
                                 ),
                               if (isUploading)
-                                SizedBox(
-                                  width: 12,
-                                  height: 12,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      config.isMyMessage
-                                          ? Colors.white70
-                                          : themeColor.primary,
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    SizedBox(
+                                      width: 12,
+                                      height: 12,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        value: uploadProgress != null ? uploadProgress / 100.0 : null,
+                                        valueColor: AlwaysStoppedAnimation<Color>(
+                                          config.isMyMessage
+                                              ? Colors.white70
+                                              : themeColor.primary,
+                                        ),
+                                      ),
                                     ),
-                                  ),
+                                    if (uploadProgress != null) ...[
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '$uploadProgress%',
+                                        style: TextStyle(
+                                          color: config.isMyMessage
+                                              ? Colors.white70
+                                              : themeColor.primary,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 )
                               else ...[
                                 Text(

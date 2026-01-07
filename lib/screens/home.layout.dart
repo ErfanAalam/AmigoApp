@@ -87,11 +87,9 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     setState(() {
       _currentPageIndex = index;
     });
-    _pageController.animateToPage(
-      index,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
+    // Use jumpToPage for immediate navigation when clicking tabs
+    // This prevents showing intermediate pages during navigation
+    _pageController.jumpToPage(index);
 
     if (index == 0) {
       _chatsPageKey.currentState?.onPageVisible();

@@ -9,7 +9,9 @@ import 'package:amigo/providers/call.provider.dart';
 import 'package:amigo/utils/snowflake.util.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -20,6 +22,7 @@ import '../../../models/user.model.dart';
 import '../../../providers/chat.provider.dart';
 import '../../../providers/draft.provider.dart';
 import '../../../providers/theme-color.provider.dart';
+import '../../../config/app-colors.config.dart';
 import '../../../services/draft-message.service.dart';
 import '../../../services/media-cache.service.dart';
 import '../../../services/notification.service.dart';
@@ -33,11 +36,16 @@ import '../../../ui/chat/forward-message.widget.dart';
 import '../../../ui/snackbar.dart';
 import '../../../ui/chat/input-container.widget.dart';
 import '../../../ui/chat/media-messages.widget.dart';
+import '../../../ui/chat/media-grid.widget.dart';
 import '../../../ui/chat/message.action-sheet.dart';
 import '../../../ui/chat/message.widget.dart';
 import '../../../ui/chat/pinned-message.widget.dart';
 import '../../../ui/chat/scroll-to-bottom.button.dart';
 import '../../../ui/chat/voice-recording.widget.dart';
+import '../../../ui/chat/message-recommendations.widget.dart';
+import '../../../ui/chat/contact-selection.widget.dart';
+import '../../../ui/chat/contact-message.widget.dart';
+import '../../../models/contact.model.dart';
 import '../../../utils/animations.utils.dart';
 import '../../../utils/chat/attachments.utils.dart';
 import '../../../utils/chat/audio-playback.utils.dart';
@@ -45,6 +53,7 @@ import '../../../utils/chat/chat-helpers.utils.dart';
 import '../../../utils/chat/forward-message.utils.dart';
 import '../../../utils/chat/preview-media.utils.dart';
 import '../image-editor.screen.dart';
+import 'dm-details.screen.dart';
 
 class InnerChatPage extends ConsumerStatefulWidget {
   final DmModel dm;
@@ -64,6 +73,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   final UserRepository _userRepo = UserRepository();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _messageController = TextEditingController();
+  final FocusNode _messageFocusNode = FocusNode();
   final WebSocketService _webSocket = WebSocketService();
   final WebSocketMessageHandler _wsMessageHandler = WebSocketMessageHandler();
   final ImagePicker _imagePicker = ImagePicker();
@@ -168,9 +178,38 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // Reply message state
   MessageModel? _replyToMessageData;
 
+  // Pending contact metadata for contact messages
+  Map<String, dynamic>? _pendingContactMetadata;
+
   // Highlighted message state (for scroll-to effect)
-  int? _highlightedMessageId;
+  int? _highlightedMessageId; // Current match being viewed
+  Set<int> _highlightedMessageIds = {}; // All matching messages
   Timer? _highlightTimer;
+  
+  // GlobalKeys for message widgets to enable accurate scrolling
+  final Map<int, GlobalKey> _messageKeys = {};
+
+  // Search state
+  bool _isSearchMode = false;
+  final TextEditingController _searchController = TextEditingController();
+  List<int> _searchMatches = []; // List of message IDs that match search
+  int _currentMatchIndex = -1; // Current match index in _searchMatches
+  Timer? _searchDebounceTimer;
+
+  // Message recommendations state
+  bool _isInputFocused = false;
+  final List<String> _messageRecommendations = [
+    'Hi',
+    'Hello',
+    'Done',
+    'Bye',
+    'Ok',
+    'Thanks',
+    'Sure',
+    'Yes',
+    'No',
+    'Maybe',
+  ];
 
   // Sticky date separator state - using ValueNotifier to avoid setState during scroll
   final ValueNotifier<String?> _currentStickyDate = ValueNotifier<String?>(
@@ -240,6 +279,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     // Listen to text changes for draft saving
     _messageController.addListener(_onMessageTextChanged);
+
+    // Listen to search text changes
+    _searchController.addListener(_onSearchTextChanged);
+
+    // Listen to focus changes
+    _messageFocusNode.addListener(_onInputFocusChange);
   }
 
   void _initializeTypingAnimation() {
@@ -276,10 +321,82 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       mediaCacheService: _mediaCacheService,
       messagesRepo: _messagesRepo,
       messages: _messages,
+      onAudioFinished: _handleAudioFinished,
     );
 
     // Initialize the audio player asynchronously
     _audioPlaybackManager.initialize();
+  }
+
+  /// Handle audio finished - auto-play next consecutive audio message
+  void _handleAudioFinished(String finishedAudioKey) {
+    try {
+      // Extract message ID from audioKey (format: messageId_url)
+      final messageIdStr = finishedAudioKey.split('_').first;
+      final messageId = int.tryParse(messageIdStr);
+      
+      if (messageId == null) return;
+
+      // Find the current message index
+      final currentIndex = _messages.indexWhere(
+        (msg) => msg.id == messageId || msg.optimisticId == messageId,
+      );
+
+      if (currentIndex == -1) return;
+
+      // Find the next audio message (check messages after current one)
+      // Messages are sorted by sentAt, so we check forward in the list
+      MessageModel? nextAudioMessage;
+      for (int i = currentIndex + 1; i < _messages.length; i++) {
+        final message = _messages[i];
+        // Check if it's an audio message
+        if (message.type == MessageType.audio || 
+            (message.attachments != null && 
+             (message.attachments as Map<String, dynamic>)['category']?.toString().toLowerCase() == 'audios')) {
+          nextAudioMessage = message;
+          break;
+        }
+      }
+
+      // If found, auto-play the next audio message
+      if (nextAudioMessage != null) {
+        final audioData = nextAudioMessage.attachments as Map<String, dynamic>?;
+        final audioUrl = audioData?['url'] as String?;
+        
+        if (audioUrl != null && audioUrl.isNotEmpty) {
+          // Play a notification tone to indicate next audio is starting
+          try {
+            FlutterRingtonePlayer().playNotification(
+              asAlarm: false,
+            );
+          } catch (e) {
+            debugPrint('⚠️ Could not play notification tone: $e');
+            // Fallback to system sound
+            try {
+              SystemSound.play(SystemSoundType.alert);
+            } catch (e2) {
+              debugPrint('⚠️ Could not play system sound: $e2');
+            }
+          }
+          
+          // Small delay before playing next audio for better UX
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted) {
+              final nextAudioKey = '${nextAudioMessage!.id}_$audioUrl';
+              _audioPlaybackManager.togglePlayback(
+                nextAudioKey,
+                audioUrl,
+                onError: (error) {
+                  debugPrint('❌ Error auto-playing next audio: $error');
+                },
+              );
+            }
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error handling audio finished: $e');
+    }
   }
 
   /// Load draft message when opening conversation
@@ -1275,16 +1392,22 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Create optimistic message for immediate display with current UTC time
     final nowUTC = DateTime.now().toUtc();
 
-    // Structure metadata properly for reply messages
-    Map<String, dynamic>? replyMetadata;
+    // Structure metadata properly for reply messages and contact messages
+    Map<String, dynamic>? combinedMetadata;
     if (_replyToMessageData != null) {
-      replyMetadata = {
+      combinedMetadata = {
         'reply_to': {
           'message_id': _replyToMessageData!.id,
           'sender_id': _replyToMessageData!.senderId,
           'sender_name': _replyToMessageData!.senderName,
         },
       };
+    }
+    
+    // Merge contact metadata if present
+    if (_pendingContactMetadata != null) {
+      combinedMetadata ??= {};
+      combinedMetadata.addAll(_pendingContactMetadata!);
     }
 
     final newMsg = MessageModel(
@@ -1293,7 +1416,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       senderId: _currentUserDetails!.id,
       senderName: _currentUserDetails!.name,
       senderProfilePic: _currentUserDetails!.profilePic,
-      metadata: replyMetadata,
+      metadata: combinedMetadata,
       attachments: mediaResponse?.toJson(),
       type: messageType,
       body: messageText,
@@ -1301,6 +1424,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       status: MessageStatusType.sent,
       sentAt: nowUTC.toIso8601String(),
     );
+    
+    // Clear pending contact metadata after using it
+    _pendingContactMetadata = null;
 
     // storing the message into the local database
     await _messagesRepo.insertMessage(newMsg);
@@ -1343,6 +1469,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         convType: ChatType.dm,
         msgType: messageType,
         body: messageText,
+        metadata: combinedMetadata,
         replyToMessageId: _replyToMessageData?.id,
         sentAt: nowUTC,
       );
@@ -1509,8 +1636,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     );
     if (updatedMessageIndex != -1 && _scrollController.hasClients) {
       // Calculate approximate position (reverse list)
+      // Use a more accurate estimate: average message height is around 80-120px
       final approximatePosition =
-          (_messages.length - 1 - updatedMessageIndex) * 100.0;
+          (_messages.length - 1 - updatedMessageIndex) * 90.0;
 
       // Only scroll if the message is not near the current viewport
       final currentPosition = _scrollController.position.pixels;
@@ -1520,16 +1648,36 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       if ((approximatePosition - currentPosition).abs() > viewportHeight / 2) {
         try {
           await _scrollController.animateTo(
-            approximatePosition,
+            approximatePosition.clamp(
+              0.0,
+              _scrollController.position.maxScrollExtent,
+            ),
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeOut,
           );
 
-          // Wait for widgets to build
-          await Future.delayed(const Duration(milliseconds: 100));
+          // Wait for widgets to build and layout
+          await Future.delayed(const Duration(milliseconds: 200));
         } catch (e) {
           debugPrint('⚠️ Error in approximate scroll: $e');
         }
+      }
+    }
+    
+    // PHASE 1.5: Try to use GlobalKey to scroll to exact position
+    final messageKey = _messageKeys[messageId];
+    if (messageKey?.currentContext != null) {
+      try {
+        await Scrollable.ensureVisible(
+          messageKey!.currentContext!,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          alignment: 0.3, // Position message at 30% from top of viewport
+        );
+        // Wait a bit for the scroll to complete
+        await Future.delayed(const Duration(milliseconds: 100));
+      } catch (e) {
+        debugPrint('⚠️ Error in ensureVisible scroll: $e');
       }
     }
 
@@ -1561,6 +1709,215 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       await Future.delayed(const Duration(milliseconds: 300));
       _scrollToMessage(messageId, retryCount: retryCount + 1);
     }
+  }
+
+  /// Toggle search mode
+  void _toggleSearchMode() {
+    setState(() {
+      _isSearchMode = !_isSearchMode;
+      if (!_isSearchMode) {
+        // Clear search when exiting
+        _searchController.clear();
+        _searchMatches.clear();
+        _currentMatchIndex = -1;
+        _highlightedMessageId = null;
+      }
+    });
+  }
+
+  /// Handle search text changes with debounce
+  void _onSearchTextChanged() {
+    _searchDebounceTimer?.cancel();
+    _searchDebounceTimer = Timer(const Duration(milliseconds: 300), () {
+      _performSearch();
+    });
+  }
+
+  /// Handle input focus changes
+  void _onInputFocusChange() {
+    if (!_canSetState) return;
+    _safeSetState(() {
+      _isInputFocused = _messageFocusNode.hasFocus;
+    });
+  }
+
+  /// Handle recommendation tap - send message directly
+  void _onRecommendationTap(String recommendation) {
+    if (!_canSetState) return;
+    
+    // Set the message text
+    _messageController.text = recommendation;
+    
+    // Send the message
+    _sendMessage(MessageType.text);
+    
+    // Keep keyboard open - don't unfocus
+  }
+
+  /// Perform search on messages
+  void _performSearch() {
+    final query = _searchController.text.trim().toLowerCase();
+    
+    if (query.isEmpty) {
+      setState(() {
+        _searchMatches.clear();
+        _currentMatchIndex = -1;
+        _highlightedMessageId = null;
+        _highlightedMessageIds.clear();
+      });
+      return;
+    }
+
+    // Search in loaded messages
+    final matches = <int>[];
+    for (final message in _messages) {
+      if (message.isDeleted == true) continue;
+      
+      // Search in message body
+      if (message.body != null && message.body!.toLowerCase().contains(query)) {
+        matches.add(message.id);
+      }
+    }
+
+    setState(() {
+      _searchMatches = matches;
+      _highlightedMessageIds = matches.toSet(); // Highlight all matches
+      if (matches.isNotEmpty) {
+        _currentMatchIndex = 0;
+        _navigateToMatch(0);
+      } else {
+        _currentMatchIndex = -1;
+        _highlightedMessageId = null;
+      }
+    });
+  }
+
+  /// Navigate to a specific match
+  void _navigateToMatch(int index) {
+    if (index < 0 || index >= _searchMatches.length) return;
+
+    final messageId = _searchMatches[index];
+    setState(() {
+      _currentMatchIndex = index;
+      _highlightedMessageId = messageId;
+    });
+
+    // Scroll to message
+    _scrollToMessage(messageId);
+
+    // Note: We don't remove the highlight anymore - all matches stay highlighted
+    // Only the current match gets a brighter highlight
+  }
+
+  /// Navigate to next match
+  void _navigateToNextMatch() {
+    if (_searchMatches.isEmpty) return;
+    final nextIndex = (_currentMatchIndex + 1) % _searchMatches.length;
+    _navigateToMatch(nextIndex);
+  }
+
+  /// Navigate to previous match
+  void _navigateToPreviousMatch() {
+    if (_searchMatches.isEmpty) return;
+    final prevIndex = _currentMatchIndex <= 0
+        ? _searchMatches.length - 1
+        : _currentMatchIndex - 1;
+    _navigateToMatch(prevIndex);
+  }
+
+  /// Build search bar widget
+  Widget _buildSearchBar(ColorTheme themeColor) {
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: _searchController,
+      builder: (context, searchValue, child) {
+        final hasText = searchValue.text.isNotEmpty;
+        return Container(
+          height: 40,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            children: [
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  autofocus: true,
+                  style: const TextStyle(fontSize: 16, color: Colors.black87),
+                  decoration: InputDecoration(
+                    hintText: 'Search messages...',
+                    hintStyle: TextStyle(color: Colors.grey[600], fontSize: 16),
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  onSubmitted: (_) {
+                    if (_searchMatches.isNotEmpty) {
+                      _navigateToNextMatch();
+                    }
+                  },
+                ),
+              ),
+              if (hasText) ...[
+                // Match counter
+                if (_searchMatches.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      '${_currentMatchIndex + 1}/${_searchMatches.length}',
+                      style: TextStyle(
+                        color: Colors.grey[700],
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                // Previous match button
+                IconButton(
+                  icon: Icon(
+                    Icons.arrow_upward,
+                    size: 20,
+                    color: _searchMatches.isNotEmpty
+                        ? themeColor.primary
+                        : Colors.grey[400],
+                  ),
+                  onPressed: _searchMatches.isNotEmpty
+                      ? _navigateToPreviousMatch
+                      : null,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+                // Next match button
+                IconButton(
+                  icon: Icon(
+                    Icons.arrow_downward,
+                    size: 20,
+                    color: _searchMatches.isNotEmpty
+                        ? themeColor.primary
+                        : Colors.grey[400],
+                  ),
+                  onPressed: _searchMatches.isNotEmpty
+                      ? _navigateToNextMatch
+                      : null,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+                const SizedBox(width: 4),
+              ],
+              // Close search button
+              IconButton(
+                icon: const Icon(Icons.close, size: 20, color: Colors.grey),
+                onPressed: _toggleSearchMode,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+              const SizedBox(width: 8),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   /// Create and start animation for a new message
@@ -1624,80 +1981,92 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                 icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
                 onPressed: () => Navigator.pop(context),
               ),
-        title: _selectedMessages.isNotEmpty
-            ? Text(
-                '${_selectedMessages.length} selected',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                ),
-              )
-            : Row(
-                children: [
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundColor: Colors.white,
-                    backgroundImage: widget.dm.recipientProfilePic != null
-                        ? CachedNetworkImageProvider(
-                            widget.dm.recipientProfilePic!,
-                          )
-                        : null,
-                    child: widget.dm.recipientProfilePic == null
-                        ? Text(
-                            widget.dm.recipientName.isNotEmpty
-                                ? widget.dm.recipientName[0].toUpperCase()
-                                : '?',
-                            style: TextStyle(
-                              color: themeColor.primary,
+        title: _isSearchMode
+            ? _buildSearchBar(themeColor)
+            : _selectedMessages.isNotEmpty
+                ? Text(
+                    '${_selectedMessages.length} selected',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                    ),
+                  )
+                : InkWell(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => DmDetailsScreen(dm: widget.dm),
+                    ),
+                  );
+                },
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 18,
+                      backgroundColor: Colors.white,
+                      backgroundImage: widget.dm.recipientProfilePic != null
+                          ? CachedNetworkImageProvider(
+                              widget.dm.recipientProfilePic!,
+                            )
+                          : null,
+                      child: widget.dm.recipientProfilePic == null
+                          ? Text(
+                              widget.dm.recipientName.isNotEmpty
+                                  ? widget.dm.recipientName[0].toUpperCase()
+                                  : '?',
+                              style: TextStyle(
+                                color: themeColor.primary,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            )
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.dm.recipientName,
+                            style: const TextStyle(
+                              color: Colors.white,
                               fontWeight: FontWeight.bold,
                               fontSize: 16,
                             ),
-                          )
-                        : null,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.dm.recipientName,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
                           ),
-                        ),
-                        Row(
-                          children: [
-                            StreamBuilder<Map<int, bool>>(
-                              stream: UserStatusService().userStatusStream,
-                              initialData: UserStatusService().onlineStatus,
-                              builder: (context, snapshot) {
-                                final isOnline = ref
-                                    .read(chatProvider)
-                                    .isUserOnline(
-                                      widget.dm.recipientId,
-                                      widget.dm.conversationId,
-                                    );
-                                return Text(
-                                  isOnline ? 'Online' : 'Offline',
-                                  style: TextStyle(
-                                    color: isOnline
-                                        ? Colors.greenAccent[100]
-                                        : Colors.red[100],
-                                    fontSize: 12,
-                                  ),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                      ],
+                          Row(
+                            children: [
+                              StreamBuilder<Map<int, bool>>(
+                                stream: UserStatusService().userStatusStream,
+                                initialData: UserStatusService().onlineStatus,
+                                builder: (context, snapshot) {
+                                  final isOnline = ref
+                                      .read(chatProvider)
+                                      .isUserOnline(
+                                        widget.dm.recipientId,
+                                        widget.dm.conversationId,
+                                      );
+                                  return Text(
+                                    isOnline ? 'Online' : 'Offline',
+                                    style: TextStyle(
+                                      color: isOnline
+                                          ? Colors.greenAccent[100]
+                                          : Colors.red[100],
+                                      fontSize: 12,
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
         backgroundColor: themeColor.primary,
         elevation: 0,
@@ -1715,6 +2084,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                 ),
               ]
             : [
+                // Search button
+                IconButton(
+                  icon: const Icon(Icons.search, color: Colors.white),
+                  onPressed: _toggleSearchMode,
+                  tooltip: 'Search messages',
+                ),
                 // Only show call button if user has call access
                 if (_currentUserDetails?.callAccess == true)
                   IconButton(
@@ -1759,6 +2134,22 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
                 // Messages List
                 Expanded(child: _buildMessagesList()),
+
+                // Message Recommendations (shown when text is empty or matches a recommendation)
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: _messageController,
+                  builder: (context, value, child) {
+                    final text = value.text.trim();
+                    // Show recommendations if text is empty OR if it matches one of the recommendations
+                    if (text.isEmpty || _messageRecommendations.contains(text)) {
+                      return MessageRecommendations(
+                        recommendations: _messageRecommendations,
+                        onRecommendationTap: _onRecommendationTap,
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
 
                 // Message Input
                 _buildMessageInput(),
@@ -1891,6 +2282,15 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       );
     }
 
+    // Find media groups (4+ consecutive media messages)
+    final mediaGroups = ChatHelpers.findConsecutiveMediaGroups(_messages);
+    final Set<int> groupedMessageIndices = {};
+    for (final group in mediaGroups) {
+      for (int i = group.startIndex; i <= group.endIndex; i++) {
+        groupedMessageIndices.add(i);
+      }
+    }
+
     return ListView.builder(
       controller: _scrollController,
       reverse: true, // Start from bottom (newest messages)
@@ -1902,68 +2302,45 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       addAutomaticKeepAlives: false, // Don't keep all items alive
       addRepaintBoundaries:
           true, // Add repaint boundaries for better performance
-      // itemCount: _messages.length + (_isLoadingMore ? 1 : 0),
-      // (_isLoadingMore ? 1 : 0) +
-      // (!_hasMoreMessages && _messages.isNotEmpty ? 1 : 0),
       itemBuilder: (context, index) {
-        // Show loading indicator at the top when loading older messages
-        // if (index == 0 && _isLoadingMore) {
-        //   return Container(
-        //     padding: const EdgeInsets.all(16),
-        //     margin: const EdgeInsets.symmetric(vertical: 8),
-        //     decoration: BoxDecoration(
-        //       color: Colors.grey[50],
-        //       borderRadius: BorderRadius.circular(12),
-        //       border: Border.all(color: Colors.grey[200]!),
-        //     ),
-        //     child: Row(
-        //       mainAxisAlignment: MainAxisAlignment.center,
-        //       children: [
-        //         SizedBox(
-        //           width: 20,
-        //           height: 20,
-        //           child: CircularProgressIndicator(
-        //             strokeWidth: 2,
-        //             valueColor: AlwaysStoppedAnimation<Color>(
-        //               Colors.teal[400]!,
-        //             ),
-        //           ),
-        //         ),
-        //         const SizedBox(width: 12),
-        //         Text(
-        //           'Loading older messages...',
-        //           style: TextStyle(
-        //             color: Colors.grey[600],
-        //             fontSize: 14,
-        //             fontWeight: FontWeight.w500,
-        //           ),
-        //         ),
-        //       ],
-        //     ),
-        //   );
-        // }
-
         // Calculate the actual message index, accounting for indicators
         int messageIndex = index;
         // Bounds check to prevent index out of bounds errors
         if (messageIndex < 0 || messageIndex >= _messages.length) {
-          // Removed expensive debug prints during scroll - causes lag
           return const SizedBox.shrink(); // Return empty widget for invalid indices
         }
 
-        final message =
-            _messages[_messages.length -
-                1 -
-                messageIndex]; // Show newest at bottom
+        final actualIndex = _messages.length - 1 - messageIndex;
+        final message = _messages[actualIndex];
+
+        // Check if this message is part of a media group
+        final mediaGroup = mediaGroups.firstWhere(
+          (group) => actualIndex >= group.startIndex && actualIndex <= group.endIndex,
+          orElse: () => MediaGroup(startIndex: -1, endIndex: -1, messages: []),
+        );
+
+        // If this is the first message of a media group, render the grid
+        if (mediaGroup.startIndex != -1 && actualIndex == mediaGroup.startIndex) {
+          return _buildMediaGroup(mediaGroup, actualIndex);
+        }
+
+        // If this message is part of a media group but not the first, skip it
+        if (groupedMessageIndices.contains(actualIndex) && actualIndex != mediaGroup.startIndex) {
+          return const SizedBox.shrink();
+        }
 
         // Determine if message is from current user
-        // If _currentUserId is known, use it
-        // If not, infer: in a DM, any message NOT from conversation.userId is from us
         final isMyMessage = message.senderId == _currentUserDetails?.id;
+
+        // Get or create GlobalKey for this message
+        if (!_messageKeys.containsKey(message.id)) {
+          _messageKeys[message.id] = GlobalKey();
+        }
+        final messageKey = _messageKeys[message.id]!;
 
         // Wrap the message with a container that has a key for scrolling
         return Container(
-          key: ValueKey(message.id),
+          key: messageKey,
           child: Column(
             children: [
               // Date separator - show the date for the group of messages that starts here
@@ -1975,6 +2352,80 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           ),
         );
       },
+    );
+  }
+
+  Widget _buildMediaGroup(MediaGroup group, int actualIndex) {
+    final firstMessage = group.messages.first;
+    final isMyMessage = firstMessage.senderId == _currentUserDetails?.id;
+
+    return Container(
+      margin: EdgeInsets.only(
+        left: isMyMessage ? 50 : 0,
+        right: isMyMessage ? 0 : 50,
+        bottom: 8,
+      ),
+      child: Column(
+        crossAxisAlignment: isMyMessage ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          // Date separator if needed
+          if (ChatHelpers.shouldShowDateSeparator(_messages, _messages.length - 1 - actualIndex))
+            DateSeparator(dateTimeString: firstMessage.sentAt),
+          // Media grid
+          MediaGridWidget(
+            mediaMessages: group.messages,
+            isMyMessage: isMyMessage,
+            onTap: (messages, index) => _openMediaGroupPreview(messages, index, isMyMessage),
+            onCacheImage: (url, id) {
+              ChatHelpers.cacheMediaForMessage(
+                url: url,
+                messageId: id,
+                mediaCacheService: _mediaCacheService,
+                checkExistingCache: false,
+                debugPrefix: 'dm media grid',
+              );
+            },
+            videoThumbnailCache: _videoThumbnailCache,
+            videoThumbnailFutures: _videoThumbnailFutures,
+            generateVideoThumbnail: (url, _) async {
+              return await generateVideoThumbnailWithCache(
+                url,
+                _videoThumbnailCache,
+                _videoThumbnailFutures,
+              ) ?? '';
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openMediaGroupPreview(List<MessageModel> messages, int initialIndex, bool isMyMessage) async {
+    await openUnifiedMediaPreview(
+      context: context,
+      messages: messages,
+      initialIndex: initialIndex,
+      mediaCacheService: _mediaCacheService,
+      messagesRepo: _messagesRepo,
+      mounted: mounted,
+      isMyMessage: isMyMessage,
+      buildMessageStatusTicks: _buildMessageStatusTicks,
+      onRetryImage: (file, source, {MessageModel? failedMessage}) {
+        if (failedMessage != null) {
+          _resendFailedMessage(failedMessage);
+        } else {
+          _sendMediaMessageToServer(file, MessageType.image);
+        }
+      },
+      onRetryVideo: (file, source, {MessageModel? failedMessage}) {
+        if (failedMessage != null) {
+          _resendFailedMessage(failedMessage);
+        } else {
+          _sendMediaMessageToServer(file, MessageType.video);
+        }
+      },
+      showErrorDialog: _showErrorDialog,
+      starredMessages: _starredMessages,
     );
   }
 
@@ -2055,7 +2506,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         child: Container(
           color: isSelected
               ? themeColor.primary.withOpacity(0.1)
-              : Colors.transparent,
+              : (_highlightedMessageIds.contains(message.id)
+                  ? (_highlightedMessageId == message.id
+                      ? Colors.yellow.withOpacity(0.5) // Current match - brighter
+                      : Colors.yellow.withOpacity(0.2)) // Other matches - dimmer
+                  : Colors.transparent),
           child: Stack(
             children: [
               _buildSwipeableMessageBubble(
@@ -2323,6 +2778,17 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Widget _buildMessageContent(MessageModel message, bool isMyMessage) {
+    // Check if this is a contact message
+    if (isContactMessage(message)) {
+      final contacts = parseContactsFromMessage(message);
+      if (contacts.isNotEmpty) {
+        return ContactMessageWidget(
+          contacts: contacts,
+          isMyMessage: isMyMessage,
+        );
+      }
+    }
+
     // Handle attachments based on category
     if (message.attachments != null) {
       final attachmentData = message.attachments as Map<String, dynamic>;
@@ -2526,7 +2992,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         onStar: () => _toggleStarMessage(message.id),
         onForward: () => _forwardMessage(message),
         onSelect: () => _enterSelectionMode(message.id),
-        onDelete: isMyMessage ? () => _deleteMessage(message.id) : null,
+        onDeleteForMe: () => _deleteMessageForMe(message.id),
+        onDeleteForEveryone: isMyMessage ? () => _deleteMessage(message.id, deleteForEveryone: true) : null,
       ),
     );
   }
@@ -2540,6 +3007,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         onCameraTap: () => _handleCameraAttachment(),
         onGalleryTap: () => _handleGalleryAttachment(),
         onDocumentTap: () => _handleDocumentAttachment(),
+        onContactTap: () => _handleContactAttachment(),
       ),
     );
   }
@@ -2602,6 +3070,48 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       onError: (message) {
         _showErrorDialog(message);
       },
+    );
+  }
+
+  void _handleContactAttachment() async {
+    if (!mounted) return;
+    
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ContactSelectionWidget(
+          onContactsSelected: (List<ContactModel> contacts) {
+            if (contacts.isEmpty) return;
+            
+            // Store contacts in metadata for special rendering
+            final contactsMetadata = contacts.map((contact) => {
+              'name': contact.displayName,
+              'displayName': contact.displayName,
+              'firstName': contact.firstName,
+              'lastName': contact.lastName,
+              'phone': contact.phoneNumber,
+              'phoneNumber': contact.phoneNumber,
+            }).toList();
+            
+            // Also format as text for backward compatibility
+            final contactText = contacts
+                .map((contact) => '${contact.displayName}: ${contact.phoneNumber}')
+                .join(',\n');
+            
+            // Set the formatted text in the message controller
+            _messageController.text = contactText;
+            
+            // Store metadata before sending
+            _pendingContactMetadata = {
+              'contacts': contactsMetadata,
+              'is_contact_message': true,
+            };
+            
+            // Send the message
+            _sendMessage(MessageType.text);
+          },
+        ),
+      ),
     );
   }
 
@@ -2692,6 +3202,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Structure metadata properly for reply messages and upload status
     Map<String, dynamic> metadata = {
       'is_uploading': true, // UI widgets check for this to show loading state
+      'upload_progress': 0, // Initialize progress to 0
     };
     if (_replyToMessageData != null) {
       metadata['reply_to'] = {
@@ -2733,9 +3244,67 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       _scrollToBottom();
     }
 
-    final response = await _chatsServices.sendMediaMessage(mediaFile);
+    int? lastProgressUpdate = -1;
+    
+    final response = await _chatsServices.sendMediaMessage(
+      mediaFile,
+      onSendProgress: (sent, total) {
+        // Calculate progress percentage
+        final progress = total > 0 ? ((sent / total) * 100).round() : 0;
+        
+        // Update immediately if progress changed (remove throttling to see all updates)
+        if (progress != lastProgressUpdate && _canSetState) {
+          lastProgressUpdate = progress;
+          
+          final index = _messages.indexWhere(
+            (msg) => msg.optimisticId == optimisticId,
+          );
+          
+          if (index != -1) {
+            final currentMsg = _messages[index];
+            final updatedMetadata = Map<String, dynamic>.from(
+              currentMsg.metadata ?? {},
+            );
+            updatedMetadata['upload_progress'] = progress;
+            updatedMetadata['is_uploading'] = true;
+            
+            final updatedMessage = currentMsg.copyWith(
+              metadata: updatedMetadata,
+            );
+            
+            _safeSetState(() {
+              _messages[index] = updatedMessage;
+            });
+          }
+        }
+      },
+    );
     if (response['success'] == true && response['data'] != null) {
       final mediaData = MediaResponse.fromJson(response['data']);
+
+      // Clear upload progress before sending message
+      if (_canSetState) {
+        final index = _messages.indexWhere(
+          (msg) => msg.optimisticId == optimisticId,
+        );
+        
+        if (index != -1) {
+          final currentMsg = _messages[index];
+          final updatedMetadata = Map<String, dynamic>.from(
+            currentMsg.metadata ?? {},
+          );
+          updatedMetadata.remove('is_uploading');
+          updatedMetadata.remove('upload_progress');
+          
+          final updatedMessage = currentMsg.copyWith(
+            metadata: updatedMetadata,
+          );
+          
+          _safeSetState(() {
+            _messages[index] = updatedMessage;
+          });
+        }
+      }
 
       _sendMessage(
         messageType,
@@ -2799,6 +3368,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     );
     uploadingMetadata.remove('upload_failed');
     uploadingMetadata['is_uploading'] = true;
+    uploadingMetadata['upload_progress'] = 0; // Initialize progress to 0
 
     final uploadingMessage = failedMessage.copyWith(
       status: MessageStatusType.sent,
@@ -2842,7 +3412,35 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         }
 
         // Upload the media to server first
-        final response = await _chatsServices.sendMediaMessage(mediaFile);
+        int? lastProgressUpdate = -1;
+        
+        final response = await _chatsServices.sendMediaMessage(
+          mediaFile,
+          onSendProgress: (sent, total) {
+            // Calculate progress percentage
+            final progress = total > 0 ? ((sent / total) * 100).round() : 0;
+            
+            // Update immediately if progress changed
+            if (progress != lastProgressUpdate && index != -1 && _canSetState) {
+              lastProgressUpdate = progress;
+              
+              final currentMsg = _messages[index];
+              final updatedMetadata = Map<String, dynamic>.from(
+                currentMsg.metadata ?? {},
+              );
+              updatedMetadata['upload_progress'] = progress;
+              updatedMetadata['is_uploading'] = true;
+              
+              final updatedMessage = currentMsg.copyWith(
+                metadata: updatedMetadata,
+              );
+              
+              _safeSetState(() {
+                _messages[index] = updatedMessage;
+              });
+            }
+          },
+        );
 
         if (response['success'] == true && response['data'] != null) {
           final mediaData = MediaResponse.fromJson(response['data']);
@@ -3061,41 +3659,106 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     await _showForwardModal();
   }
 
-  void _deleteMessage(int messageId) async {
-    setState(() {
-      _messages.removeWhere((message) => message.id == messageId);
-    });
+  void _deleteMessage(int messageId, {bool deleteForEveryone = false}) async {
+    try {
+      if (deleteForEveryone) {
+        // Delete for everyone - only own messages
+        final message = _messages.firstWhere((m) => m.id == messageId);
+        if (message.senderId != _currentUserDetails?.id) {
+          Snack.warning('You can only delete your own messages for everyone');
+          return;
+        }
 
-    ref
-        .read(chatProvider.notifier)
-        .handleMessageDelete(
-          DeleteMessagePayload(
+        // delete from local database
+        await _messagesRepo.deleteMessage(messageId);
+
+        // Remove from UI immediately
+        if (_canSetState) {
+          _safeSetState(() {
+            _messages.removeWhere((message) => message.id == messageId);
+          });
+        }
+
+        // Call API
+        final response = await _chatsServices.deleteMessage([messageId]);
+        
+        if (response['success'] == true) {
+          // Update provider
+          ref
+              .read(chatProvider.notifier)
+              .handleMessageDelete(
+                DeleteMessagePayload(
+                  messageIds: [messageId],
+                  convId: widget.dm.conversationId,
+                  senderId: _currentUserDetails?.id ?? 0,
+                ), 
+              )
+              .catchError((e) {
+                debugPrint('❌ Error deleting messages: $e');
+              });
+
+          // Send WebSocket message
+          final deleteMessagePayload = DeleteMessagePayload(
             messageIds: [messageId],
             convId: widget.dm.conversationId,
             senderId: _currentUserDetails?.id ?? 0,
-          ),
-        )
-        .catchError((e) {
-          debugPrint('❌ Error deleting messages: $e');
+          ).toJson();
+
+          final wsmsg = WSMessage(
+            type: WSMessageType.messageDelete,
+            payload: deleteMessagePayload,
+            wsTimestamp: DateTime.now(),
+          ).toJson();
+
+          _webSocket.sendMessage(wsmsg).catchError((e) {
+            debugPrint('❌ Error sending message delete: $e');
+          });
+        } else {
+          Snack.error(response['message'] ?? 'Failed to delete message');
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error deleting message: $e');
+      Snack.error('Failed to delete message');
+    }
+  }
+
+  void _deleteMessageForMe(int messageId) async {
+    try {
+      // Remove from UI immediately
+      if (_canSetState) {
+        _safeSetState(() {
+          _messages.removeWhere((message) => message.id == messageId);
         });
+      }
 
-    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    final deleteMessagePayload = DeleteMessagePayload(
-      messageIds: [messageId],
-      convId: widget.dm.conversationId,
-      senderId: _currentUserDetails?.id ?? 0,
-    ).toJson();
+      // Call API
+      final response = await _chatsServices.deleteMessageForMe(
+        [messageId],
+        widget.dm.conversationId,
+      );
 
-    final wsmsg = WSMessage(
-      type: WSMessageType.messageDelete,
-      payload: deleteMessagePayload,
-      wsTimestamp: DateTime.now(),
-    ).toJson();
+      if (response['success'] == true) {
+        // delete from local database
+        await _messagesRepo.deleteMessage(messageId);
+      }
 
-    _webSocket.sendMessage(wsmsg).catchError((e) {
-      debugPrint('❌ Error sending message delete: $e');
-    });
-    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    } catch (e) {
+      debugPrint('❌ Error deleting message for me: $e');
+      // Restore message on error
+      if (_canSetState) {
+        final messagesFromLocal = await _messagesRepo.getMessagesByConversation(
+          widget.dm.conversationId,
+          limit: 100,
+          offset: 0,
+        );
+        _safeSetState(() {
+          _messages = messagesFromLocal;
+          _sortMessagesBySentAt();
+        });
+      }
+      Snack.error('Failed to delete message');
+    }
   }
 
   void _bulkStarMessages() async {
@@ -3133,6 +3796,13 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       onAttachmentTap: _showAttachmentModal,
       onTyping: _handleTyping,
       onCancelReply: _cancelReply,
+      focusNode: _messageFocusNode,
+      onFocusChange: (isFocused) {
+        if (!_canSetState) return;
+        _safeSetState(() {
+          _isInputFocused = isFocused;
+        });
+      },
       dm: widget.dm,
     );
   }
@@ -3356,6 +4026,7 @@ Future<void> _initiateCall(int userId, String userName, String? userProfilePic) 
 
     _scrollController.dispose();
     _messageController.dispose();
+    _messageFocusNode.dispose();
     _messageSubscription?.cancel();
     _messageAckSubscription?.cancel();
     _typingSubscription?.cancel();
@@ -3436,6 +4107,14 @@ Future<void> _initiateCall(int userId, String userName, String? userProfilePic) 
     _voiceModalAnimationController.dispose();
     _zigzagAnimationController.dispose();
     _timerStreamController.close();
+
+    // Dispose search controller and timer
+    _searchController.dispose();
+    _searchDebounceTimer?.cancel();
+    _highlightTimer?.cancel();
+    
+    // Clear message keys
+    _messageKeys.clear();
 
     super.dispose();
   }

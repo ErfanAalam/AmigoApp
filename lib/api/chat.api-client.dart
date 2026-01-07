@@ -80,9 +80,15 @@ class ChatsServices {
     }
   }
 
-  Future<Map<String, dynamic>> sendMediaMessage(File file) async {
+  Future<Map<String, dynamic>> sendMediaMessage(
+    File file, {
+    Function(int sent, int total)? onSendProgress,
+  }) async {
     try {
-      final response = await _apiService.sendMedia(file: file);
+      final response = await _apiService.sendMedia(
+        file: file,
+        onSendProgress: onSendProgress,
+      );
 
       // Handle the response based on the API structure
       // Response should be: {success: true, code: 200, message: "File uploaded successfully", data: {...}}
@@ -112,9 +118,37 @@ class ChatsServices {
     bool? isAdminOrStaff,
   ]) async {
     try {
+      final body = <String, dynamic>{
+        'message_ids': messageIds,
+      };
+      if (isAdminOrStaff != null) {
+        body['is_admin_or_staff'] = isAdminOrStaff;
+      }
       final response = await _apiService.authenticatedDelete(
         '/chat/soft-delete-message',
-        body: {'message_ids': messageIds, 'is_admin_or_staff': isAdminOrStaff},
+        body: body,
+      );
+      return response.data;
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Failed to delete message',
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>> deleteMessageForMe(
+    List<int> messageIds,
+    int conversationId,
+  ) async {
+    try {
+      final response = await _apiService.authenticatedDelete(
+        '/chat/delete-message-for-me',
+        body: {
+          'message_ids': messageIds,
+          'conversation_id': conversationId,
+        },
       );
       return response.data;
     } catch (e) {

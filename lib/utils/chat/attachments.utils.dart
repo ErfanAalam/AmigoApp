@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../../models/contact.model.dart';
 
 /// Callbacks for attachment handling
 typedef OnImageSelected = void Function(File imageFile, String source);
@@ -155,4 +156,14 @@ Future<void> handleDocumentAttachment({
       onError('Failed to select document');
     }
   }
+}
+
+/// Format selected contacts into a message string
+/// Format: name: contact number,\nname2: contact number
+String formatContactsForMessage(List<ContactModel> contacts) {
+  if (contacts.isEmpty) return '';
+  
+  return contacts
+      .map((contact) => '${contact.displayName}: ${contact.phoneNumber}')
+      .join(',\n');
 }

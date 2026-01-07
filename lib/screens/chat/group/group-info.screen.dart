@@ -290,6 +290,12 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     }
   }
 
+  bool _isCurrentUserCreator() {
+    if (_currentUserDetails?.id == null) return false;
+    final creatorId = _groupInfo?['createrId'] ?? _groupInfo?['created_by'];
+    return _currentUserDetails?.id == creatorId;
+  }
+
   Widget _buildGroupAvatar(String title, {double radius = 40}) {
     final themeColor = ref.watch(themeColorProvider);
     final firstLetter = title.isNotEmpty ? title[0].toUpperCase() : '?';
@@ -1727,6 +1733,280 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     }
   }
 
+  Future<void> _showRemoveAllMembersDialog() async {
+    if (!_isCurrentUserCreator()) {
+      _showSnackBar('Only the group creator can remove all members', isError: true);
+      return;
+    }
+
+    if (_groupInfo?['members'] == null) return;
+    final List<dynamic> members = _groupInfo!['members'];
+    final creatorId = _groupInfo?['createrId'] ?? _groupInfo?['created_by'];
+    
+    // Filter out the creator from the list
+    final membersToRemove = members.where((member) => member['userId'] != creatorId).toList();
+    
+    if (membersToRemove.isEmpty) {
+      _showSnackBar('No members to remove', isError: true);
+      return;
+    }
+
+    final bool? confirmed = await showGeneralDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, animation1, animation2) => Container(),
+      transitionBuilder: (context, animation1, animation2, child) {
+        return ScaleTransition(
+          scale: CurvedAnimation(parent: animation1, curve: Curves.easeOutBack),
+          child: FadeTransition(
+            opacity: animation1,
+            child: AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              contentPadding: EdgeInsets.zero,
+              content: Container(
+                width: MediaQuery.of(context).size.width * 0.85,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Colors.white, Colors.red.shade50],
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Content
+                    Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.delete_sweep,
+                              size: 48,
+                              color: Colors.red.shade700,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Remove All Members',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          RichText(
+                            textAlign: TextAlign.center,
+                            text: TextSpan(
+                              style: TextStyle(
+                                color: Colors.grey.shade800,
+                                fontSize: 16,
+                                height: 1.5,
+                              ),
+                              children: [
+                                const TextSpan(
+                                  text: 'Are you sure you want to remove all ',
+                                ),
+                                TextSpan(
+                                  text: '${membersToRemove.length} member${membersToRemove.length > 1 ? 's' : ''}',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.red.shade700,
+                                  ),
+                                ),
+                                const TextSpan(
+                                  text: ' from this group?',
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade100,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.red.shade300),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.warning_rounded,
+                                  color: Colors.red.shade700,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'This will remove all members except you (the creator). This action cannot be undone.',
+                                    style: TextStyle(
+                                      color: Colors.red.shade900,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Action buttons
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: const BorderRadius.only(
+                          bottomLeft: Radius.circular(20),
+                          bottomRight: Radius.circular(20),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  side: BorderSide(color: Colors.grey.shade300),
+                                ),
+                              ),
+                              child: Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade700,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                elevation: 2,
+                                shadowColor: Colors.red.withOpacity(0.3),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.delete_sweep, size: 20),
+                                  const SizedBox(width: 8),
+                                  const Text(
+                                    'Remove All',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      await _removeAllMembers(membersToRemove);
+    }
+  }
+
+  Future<void> _removeAllMembers(List<dynamic> membersToRemove) async {
+    if (!_isCurrentUserCreator()) {
+      _showSnackBar('Only the group creator can remove all members', isError: true);
+      return;
+    }
+
+    try {
+      final loadingId = TaskSnack.show(message: 'Removing all members...');
+
+      // Remove all members one by one
+      int successCount = 0;
+      int failCount = 0;
+
+      for (var member in membersToRemove) {
+        final userId = member['userId'];
+        try {
+          final response = await _groupsService.removeMember(
+            widget.group.conversationId,
+            userId,
+          );
+
+          if (response['success'] == true) {
+            successCount++;
+            await _conversationMemberRepository
+                .deleteMemberByConversationAndUserId(
+                  widget.group.conversationId,
+                  userId,
+                );
+          } else {
+            failCount++;
+          }
+        } catch (e) {
+          failCount++;
+          debugPrint('Error removing member $userId: $e');
+        }
+      }
+
+      if (successCount > 0) {
+        TaskSnack.resolve(
+          id: loadingId,
+          isSuccess: true,
+          message: failCount > 0
+              ? '$successCount member${successCount > 1 ? 's' : ''} removed. $failCount failed.'
+              : 'All members removed successfully',
+        );
+        await _loadGroupInfoFromLocal(); // Refresh group info
+      } else {
+        TaskSnack.resolve(
+          id: loadingId,
+          isSuccess: false,
+          message: 'Failed to remove members',
+        );
+      }
+    } catch (e) {
+      TaskSnack.dismiss();
+      _showSnackBar('Error removing all members: $e', isError: true);
+    }
+  }
+
   Future<void> _showDeleteGroupDialog() async {
     final groupTitle = _groupInfo?['title'] ?? 'this group';
 
@@ -2117,28 +2397,83 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                                       color: Colors.black87,
                                     ),
                                   ),
-                                  if (_isCurrentUserAdmin())
-                                    ElevatedButton.icon(
-                                      onPressed: _showAddMemberDialog,
-                                      icon: const Icon(
-                                        Icons.person_add,
-                                        size: 18,
-                                      ),
-                                      label: const Text('Add Member'),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: themeColor.primary,
-                                        foregroundColor: Colors.white,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            20,
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (_isCurrentUserAdmin())
+                                        ElevatedButton.icon(
+                                          onPressed: _showAddMemberDialog,
+                                          icon: const Icon(
+                                            Icons.person_add,
+                                            size: 18,
+                                          ),
+                                          label: const Text('Add Member'),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: themeColor.primary,
+                                            foregroundColor: Colors.white,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(
+                                                20,
+                                              ),
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 16,
+                                              vertical: 8,
+                                            ),
                                           ),
                                         ),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 16,
-                                          vertical: 8,
+                                      if (_isCurrentUserCreator() &&
+                                          _groupInfo?['members'] != null)
+                                        Builder(
+                                          builder: (context) {
+                                            final List<dynamic> members =
+                                                _groupInfo!['members'];
+                                            final creatorId = _groupInfo?['createrId'] ??
+                                                _groupInfo?['created_by'];
+                                            final membersToRemove = members
+                                                .where((member) =>
+                                                    member['userId'] !=
+                                                    creatorId)
+                                                .toList();
+                                            
+                                            if (membersToRemove.isEmpty) {
+                                              return const SizedBox.shrink();
+                                            }
+                                            
+                                            return Padding(
+                                              padding: EdgeInsets.only(
+                                                left: _isCurrentUserAdmin()
+                                                    ? 8
+                                                    : 0,
+                                              ),
+                                              child: ElevatedButton.icon(
+                                                onPressed: _showRemoveAllMembersDialog,
+                                                icon: const Icon(
+                                                  Icons.delete_sweep,
+                                                  size: 18,
+                                                ),
+                                                label: const Text('Remove All'),
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: Colors.red,
+                                                  foregroundColor: Colors.white,
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                      20,
+                                                    ),
+                                                  ),
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                    horizontal: 16,
+                                                    vertical: 8,
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          },
                                         ),
-                                      ),
-                                    ),
+                                    ],
+                                  ),
                                 ],
                               ),
                               const SizedBox(height: 16),

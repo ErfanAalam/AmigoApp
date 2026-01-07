@@ -46,6 +46,7 @@ class AudioPlaybackManager {
   // Callbacks
   final void Function(String audioKey, Duration duration, Duration position)?
   _onProgressUpdate;
+  final void Function(String audioKey)? _onAudioFinished;
 
   AudioPlaybackManager({
     required TickerProvider vsync,
@@ -57,6 +58,7 @@ class AudioPlaybackManager {
     List<MessageModel>? messages,
     void Function(String audioKey, Duration duration, Duration position)?
     onProgressUpdate,
+    void Function(String audioKey)? onAudioFinished,
   }) : _vsync = vsync,
        _mounted = mounted,
        _setState = setState,
@@ -64,7 +66,8 @@ class AudioPlaybackManager {
        _mediaCacheService = mediaCacheService,
        _messagesRepo = messagesRepo,
        _messages = messages,
-       _onProgressUpdate = onProgressUpdate {
+       _onProgressUpdate = onProgressUpdate,
+       _onAudioFinished = onAudioFinished {
     _audioPlayer = FlutterSoundPlayer();
   }
 
@@ -124,37 +127,42 @@ class AudioPlaybackManager {
       final isCurrentlyPlaying = _playingAudios[audioKey] ?? false;
 
       if (isCurrentlyPlaying) {
-        // Stop playback
+        // Pause playback - stop player but save current position for resume
         await _audioPlayer.stopPlayer();
 
         // Stop animation
         final controller = _audioAnimationControllers[audioKey];
         controller?.stop();
 
-        // Stop progress timer and save current position
+        // Stop progress timer but keep the current position
         _stopProgressTimer();
 
         _setState();
         _playingAudios[audioKey] = false;
         _currentPlayingAudioKey = null;
-        // Keep the current position when paused
+
+        debugPrint('⏸️ Paused audio playback for: $audioKey at position: ${_audioPositions[audioKey]}');
       } else {
         // Stop any currently playing audio
-        _stopProgressTimer();
-        for (final key in _playingAudios.keys) {
-          _playingAudios[key] = false;
+        if (_currentPlayingAudioKey != null && _currentPlayingAudioKey != audioKey) {
+          await _audioPlayer.stopPlayer();
+          final prevKey = _currentPlayingAudioKey!;
+          final prevController = _audioAnimationControllers[prevKey];
+          prevController?.stop();
+          _playingAudios[prevKey] = false;
         }
+        
+        _stopProgressTimer();
 
-        // Only reset position if this is a fresh start (not resume)
+        // Get saved position for resume
         final currentPosition = _audioPositions[audioKey] ?? Duration.zero;
         final currentDuration = _audioDurations[audioKey] ?? Duration.zero;
 
         // If we're at the end, start from beginning; otherwise resume from current position
-        if (currentPosition.inMilliseconds >=
-            currentDuration.inMilliseconds - 100) {
-          _setState();
-          _audioPositions[audioKey] = Duration.zero;
-        }
+        final shouldReset = currentPosition.inMilliseconds >=
+            (currentDuration.inMilliseconds - 100);
+        
+        final resumePosition = shouldReset ? Duration.zero : currentPosition;
 
         _setState();
         _playingAudios[audioKey] = true;
@@ -201,33 +209,45 @@ class AudioPlaybackManager {
           }
         }
 
-        // Start new playback
-        await _audioPlayer.startPlayer(
-          fromURI: playbackUrl,
-          whenFinished: () {
-            if (_mounted()) {
-              // Stop animation
-              final controller = _audioAnimationControllers[audioKey];
-              controller?.stop();
-
-              // Stop progress timer
-              _stopProgressTimer();
-
-              _setState();
-              _playingAudios[audioKey] = false;
-              // Keep position at duration when finished so we show total duration
-              final duration = _audioDurations[audioKey] ?? Duration.zero;
-              _audioPositions[audioKey] = duration;
-              _currentPlayingAudioKey = null;
-            }
-          },
-        );
+        // Check if we're resuming or starting fresh
+        if (resumePosition == Duration.zero) {
+          // Start new playback from beginning
+          await _audioPlayer.startPlayer(
+            fromURI: playbackUrl,
+            whenFinished: () {
+              if (_mounted()) {
+                _handleAudioFinished(audioKey);
+              }
+            },
+          );
+        } else {
+          // Resume from saved position
+          // First start the player
+          await _audioPlayer.startPlayer(
+            fromURI: playbackUrl,
+            whenFinished: () {
+              if (_mounted()) {
+                _handleAudioFinished(audioKey);
+              }
+            },
+          );
+          
+          // Then seek to the saved position
+          await Future.delayed(const Duration(milliseconds: 100));
+          try {
+            await _audioPlayer.seekToPlayer(resumePosition);
+            debugPrint('▶️ Resumed audio playback for: $audioKey at position: $resumePosition');
+          } catch (e) {
+            debugPrint('⚠️ Error seeking to position: $e');
+            // If seek fails, continue from beginning
+          }
+        }
 
         // Verify player is actually playing
         await Future.delayed(const Duration(milliseconds: 100));
 
         // Start progress timer as fallback
-        _startProgressTimer(audioKey);
+        _startProgressTimer(audioKey, resumePosition);
 
         debugPrint('🔊 Started audio playback for: $audioKey');
       }
@@ -258,12 +278,32 @@ class AudioPlaybackManager {
     }
   }
 
+  /// Handle audio finished event
+  void _handleAudioFinished(String audioKey) {
+    // Stop animation
+    final controller = _audioAnimationControllers[audioKey];
+    controller?.stop();
+
+    // Stop progress timer
+    _stopProgressTimer();
+
+    _setState();
+    _playingAudios[audioKey] = false;
+    // Keep position at duration when finished so we show total duration
+    final duration = _audioDurations[audioKey] ?? Duration.zero;
+    _audioPositions[audioKey] = duration;
+    _currentPlayingAudioKey = null;
+    
+    // Call the callback to trigger auto-play of next audio
+    _onAudioFinished?.call(audioKey);
+  }
+
   /// Start progress tracking timer
-  void _startProgressTimer(String audioKey) {
+  void _startProgressTimer(String audioKey, [Duration? startPosition]) {
     _audioProgressTimer?.cancel();
 
     // Get current position for resume functionality
-    final currentPosition = _audioPositions[audioKey] ?? Duration.zero;
+    final currentPosition = startPosition ?? (_audioPositions[audioKey] ?? Duration.zero);
 
     // Adjust start time to account for current position (for resume)
     _audioStartTime = DateTime.now().subtract(currentPosition);

@@ -14,6 +14,7 @@ import '../../ui/country-selector.modal.dart';
 import '../../ui/setup-loading.popup.dart';
 import '../../ui/snackbar.dart';
 import '../home.layout.dart';
+import 'signup-status.screen.dart';
 
 class SignUpScreen extends ConsumerStatefulWidget {
   const SignUpScreen({super.key});
@@ -136,38 +137,56 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       _isLoading = true;
     });
 
-    final response = await apiService.verifySignupOtp(
-      _completePhoneNumber.replaceAll(' ', ''),
-      int.parse(_otpController.text),
+    // final response = await apiService.verifySignupOtp(
+    //   _completePhoneNumber.replaceAll(' ', ''),
+    //   int.parse(_otpController.text),
+    //   _firstNameController.text,
+    //   _lastNameController.text,
+    // );
+
+    final response = await apiService.requestSignup(
       _firstNameController.text,
       _lastNameController.text,
+      _completePhoneNumber.replaceAll(' ', ''),
     );
 
     if (response['success']) {
       // Show the setup loading popup
-      _showSetupLoadingPopup();
+      // _showSetupLoadingPopup();
 
       if (mounted) {
-        Snack.success('Account created successfully');
+        Snack.success('Signup request sent successfully!!!Wait for the admin to approve your request');
       }
 
-      final appVersion = await UserUtils().getAppVersion();
-      await userService.updateUser({'app_version': appVersion});
+      // clear the form
+      _firstNameController.clear();
+      _lastNameController.clear();
+      _phoneController.clear();
+      _otpController.clear();
+      setState(() {
+        _isOtpSent = false;
+        _isLoading = false;
+      });
 
-      final userDetail = {
-        'id': response['data']['id'],
-        'name': response['data']['name'],
-        'phone': response['data']['phone'],
-        'role': response['data']['role'],
-        'profile_pic': null,
-        'created_at': DateTime.now().toIso8601String(),
-        'call_access': false,
-      };
+      // final appVersion = await UserUtils().getAppVersion();
+      // await userService.updateUser({'app_version': appVersion});
 
-      await UserUtils().saveUserDetails(UserModel.fromJson(userDetail));
+      // final userDetail = {
+      //   'id': response['data']['id'],
+      //   'name': response['data']['name'],
+      //   'phone': response['data']['phone'],
+      //   'role': response['data']['role'],
+      //   'profile_pic': null,
+      //   'created_at': DateTime.now().toIso8601String(),
+      //   'call_access': false,
+      // };
 
-      // Send FCM token to backend after successful signup
-      await authService.sendFCMTokenToBackend(3);
+      // await UserUtils().saveUserDetails(UserModel.fromJson(userDetail));
+
+      // // Send FCM token to backend after successful signup
+      // await authService.sendFCMTokenToBackend(3);
+
+
     } else {
       if (mounted) {
         Snack.error('Error verifying Signup OTP');
@@ -194,19 +213,81 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
           ),
         ),
         child: material.SafeArea(
-          child: material.SingleChildScrollView(
-            padding: const material.EdgeInsets.symmetric(horizontal: 24.0),
-            child: material.ConstrainedBox(
-              constraints: material.BoxConstraints(
-                minHeight:
-                    material.MediaQuery.of(context).size.height -
-                    material.MediaQuery.of(context).padding.top -
-                    material.MediaQuery.of(context).padding.bottom,
+          child: material.Column(
+            children: [
+              // Status Check Button in Upper Right
+              material.Padding(
+                padding: const material.EdgeInsets.only(
+                  top: 8,
+                  right: 8,
+                ),
+                child: material.Align(
+                  alignment: material.Alignment.topRight,
+                  child: material.Material(
+                    color: material.Colors.transparent,
+                    child: material.InkWell(
+                      onTap: () {
+                        material.Navigator.push(
+                          context,
+                          material.MaterialPageRoute(
+                            builder: (context) => const SignupStatusScreen(),
+                          ),
+                        );
+                      },
+                      borderRadius: material.BorderRadius.circular(12),
+                      child: material.Container(
+                        padding: const material.EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: material.BoxDecoration(
+                          color: material.Colors.white.withOpacity(0.2),
+                          borderRadius: material.BorderRadius.circular(12),
+                          border: material.Border.all(
+                            color: material.Colors.white.withOpacity(0.3),
+                            width: 1,
+                          ),
+                        ),
+                        child: material.Row(
+                          mainAxisSize: material.MainAxisSize.min,
+                          children: [
+                            const material.Icon(
+                              material.Icons.info_outline_rounded,
+                              color: material.Colors.white,
+                              size: 18,
+                            ),
+                            const material.SizedBox(width: 6),
+                            const material.Text(
+                              'Check Status',
+                              style: material.TextStyle(
+                                color: material.Colors.white,
+                                fontSize: 13,
+                                fontWeight: material.FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
-              child: material.IntrinsicHeight(
-                child: material.Column(
-                  children: [
-                    const material.SizedBox(height: 30),
+              // Main Content
+              material.Expanded(
+                child: material.SingleChildScrollView(
+                  padding: const material.EdgeInsets.symmetric(horizontal: 24.0),
+                  child: material.ConstrainedBox(
+                    constraints: material.BoxConstraints(
+                      minHeight:
+                          material.MediaQuery.of(context).size.height -
+                          material.MediaQuery.of(context).padding.top -
+                          material.MediaQuery.of(context).padding.bottom -
+                          60,
+                    ),
+                    child: material.IntrinsicHeight(
+                      child: material.Column(
+                        children: [
+                          const material.SizedBox(height: 20),
 
                     // App Logo Section
                     material.Container(
@@ -718,10 +799,13 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                     ),
 
                     const material.SizedBox(height: 15),
-                  ],
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
         ),
       ),

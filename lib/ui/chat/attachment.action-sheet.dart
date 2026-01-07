@@ -5,12 +5,14 @@ class AttachmentActionSheet extends StatelessWidget {
   final VoidCallback onCameraTap;
   final VoidCallback onGalleryTap;
   final VoidCallback onDocumentTap;
+  final VoidCallback? onContactTap;
 
   const AttachmentActionSheet({
     super.key,
     required this.onCameraTap,
     required this.onGalleryTap,
     required this.onDocumentTap,
+    this.onContactTap,
   });
 
   @override
@@ -97,6 +99,16 @@ class AttachmentActionSheet extends StatelessWidget {
                     onDocumentTap();
                   },
                 ),
+                if (onContactTap != null)
+                  _buildAttachmentOption(
+                    icon: Icons.contacts,
+                    label: 'Contact',
+                    color: const Color(0xFF9C27B0),
+                    onTap: () {
+                      Navigator.pop(context);
+                      onContactTap!();
+                    },
+                  ),
               ],
             ),
           ),
