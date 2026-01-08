@@ -948,7 +948,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         //   title: 'Delete All Messages',
                         //   subtitle: 'Delete all messages from the database',
                         //   onTap: () async {
-                        //     await MessageRepository().deleteAllMessagesLessThanOrEqualTo0();
+                        //     await MessageRepository()
+                        //         .deleteAllMessagesLessThanOrEqualTo0();
                         //   },
                         // ),
                       ],

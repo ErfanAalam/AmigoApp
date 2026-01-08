@@ -71,33 +71,34 @@ class ApiService {
             //   // Don't log the actual cookies for security reasons
             // }
 
-            if (response.statusCode == 401) {
+            if (response.statusCode == 498 || response.statusCode == 499) {
               // Don't try to refresh if we're already refreshing
               // or if the failed request was the refresh endpoint itself
-              if (_isRefreshing ||
-                  response.requestOptions.path.contains(
-                    '/auth/refresh-mobile',
-                  )) {
-                _authService.logout();
-                _disconnectWebSocketOnLogout();
-                return handler.next(response);
-              }
+              // if (_isRefreshing ||
+              //     response.requestOptions.path.contains(
+              //       '/auth/refresh-mobile',
+              //     )) {
+              //   _authService.logout();
+              //   _disconnectWebSocketOnLogout();
+              //   return handler.next(response);
+              // }
 
               // Try to refresh the token
               final refreshSuccess = await _refreshToken();
 
               if (refreshSuccess) {
                 // Retry the original request with new token
-                try {
-                  final res = await _dio.fetch(response.requestOptions);
-                  return handler.resolve(res);
-                } catch (retryError) {
-                  return handler.next(response);
-                }
+                // try {
+                // final res = await _dio.fetch(response.requestOptions);
+                return handler.next(response);
+                // } catch (retryError) {
+                //   return handler.next(response);
+                // }
               } else {
                 _authService.logout();
                 _disconnectWebSocketOnLogout();
-                return handler.next(response);
+                return;
+                // return handler.next(response);
               }
             }
 
@@ -227,7 +228,10 @@ class ApiService {
         '${Environment.baseUrl}/auth/validate-token',
         options: Options(
           validateStatus: (status) {
-            return status != null && (status >= 200 && status < 300 || status == 404 || status == 401);
+            return status != null &&
+                (status >= 200 && status < 300 ||
+                    status == 404 ||
+                    status == 401);
           },
         ),
       );
@@ -290,13 +294,21 @@ class ApiService {
     }
   }
 
-  Future requestSignup(String firstName, String lastName, String phoneNumber) async {
+  Future requestSignup(
+    String firstName,
+    String lastName,
+    String phoneNumber,
+  ) async {
     try {
       Response response = await _dio.post(
         "${Environment.baseUrl}/auth/request-signup",
-        data: {'first_name': firstName, 'last_name': lastName, 'phone': phoneNumber},
+        data: {
+          'first_name': firstName,
+          'last_name': lastName,
+          'phone': phoneNumber,
+        },
       );
-     if (response.data is String) {
+      if (response.data is String) {
         return jsonDecode(response.data as String);
       }
       return response.data;
