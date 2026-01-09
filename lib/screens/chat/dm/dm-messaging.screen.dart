@@ -2085,11 +2085,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
               ]
             : [
                 // Search button
-                IconButton(
-                  icon: const Icon(Icons.search, color: Colors.white),
-                  onPressed: _toggleSearchMode,
-                  tooltip: 'Search messages',
-                ),
+                // IconButton(
+                //   icon: const Icon(Icons.search, color: Colors.white),
+                //   onPressed: _toggleSearchMode,
+                //   tooltip: 'Search messages',
+                // ),
                 // Only show call button if user has call access
                 if (_currentUserDetails?.callAccess == true)
                   IconButton(

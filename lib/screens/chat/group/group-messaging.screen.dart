@@ -2921,11 +2921,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             ? _buildSelectionModeActions()
             : [
                 // Search button
-                IconButton(
-                  icon: const Icon(Icons.search, color: Colors.white),
-                  onPressed: _toggleSearchMode,
-                  tooltip: 'Search messages',
-                ),
+                // IconButton(
+                //   icon: const Icon(Icons.search, color: Colors.white),
+                //   onPressed: _toggleSearchMode,
+                //   tooltip: 'Search messages',
+                // ),
                 IconButton(
                   icon: const Icon(Icons.info_outline, color: Colors.white),
                   onPressed: _openGroupInfo,
