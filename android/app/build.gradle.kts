@@ -16,7 +16,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.aiexch.amigo"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36  // Updated for plugin compatibility
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -41,7 +41,7 @@ android {
     defaultConfig {
         applicationId = "com.aiexch.amigo"
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 36  // Updated for plugin compatibility
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true

@@ -129,10 +129,10 @@ class DownloadService {
 
         debugPrint('Android SDK Version: $sdkInt');
 
-        // For Android 13+ (API 33+), use the new permission model
-        if (sdkInt >= 33) {
-          // Android 13+ uses granular permissions
-          debugPrint('Requesting granular permissions for Android 13+');
+        // For Android 11+ (API 30+), use granular media permissions
+        if (sdkInt >= 30) {
+          // Android 11+ uses granular media permissions for photos, videos, and audio
+          debugPrint('Requesting granular media permissions for Android 11+');
 
           Map<Permission, PermissionStatus> statuses = await [
             Permission.photos,
@@ -163,24 +163,6 @@ class DownloadService {
             }
             return {'granted': false, 'message': 'Storage permissions denied'};
           }
-        } else if (sdkInt >= 30) {
-          // Android 11-12 (API 30-32) - use manage external storage
-          debugPrint('Requesting manage external storage for Android 11-12');
-
-          PermissionStatus status = await Permission.manageExternalStorage
-              .request();
-          debugPrint('Manage external storage status: $status');
-
-          if (status == PermissionStatus.granted) {
-            return {'granted': true, 'message': 'Storage permission granted'};
-          } else if (status == PermissionStatus.permanentlyDenied) {
-            return {
-              'granted': false,
-              'message':
-                  'Storage permission is permanently denied. Please enable it in app settings.',
-            };
-          }
-          return {'granted': false, 'message': 'Storage permission denied'};
         } else {
           // For older Android versions (API < 30), use storage permission
           debugPrint(
@@ -480,11 +462,8 @@ class DownloadService {
   /// Opens app settings for permission management
   Future<void> openAppSettingsForPermissions() async {
     try {
-      await Permission.manageExternalStorage.request();
-      // If still denied, guide user to settings
-      if (await Permission.manageExternalStorage.isDenied) {
-        await Permission.storage.request();
-      }
+      // Open app settings to allow user to manually enable permissions
+      await openAppSettings();
     } catch (e) {
       debugPrint('Error opening app settings: $e');
     }
@@ -497,8 +476,8 @@ class DownloadService {
         final androidInfo = await DeviceInfoPlugin().androidInfo;
         final sdkInt = androidInfo.version.sdkInt;
 
-        if (sdkInt >= 33) {
-          // Check granular permissions for Android 13+
+        if (sdkInt >= 30) {
+          // Check granular media permissions for Android 11+
           Map<Permission, PermissionStatus> statuses = await [
             Permission.photos,
             Permission.videos,
@@ -508,9 +487,6 @@ class DownloadService {
           return statuses.values.any(
             (status) => status == PermissionStatus.granted,
           );
-        } else if (sdkInt >= 30) {
-          // Check manage external storage for Android 11-12
-          return await Permission.manageExternalStorage.isGranted;
         } else {
           // Check storage permission for older versions
           return await Permission.storage.isGranted;
