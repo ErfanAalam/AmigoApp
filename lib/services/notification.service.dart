@@ -12,7 +12,9 @@ import 'package:amigo/models/message.model.dart';
 
 import '../api/auth.api-client.dart';
 import '../types/socket.types.dart';
+import '../utils/user.utils.dart';
 import 'call/call-background.service.dart';
+import 'socket/websocket.service.dart';
 
 // import 'package:amigo/firebase_options.dart';
 
@@ -299,8 +301,62 @@ class NotificationService {
       debugPrint(
         '✅ Stored message from FCM notification: ${chatMessagePayload.canonicalId ?? chatMessagePayload.optimisticId}',
       );
+
+      // Send delivery receipt to backend
+      await _sendDeliveryReceipt(chatMessagePayload);
     } catch (e) {
       debugPrint('❌ Error storing message from FCM notification: $e');
+    }
+  }
+
+  /// Send delivery receipt to backend via WebSocket
+  /// This notifies the sender that the message was delivered via FCM
+  Future<void> _sendDeliveryReceipt(ChatMessagePayload message) async {
+    try {
+      // Get current user ID
+      final currentUser = await UserUtils().getUserDetails();
+      if (currentUser == null) {
+        debugPrint('⚠️ Cannot send delivery receipt: no current user');
+        return;
+      }
+
+      // Only send receipt if we have a canonical (server) message ID
+      final messageId = message.canonicalId;
+      if (messageId == null) {
+        debugPrint('⚠️ Cannot send delivery receipt: no canonical message ID');
+        return;
+      }
+
+      final websocketService = WebSocketService();
+
+      // Check if WebSocket is connected
+      if (!websocketService.isConnected) {
+        debugPrint('ℹ️ WebSocket not connected, delivery receipt will be synced later');
+        return;
+      }
+
+      // Create delivery receipt payload
+      final deliveryPayload = MessageDeliveredPayload(
+        messageId: messageId,
+        convId: message.convId,
+        senderId: message.senderId,
+        recipientId: currentUser.id,
+        deliveredAt: DateTime.now(),
+      );
+
+      // Send delivery receipt via WebSocket
+      await websocketService.sendMessage({
+        'type': WSMessageType.messageDelivered.value,
+        'payload': deliveryPayload.toJson(),
+      });
+
+      debugPrint(
+        '📬 Sent delivery receipt for message $messageId to sender ${message.senderId}',
+      );
+    } catch (e) {
+      debugPrint('⚠️ Error sending delivery receipt: $e');
+      // Don't throw - delivery receipt is best-effort
+      // The sync mechanism will handle it if WebSocket fails
     }
   }
 

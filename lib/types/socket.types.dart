@@ -131,6 +131,7 @@ enum WSMessageType {
   messageForward('message:forward'),
   messageDelete('message:delete'),
   messageSync('message:sync'),
+  messageDelivered('message:delivered'),
   callInit('call:init'),
   callInitAck('call:init:ack'),
   callOffer('call:offer'),
@@ -897,6 +898,57 @@ class SyncMessagesPayload {
   }
 }
 
+/// Message delivered payload - delivery receipt for FCM messages
+class MessageDeliveredPayload {
+  final int messageId;
+  final int convId;
+  final int senderId;
+  final int recipientId;
+  final DateTime deliveredAt;
+
+  MessageDeliveredPayload({
+    required this.messageId,
+    required this.convId,
+    required this.senderId,
+    required this.recipientId,
+    required this.deliveredAt,
+  });
+
+  factory MessageDeliveredPayload.fromJson(Map<String, dynamic> json) {
+    DateTime deliveredAt;
+    try {
+      final deliveredAtData = json['delivered_at'];
+      if (deliveredAtData is String) {
+        deliveredAt = DateTime.parse(deliveredAtData);
+      } else if (deliveredAtData is DateTime) {
+        deliveredAt = deliveredAtData;
+      } else {
+        deliveredAt = DateTime.now();
+      }
+    } catch (e) {
+      deliveredAt = DateTime.now();
+    }
+
+    return MessageDeliveredPayload(
+      messageId: json['message_id'] as int,
+      convId: json['conv_id'] as int,
+      senderId: json['sender_id'] as int,
+      recipientId: json['recipient_id'] as int,
+      deliveredAt: deliveredAt,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'message_id': messageId,
+      'conv_id': convId,
+      'sender_id': senderId,
+      'recipient_id': recipientId,
+      'delivered_at': deliveredAt.toIso8601String(),
+    };
+  }
+}
+
 /// Call payload
 class CallPayload {
   final int? callId;
@@ -1083,6 +1135,8 @@ class WSMessage {
         return DeleteMessagePayload.fromJson(payloadJson);
       case WSMessageType.messageSync:
         return SyncMessagesPayload.fromJson(payloadJson);
+      case WSMessageType.messageDelivered:
+        return MessageDeliveredPayload.fromJson(payloadJson);
       case WSMessageType.callInit:
       case WSMessageType.callInitAck:
       case WSMessageType.callOffer:
@@ -1131,6 +1185,7 @@ class WSMessage {
     if (payload is MessagePinPayload) return payload.toJson();
     if (payload is MessageForwardPayload) return payload.toJson();
     if (payload is SyncMessagesPayload) return payload.toJson();
+    if (payload is MessageDeliveredPayload) return payload.toJson();
     if (payload is CallPayload) return payload.toJson();
     if (payload is ConversationActionPayload) return payload.toJson();
     return payload;
@@ -1167,6 +1222,9 @@ class WSMessage {
 
   SyncMessagesPayload? get syncMessagesPayload =>
       payload is SyncMessagesPayload ? payload : null;
+
+  MessageDeliveredPayload? get messageDeliveredPayload =>
+      payload is MessageDeliveredPayload ? payload : null;
 
   CallPayload? get callPayload => payload is CallPayload ? payload : null;
 
