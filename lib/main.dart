@@ -69,7 +69,8 @@ class MyApp extends material.StatefulWidget {
   material.State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends material.State<MyApp> with material.WidgetsBindingObserver {
+class _MyAppState extends material.State<MyApp>
+    with material.WidgetsBindingObserver {
   final AuthService _authService = AuthService();
   final WebSocketService _websocketService = WebSocketService();
   final UserStatusService _userStatusService = UserStatusService();
@@ -104,11 +105,11 @@ class _MyAppState extends material.State<MyApp> with material.WidgetsBindingObse
   @override
   void didChangeAppLifecycleState(material.AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    
+
     // Handle app lifecycle changes to manage wakelock properly
     final callService = CallService();
     final isInCall = callService.isInCall;
-    
+
     switch (state) {
       case material.AppLifecycleState.paused:
       case material.AppLifecycleState.inactive:
@@ -118,30 +119,40 @@ class _MyAppState extends material.State<MyApp> with material.WidgetsBindingObse
         if (!isInCall) {
           // No active call - disable wakelock to allow screen to lock
           WakelockPlus.disable();
-          debugPrint('[APP_LIFECYCLE] App going to background - disabled wakelock (no active call)');
+          debugPrint(
+            '[APP_LIFECYCLE] App going to background - disabled wakelock (no active call)',
+          );
         } else {
-          debugPrint('[APP_LIFECYCLE] App going to background - keeping wakelock (active call in progress)');
+          debugPrint(
+            '[APP_LIFECYCLE] App going to background - keeping wakelock (active call in progress)',
+          );
         }
         break;
-        
+
       case material.AppLifecycleState.resumed:
         // App is coming to foreground
         // Re-enable wakelock if there's an active call
         if (isInCall) {
           WakelockPlus.enable();
-          debugPrint('[APP_LIFECYCLE] App resumed - enabled wakelock (active call in progress)');
+          debugPrint(
+            '[APP_LIFECYCLE] App resumed - enabled wakelock (active call in progress)',
+          );
         } else {
           // Ensure wakelock is disabled when app resumes without active call
           WakelockPlus.disable();
-          debugPrint('[APP_LIFECYCLE] App resumed - disabled wakelock (no active call)');
+          debugPrint(
+            '[APP_LIFECYCLE] App resumed - disabled wakelock (no active call)',
+          );
         }
         break;
-        
+
       case material.AppLifecycleState.hidden:
         // App is hidden (Android 12+)
         if (!isInCall) {
           WakelockPlus.disable();
-          debugPrint('[APP_LIFECYCLE] App hidden - disabled wakelock (no active call)');
+          debugPrint(
+            '[APP_LIFECYCLE] App hidden - disabled wakelock (no active call)',
+          );
         }
         break;
     }
@@ -320,8 +331,6 @@ class _MyAppState extends material.State<MyApp> with material.WidgetsBindingObse
           debugPrint('❌ Failed to parse conversationId: $conversationIdStr');
           return;
         }
-
-        debugPrint('🔔 Navigating to conversation: $conversationId');
 
         // Try to fetch the conversation from local DB with retry
         await _fetchAndNavigateToConversationWithRetry(conversationId, data);

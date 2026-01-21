@@ -1,13 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter/material.dart' as material;
 
-import '../../env.dart';
 import '../../types/socket.types.dart';
 import '../../utils/navigation-helper.util.dart';
 import '../cookies.service.dart';
+import 'transport.manager.dart';
+import 'transport.service.dart';
 
 enum WebSocketConnectionState {
   disconnected,
@@ -17,25 +17,24 @@ enum WebSocketConnectionState {
   error,
 }
 
+/// WebSocket service that provides reliable real-time communication.
+/// 
+/// This service uses the TransportManager internally to automatically handle
+/// fallback between different transports (WebSocket → SSE → HTTP Long Polling)
+/// ensuring maximum connectivity even in restrictive network environments.
+/// 
+/// The public interface remains unchanged for backward compatibility.
 class WebSocketService {
   static final WebSocketService _instance = WebSocketService._internal();
   factory WebSocketService() => _instance;
   WebSocketService._internal();
 
-  WebSocket? _socket;
+  final CookieService _cookieService = CookieService();
+  final TransportManager _transportManager = TransportManager();
+
+  // Connection state tracking
   WebSocketConnectionState _connectionState =
       WebSocketConnectionState.disconnected;
-
-  final CookieService _cookieService = CookieService();
-
-  // If false, do not attempt automatic reconnects (e.g., during logout)
-  bool _allowReconnect = true;
-
-  // Connection management
-  Timer? _reconnectTimer;
-  int _reconnectAttempts = 0;
-  static const int maxReconnectAttempts = 50;
-  static const Duration reconnectInterval = Duration(seconds: 3);
   bool _isDialogShowing = false;
 
   // Stream controllers for different events
@@ -47,6 +46,12 @@ class WebSocketService {
 
   final StreamController<String> _errorController =
       StreamController<String>.broadcast();
+
+  // Subscriptions to transport manager
+  StreamSubscription? _connectionStateSub;
+  StreamSubscription? _messageSub;
+  StreamSubscription? _errorSub;
+  StreamSubscription? _transportTypeSub;
 
   // Getters
   WebSocketConnectionState get connectionState => _connectionState;
@@ -61,10 +66,19 @@ class WebSocketService {
   bool get isConnected =>
       _connectionState == WebSocketConnectionState.connected;
 
-  // Initialize WebSocket connection with access token from cookies
+  /// Get the current transport type being used (for diagnostics)
+  TransportType? get currentTransportType => _transportManager.currentTransportType;
+
+  /// Stream of transport type changes (for diagnostics/UI)
+  Stream<TransportType> get transportTypeStream => _transportManager.transportTypeStream;
+
+  /// Initialize connection with automatic transport fallback.
+  /// 
+  /// This will attempt to connect using the best available transport:
+  /// 1. WebSocket (preferred)
+  /// 2. SSE (Server-Sent Events)
+  /// 3. HTTP Long Polling
   Future<void> connect([int? conversationId]) async {
-    // Allow reconnects again on any explicit connect
-    _allowReconnect = true;
     if (_connectionState == WebSocketConnectionState.connecting ||
         _connectionState == WebSocketConnectionState.connected) {
       return;
@@ -79,112 +93,84 @@ class WebSocketService {
         throw Exception('No access token found in cookies');
       }
 
-      // Build WebSocket URL with access token as query parameter
-      final wsUrl =
-          '${Environment.websocketUrl}?token=${Uri.encodeComponent(accessToken)}';
+      // Set up subscriptions to transport manager
+      _setupTransportSubscriptions();
 
-      // Create WebSocket connection using native WebSocket
-      debugPrint('🔍 About to connect to: $wsUrl');
-      _socket = await WebSocket.connect(wsUrl);
+      // Connect via transport manager (handles fallback automatically)
+      debugPrint('🔌 Connecting via TransportManager...');
+      final success = await _transportManager.connect(accessToken);
 
-      // Listen to messages
-      _socket!.listen(
-        _handleMessage,
-        onError: _handleError,
-        onDone: _handleDisconnection,
-      );
-
-      _reconnectAttempts = 0;
-      _isDialogShowing = false; // Reset dialog flag on successful connection
-      _updateConnectionState(WebSocketConnectionState.connected);
-      debugPrint('✅ WebSocket connected successfully');
-
-      // If a conversation ID is provided, send active_in_conversation message
-      // if (conversationId != null) {
-      //   await sendMessage({
-      //     'type': 'active_in_conversation',
-      //     'conversation_id': conversationId,
-      //   });
-      // }
-    } catch (e) {
-      debugPrint('❌ WebSocket connection failed');
-      _handleConnectionError(e.toString());
-    }
-  }
-
-  /// Handle incoming WebSocket messages
-  void _handleMessage(dynamic message) {
-    try {
-      final WSMessage data;
-      Map<String, dynamic>? jsonMap;
-
-      // Handle string messages (JSON strings from WebSocket)
-      if (message is String) {
-        try {
-          jsonMap = json.decode(message) as Map<String, dynamic>;
-        } catch (e) {
-          debugPrint('⚠️ Failed to parse JSON string: $message');
-          debugPrint('❌ JSON decode error: $e');
-          return;
-        }
-      } else if (message is Map<String, dynamic>) {
-        jsonMap = message;
+      if (success) {
+        _isDialogShowing = false;
+        _updateConnectionState(WebSocketConnectionState.connected);
+        debugPrint('✅ Connected successfully via ${_transportManager.currentTransportType?.name}');
       } else {
-        debugPrint(
-          '⚠️ Received unexpected websocket message type: ${message.runtimeType}',
-        );
-        debugPrint('⚠️ Message content: $message');
-        return;
+        debugPrint('❌ All transport connections failed');
+        _updateConnectionState(WebSocketConnectionState.error);
+        _errorController.add('Failed to establish connection');
       }
-
-      // Parse the JSON map into WSMessage
-      data = WSMessage.fromJson(jsonMap);
-      _messageController.add(data);
-    } catch (e, stackTrace) {
-      debugPrint('❌ Error parsing WebSocket message: $e');
-      debugPrint('❌ Stack trace: $stackTrace');
-      _errorController.add('Error parsing message: $e');
+    } catch (e) {
+      debugPrint('❌ Connection failed: $e');
+      _updateConnectionState(WebSocketConnectionState.error);
+      _errorController.add('Connection failed: $e');
     }
   }
 
-  /// Handle WebSocket errors
-  void _handleError(dynamic error) {
-    debugPrint('❌ WebSocket error: $error');
-    _handleConnectionError(error.toString());
-  }
+  void _setupTransportSubscriptions() {
+    // Cancel existing subscriptions
+    _connectionStateSub?.cancel();
+    _messageSub?.cancel();
+    _errorSub?.cancel();
+    _transportTypeSub?.cancel();
 
-  /// Handle WebSocket disconnection
-  void _handleDisconnection() {
-    debugPrint('🔌 WebSocket disconnected');
-    _updateConnectionState(WebSocketConnectionState.disconnected);
-    if (_allowReconnect) {
-      _scheduleReconnect();
-    }
-  }
+    // Subscribe to connection state changes
+    _connectionStateSub = _transportManager.connectionStateStream.listen((state) {
+      final mappedState = _mapTransportState(state);
+      _updateConnectionState(mappedState);
 
-  /// Handle connection errors
-  void _handleConnectionError(String error) {
-    debugPrint('❌ WebSocket connection error');
-    _updateConnectionState(WebSocketConnectionState.error);
-    _errorController.add(error);
-    if (_allowReconnect) {
-      _scheduleReconnect();
-    }
-  }
-
-  /// Schedule reconnection attempt
-  void _scheduleReconnect() {
-    if (_reconnectAttempts >= maxReconnectAttempts) {
-      debugPrint('❌ Max reconnection attempts reached');
-      _showInternetIssueDialog();
-      return;
-    }
-
-    _reconnectAttempts++;
-    _updateConnectionState(WebSocketConnectionState.reconnecting);
-    _reconnectTimer = Timer(reconnectInterval, () {
-      connect();
+      // Show dialog when max reconnect attempts reached
+      if (state == TransportConnectionState.error) {
+        _showInternetIssueDialog();
+      }
     });
+
+    // Subscribe to messages
+    _messageSub = _transportManager.messageStream.listen((jsonMap) {
+      try {
+        // Parse the JSON map into WSMessage
+        final data = WSMessage.fromJson(jsonMap);
+        _messageController.add(data);
+      } catch (e, stackTrace) {
+        debugPrint('❌ Error parsing message: $e');
+        debugPrint('❌ Stack trace: $stackTrace');
+        _errorController.add('Error parsing message: $e');
+      }
+    });
+
+    // Subscribe to errors
+    _errorSub = _transportManager.errorStream.listen((error) {
+      _errorController.add(error);
+    });
+
+    // Subscribe to transport type changes (for logging)
+    _transportTypeSub = _transportManager.transportTypeStream.listen((type) {
+      debugPrint('📡 Transport type changed to: ${type.name}');
+    });
+  }
+
+  WebSocketConnectionState _mapTransportState(TransportConnectionState state) {
+    switch (state) {
+      case TransportConnectionState.disconnected:
+        return WebSocketConnectionState.disconnected;
+      case TransportConnectionState.connecting:
+        return WebSocketConnectionState.connecting;
+      case TransportConnectionState.connected:
+        return WebSocketConnectionState.connected;
+      case TransportConnectionState.reconnecting:
+        return WebSocketConnectionState.reconnecting;
+      case TransportConnectionState.error:
+        return WebSocketConnectionState.error;
+    }
   }
 
   void _showInternetIssueDialog() {
@@ -208,8 +194,9 @@ class WebSocketService {
           context: context,
           builder: (ctx) => material.AlertDialog(
             title: const material.Text('Connection issue'),
-            content: const material.Text(
-              "We're having trouble connecting to the server. Please check your internet connection.",
+            content: material.Text(
+              "We're having trouble connecting to the server. Please check your internet connection.\n\n"
+              "Current transport: ${_transportManager.currentTransportType?.name ?? 'none'}",
             ),
             actions: [
               material.TextButton(
@@ -238,59 +225,67 @@ class WebSocketService {
 
   /// Update connection state and notify listeners
   void _updateConnectionState(WebSocketConnectionState newState) {
-    _connectionState = newState;
-    _connectionStateController.add(newState);
+    if (_connectionState != newState) {
+      _connectionState = newState;
+      _connectionStateController.add(newState);
+    }
   }
 
-  /// Send a message through WebSocket
+  /// Send a message through the current transport
   Future<void> sendMessage(Map<String, dynamic> message) async {
-    if (_socket == null ||
-        _connectionState != WebSocketConnectionState.connected) {
-      throw Exception('WebSocket is not connected');
+    if (!isConnected) {
+      throw Exception('Not connected - cannot send message');
     }
 
     try {
       final jsonMessage = json.encode(message);
+      debugPrint('📤 Sending message: $jsonMessage');
 
-      debugPrint('📤 Sending WebSocket message: $jsonMessage');
-      _socket!.add(jsonMessage);
-      // print('📤 Sent WebSocket message dfdfg: $jsonMessage');
+      final success = await _transportManager.sendMessage(message);
+      if (!success) {
+        throw Exception('Failed to send message');
+      }
     } catch (e) {
-      debugPrint('❌ Error sending WebSocket message: $e');
+      debugPrint('❌ Error sending message: $e');
       throw Exception('Failed to send message: $e');
     }
   }
 
-  /// Disconnect WebSocket
+  /// Disconnect from server
   Future<void> disconnect() async {
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
+    _connectionStateSub?.cancel();
+    _messageSub?.cancel();
+    _errorSub?.cancel();
+    _transportTypeSub?.cancel();
 
-    if (_socket != null) {
-      await _socket!.close();
-      _socket = null;
-    }
-
+    await _transportManager.disconnect();
     _updateConnectionState(WebSocketConnectionState.disconnected);
   }
 
   /// Disconnect and suppress any automatic reconnects (use for logout)
   Future<void> shutdown() async {
-    _allowReconnect = false;
-    await disconnect();
+    _connectionStateSub?.cancel();
+    _messageSub?.cancel();
+    _errorSub?.cancel();
+    _transportTypeSub?.cancel();
+
+    await _transportManager.shutdown();
+    _updateConnectionState(WebSocketConnectionState.disconnected);
   }
 
-  /// Reconnect WebSocket (useful for token refresh scenarios)
+  /// Reconnect with fresh state (useful for token refresh scenarios)
   Future<void> reconnect() async {
-    await disconnect();
-    _reconnectAttempts = 0;
-    await connect();
+    await _transportManager.reconnect();
   }
 
-  /// Dispose resources
+  /// Dispose all resources
   void dispose() {
-    _reconnectTimer?.cancel();
-    _socket?.close();
+    _connectionStateSub?.cancel();
+    _messageSub?.cancel();
+    _errorSub?.cancel();
+    _transportTypeSub?.cancel();
+
+    _transportManager.dispose();
     _connectionStateController.close();
     _messageController.close();
     _errorController.close();

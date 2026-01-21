@@ -130,6 +130,7 @@ enum WSMessageType {
   messageReply('message:reply'),
   messageForward('message:forward'),
   messageDelete('message:delete'),
+  messageSync('message:sync'),
   callInit('call:init'),
   callInitAck('call:init:ack'),
   callOffer('call:offer'),
@@ -755,6 +756,147 @@ class MessageForwardPayload {
   }
 }
 
+/// Single synced message item
+class SyncMessageItem {
+  final int id;
+  final int convId;
+  final ChatType convType;
+  final int senderId;
+  final String? senderName;
+  final String? senderPfp;
+  final MessageType msgType;
+  final String? body;
+  final dynamic attachments;
+  final dynamic metadata;
+  final DateTime sentAt;
+  final DateTime createdAt;
+
+  SyncMessageItem({
+    required this.id,
+    required this.convId,
+    required this.convType,
+    required this.senderId,
+    this.senderName,
+    this.senderPfp,
+    required this.msgType,
+    this.body,
+    this.attachments,
+    this.metadata,
+    required this.sentAt,
+    required this.createdAt,
+  });
+
+  factory SyncMessageItem.fromJson(Map<String, dynamic> json) {
+    DateTime sentAt;
+    try {
+      final sentAtData = json['sent_at'];
+      if (sentAtData is String) {
+        sentAt = DateTime.parse(sentAtData);
+      } else if (sentAtData is DateTime) {
+        sentAt = sentAtData;
+      } else {
+        sentAt = DateTime.now();
+      }
+    } catch (e) {
+      sentAt = DateTime.now();
+    }
+
+    DateTime createdAt;
+    try {
+      final createdAtData = json['created_at'];
+      if (createdAtData is String) {
+        createdAt = DateTime.parse(createdAtData);
+      } else if (createdAtData is DateTime) {
+        createdAt = createdAtData;
+      } else {
+        createdAt = DateTime.now();
+      }
+    } catch (e) {
+      createdAt = DateTime.now();
+    }
+
+    return SyncMessageItem(
+      id: json['id'] as int,
+      convId: json['conv_id'] as int,
+      convType:
+          ChatType.fromString(json['conv_type'] as String?) ?? ChatType.dm,
+      senderId: json['sender_id'] as int,
+      senderName: json['sender_name'] as String?,
+      senderPfp: json['sender_pfp'] as String?,
+      msgType:
+          MessageType.fromString(json['msg_type'] as String?) ??
+          MessageType.text,
+      body: json['body'] as String?,
+      attachments: json['attachments'],
+      metadata: json['metadata'],
+      sentAt: sentAt,
+      createdAt: createdAt,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'conv_id': convId,
+      'conv_type': convType.value,
+      'sender_id': senderId,
+      if (senderName != null) 'sender_name': senderName,
+      if (senderPfp != null) 'sender_pfp': senderPfp,
+      'msg_type': msgType.value,
+      if (body != null) 'body': body,
+      if (attachments != null) 'attachments': attachments,
+      if (metadata != null) 'metadata': metadata,
+      'sent_at': sentAt.toIso8601String(),
+      'created_at': createdAt.toIso8601String(),
+    };
+  }
+}
+
+/// Sync messages payload - sent on reconnection with missed messages
+class SyncMessagesPayload {
+  final List<SyncMessageItem> messages;
+  final DateTime syncTimestamp;
+  final int totalCount;
+
+  SyncMessagesPayload({
+    required this.messages,
+    required this.syncTimestamp,
+    required this.totalCount,
+  });
+
+  factory SyncMessagesPayload.fromJson(Map<String, dynamic> json) {
+    DateTime syncTimestamp;
+    try {
+      final timestampData = json['sync_timestamp'];
+      if (timestampData is String) {
+        syncTimestamp = DateTime.parse(timestampData);
+      } else if (timestampData is DateTime) {
+        syncTimestamp = timestampData;
+      } else {
+        syncTimestamp = DateTime.now();
+      }
+    } catch (e) {
+      syncTimestamp = DateTime.now();
+    }
+
+    return SyncMessagesPayload(
+      messages: (json['messages'] as List<dynamic>? ?? [])
+          .map((e) => SyncMessageItem.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      syncTimestamp: syncTimestamp,
+      totalCount: json['total_count'] as int? ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'messages': messages.map((e) => e.toJson()).toList(),
+      'sync_timestamp': syncTimestamp.toIso8601String(),
+      'total_count': totalCount,
+    };
+  }
+}
+
 /// Call payload
 class CallPayload {
   final int? callId;
@@ -939,6 +1081,8 @@ class WSMessage {
         return MessageForwardPayload.fromJson(payloadJson);
       case WSMessageType.messageDelete:
         return DeleteMessagePayload.fromJson(payloadJson);
+      case WSMessageType.messageSync:
+        return SyncMessagesPayload.fromJson(payloadJson);
       case WSMessageType.callInit:
       case WSMessageType.callInitAck:
       case WSMessageType.callOffer:
@@ -986,6 +1130,7 @@ class WSMessage {
     if (payload is MiscPayload) return payload.toJson();
     if (payload is MessagePinPayload) return payload.toJson();
     if (payload is MessageForwardPayload) return payload.toJson();
+    if (payload is SyncMessagesPayload) return payload.toJson();
     if (payload is CallPayload) return payload.toJson();
     if (payload is ConversationActionPayload) return payload.toJson();
     return payload;
@@ -1019,6 +1164,9 @@ class WSMessage {
 
   MessageForwardPayload? get messageForwardPayload =>
       payload is MessageForwardPayload ? payload : null;
+
+  SyncMessagesPayload? get syncMessagesPayload =>
+      payload is SyncMessagesPayload ? payload : null;
 
   CallPayload? get callPayload => payload is CallPayload ? payload : null;
 

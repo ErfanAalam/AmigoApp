@@ -1,4 +1,3 @@
-import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +12,7 @@ import '../../services/socket/websocket.service.dart';
 import '../../ui/country-selector.modal.dart';
 import '../../ui/setup-loading.popup.dart';
 import '../../ui/snackbar.dart';
+import '../../utils/user.utils.dart';
 import '../home.layout.dart';
 import 'signup-status.screen.dart';
 
@@ -137,25 +137,28 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       _isLoading = true;
     });
 
-    // final response = await apiService.verifySignupOtp(
-    //   _completePhoneNumber.replaceAll(' ', ''),
-    //   int.parse(_otpController.text),
-    //   _firstNameController.text,
-    //   _lastNameController.text,
-    // );
-
-    final response = await apiService.requestSignup(
+    final response = await apiService.verifySignupOtp(
+      _completePhoneNumber.replaceAll(' ', ''),
+      int.parse(_otpController.text),
       _firstNameController.text,
       _lastNameController.text,
-      _completePhoneNumber.replaceAll(' ', ''),
     );
+
+    // final response = await apiService.requestSignup(
+    //   _firstNameController.text,
+    //   _lastNameController.text,
+    //   _completePhoneNumber.replaceAll(' ', ''),
+    // );
 
     if (response['success']) {
       // Show the setup loading popup
-      // _showSetupLoadingPopup();
+      _showSetupLoadingPopup();
 
       if (mounted) {
-        Snack.success('Signup request sent successfully!!!Wait for the admin to approve your request');
+        // Snack.success(
+        //   'Signup request sent successfully!!!Wait for the admin to approve your request',
+        // );
+        Snack.success('Signup successful! Welcome to Amigo Chats!');
       }
 
       // clear the form
@@ -168,25 +171,23 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
         _isLoading = false;
       });
 
-      // final appVersion = await UserUtils().getAppVersion();
-      // await userService.updateUser({'app_version': appVersion});
+      final appVersion = await UserUtils().getAppVersion();
+      await userService.updateUser({'app_version': appVersion});
 
-      // final userDetail = {
-      //   'id': response['data']['id'],
-      //   'name': response['data']['name'],
-      //   'phone': response['data']['phone'],
-      //   'role': response['data']['role'],
-      //   'profile_pic': null,
-      //   'created_at': DateTime.now().toIso8601String(),
-      //   'call_access': false,
-      // };
+      final userDetail = {
+        'id': response['data']['id'],
+        'name': response['data']['name'],
+        'phone': response['data']['phone'],
+        'role': response['data']['role'],
+        'profile_pic': null,
+        'created_at': DateTime.now().toIso8601String(),
+        'call_access': false,
+      };
 
-      // await UserUtils().saveUserDetails(UserModel.fromJson(userDetail));
+      await UserUtils().saveUserDetails(UserModel.fromJson(userDetail));
 
       // // Send FCM token to backend after successful signup
-      // await authService.sendFCMTokenToBackend(3);
-
-
+      await authService.sendFCMTokenToBackend(3);
     } else {
       if (mounted) {
         Snack.error('Error verifying Signup OTP');
@@ -217,10 +218,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
             children: [
               // Status Check Button in Upper Right
               material.Padding(
-                padding: const material.EdgeInsets.only(
-                  top: 8,
-                  right: 8,
-                ),
+                padding: const material.EdgeInsets.only(top: 8, right: 8),
                 child: material.Align(
                   alignment: material.Alignment.topRight,
                   child: material.Material(
@@ -275,7 +273,9 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
               // Main Content
               material.Expanded(
                 child: material.SingleChildScrollView(
-                  padding: const material.EdgeInsets.symmetric(horizontal: 24.0),
+                  padding: const material.EdgeInsets.symmetric(
+                    horizontal: 24.0,
+                  ),
                   child: material.ConstrainedBox(
                     constraints: material.BoxConstraints(
                       minHeight:
@@ -289,276 +289,97 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                         children: [
                           const material.SizedBox(height: 20),
 
-                    // App Logo Section
-                    material.Container(
-                      padding: const material.EdgeInsets.all(12),
-                      decoration: material.BoxDecoration(
-                        color: material.Colors.white.withOpacity(0.15),
-                        shape: material.BoxShape.circle,
-                        border: material.Border.all(
-                          color: material.Colors.white.withOpacity(0.3),
-                          width: 1.5,
-                        ),
-                        boxShadow: [
-                          material.BoxShadow(
-                            color: material.Colors.black.withOpacity(0.1),
-                            blurRadius: 15,
-                            offset: const material.Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: const material.Icon(
-                        material.Icons.person_add_rounded,
-                        size: 40,
-                        color: material.Colors.white,
-                      ),
-                    ),
-
-                    const material.SizedBox(height: 20),
-
-                    // App Name
-                    const material.Text(
-                      'Amigo Chat App',
-                      textAlign: material.TextAlign.center,
-                      style: material.TextStyle(
-                        fontSize: 24,
-                        fontWeight: material.FontWeight.bold,
-                        color: material.Colors.white,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-
-                    const material.SizedBox(height: 4),
-
-                    // Welcome Text
-                    material.Text(
-                      !_isOtpSent
-                          ? 'Join the conversation'
-                          : 'Enter verification code',
-                      textAlign: material.TextAlign.center,
-                      style: material.TextStyle(
-                        fontSize: 14,
-                        color: material.Colors.white.withOpacity(0.9),
-                        fontWeight: material.FontWeight.w400,
-                      ),
-                    ),
-
-                    const material.SizedBox(height: 30),
-
-                    // Main Card
-                    material.Container(
-                      padding: const material.EdgeInsets.all(20),
-                      decoration: material.BoxDecoration(
-                        color: material.Colors.white,
-                        borderRadius: material.BorderRadius.circular(20),
-                        boxShadow: [
-                          material.BoxShadow(
-                            color: material.Colors.black.withOpacity(0.1),
-                            blurRadius: 20,
-                            offset: const material.Offset(0, 10),
-                          ),
-                        ],
-                      ),
-                      child: material.Column(
-                        crossAxisAlignment: material.CrossAxisAlignment.stretch,
-                        children: [
-                          // Form Fields
-                          if (!_isOtpSent) ...[
-                            // First Name Field
-                            material.Column(
-                              crossAxisAlignment:
-                                  material.CrossAxisAlignment.start,
-                              children: [
-                                material.Text(
-                                  'First Name',
-                                  style: material.TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: material.FontWeight.w600,
-                                    color: material.Colors.grey[800],
-                                  ),
-                                ),
-                                const material.SizedBox(height: 6),
-                                material.Container(
-                                  decoration: material.BoxDecoration(
-                                    color: material.Colors.grey[50],
-                                    borderRadius:
-                                        material.BorderRadius.circular(16),
-                                    border: material.Border.all(
-                                      color: material.Colors.grey[200]!,
-                                    ),
-                                  ),
-                                  child: material.Padding(
-                                    padding:
-                                        const material.EdgeInsets.symmetric(
-                                          horizontal: 16.0,
-                                        ),
-                                    child: material.TextField(
-                                      controller: _firstNameController,
-                                      textInputAction:
-                                          material.TextInputAction.next,
-                                      style: material.TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: material.FontWeight.w500,
-                                      ),
-                                      decoration: material.InputDecoration(
-                                        hintText: 'Enter your first name',
-                                        hintStyle: material.TextStyle(
-                                          color: material.Colors.grey[400],
-                                          fontSize: 15,
-                                        ),
-                                        border: material.InputBorder.none,
-                                        contentPadding:
-                                            const material.EdgeInsets.symmetric(
-                                              vertical: 14.0,
-                                            ),
-                                      ),
-                                    ),
-                                  ),
+                          // App Logo Section
+                          material.Container(
+                            padding: const material.EdgeInsets.all(12),
+                            decoration: material.BoxDecoration(
+                              color: material.Colors.white.withOpacity(0.15),
+                              shape: material.BoxShape.circle,
+                              border: material.Border.all(
+                                color: material.Colors.white.withOpacity(0.3),
+                                width: 1.5,
+                              ),
+                              boxShadow: [
+                                material.BoxShadow(
+                                  color: material.Colors.black.withOpacity(0.1),
+                                  blurRadius: 15,
+                                  offset: const material.Offset(0, 8),
                                 ),
                               ],
                             ),
-                            const material.SizedBox(height: 16),
+                            child: const material.Icon(
+                              material.Icons.person_add_rounded,
+                              size: 40,
+                              color: material.Colors.white,
+                            ),
+                          ),
 
-                            // Last Name Field
-                            material.Column(
-                              crossAxisAlignment:
-                                  material.CrossAxisAlignment.start,
-                              children: [
-                                material.Text(
-                                  'Last Name',
-                                  style: material.TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: material.FontWeight.w600,
-                                    color: material.Colors.grey[800],
-                                  ),
-                                ),
-                                const material.SizedBox(height: 6),
-                                material.Container(
-                                  decoration: material.BoxDecoration(
-                                    color: material.Colors.grey[50],
-                                    borderRadius:
-                                        material.BorderRadius.circular(16),
-                                    border: material.Border.all(
-                                      color: material.Colors.grey[200]!,
-                                    ),
-                                  ),
-                                  child: material.Padding(
-                                    padding:
-                                        const material.EdgeInsets.symmetric(
-                                          horizontal: 16.0,
-                                        ),
-                                    child: material.TextField(
-                                      controller: _lastNameController,
-                                      textInputAction:
-                                          material.TextInputAction.next,
-                                      style: material.TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: material.FontWeight.w500,
-                                      ),
-                                      decoration: material.InputDecoration(
-                                        hintText: 'Enter your last name',
-                                        hintStyle: material.TextStyle(
-                                          color: material.Colors.grey[400],
-                                          fontSize: 15,
-                                        ),
-                                        border: material.InputBorder.none,
-                                        contentPadding:
-                                            const material.EdgeInsets.symmetric(
-                                              vertical: 14.0,
-                                            ),
-                                      ),
-                                    ),
-                                  ),
+                          const material.SizedBox(height: 20),
+
+                          // App Name
+                          const material.Text(
+                            'Amigo Chat App',
+                            textAlign: material.TextAlign.center,
+                            style: material.TextStyle(
+                              fontSize: 24,
+                              fontWeight: material.FontWeight.bold,
+                              color: material.Colors.white,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+
+                          const material.SizedBox(height: 4),
+
+                          // Welcome Text
+                          material.Text(
+                            !_isOtpSent
+                                ? 'Join the conversation'
+                                : 'Enter verification code',
+                            textAlign: material.TextAlign.center,
+                            style: material.TextStyle(
+                              fontSize: 14,
+                              color: material.Colors.white.withOpacity(0.9),
+                              fontWeight: material.FontWeight.w400,
+                            ),
+                          ),
+
+                          const material.SizedBox(height: 30),
+
+                          // Main Card
+                          material.Container(
+                            padding: const material.EdgeInsets.all(20),
+                            decoration: material.BoxDecoration(
+                              color: material.Colors.white,
+                              borderRadius: material.BorderRadius.circular(20),
+                              boxShadow: [
+                                material.BoxShadow(
+                                  color: material.Colors.black.withOpacity(0.1),
+                                  blurRadius: 20,
+                                  offset: const material.Offset(0, 10),
                                 ),
                               ],
                             ),
-                            const material.SizedBox(height: 16),
-
-                            // Phone Number Field
-                            material.Column(
+                            child: material.Column(
                               crossAxisAlignment:
-                                  material.CrossAxisAlignment.start,
+                                  material.CrossAxisAlignment.stretch,
                               children: [
-                                material.Text(
-                                  'Phone Number',
-                                  style: material.TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: material.FontWeight.w600,
-                                    color: material.Colors.grey[800],
-                                  ),
-                                ),
-                                const material.SizedBox(height: 6),
-                                material.Row(
-                                  children: [
-                                    // Country Code Selector
-                                    material.Container(
-                                      decoration: material.BoxDecoration(
-                                        color: material.Colors.grey[50],
-                                        borderRadius:
-                                            material.BorderRadius.circular(16),
-                                        border: material.Border.all(
-                                          color: material.Colors.grey[200]!,
+                                // Form Fields
+                                if (!_isOtpSent) ...[
+                                  // First Name Field
+                                  material.Column(
+                                    crossAxisAlignment:
+                                        material.CrossAxisAlignment.start,
+                                    children: [
+                                      material.Text(
+                                        'First Name',
+                                        style: material.TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: material.FontWeight.w600,
+                                          color: material.Colors.grey[800],
                                         ),
                                       ),
-                                      child: material.Material(
-                                        color: material.Colors.transparent,
-                                        child: material.InkWell(
-                                          onTap: _showCountrySelector,
-                                          borderRadius: material
-                                              .BorderRadius.circular(16),
-                                          child: material.Padding(
-                                            padding:
-                                                const material.EdgeInsets.symmetric(
-                                                  horizontal: 12,
-                                                  vertical: 14,
-                                                ),
-                                            child: material.Row(
-                                              mainAxisSize:
-                                                  material.MainAxisSize.min,
-                                              children: [
-                                                material.Text(
-                                                  _selectedCountry.flag,
-                                                  style:
-                                                      const material.TextStyle(
-                                                        fontSize: 20,
-                                                      ),
-                                                ),
-                                                const material.SizedBox(
-                                                  width: 8,
-                                                ),
-                                                material.Text(
-                                                  _selectedCountry.dialCode,
-                                                  style: material.TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight: material
-                                                        .FontWeight
-                                                        .w600,
-                                                    color: material
-                                                        .Colors
-                                                        .grey[800],
-                                                  ),
-                                                ),
-                                                const material.SizedBox(
-                                                  width: 4,
-                                                ),
-                                                material.Icon(
-                                                  material
-                                                      .Icons
-                                                      .keyboard_arrow_down,
-                                                  size: 20,
-                                                  color:
-                                                      material.Colors.grey[600],
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const material.SizedBox(width: 12),
-                                    // Phone Number Input
-                                    material.Expanded(
-                                      child: material.Container(
+                                      const material.SizedBox(height: 6),
+                                      material.Container(
                                         decoration: material.BoxDecoration(
                                           color: material.Colors.grey[50],
                                           borderRadius: material
@@ -573,25 +394,16 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                                                 horizontal: 16.0,
                                               ),
                                           child: material.TextField(
-                                            controller: _phoneController,
-                                            keyboardType:
-                                                material.TextInputType.phone,
+                                            controller: _firstNameController,
                                             textInputAction:
-                                                material.TextInputAction.done,
-                                            inputFormatters: [
-                                              FilteringTextInputFormatter
-                                                  .digitsOnly,
-                                            ],
-                                            onChanged: (value) =>
-                                                _updateCompletePhoneNumber(),
+                                                material.TextInputAction.next,
                                             style: material.TextStyle(
                                               fontSize: 15,
                                               fontWeight:
                                                   material.FontWeight.w500,
                                             ),
                                             decoration: material.InputDecoration(
-                                              hintText:
-                                                  'Enter your phone number',
+                                              hintText: 'Enter your first name',
                                               hintStyle: material.TextStyle(
                                                 color:
                                                     material.Colors.grey[400],
@@ -606,199 +418,418 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                                           ),
                                         ),
                                       ),
+                                    ],
+                                  ),
+                                  const material.SizedBox(height: 16),
+
+                                  // Last Name Field
+                                  material.Column(
+                                    crossAxisAlignment:
+                                        material.CrossAxisAlignment.start,
+                                    children: [
+                                      material.Text(
+                                        'Last Name',
+                                        style: material.TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: material.FontWeight.w600,
+                                          color: material.Colors.grey[800],
+                                        ),
+                                      ),
+                                      const material.SizedBox(height: 6),
+                                      material.Container(
+                                        decoration: material.BoxDecoration(
+                                          color: material.Colors.grey[50],
+                                          borderRadius: material
+                                              .BorderRadius.circular(16),
+                                          border: material.Border.all(
+                                            color: material.Colors.grey[200]!,
+                                          ),
+                                        ),
+                                        child: material.Padding(
+                                          padding:
+                                              const material.EdgeInsets.symmetric(
+                                                horizontal: 16.0,
+                                              ),
+                                          child: material.TextField(
+                                            controller: _lastNameController,
+                                            textInputAction:
+                                                material.TextInputAction.next,
+                                            style: material.TextStyle(
+                                              fontSize: 15,
+                                              fontWeight:
+                                                  material.FontWeight.w500,
+                                            ),
+                                            decoration: material.InputDecoration(
+                                              hintText: 'Enter your last name',
+                                              hintStyle: material.TextStyle(
+                                                color:
+                                                    material.Colors.grey[400],
+                                                fontSize: 15,
+                                              ),
+                                              border: material.InputBorder.none,
+                                              contentPadding:
+                                                  const material.EdgeInsets.symmetric(
+                                                    vertical: 14.0,
+                                                  ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const material.SizedBox(height: 16),
+
+                                  // Phone Number Field
+                                  material.Column(
+                                    crossAxisAlignment:
+                                        material.CrossAxisAlignment.start,
+                                    children: [
+                                      material.Text(
+                                        'Phone Number',
+                                        style: material.TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: material.FontWeight.w600,
+                                          color: material.Colors.grey[800],
+                                        ),
+                                      ),
+                                      const material.SizedBox(height: 6),
+                                      material.Row(
+                                        children: [
+                                          // Country Code Selector
+                                          material.Container(
+                                            decoration: material.BoxDecoration(
+                                              color: material.Colors.grey[50],
+                                              borderRadius: material
+                                                  .BorderRadius.circular(16),
+                                              border: material.Border.all(
+                                                color:
+                                                    material.Colors.grey[200]!,
+                                              ),
+                                            ),
+                                            child: material.Material(
+                                              color:
+                                                  material.Colors.transparent,
+                                              child: material.InkWell(
+                                                onTap: _showCountrySelector,
+                                                borderRadius: material
+                                                    .BorderRadius.circular(16),
+                                                child: material.Padding(
+                                                  padding:
+                                                      const material.EdgeInsets.symmetric(
+                                                        horizontal: 12,
+                                                        vertical: 14,
+                                                      ),
+                                                  child: material.Row(
+                                                    mainAxisSize: material
+                                                        .MainAxisSize
+                                                        .min,
+                                                    children: [
+                                                      material.Text(
+                                                        _selectedCountry.flag,
+                                                        style:
+                                                            const material.TextStyle(
+                                                              fontSize: 20,
+                                                            ),
+                                                      ),
+                                                      const material.SizedBox(
+                                                        width: 8,
+                                                      ),
+                                                      material.Text(
+                                                        _selectedCountry
+                                                            .dialCode,
+                                                        style:
+                                                            material.TextStyle(
+                                                              fontSize: 16,
+                                                              fontWeight:
+                                                                  material
+                                                                      .FontWeight
+                                                                      .w600,
+                                                              color: material
+                                                                  .Colors
+                                                                  .grey[800],
+                                                            ),
+                                                      ),
+                                                      const material.SizedBox(
+                                                        width: 4,
+                                                      ),
+                                                      material.Icon(
+                                                        material
+                                                            .Icons
+                                                            .keyboard_arrow_down,
+                                                        size: 20,
+                                                        color: material
+                                                            .Colors
+                                                            .grey[600],
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          const material.SizedBox(width: 12),
+                                          // Phone Number Input
+                                          material.Expanded(
+                                            child: material.Container(
+                                              decoration: material.BoxDecoration(
+                                                color: material.Colors.grey[50],
+                                                borderRadius: material
+                                                    .BorderRadius.circular(16),
+                                                border: material.Border.all(
+                                                  color: material
+                                                      .Colors
+                                                      .grey[200]!,
+                                                ),
+                                              ),
+                                              child: material.Padding(
+                                                padding:
+                                                    const material.EdgeInsets.symmetric(
+                                                      horizontal: 16.0,
+                                                    ),
+                                                child: material.TextField(
+                                                  controller: _phoneController,
+                                                  keyboardType: material
+                                                      .TextInputType
+                                                      .phone,
+                                                  textInputAction: material
+                                                      .TextInputAction
+                                                      .done,
+                                                  inputFormatters: [
+                                                    FilteringTextInputFormatter
+                                                        .digitsOnly,
+                                                  ],
+                                                  onChanged: (value) =>
+                                                      _updateCompletePhoneNumber(),
+                                                  style: material.TextStyle(
+                                                    fontSize: 15,
+                                                    fontWeight: material
+                                                        .FontWeight
+                                                        .w500,
+                                                  ),
+                                                  decoration: material.InputDecoration(
+                                                    hintText:
+                                                        'Enter your phone number',
+                                                    hintStyle:
+                                                        material.TextStyle(
+                                                          color: material
+                                                              .Colors
+                                                              .grey[400],
+                                                          fontSize: 15,
+                                                        ),
+                                                    border: material
+                                                        .InputBorder
+                                                        .none,
+                                                    contentPadding:
+                                                        const material.EdgeInsets.symmetric(
+                                                          vertical: 14.0,
+                                                        ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ] else ...[
+                                  // OTP Field
+                                  material.Column(
+                                    crossAxisAlignment:
+                                        material.CrossAxisAlignment.start,
+                                    children: [
+                                      material.Text(
+                                        'Verification Code',
+                                        style: material.TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: material.FontWeight.w600,
+                                          color: material.Colors.grey[800],
+                                        ),
+                                      ),
+                                      const material.SizedBox(height: 6),
+                                      material.Container(
+                                        decoration: material.BoxDecoration(
+                                          color: material.Colors.grey[50],
+                                          borderRadius: material
+                                              .BorderRadius.circular(16),
+                                          border: material.Border.all(
+                                            color: material.Colors.grey[200]!,
+                                          ),
+                                        ),
+                                        child: material.Padding(
+                                          padding:
+                                              const material.EdgeInsets.symmetric(
+                                                horizontal: 16.0,
+                                              ),
+                                          child: material.TextField(
+                                            controller: _otpController,
+                                            keyboardType:
+                                                material.TextInputType.number,
+                                            textAlign:
+                                                material.TextAlign.center,
+                                            textInputAction:
+                                                material.TextInputAction.done,
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter
+                                                  .digitsOnly,
+                                            ],
+                                            style: material.TextStyle(
+                                              fontSize: 18,
+                                              fontWeight:
+                                                  material.FontWeight.w600,
+                                              letterSpacing: 3,
+                                            ),
+                                            decoration: material.InputDecoration(
+                                              hintText: '000000',
+                                              hintStyle: material.TextStyle(
+                                                color:
+                                                    material.Colors.grey[400],
+                                                fontSize: 18,
+                                                letterSpacing: 3,
+                                              ),
+                                              border: material.InputBorder.none,
+                                              contentPadding:
+                                                  const material.EdgeInsets.symmetric(
+                                                    vertical: 14.0,
+                                                  ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                                const material.SizedBox(height: 24),
+
+                                // Action Button
+                                material.Container(
+                                  decoration: material.BoxDecoration(
+                                    gradient: material.LinearGradient(
+                                      colors: [
+                                        themeColor.primary,
+                                        themeColor.primary,
+                                      ],
+                                    ),
+                                    borderRadius:
+                                        material.BorderRadius.circular(14),
+                                    boxShadow: [
+                                      material.BoxShadow(
+                                        color: themeColor.primary.withOpacity(
+                                          0.3,
+                                        ),
+                                        blurRadius: 15,
+                                        offset: const material.Offset(0, 8),
+                                      ),
+                                    ],
+                                  ),
+                                  child: material.Material(
+                                    color: material.Colors.transparent,
+                                    child: material.InkWell(
+                                      onTap: _isLoading
+                                          ? null
+                                          : () {
+                                              !_isOtpSent
+                                                  ? handleSendOtp()
+                                                  : handleVerifyOtp();
+                                            },
+                                      borderRadius:
+                                          material.BorderRadius.circular(14),
+                                      child: material.Padding(
+                                        padding:
+                                            const material.EdgeInsets.symmetric(
+                                              vertical: 14,
+                                            ),
+                                        child: material.Row(
+                                          mainAxisAlignment:
+                                              material.MainAxisAlignment.center,
+                                          children: [
+                                            if (_isLoading)
+                                              const material.SizedBox(
+                                                height: 20,
+                                                width: 20,
+                                                child:
+                                                    material.CircularProgressIndicator(
+                                                      color:
+                                                          material.Colors.white,
+                                                      strokeWidth: 2,
+                                                    ),
+                                              )
+                                            else ...[
+                                              material.Text(
+                                                !_isOtpSent
+                                                    ? 'Send OTP'
+                                                    : 'Verify & Create Account',
+                                                style: const material.TextStyle(
+                                                  fontSize: 16,
+                                                  fontWeight:
+                                                      material.FontWeight.bold,
+                                                  color: material.Colors.white,
+                                                  letterSpacing: 0.5,
+                                                ),
+                                              ),
+                                              const material.SizedBox(width: 8),
+                                              const material.Icon(
+                                                material
+                                                    .Icons
+                                                    .arrow_forward_rounded,
+                                                color: material.Colors.white,
+                                                size: 20,
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+
+                                const material.SizedBox(height: 20),
+
+                                // Login Link
+                                material.Row(
+                                  mainAxisAlignment:
+                                      material.MainAxisAlignment.center,
+                                  children: [
+                                    material.Text(
+                                      "Already have an account? ",
+                                      style: material.TextStyle(
+                                        color: material.Colors.grey[600],
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    material.GestureDetector(
+                                      onTap: () {
+                                        material.Navigator.pop(context);
+                                      },
+                                      child: material.Text(
+                                        'Sign In',
+                                        style: material.TextStyle(
+                                          color: themeColor.primary,
+                                          fontWeight: material.FontWeight.bold,
+                                          fontSize: 13,
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ),
                               ],
                             ),
-                          ] else ...[
-                            // OTP Field
-                            material.Column(
-                              crossAxisAlignment:
-                                  material.CrossAxisAlignment.start,
-                              children: [
-                                material.Text(
-                                  'Verification Code',
-                                  style: material.TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: material.FontWeight.w600,
-                                    color: material.Colors.grey[800],
-                                  ),
-                                ),
-                                const material.SizedBox(height: 6),
-                                material.Container(
-                                  decoration: material.BoxDecoration(
-                                    color: material.Colors.grey[50],
-                                    borderRadius:
-                                        material.BorderRadius.circular(16),
-                                    border: material.Border.all(
-                                      color: material.Colors.grey[200]!,
-                                    ),
-                                  ),
-                                  child: material.Padding(
-                                    padding:
-                                        const material.EdgeInsets.symmetric(
-                                          horizontal: 16.0,
-                                        ),
-                                    child: material.TextField(
-                                      controller: _otpController,
-                                      keyboardType:
-                                          material.TextInputType.number,
-                                      textAlign: material.TextAlign.center,
-                                      textInputAction:
-                                          material.TextInputAction.done,
-                                      inputFormatters: [
-                                        FilteringTextInputFormatter.digitsOnly,
-                                      ],
-                                      style: material.TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: material.FontWeight.w600,
-                                        letterSpacing: 3,
-                                      ),
-                                      decoration: material.InputDecoration(
-                                        hintText: '000000',
-                                        hintStyle: material.TextStyle(
-                                          color: material.Colors.grey[400],
-                                          fontSize: 18,
-                                          letterSpacing: 3,
-                                        ),
-                                        border: material.InputBorder.none,
-                                        contentPadding:
-                                            const material.EdgeInsets.symmetric(
-                                              vertical: 14.0,
-                                            ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                          const material.SizedBox(height: 24),
+                          ),
 
-                          // Action Button
-                          material.Container(
-                            decoration: material.BoxDecoration(
-                              gradient: material.LinearGradient(
-                                colors: [
-                                  themeColor.primary,
-                                  themeColor.primary,
-                                ],
-                              ),
-                              borderRadius: material.BorderRadius.circular(14),
-                              boxShadow: [
-                                material.BoxShadow(
-                                  color: themeColor.primary.withOpacity(0.3),
-                                  blurRadius: 15,
-                                  offset: const material.Offset(0, 8),
-                                ),
-                              ],
-                            ),
-                            child: material.Material(
-                              color: material.Colors.transparent,
-                              child: material.InkWell(
-                                onTap: _isLoading
-                                    ? null
-                                    : () {
-                                        !_isOtpSent
-                                            ? handleSendOtp()
-                                            : handleVerifyOtp();
-                                      },
-                                borderRadius: material.BorderRadius.circular(
-                                  14,
-                                ),
-                                child: material.Padding(
-                                  padding: const material.EdgeInsets.symmetric(
-                                    vertical: 14,
-                                  ),
-                                  child: material.Row(
-                                    mainAxisAlignment:
-                                        material.MainAxisAlignment.center,
-                                    children: [
-                                      if (_isLoading)
-                                        const material.SizedBox(
-                                          height: 20,
-                                          width: 20,
-                                          child:
-                                              material.CircularProgressIndicator(
-                                                color: material.Colors.white,
-                                                strokeWidth: 2,
-                                              ),
-                                        )
-                                      else ...[
-                                        material.Text(
-                                          !_isOtpSent
-                                              ? 'Send OTP'
-                                              : 'Verify & Create Account',
-                                          style: const material.TextStyle(
-                                            fontSize: 16,
-                                            fontWeight:
-                                                material.FontWeight.bold,
-                                            color: material.Colors.white,
-                                            letterSpacing: 0.5,
-                                          ),
-                                        ),
-                                        const material.SizedBox(width: 8),
-                                        const material.Icon(
-                                          material.Icons.arrow_forward_rounded,
-                                          color: material.Colors.white,
-                                          size: 20,
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                              ),
+                          const material.Spacer(),
+
+                          // Footer
+                          material.Text(
+                            'By creating an account, you agree to our Terms of Service\nand Privacy Policy',
+                            textAlign: material.TextAlign.center,
+                            style: material.TextStyle(
+                              color: material.Colors.white.withOpacity(0.7),
+                              fontSize: 11,
+                              height: 1.3,
                             ),
                           ),
 
-                          const material.SizedBox(height: 20),
-
-                          // Login Link
-                          material.Row(
-                            mainAxisAlignment:
-                                material.MainAxisAlignment.center,
-                            children: [
-                              material.Text(
-                                "Already have an account? ",
-                                style: material.TextStyle(
-                                  color: material.Colors.grey[600],
-                                  fontSize: 13,
-                                ),
-                              ),
-                              material.GestureDetector(
-                                onTap: () {
-                                  material.Navigator.pop(context);
-                                },
-                                child: material.Text(
-                                  'Sign In',
-                                  style: material.TextStyle(
-                                    color: themeColor.primary,
-                                    fontWeight: material.FontWeight.bold,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const material.Spacer(),
-
-                    // Footer
-                    material.Text(
-                      'By creating an account, you agree to our Terms of Service\nand Privacy Policy',
-                      textAlign: material.TextAlign.center,
-                      style: material.TextStyle(
-                        color: material.Colors.white.withOpacity(0.7),
-                        fontSize: 11,
-                        height: 1.3,
-                      ),
-                    ),
-
-                    const material.SizedBox(height: 15),
+                          const material.SizedBox(height: 15),
                         ],
                       ),
                     ),

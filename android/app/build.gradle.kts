@@ -17,7 +17,8 @@ if (keystorePropertiesFile.exists()) {
 android {
     namespace = "com.aiexch.amigo"
     compileSdk = 36  // Updated for plugin compatibility
-    ndkVersion = flutter.ndkVersion
+    buildToolsVersion = "36.0.0"
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

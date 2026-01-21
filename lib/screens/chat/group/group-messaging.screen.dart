@@ -876,9 +876,6 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       final firstPageHistory = ConversationHistoryResponse.fromJson(
         firstPageResponse['data'],
       );
-      print('-----ghdfghdfghdf--------------------------');
-      print(firstPageHistory);
-      print('-------------gfhfghfdgh------------------');
 
       final List<ConversationMemberModel> membersOfConversation =
           firstPageHistory.members
@@ -893,10 +890,6 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                 ),
               )
               .toList();
-
-              print('-------------------------------');
-              print(membersOfConversation);
-              print('-------------------------------');
 
       await _conversationMemberRepo.insertOrUpdateConversationMembers(
         membersOfConversation,

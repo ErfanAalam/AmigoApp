@@ -17,6 +17,7 @@ import '../notification.service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:dio/dio.dart';
 
 import '../socket/websocket.service.dart';
 import '../user-status.service.dart';
@@ -70,12 +71,29 @@ class AuthService {
       // CRITICAL: Validate refresh token against server to detect if user logged in elsewhere
       // This ensures that if Device A is closed and Device B logs in, Device A will be logged out
       // when it opens the app again
-      final apiService = api.ApiService();
-      final isTokenValid = await apiService.validateRefreshToken();
-      if (!isTokenValid) {
-        debugPrint('🚪 Refresh token invalidated - user logged in on another device');
-        await logout();
-        return false;
+      // NOTE: Skip server validation when offline to allow users to use the app offline
+      try {
+        final apiService = api.ApiService();
+        final isTokenValid = await apiService.validateRefreshToken();
+        if (!isTokenValid) {
+          debugPrint('🚪 Refresh token invalidated - user logged in on another device');
+          await logout();
+          return false;
+        }
+      } on DioException catch (e) {
+        // If we can't reach the server (offline), skip validation and allow offline access
+        // Only logout if the server explicitly says the token is invalid, not if we can't reach it
+        if (e.type == DioExceptionType.connectionTimeout ||
+            e.type == DioExceptionType.sendTimeout ||
+            e.type == DioExceptionType.receiveTimeout ||
+            e.type == DioExceptionType.connectionError ||
+            e.type == DioExceptionType.unknown) {
+          debugPrint('⚠️ Cannot validate token (offline) - allowing offline access');
+          // Return true based on local checks only when offline
+          return true;
+        }
+        // For other DioExceptions, rethrow to be handled by outer catch
+        rethrow;
       }
 
       return true;

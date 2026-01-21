@@ -84,6 +84,10 @@ class WebSocketMessageHandler {
   final StreamController<CallPayload> _callErrorController =
       StreamController<CallPayload>.broadcast();
 
+  // Sync messages controller (for missed messages on reconnection)
+  final StreamController<SyncMessagesPayload> _syncMessagesController =
+      StreamController<SyncMessagesPayload>.broadcast();
+
   bool _isInitialized = false;
 
   /// Get stream for online status (type: 'connection:status')
@@ -157,6 +161,10 @@ class WebSocketMessageHandler {
 
   /// Get stream for call error events (type: 'call:error')
   Stream<CallPayload> get callErrorStream => _callErrorController.stream;
+
+  /// Get stream for sync messages (type: 'message:sync') - sent on reconnection
+  Stream<SyncMessagesPayload> get syncMessagesStream =>
+      _syncMessagesController.stream;
 
   /// Initialize the handler - call this once when app starts
   void initialize() {
@@ -477,6 +485,34 @@ class WebSocketMessageHandler {
         case WSMessageType.messageForward:
           debugPrint('↩️ Message forward: ${message.type.value}');
           break;
+
+        case WSMessageType.messageSync:
+          final payload = message.syncMessagesPayload;
+          if (payload != null) {
+            debugPrint('🔄 Syncing ${payload.totalCount} missed messages');
+            _syncMessagesController.add(payload);
+            
+            // Also emit individual messages as new messages so chat UI updates
+            // This ensures message lists get updated regardless of which screen user is on
+            for (final syncMsg in payload.messages) {
+              final chatPayload = ChatMessagePayload(
+                optimisticId: syncMsg.id, // Use server ID as optimistic ID
+                canonicalId: syncMsg.id,
+                senderId: syncMsg.senderId,
+                senderName: syncMsg.senderName,
+                convId: syncMsg.convId,
+                convType: syncMsg.convType,
+                msgType: syncMsg.msgType,
+                body: syncMsg.body,
+                attachments: syncMsg.attachments,
+                metadata: syncMsg.metadata,
+                replyToMessageId: null,
+                sentAt: syncMsg.sentAt,
+              );
+              _messageNewController.add(chatPayload);
+            }
+          }
+          break;
       }
     } catch (e) {
       debugPrint('❌ Error handling WebSocket message');
@@ -656,6 +692,7 @@ class WebSocketMessageHandler {
     _callRingingController.close();
     _callMissedController.close();
     _callErrorController.close();
+    _syncMessagesController.close();
     _isInitialized = false;
   }
 }

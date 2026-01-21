@@ -221,7 +221,8 @@ class ApiService {
   }
 
   /// Validate if the refresh token is still valid (matches server)
-  /// Returns true if valid, false if invalid or error
+  /// Returns true if valid, false if invalid
+  /// Throws DioException for network errors (to allow offline handling)
   Future<bool> validateRefreshToken() async {
     try {
       final response = await _dio.get(
@@ -243,6 +244,16 @@ class ApiService {
         return false;
       }
     } on DioException catch (e) {
+      // Rethrow network-related errors so caller can handle offline scenarios
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.sendTimeout ||
+          e.type == DioExceptionType.receiveTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.unknown) {
+        debugPrint('⚠️ Token validation network error (offline): ${e.message}');
+        rethrow;
+      }
+      // For other DioExceptions (like bad response), return false (token invalid)
       debugPrint('❌ Token validation DioException: ${e.message}');
       return false;
     } catch (e) {
@@ -392,14 +403,16 @@ class ApiService {
         ipService.getDetailedIpInfo(),
       ]);
 
-      final locationResult = futures[0];
       final ipResult = futures[1];
+
+      final locationResult = futures[0];
+      final lat = locationResult['latitude'];
+      final lng = locationResult['longitude'];
+
       final data = {
-        'location': {
-          'latitude': locationResult['latitude'],
-          'longitude': locationResult['longitude'],
-        },
-        'ip_address': (ipResult['ip']).toString(),
+        if (lat != null && lng != null)
+          'location': {'latitude': lat, 'longitude': lng},
+        'ip_address': ipResult['ip'].toString(),
       };
 
       final response = await authenticatedPost('/user/update-user', data: data);
