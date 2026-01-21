@@ -11,10 +11,10 @@ import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/models/message.model.dart';
 
 import '../api/auth.api-client.dart';
+import '../api/chat.api-client.dart';
 import '../types/socket.types.dart';
 import '../utils/user.utils.dart';
 import 'call/call-background.service.dart';
-import 'socket/websocket.service.dart';
 
 // import 'package:amigo/firebase_options.dart';
 
@@ -309,8 +309,9 @@ class NotificationService {
     }
   }
 
-  /// Send delivery receipt to backend via WebSocket
+  /// Send delivery receipt to backend via API
   /// This notifies the sender that the message was delivered via FCM
+  /// Uses API instead of WebSocket since app might be killed/not connected
   Future<void> _sendDeliveryReceipt(ChatMessagePayload message) async {
     try {
       // Get current user ID
@@ -327,28 +328,13 @@ class NotificationService {
         return;
       }
 
-      final websocketService = WebSocketService();
-
-      // Check if WebSocket is connected
-      if (!websocketService.isConnected) {
-        debugPrint('ℹ️ WebSocket not connected, delivery receipt will be synced later');
-        return;
-      }
-
-      // Create delivery receipt payload
-      final deliveryPayload = MessageDeliveredPayload(
+      // Send delivery receipt via API
+      // The backend will handle WebSocket broadcast to the sender
+      final chatApi = ChatsServices();
+      await chatApi.markMessageDelivered(
         messageId: messageId,
-        convId: message.convId,
-        senderId: message.senderId,
-        recipientId: currentUser.id,
-        deliveredAt: DateTime.now(),
+        conversationId: message.convId,
       );
-
-      // Send delivery receipt via WebSocket
-      await websocketService.sendMessage({
-        'type': WSMessageType.messageDelivered.value,
-        'payload': deliveryPayload.toJson(),
-      });
 
       debugPrint(
         '📬 Sent delivery receipt for message $messageId to sender ${message.senderId}',
@@ -356,7 +342,7 @@ class NotificationService {
     } catch (e) {
       debugPrint('⚠️ Error sending delivery receipt: $e');
       // Don't throw - delivery receipt is best-effort
-      // The sync mechanism will handle it if WebSocket fails
+      // The sync mechanism will handle it if API fails
     }
   }
 

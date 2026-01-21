@@ -189,4 +189,30 @@ class ChatsServices {
       };
     }
   }
+
+  /// Mark a message as delivered (for FCM messages when app was killed)
+  Future<Map<String, dynamic>> markMessageDelivered({
+    required int messageId,
+    required int conversationId,
+  }) async {
+    try {
+      final response = await _apiService.authenticatedPost(
+        '/chat/messages/delivered',
+        data: {
+          'message_id': messageId,
+          'conversation_id': conversationId,
+        },
+      );
+      if (response.data is String) {
+        return jsonDecode(response.data as String);
+      }
+      return response.data;
+    } catch (e) {
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'Failed to mark message as delivered',
+      };
+    }
+  }
 }

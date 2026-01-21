@@ -513,6 +513,13 @@ class WebSocketMessageHandler {
             }
           }
           break;
+
+        case WSMessageType.messageDelivered:
+          // Delivery receipt acknowledgment - handled by message:ack stream
+          // This case exists for completeness but delivery receipts are handled
+          // via message:ack which is already processed above
+          debugPrint('📬 Delivery receipt received');
+          break;
       }
     } catch (e) {
       debugPrint('❌ Error handling WebSocket message');
