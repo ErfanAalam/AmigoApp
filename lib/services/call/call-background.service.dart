@@ -15,9 +15,11 @@ import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../api/chat.api-client.dart';
 import '../../models/call.model.dart';
 import '../../utils/call.utils.dart';
 import '../../types/socket.types.dart';
+import '../../utils/user.utils.dart';
 import '../notification.service.dart';
 import 'call.service.dart';
 
@@ -75,8 +77,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         _stopBackgroundStatusPolling();
         callService.endCall();
 
-         await FlutterCallkitIncoming.endCall(event?.body['id'] ?? '');
-          await FlutterCallkitIncoming.endAllCalls();
+        await FlutterCallkitIncoming.endCall(event?.body['id'] ?? '');
+        await FlutterCallkitIncoming.endAllCalls();
 
         // Initialize Dio and make API request
         final dio = Dio();
@@ -92,7 +94,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
       case Event.actionCallEnded:
         await FlutterCallkitIncoming.endCall(event?.body['id'] ?? '');
-          await FlutterCallkitIncoming.endAllCalls();
+        await FlutterCallkitIncoming.endAllCalls();
         // Stop background polling since call is ended
         _stopBackgroundStatusPolling();
 
@@ -130,7 +132,6 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     // Ensure callId is a string (matching the format used when showing CallKit)
     final callId = message.data['callId']?.toString() ?? '';
 
-
     // Stop background polling immediately since call is ended via FCM
     _stopBackgroundStatusPolling();
 
@@ -159,13 +160,12 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         final callIdInt = int.tryParse(callId);
         if (callIdInt != null) {
           final existingCallDetails = await callUtils.getCallDetails();
-          final updatedCallDetails = existingCallDetails?.copyWith(
-            callId: callIdInt,
-            callStatus: 'ended',
-          ) ?? CallDetails(
-            callId: callIdInt,
-            callStatus: 'ended',
-          );
+          final updatedCallDetails =
+              existingCallDetails?.copyWith(
+                callId: callIdInt,
+                callStatus: 'ended',
+              ) ??
+              CallDetails(callId: callIdInt, callStatus: 'ended');
           await callUtils.saveCallDetails(updatedCallDetails);
         }
       } catch (e) {
@@ -327,13 +327,19 @@ void _startBackgroundStatusPolling(int callId) {
         // Update shared preferences
         final callUtils = CallUtils();
         final existingCallDetails = await callUtils.getCallDetails();
-        final updatedCallDetails = existingCallDetails?.copyWith(
-          callId: callId,
-          callStatus: status == 'declined' ? 'declined' : (status == 'ended' ? 'ended' : existingCallDetails.callStatus),
-        ) ?? CallDetails(
-          callId: callId,
-          callStatus: status == 'declined' ? 'declined' : 'ended',
-        );
+        final updatedCallDetails =
+            existingCallDetails?.copyWith(
+              callId: callId,
+              callStatus: status == 'declined'
+                  ? 'declined'
+                  : (status == 'ended'
+                        ? 'ended'
+                        : existingCallDetails.callStatus),
+            ) ??
+            CallDetails(
+              callId: callId,
+              callStatus: status == 'declined' ? 'declined' : 'ended',
+            );
         await callUtils.saveCallDetails(updatedCallDetails);
       }
     }
@@ -434,9 +440,50 @@ Future<void> _storeMessageFromNotificationBackground(
     debugPrint(
       '✅ [BACKGROUND] Stored message from FCM notification: ${chatMessagePayload.canonicalId ?? chatMessagePayload.optimisticId}',
     );
+
+    debugPrint("calling delivery receipt from background handler");
+    // Send delivery receipt to backend
+    await sendDeliveryReceipt(chatMessagePayload);
   } catch (e) {
     debugPrint(
       '❌ [BACKGROUND] Error storing message from FCM notification: $e',
     );
+  }
+}
+
+/// Send delivery receipt to backend via API
+/// This notifies the sender that the message was delivered via FCM
+/// Uses API instead of WebSocket since app might be killed/not connected
+Future<void> sendDeliveryReceipt(ChatMessagePayload message) async {
+  try {
+    // Get current user ID
+    final currentUser = await UserUtils().getUserDetails();
+    if (currentUser == null) {
+      debugPrint('⚠️ Cannot send delivery receipt: no current user');
+      return;
+    }
+
+    // Only send receipt if we have a canonical (server) message ID
+    final messageId = message.canonicalId;
+    if (messageId == null) {
+      debugPrint('⚠️ Cannot send delivery receipt: no canonical message ID');
+      return;
+    }
+
+    // Send delivery receipt via API
+    // The backend will handle WebSocket broadcast to the sender
+    final chatApi = ChatsServices();
+    await chatApi.markMessageDelivered(
+      messageId: messageId,
+      conversationId: message.convId,
+    );
+
+    debugPrint(
+      '📬 Sent delivery receipt for message $messageId to sender ${message.senderId}',
+    );
+  } catch (e) {
+    debugPrint('⚠️ Error sending delivery receipt: $e');
+    // Don't throw - delivery receipt is best-effort
+    // The sync mechanism will handle it if API fails
   }
 }

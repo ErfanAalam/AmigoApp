@@ -91,7 +91,7 @@ class NotificationService {
       InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/launcher_icon'),
       ),
-      onDidReceiveNotificationResponse: _onNotificationTapped,
+      // onDidReceiveNotificationResponse: _onNotificationTapped,
     );
 
     // Create notification channels for Android
@@ -206,7 +206,7 @@ class NotificationService {
 
     if (data['type'] == 'message') {
       // Store message in local DB if chat_message is present
-      await _storeMessageFromNotification(data);
+      // await _storeMessageFromNotification(data);
 
       // Ensure conversationId is included in the data and convert to string
       final chatdata = ChatMessagePayload.fromJson(
@@ -219,17 +219,9 @@ class NotificationService {
       // }
 
       final notificationData = {
-        'type': 'message',
-        'conversationId': chatdata.convId,
-        'senderId': chatdata.senderId,
-        'senderName': chatdata.senderName,
-        'messageId': chatdata.canonicalId,
-        'messageType': chatdata.msgType.value,
+        'conv_id': chatdata.convId,
+        'conv_type': chatdata.convType,
       };
-
-      debugPrint(
-        '🔔 Emitting Firebase notification data: conversationId=${chatdata.convId}',
-      );
 
       _messageNotificationController.add(notificationData);
     }
@@ -303,7 +295,7 @@ class NotificationService {
       );
 
       // Send delivery receipt to backend
-      await _sendDeliveryReceipt(chatMessagePayload);
+      await sendDeliveryReceipt(chatMessagePayload);
     } catch (e) {
       debugPrint('❌ Error storing message from FCM notification: $e');
     }
@@ -312,7 +304,7 @@ class NotificationService {
   /// Send delivery receipt to backend via API
   /// This notifies the sender that the message was delivered via FCM
   /// Uses API instead of WebSocket since app might be killed/not connected
-  Future<void> _sendDeliveryReceipt(ChatMessagePayload message) async {
+  Future<void> sendDeliveryReceipt(ChatMessagePayload message) async {
     try {
       // Get current user ID
       final currentUser = await UserUtils().getUserDetails();
@@ -522,75 +514,75 @@ class NotificationService {
   }
 
   /// Handle notification tap (from local notifications)
-  void _onNotificationTapped(NotificationResponse response) {
-    try {
-      final payload = response.payload;
-      final actionId = response.actionId;
-
-      if (payload != null) {
-        // Parse the payload data
-        final data = _parseNotificationPayload(payload);
-
-        if (data != null && data['type'] == 'message') {
-          _handleMessageNotificationAction(actionId, data);
-        } else {
-          debugPrint('❌ Failed to parse notification payload');
-        }
-      } else {
-        debugPrint('❌ Notification payload is null');
-      }
-    } catch (e) {
-      debugPrint('❌ Error handling notification tap');
-    }
-  }
+  // void _onNotificationTapped(NotificationResponse response) {
+  //   try {
+  //     final payload = response.payload;
+  //     final actionId = response.actionId;
+  //
+  //     if (payload != null) {
+  //       // Parse the payload data
+  //       final data = _parseNotificationPayload(payload);
+  //
+  //       if (data != null && data['type'] == 'message') {
+  //         _handleMessageNotificationAction(actionId, data);
+  //       } else {
+  //         debugPrint('❌ Failed to parse notification payload');
+  //       }
+  //     } else {
+  //       debugPrint('❌ Notification payload is null');
+  //     }
+  //   } catch (e) {
+  //     debugPrint('❌ Error handling notification tap');
+  //   }
+  // }
 
   /// Parse notification payload
-  Map<String, dynamic>? _parseNotificationPayload(String payload) {
-    try {
-      // Try to parse as JSON
-      if (payload.startsWith('{') && payload.endsWith('}')) {
-        final Map<String, dynamic> data = jsonDecode(payload);
-        return data;
-      }
-
-      // If not JSON, try to extract basic info from string
-      // This is a fallback for simple string payloads
-      return {'type': 'call', 'callId': payload};
-    } catch (e) {
-      debugPrint('❌ Error parsing notification payload');
-      return null;
-    }
-  }
+  // Map<String, dynamic>? _parseNotificationPayload(String payload) {
+  //   try {
+  //     // Try to parse as JSON
+  //     if (payload.startsWith('{') && payload.endsWith('}')) {
+  //       final Map<String, dynamic> data = jsonDecode(payload);
+  //       return data;
+  //     }
+  //
+  //     // If not JSON, try to extract basic info from string
+  //     // This is a fallback for simple string payloads
+  //     return {'type': 'call', 'callId': payload};
+  //   } catch (e) {
+  //     debugPrint('❌ Error parsing notification payload');
+  //     return null;
+  //   }
+  // }
 
   /// Handle message notification actions (from local notifications)
-  void _handleMessageNotificationAction(
-    String? actionId,
-    Map<String, dynamic> data,
-  ) {
-    // Ensure all required fields are present
-    // Convert conversationId to string to ensure consistent format
-    final conversationId = data['conversationId']?.toString();
-
-    if (conversationId == null || conversationId.isEmpty) {
-      debugPrint('❌ conversationId is missing in notification data');
-      return;
-    }
-
-    final notificationData = {
-      'type': data['type'] ?? 'message',
-      'conversationId': conversationId,
-      'senderId': data['senderId']?.toString(),
-      'senderName': data['senderName']?.toString(),
-      'messageId': data['messageId']?.toString(),
-      'messageType': data['messageType']?.toString(),
-      'action': actionId ?? 'tap',
-    };
-
-    debugPrint('🔔 Emitting notification data: conversationId=$conversationId');
-
-    // Only emit to stream - navigation will be handled by the listener in main.dart
-    _messageNotificationController.add(notificationData);
-  }
+  // void _handleMessageNotificationAction(
+  //   String? actionId,
+  //   Map<String, dynamic> data,
+  // ) {
+  //   // Ensure all required fields are present
+  //   // Convert conversationId to string to ensure consistent format
+  //   final conversationId = data['chat_message']['conv_id']?.toString();
+  //
+  //   if (conversationId == null || conversationId.isEmpty) {
+  //     debugPrint('❌ conversationId is missing in notification data');
+  //     return;
+  //   }
+  //
+  //   final notificationData = {
+  //     'type': data['type'] ?? 'message',
+  //     'conversationId': conversationId,
+  //     'senderId': data['chat_message']['sender_id']?.toString(),
+  //     'senderName': data['chat_message']['sender_name']?.toString(),
+  //     'messageId': data['chat_message']['canonical_id']?.toString(),
+  //     'messageType': data['chat_message']['messageType']?.toString(),
+  //     'action': actionId ?? 'tap',
+  //   };
+  //
+  //   debugPrint('🔔 Emitting notification data: conversationId=$conversationId');
+  //
+  //   // Only emit to stream - navigation will be handled by the listener in main.dart
+  //   _messageNotificationController.add(notificationData);
+  // }
 
   /// Send FCM token to backend
   Future<void> sendTokenToBackend(String userId) async {

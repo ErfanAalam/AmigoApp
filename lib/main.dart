@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
+import 'package:amigo/types/socket.types.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:amigo/utils/call.utils.dart';
 import 'package:flutter/material.dart' as material;
@@ -317,23 +318,30 @@ class _MyAppState extends material.State<MyApp>
   /// Handle navigation from notification tap
   void _handleNotificationNavigation(Map<String, dynamic> data) {
     // Add a delay to ensure navigator is ready and app is fully initialized
-    Future.delayed(const Duration(milliseconds: 500), () async {
+    Future.delayed(const Duration(milliseconds: 150), () async {
       try {
-        // Convert to integer
-        final conversationIdStr = data['conversationId']?.toString();
-        if (conversationIdStr == null) {
-          debugPrint('❌ ConversationId is null in notification data');
+        print("checkpoint 1");
+        final convId = data['conv_id'] as int?;
+        final convType = data['conv_type'];
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print("convType -> ${convType}");
+        print(
+          "--------------------------------------------------------------------------------",
+        );
+        print("checkpoint 2");
+        if (convId == null || convType == null) {
+          debugPrint(
+            '❌ Either ConversationId Or ConversationType is null in notification data',
+          );
           return;
         }
 
-        final conversationId = int.tryParse(conversationIdStr);
-        if (conversationId == null) {
-          debugPrint('❌ Failed to parse conversationId: $conversationIdStr');
-          return;
-        }
-
+        print("checkpoint 3");
         // Try to fetch the conversation from local DB with retry
-        await _fetchAndNavigateToConversationWithRetry(conversationId, data);
+        await _fetchAndNavigateToConversationWithRetry(convId, convType);
+        print("checkpoint 4");
       } catch (e) {
         debugPrint('❌ Error navigating to conversation from notification: $e');
       }
@@ -343,12 +351,13 @@ class _MyAppState extends material.State<MyApp>
   /// Fetch conversation details and navigate to appropriate page with retry
   Future<void> _fetchAndNavigateToConversationWithRetry(
     int conversationId,
-    Map<String, dynamic> notificationData, {
+    ChatType convType, {
     int maxRetries = 5,
-    Duration retryDelay = const Duration(milliseconds: 500),
+    Duration retryDelay = const Duration(milliseconds: 100),
   }) async {
     for (int attempt = 0; attempt < maxRetries; attempt++) {
       try {
+        print("checkpoint 3.1");
         // Check if navigator is ready
         if (NavigationHelper.navigatorKey.currentContext == null) {
           debugPrint(
@@ -360,34 +369,29 @@ class _MyAppState extends material.State<MyApp>
 
         // First, try to get it as a DM conversation
         final conversationsRepo = ConversationRepository();
-        final convType = await conversationsRepo.getConversationTypeById(
-          conversationId,
-        );
+        print("checkpoint 3.2");
 
-        if (convType == null) {
-          debugPrint(
-            '⏳ Conversation not found in DB, retrying... (attempt ${attempt + 1}/$maxRetries)',
-          );
-          await Future.delayed(retryDelay);
-          continue;
-        }
-
-        if (convType == 'dm') {
+        if (convType == ChatType.dm) {
+          print("checkpoint 3.3");
           final dm = await conversationsRepo.getDmByConversationId(
             conversationId,
           );
           if (dm != null) {
             debugPrint('✅ Found DM conversation, navigating...');
             _navigateToDM(dm);
+
+            print("checkpoint 3.4");
             return;
           } else {
             debugPrint(
               '⏳ DM conversation data incomplete, retrying... (attempt ${attempt + 1}/$maxRetries)',
             );
             await Future.delayed(retryDelay);
+
+            print("checkpoint 3.5");
             continue;
           }
-        } else if (convType == 'group') {
+        } else if (convType == ChatType.group) {
           final group = await conversationsRepo.getGroupWithMembersByConvId(
             conversationId,
           );
