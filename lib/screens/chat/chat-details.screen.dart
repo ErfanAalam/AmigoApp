@@ -388,11 +388,11 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
             title: isGroup ? 'Joined' : 'Created',
             subtitle: _formatDate(_getCreatedAt()),
           ),
-          _buildInfoTile(
-            icon: Icons.chat_bubble_outline,
-            title: 'Conversation ID',
-            subtitle: '$conversationId',
-          ),
+          // _buildInfoTile(
+          //   icon: Icons.chat_bubble_outline,
+          //   title: 'Conversation ID',
+          //   subtitle: '$conversationId',
+          // ),
           if (isGroup && _memberCount != null) ...[
             _buildInfoTile(
               icon: Icons.people_outline,

@@ -6,8 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/theme-color.provider.dart';
+import '../../services/thumbnail-cache.service.dart';
 import '../../utils/chat/audio-playback.utils.dart';
-import '../../utils/chat/preview-media.utils.dart';
 import 'chached-image.widget.dart';
 import 'message.widget.dart';
 import 'voice-recording.widget.dart';
@@ -376,36 +376,7 @@ Widget buildVideoMessage(MediaMessageConfig config, WidgetRef ref) {
                         if (localPath != null &&
                             File(localPath).existsSync() &&
                             (isUploading || isFailed))
-                          FutureBuilder<String?>(
-                            future: generateVideoThumbnailWithCache(
-                              localPath,
-                              config.videoThumbnailCache,
-                              config.videoThumbnailFutures,
-                            ),
-                            builder: (context, snapshot) {
-                              if (snapshot.connectionState ==
-                                      ConnectionState.done &&
-                                  snapshot.hasData &&
-                                  snapshot.data != null) {
-                                return Image.file(
-                                  File(snapshot.data!),
-                                  width: 220,
-                                  height: 220,
-                                  fit: BoxFit.cover,
-                                );
-                              }
-                              return Container(
-                                width: 220,
-                                height: 220,
-                                color: Colors.grey[800],
-                                child: Icon(
-                                  Icons.videocam,
-                                  size: 50,
-                                  color: Colors.grey[400],
-                                ),
-                              );
-                            },
-                          )
+                          _LocalVideoThumbnail(videoPath: localPath)
                         else if (videoUrl != null)
                           VideoThumbnailWidget(
                             videoUrl: videoUrl,
@@ -1304,6 +1275,78 @@ class _RotatingRefreshIconState extends State<_RotatingRefreshIcon>
     return RotationTransition(
       turns: _controller,
       child: Icon(Icons.refresh, size: widget.size, color: widget.color),
+    );
+  }
+}
+
+/// Widget for displaying local video thumbnails with persistent caching
+class _LocalVideoThumbnail extends StatefulWidget {
+  final String videoPath;
+
+  const _LocalVideoThumbnail({required this.videoPath});
+
+  @override
+  State<_LocalVideoThumbnail> createState() => _LocalVideoThumbnailState();
+}
+
+class _LocalVideoThumbnailState extends State<_LocalVideoThumbnail> {
+  final ThumbnailCacheService _thumbnailCache = ThumbnailCacheService();
+  String? _thumbnailPath;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadThumbnail();
+  }
+
+  Future<void> _loadThumbnail() async {
+    try {
+      final thumbnailPath = await _thumbnailCache.getThumbnail(widget.videoPath);
+      
+      if (mounted) {
+        setState(() {
+          _thumbnailPath = thumbnailPath;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading local video thumbnail: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_thumbnailPath != null && File(_thumbnailPath!).existsSync()) {
+      return Image.file(
+        File(_thumbnailPath!),
+        width: 220,
+        height: 220,
+        fit: BoxFit.cover,
+      );
+    }
+
+    return Container(
+      width: 220,
+      height: 220,
+      color: Colors.grey[800],
+      child: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+              ),
+            )
+          : Icon(
+              Icons.videocam,
+              size: 50,
+              color: Colors.grey[400],
+            ),
     );
   }
 }

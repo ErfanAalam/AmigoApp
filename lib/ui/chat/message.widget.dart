@@ -5,10 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../config/app-colors.config.dart';
-import '../../utils/chat/preview-media.utils.dart';
 import '../../db/repositories/message.repo.dart';
 import '../../db/repositories/user.repo.dart';
 import '../../providers/theme-color.provider.dart';
+import '../../services/thumbnail-cache.service.dart';
 
 /// Configuration for MessageBubble widget
 class MessageBubbleConfig {
@@ -665,7 +665,7 @@ class _ReplyPreviewWithFetchState extends State<_ReplyPreviewWithFetch>
             : int.tryParse(replySenderId.toString());
         if (senderId != null) {
           final user = await widget.userRepo!.getUserById(senderId);
-          senderName = user?.name;
+          senderName = user?.displayName ?? user?.name;
         }
       }
 
@@ -767,54 +767,82 @@ class VideoThumbnailWidget extends ConsumerStatefulWidget {
 }
 
 class _VideoThumbnailWidgetState extends ConsumerState<VideoThumbnailWidget> {
+  final ThumbnailCacheService _thumbnailCache = ThumbnailCacheService();
+  String? _thumbnailPath;
+  bool _isLoading = true;
+
   @override
   void initState() {
     super.initState();
-    // Trigger thumbnail generation if not already cached or generating
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!widget.thumbnailCache.containsKey(widget.videoUrl) &&
-          !widget.thumbnailFutures.containsKey(widget.videoUrl)) {
-        generateVideoThumbnailWithCache(
-          widget.videoUrl,
-          widget.thumbnailCache,
-          widget.thumbnailFutures,
-        ).then((_) {
-          if (mounted) {
-            widget.onThumbnailGenerated();
-          }
+    _loadThumbnail();
+  }
+
+  Future<void> _loadThumbnail() async {
+    try {
+      // Use persistent cache service
+      final thumbnailPath = await _thumbnailCache.getThumbnail(widget.videoUrl);
+      
+      if (mounted) {
+        setState(() {
+          _thumbnailPath = thumbnailPath;
+          _isLoading = false;
+        });
+        
+        // Update the old cache for backwards compatibility
+        widget.thumbnailCache[widget.videoUrl] = thumbnailPath;
+        widget.onThumbnailGenerated();
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading thumbnail: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
         });
       }
-    });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Check if we already have the thumbnail cached
-    if (widget.thumbnailCache.containsKey(widget.videoUrl)) {
-      final thumbnailPath = widget.thumbnailCache[widget.videoUrl];
-      if (thumbnailPath != null && File(thumbnailPath).existsSync()) {
-        return Image.file(
-          File(thumbnailPath),
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            return Container(color: Colors.black87);
-          },
-        );
-      } else {
-        // Cached but path is null or file doesn't exist
-        return Container(color: Colors.black87);
-      }
+    // Show thumbnail if available
+    if (_thumbnailPath != null && File(_thumbnailPath!).existsSync()) {
+      return Image.file(
+        File(_thumbnailPath!),
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return Container(
+            color: Colors.black87,
+            child: const Icon(
+              Icons.videocam,
+              color: Colors.white70,
+              size: 32,
+            ),
+          );
+        },
+      );
     }
 
     // Show loading state while thumbnail is being generated
-    final themeColor = ref.watch(themeColorProvider);
+    if (_isLoading) {
+      final themeColor = ref.watch(themeColorProvider);
+      return Container(
+        color: Colors.black87,
+        child: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(themeColor.primary),
+            strokeWidth: 2,
+          ),
+        ),
+      );
+    }
+
+    // Show placeholder if thumbnail generation failed
     return Container(
       color: Colors.black87,
-      child: Center(
-        child: CircularProgressIndicator(
-          valueColor: AlwaysStoppedAnimation<Color>(themeColor.primary),
-          strokeWidth: 2,
-        ),
+      child: const Icon(
+        Icons.videocam,
+        color: Colors.white70,
+        size: 32,
       ),
     );
   }

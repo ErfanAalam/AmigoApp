@@ -76,6 +76,12 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
           _availableUsers = localContacts;
           _filteredUsers = localContacts;
         });
+        
+        // If we have contacts loaded, update all existing users with contact names
+        // This handles users that were already in database from DMs/groups
+        if (_contacts.isNotEmpty) {
+          await _updateAllExistingUsersWithContacts();
+        }
       }
     } catch (_) {}
   }
@@ -93,8 +99,18 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
             .map((userJson) => UserModel.fromJson(userJson))
             .toList();
 
+        // Match users with contacts and set username from contact displayName
+        users = _matchUsersWithContacts(users);
+
         // Replace local contacts DB to mirror backend
         await _contactsRepository.replaceAllContacts(users);
+
+        // Update existing users in the users table with username
+        await _updateExistingUsersWithUsername(users);
+
+        // Update ALL existing users in database with contact names
+        // This includes users that were inserted from DMs/groups before visiting contacts page
+        await _updateAllExistingUsersWithContacts();
 
         if (mounted) {
           setState(() {
@@ -177,9 +193,86 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
     return await _contactService.fetchContacts();
   }
 
-  /// Get contacts in JSON format for backend API
+  /// Get contacts in JSON format for backend API       
   List<String> getContactsForBackend() {
     return _contacts.map((contact) => contact.phoneNumber).toList();
+  }
+
+  /// Match users with contacts and set username from contact displayName
+  List<UserModel> _matchUsersWithContacts(List<UserModel> users) {
+    return users.map((user) {
+      // Find matching contact by phone number
+      final matchingContact = _contacts.firstWhere(
+        (contact) => contact.phoneNumber == user.phone,
+        orElse: () => ContactModel(
+          displayName: '',
+          firstName: '',
+          lastName: '',
+          phoneNumber: '',
+        ),
+      );
+      
+      // If matching contact found, set username to contact's display name
+      if (matchingContact.phoneNumber.isNotEmpty) {
+        return user.copyWith(username: matchingContact.displayName);
+      }
+      
+      return user;
+    }).toList();
+  }
+
+  /// Update existing users in the database with username from contacts
+  Future<void> _updateExistingUsersWithUsername(List<UserModel> users) async {
+    try {
+      // Update each user in the users table with their username and preserve role
+      for (final user in users) {
+        if (user.username != null && user.username!.isNotEmpty) {
+          await _userRepository.updateUserUsernameAndRole(
+            user.id,
+            user.username,
+            user.role, // Preserve the role from backend
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error updating users with username: $e');
+    }
+  }
+
+  /// Update ALL existing users in the database by matching with contacts
+  Future<void> _updateAllExistingUsersWithContacts() async {
+    try {
+      // Get all users from the database
+      final allUsers = await _userRepository.getAllUsers();
+      
+      if (allUsers.isEmpty) return;
+      
+      // Match each user with contacts and update if match found
+      for (final user in allUsers) {
+        final matchingContact = _contacts.firstWhere(
+          (contact) => contact.phoneNumber == user.phone,
+          orElse: () => ContactModel(
+            displayName: '',
+            firstName: '',
+            lastName: '',
+            phoneNumber: '',
+          ),
+        );
+        
+        // If matching contact found, update username and preserve role
+        if (matchingContact.phoneNumber.isNotEmpty) {
+          await _userRepository.updateUserUsernameAndRole(
+            user.id,
+            matchingContact.displayName,
+            user.role, // Preserve the role from backend
+          );
+        }
+      }
+      
+      debugPrint('✅ Updated ${allUsers.length} users with contact names');
+    } catch (e) {
+      debugPrint('Error updating all users with contacts: $e');
+    }
   }
 
   /// Load available users from backend
@@ -200,6 +293,12 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
         List<UserModel> users = usersData
             .map((userJson) => UserModel.fromJson(userJson))
             .toList();
+
+        // Match users with contacts and set username from contact displayName
+        users = _matchUsersWithContacts(users);
+
+        // Update existing users in the users table with username
+        await _updateExistingUsersWithUsername(users);
 
         setState(() {
           _availableUsers = users;
@@ -249,7 +348,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
         _filteredUsers = _availableUsers;
       } else {
         _filteredUsers = _availableUsers.where((user) {
-          return user.name.toLowerCase().contains(query.toLowerCase()) ||
+          return user.displayName.toLowerCase().contains(query.toLowerCase()) ||
               user.phone.contains(query);
         }).toList();
       }
@@ -333,7 +432,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
         final dm = DmModel(
           conversationId: conversationData['id'],
           recipientId: user.id,
-          recipientName: user.name,
+          recipientName: user.displayName,
           recipientPhone: user.phone,
           recipientProfilePic: user.profilePic,
           unreadCount: 0,
@@ -368,6 +467,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
         final userToSave = UserModel(
           id: user.id,
           name: user.name,
+          username: user.username,
           phone: user.phone,
           role: user.role,
           profilePic: user.profilePic,
@@ -762,7 +862,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                                   CrossAxisAlignment.start,
                                               children: [
                                                 Text(
-                                                  user.name,
+                                                  user.displayName,
                                                   style: TextStyle(
                                                     fontWeight: FontWeight.w600,
                                                     fontSize: 16,
@@ -1281,7 +1381,7 @@ class _FindUserDialogState extends ConsumerState<FindUserDialog> {
                                                 CrossAxisAlignment.start,
                                             children: [
                                               Text(
-                                                user.name,
+                                                user.displayName,
                                                 style: TextStyle(
                                                   fontWeight: FontWeight.bold,
                                                   fontSize: 16,

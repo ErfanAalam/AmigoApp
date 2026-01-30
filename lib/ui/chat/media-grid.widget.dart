@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:amigo/models/message.model.dart';
 import 'package:flutter/material.dart';
+import 'package:amigo/services/thumbnail-cache.service.dart';
 import 'chached-image.widget.dart';
 
 /// Widget to display a grid of media messages (images/videos)
@@ -81,18 +82,18 @@ class MediaGridWidget extends StatelessWidget {
   ) {
     final isImage = message.type.value.toLowerCase() == 'image' ||
         (message.attachments != null &&
-            (message.attachments as Map<String, dynamic>)['category']
+            message.attachments!['category']
                     ?.toString()
                     .toLowerCase() ==
                 'images');
     final isVideo = message.type.value.toLowerCase() == 'video' ||
         (message.attachments != null &&
-            (message.attachments as Map<String, dynamic>)['category']
+            message.attachments!['category']
                     ?.toString()
                     .toLowerCase() ==
                 'videos');
 
-    final attachments = message.attachments as Map<String, dynamic>?;
+    final attachments = message.attachments;
     final mediaUrl = attachments?['url'] as String?;
     final localPath = attachments?['local_path'] as String?;
 
@@ -204,23 +205,8 @@ class MediaGridWidget extends StatelessWidget {
           },
         );
       } else if (isVideo) {
-        // For video, try to get thumbnail
-        return FutureBuilder<String?>(
-          future: videoThumbnailFutures[localPath] ??
-              Future.value(videoThumbnailCache[localPath]),
-          builder: (context, snapshot) {
-            if (snapshot.hasData && snapshot.data != null) {
-              return Image.file(
-                File(snapshot.data!),
-                fit: BoxFit.cover,
-              );
-            }
-            return Container(
-              color: Colors.grey[800],
-              child: const Icon(Icons.videocam, color: Colors.white54),
-            );
-          },
-        );
+        // For video, use persistent thumbnail cache
+        return _GridVideoThumbnail(videoPath: localPath);
       }
     }
 
@@ -233,48 +219,8 @@ class MediaGridWidget extends StatelessWidget {
           onCacheMedia: (url, id) => onCacheImage(url, id),
         );
       } else if (isVideo) {
-        // For video, try to get thumbnail from cache or generate
-        final thumbnail = videoThumbnailCache[mediaUrl];
-        if (thumbnail != null) {
-          return Image.file(
-            File(thumbnail),
-            fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) {
-              return Container(
-                color: Colors.grey[800],
-                child: const Icon(Icons.videocam, color: Colors.white54),
-              );
-            },
-          );
-        } else {
-          // Generate thumbnail if not cached
-          if (!videoThumbnailFutures.containsKey(mediaUrl)) {
-            videoThumbnailFutures[mediaUrl] =
-                generateVideoThumbnail(mediaUrl, '');
-          }
-          return FutureBuilder<String?>(
-            future: videoThumbnailFutures[mediaUrl],
-            builder: (context, snapshot) {
-              if (snapshot.hasData && snapshot.data != null && snapshot.data!.isNotEmpty) {
-                videoThumbnailCache[mediaUrl] = snapshot.data;
-                return Image.file(
-                  File(snapshot.data!),
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      color: Colors.grey[800],
-                      child: const Icon(Icons.videocam, color: Colors.white54),
-                    );
-                  },
-                );
-              }
-              return Container(
-                color: Colors.grey[800],
-                child: const Icon(Icons.videocam, color: Colors.white54),
-              );
-            },
-          );
-        }
+        // For video, use persistent thumbnail cache
+        return _GridVideoThumbnail(videoPath: mediaUrl);
       }
     }
 
@@ -291,18 +237,18 @@ class MediaGridWidget extends StatelessWidget {
   ) {
     final isImage = message.type.value.toLowerCase() == 'image' ||
         (message.attachments != null &&
-            (message.attachments as Map<String, dynamic>)['category']
+            message.attachments!['category']
                     ?.toString()
                     .toLowerCase() ==
                 'images');
     final isVideo = message.type.value.toLowerCase() == 'video' ||
         (message.attachments != null &&
-            (message.attachments as Map<String, dynamic>)['category']
+            message.attachments!['category']
                     ?.toString()
                     .toLowerCase() ==
                 'videos');
 
-    final attachments = message.attachments as Map<String, dynamic>?;
+    final attachments = message.attachments;
     final mediaUrl = attachments?['url'] as String?;
     final localPath = attachments?['local_path'] as String?;
 
@@ -358,6 +304,80 @@ class MediaGridWidget extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Widget for displaying video thumbnails in grid with persistent caching
+class _GridVideoThumbnail extends StatefulWidget {
+  final String videoPath;
+
+  const _GridVideoThumbnail({required this.videoPath});
+
+  @override
+  State<_GridVideoThumbnail> createState() => _GridVideoThumbnailState();
+}
+
+class _GridVideoThumbnailState extends State<_GridVideoThumbnail> {
+  final ThumbnailCacheService _thumbnailCache = ThumbnailCacheService();
+  String? _thumbnailPath;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadThumbnail();
+  }
+
+  Future<void> _loadThumbnail() async {
+    try {
+      final thumbnailPath = await _thumbnailCache.getThumbnail(widget.videoPath);
+      
+      if (mounted) {
+        setState(() {
+          _thumbnailPath = thumbnailPath;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading grid video thumbnail: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_thumbnailPath != null && File(_thumbnailPath!).existsSync()) {
+      return Image.file(
+        File(_thumbnailPath!),
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return Container(
+            color: Colors.grey[800],
+            child: const Icon(Icons.videocam, color: Colors.white54),
+          );
+        },
+      );
+    }
+
+    return Container(
+      color: Colors.grey[800],
+      child: _isLoading
+          ? const Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white54),
+                ),
+              ),
+            )
+          : const Icon(Icons.videocam, color: Colors.white54),
     );
   }
 }

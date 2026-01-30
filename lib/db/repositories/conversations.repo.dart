@@ -603,7 +603,7 @@ class ConversationRepository {
       final dmModel = DmModel(
         conversationId: conv.id,
         recipientId: recipientUser.id,
-        recipientName: recipientUser.name,
+        recipientName: recipientUser.username ?? recipientUser.name,
         recipientPhone: recipientUser.phone,
         recipientProfilePic: recipientUser.profilePic,
         pinnedMessageId: conv.pinnedMessageId,
@@ -688,7 +688,7 @@ class ConversationRepository {
     return DmModel(
       conversationId: conv.id,
       recipientId: recipientUser.id,
-      recipientName: recipientUser.name,
+      recipientName: recipientUser.username ?? recipientUser.name,
       recipientPhone: recipientUser.phone,
       recipientProfilePic: recipientUser.profilePic,
       pinnedMessageId: conv.pinnedMessageId,
@@ -886,7 +886,7 @@ class ConversationRepository {
       if (user != null) {
         membersMap[member.userId] = GroupMember(
           userId: user.id,
-          name: user.name,
+          name: user.username ?? user.name,
           profilePic: user.profilePic,
           role: member.role,
           joinedAt: member.joinedAt,

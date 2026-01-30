@@ -2,10 +2,9 @@ import 'dart:io' as io;
 import 'dart:io';
 import 'package:amigo/models/message.model.dart';
 import 'package:flutter/material.dart';
-import 'package:video_thumbnail/video_thumbnail.dart';
-import 'package:path_provider/path_provider.dart';
 import '../../db/repositories/message.repo.dart';
 import '../../services/media-cache.service.dart';
+import '../../services/thumbnail-cache.service.dart';
 import '../../ui/media-preview.widget.dart';
 import '../../ui/snackbar.dart';
 import 'chat-helpers.utils.dart';
@@ -221,58 +220,42 @@ void openDocumentPreview({
   );
 }
 
-/// Generate video thumbnail from video URL
+/// Generate video thumbnail from video URL using persistent cache
 ///
 /// [videoUrl] - URL or local path of the video file
 /// Returns the path to the generated thumbnail file, or null if generation fails
 Future<String?> generateVideoThumbnail(String videoUrl) async {
   try {
-    final thumbnailPath = await VideoThumbnail.thumbnailFile(
-      video: videoUrl,
-      thumbnailPath: (await getTemporaryDirectory()).path,
-      imageFormat: ImageFormat.PNG,
-      maxWidth: 220,
-      quality: 75,
-    );
-    return thumbnailPath;
+    final thumbnailCacheService = ThumbnailCacheService();
+    return await thumbnailCacheService.getThumbnail(videoUrl);
   } catch (e) {
     debugPrint('❌ Error generating video thumbnail: $e');
     return null;
   }
 }
 
-  /// Generate video thumbnail with caching support
+  /// Generate video thumbnail with caching support (backwards compatibility)
   ///
   /// [videoUrl] - URL or local path of the video file
-  /// [thumbnailCache] - Map to cache thumbnail paths by video URL
-  /// [thumbnailFutures] - Map to track ongoing thumbnail generation futures
+  /// [thumbnailCache] - Map to cache thumbnail paths by video URL (for backwards compatibility)
+  /// [thumbnailFutures] - Map to track ongoing thumbnail generation futures (for backwards compatibility)
   /// Returns the path to the generated thumbnail file, or null if generation fails
 Future<String?> generateVideoThumbnailWithCache(
   String videoUrl,
   Map<String, String?> thumbnailCache,
   Map<String, Future<String?>> thumbnailFutures,
 ) async {
-  // Check if thumbnail is already cached
-  if (thumbnailCache.containsKey(videoUrl)) {
-    return thumbnailCache[videoUrl];
-  }
-
-  // Check if thumbnail is currently being generated
-  if (thumbnailFutures.containsKey(videoUrl)) {
-    return await thumbnailFutures[videoUrl];
-  }
-
-  // Generate new thumbnail
-  final future = generateVideoThumbnail(videoUrl);
-  thumbnailFutures[videoUrl] = future;
-
   try {
-    final thumbnailPath = await future;
+    // Use persistent cache service
+    final thumbnailCacheService = ThumbnailCacheService();
+    final thumbnailPath = await thumbnailCacheService.getThumbnail(videoUrl);
+    
+    // Update the old cache maps for backwards compatibility
     thumbnailCache[videoUrl] = thumbnailPath;
-    thumbnailFutures.remove(videoUrl);
+    
     return thumbnailPath;
   } catch (e) {
-    thumbnailFutures.remove(videoUrl);
+    debugPrint('❌ Error generating video thumbnail with cache: $e');
     thumbnailCache[videoUrl] = null;
     return null;
   }
@@ -309,7 +292,7 @@ Future<void> openUnifiedMediaPreview({
       String? localPath = message.localMediaPath;
       
       if (localPath == null || !io.File(localPath).existsSync()) {
-        final attachments = message.attachments as Map<String, dynamic>?;
+        final attachments = message.attachments;
         final mediaUrl = attachments?['url'] as String?;
         
         if (mediaUrl != null) {

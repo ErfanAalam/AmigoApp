@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
-
+import 'package:drift_db_viewer/drift_db_viewer.dart';
 import '../../api/auth.api-client.dart';
 import '../../api/user.api-client.dart';
 import '../../config/app-colors.config.dart';
@@ -925,6 +925,22 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                               : 'Loading...',
                           valueColor: Colors.grey[700],
                         ),
+
+                        // ProfileOption(
+                        //   icon: Icons.storage,
+                        //   title: 'Database Viewer',
+                        //   subtitle: 'View and inspect database contents',
+                        //   onTap: () {
+                        //     Navigator.push(
+                        //       context,
+                        //       MaterialPageRoute(
+                        //         builder: (context) => DriftDbViewer(
+                        //           SqliteDatabase.instance.database,
+                        //         ),
+                        //       ),
+                        //     );
+                        //   },
+                        // ),
                         // ProfileOption(
                         //   icon: Icons.delete_outline,
                         //   title: 'Delete All Messages',

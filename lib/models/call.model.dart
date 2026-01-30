@@ -95,6 +95,40 @@ class CallModel {
       'created_at': createdAt.toIso8601String(),
     };
   }
+
+  CallModel copyWith({
+    int? id,
+    int? callerId,
+    int? calleeId,
+    int? contactId,
+    String? contactName,
+    String? contactProfilePic,
+    DateTime? startedAt,
+    DateTime? answeredAt,
+    DateTime? endedAt,
+    int? durationSeconds,
+    CallStatus? status,
+    String? reason,
+    CallType? callType,
+    DateTime? createdAt,
+  }) {
+    return CallModel(
+      id: id ?? this.id,
+      callerId: callerId ?? this.callerId,
+      calleeId: calleeId ?? this.calleeId,
+      contactId: contactId ?? this.contactId,
+      contactName: contactName ?? this.contactName,
+      contactProfilePic: contactProfilePic ?? this.contactProfilePic,
+      startedAt: startedAt ?? this.startedAt,
+      answeredAt: answeredAt ?? this.answeredAt,
+      endedAt: endedAt ?? this.endedAt,
+      durationSeconds: durationSeconds ?? this.durationSeconds,
+      status: status ?? this.status,
+      reason: reason ?? this.reason,
+      callType: callType ?? this.callType,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
 }
 
 enum CallStatus {

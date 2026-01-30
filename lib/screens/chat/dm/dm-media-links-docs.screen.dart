@@ -12,6 +12,7 @@ import '../../../providers/theme-color.provider.dart';
 import '../../../utils/chat/preview-media.utils.dart';
 import '../../../utils/chat/chat-helpers.utils.dart';
 import '../../../services/media-cache.service.dart';
+import '../../../services/thumbnail-cache.service.dart';
 
 class DmMediaLinksDocsScreen extends ConsumerStatefulWidget {
   final DmModel? dm;
@@ -35,6 +36,7 @@ class _DmMediaLinksDocsScreenState
     with SingleTickerProviderStateMixin {
   final MessageRepository _messagesRepo = MessageRepository();
   final MediaCacheService _mediaCacheService = MediaCacheService();
+  final ThumbnailCacheService _thumbnailCacheService = ThumbnailCacheService();
 
   late TabController _tabController;
   List<MessageModel> _allMessages = [];
@@ -42,10 +44,6 @@ class _DmMediaLinksDocsScreenState
   List<MessageModel> _linkMessages = [];
   List<MessageModel> _documentMessages = [];
   bool _isLoading = true;
-
-  // Video thumbnail cache
-  final Map<String, String?> _videoThumbnailCache = {};
-  final Map<String, Future<String?>> _videoThumbnailFutures = {};
 
   @override
   void initState() {
@@ -179,7 +177,7 @@ class _DmMediaLinksDocsScreenState
 
   /// Extract URLs from text using regex
   List<String> _extractUrls(String text) {
-    final urlRegex = RegExp(
+    final urlRegex = RegExp(  
       r'https?://[^\s]+|www\.[^\s]+',
       caseSensitive: false,
     );
@@ -262,6 +260,8 @@ class _DmMediaLinksDocsScreenState
         mainAxisSpacing: 4,
       ),
       itemCount: _mediaMessages.length,
+      // Increase cache extent to keep more images in memory
+      cacheExtent: 1000, // Keep images within 1000px offscreen
       itemBuilder: (context, index) {
         final message = _mediaMessages[index];
         return _buildMediaItem(message);
@@ -305,146 +305,33 @@ class _DmMediaLinksDocsScreenState
       }
     }
 
-    if (isImage) {
-      return _buildImageItem(mediaUrl, localPath, message);
-    } else if (isVideo) {
-      return _buildVideoItem(mediaUrl, localPath, message);
-    }
-
-    return const SizedBox.shrink();
+    // Wrap in RepaintBoundary to prevent unnecessary repaints
+    return RepaintBoundary(
+      child: isImage
+          ? _buildImageItem(mediaUrl, localPath, message)
+          : isVideo
+              ? _buildVideoItem(mediaUrl, localPath, message)
+              : const SizedBox.shrink(),
+    );
   }
 
   Widget _buildImageItem(String? imageUrl, String? localPath, MessageModel message) {
-    return GestureDetector(
-      onTap: imageUrl != null
-          ? () => _previewImage(imageUrl, message)
-          : null,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (localPath != null && File(localPath).existsSync())
-            Image.file(
-              File(localPath),
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) {
-                return _buildErrorPlaceholder();
-              },
-            )
-          else if (imageUrl != null)
-            CachedNetworkImage(
-              imageUrl: imageUrl,
-              fit: BoxFit.cover,
-              placeholder: (context, url) => Container(
-                color: Colors.grey[200],
-                child: const Center(
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-              errorWidget: (context, url, error) => _buildErrorPlaceholder(),
-            )
-          else
-            _buildErrorPlaceholder(),
-        ],
-      ),
+    return _CachedImageGridItem(
+      imageUrl: imageUrl,
+      localPath: localPath,
+      onTap: imageUrl != null ? () => _previewImage(imageUrl, message) : null,
     );
   }
 
   Widget _buildVideoItem(String? videoUrl, String? localPath, MessageModel message) {
-    return GestureDetector(
-      onTap: videoUrl != null
-          ? () => _previewVideo(videoUrl, message)
-          : null,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          FutureBuilder<String?>(
-            future: _getVideoThumbnail(videoUrl, localPath),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.done &&
-                  snapshot.hasData &&
-                  snapshot.data != null) {
-                return Image.file(
-                  File(snapshot.data!),
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) {
-                    return _buildVideoPlaceholder();
-                  },
-                );
-              }
-              return _buildVideoPlaceholder();
-            },
-          ),
-          // Play button overlay
-          Center(
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.6),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.play_arrow,
-                color: Colors.white,
-                size: 24,
-              ),
-            ),
-          ),
-        ],
-      ),
+    return _CachedVideoGridItem(
+      videoUrl: videoUrl,
+      localPath: localPath,
+      thumbnailCacheService: _thumbnailCacheService,
+      onTap: videoUrl != null ? () => _previewVideo(videoUrl, message) : null,
     );
   }
 
-  Future<String?> _getVideoThumbnail(String? videoUrl, String? localPath) async {
-    final videoPath = localPath ?? videoUrl;
-    if (videoPath == null) return null;
-
-    // Check cache first
-    if (_videoThumbnailCache.containsKey(videoPath)) {
-      return _videoThumbnailCache[videoPath];
-    }
-
-    // Check if already generating
-    if (_videoThumbnailFutures.containsKey(videoPath)) {
-      return await _videoThumbnailFutures[videoPath];
-    }
-
-    // Generate thumbnail
-    final future = generateVideoThumbnail(videoPath);
-    _videoThumbnailFutures[videoPath] = future;
-
-    try {
-      final thumbnailPath = await future;
-      _videoThumbnailCache[videoPath] = thumbnailPath;
-      _videoThumbnailFutures.remove(videoPath);
-      return thumbnailPath;
-    } catch (e) {
-      _videoThumbnailFutures.remove(videoPath);
-      _videoThumbnailCache[videoPath] = null;
-      return null;
-    }
-  }
-
-  Widget _buildVideoPlaceholder() {
-    return Container(
-      color: Colors.grey[800],
-      child: const Icon(
-        Icons.videocam,
-        color: Colors.white70,
-        size: 32,
-      ),
-    );
-  }
-
-  Widget _buildErrorPlaceholder() {
-    return Container(
-      color: Colors.grey[200],
-      child: const Icon(
-        Icons.broken_image,
-        color: Colors.grey,
-        size: 32,
-      ),
-    );
-  }
 
   Future<void> _previewImage(String imageUrl, MessageModel message) async {
     await openImagePreview(
@@ -741,6 +628,202 @@ class _DmMediaLinksDocsScreenState
       fileName: fileName,
       caption: caption,
       fileSize: fileSize,
+    );
+  }
+}
+
+/// Optimized image grid item that keeps images alive when scrolling
+class _CachedImageGridItem extends StatefulWidget {
+  final String? imageUrl;
+  final String? localPath;
+  final VoidCallback? onTap;
+
+  const _CachedImageGridItem({
+    required this.imageUrl,
+    required this.localPath,
+    required this.onTap,
+  });
+
+  @override
+  State<_CachedImageGridItem> createState() => _CachedImageGridItemState();
+}
+
+class _CachedImageGridItemState extends State<_CachedImageGridItem>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true; // Keep widget alive when scrolling away
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
+
+    return GestureDetector(
+      onTap: widget.onTap,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (widget.localPath != null && File(widget.localPath!).existsSync())
+            Image.file(
+              File(widget.localPath!),
+              fit: BoxFit.cover,
+              cacheWidth: 400, // Optimize memory by limiting decode size
+              errorBuilder: (context, error, stackTrace) {
+                return _buildErrorPlaceholder();
+              },
+            )
+          else if (widget.imageUrl != null)
+            CachedNetworkImage(
+              imageUrl: widget.imageUrl!,
+              fit: BoxFit.cover,
+              memCacheWidth: 400, // Limit memory cache size for grid
+              maxWidthDiskCache: 400, // Limit disk cache size
+              // Reduce fade duration for instant appearance
+              fadeInDuration: const Duration(milliseconds: 50),
+              fadeOutDuration: const Duration(milliseconds: 50),
+              // Use a minimal placeholder that doesn't flash
+              placeholder: (context, url) => Container(
+                color: Colors.grey[200],
+              ),
+              errorWidget: (context, url, error) => _buildErrorPlaceholder(),
+            )
+          else
+            _buildErrorPlaceholder(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorPlaceholder() {
+    return Container(
+      color: Colors.grey[200],
+      child: const Icon(
+        Icons.broken_image,
+        color: Colors.grey,
+        size: 32,
+      ),
+    );
+  }
+}
+
+/// Optimized video grid item that keeps thumbnails alive when scrolling
+class _CachedVideoGridItem extends StatefulWidget {
+  final String? videoUrl;
+  final String? localPath;
+  final ThumbnailCacheService thumbnailCacheService;
+  final VoidCallback? onTap;
+
+  const _CachedVideoGridItem({
+    required this.videoUrl,
+    required this.localPath,
+    required this.thumbnailCacheService,
+    required this.onTap,
+  });
+
+  @override
+  State<_CachedVideoGridItem> createState() => _CachedVideoGridItemState();
+}
+
+class _CachedVideoGridItemState extends State<_CachedVideoGridItem>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true; // Keep widget alive when scrolling away
+
+  String? _thumbnailPath;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadThumbnail();
+  }
+
+  Future<void> _loadThumbnail() async {
+    final videoPath = widget.localPath ?? widget.videoUrl;
+    if (videoPath == null) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+      return;
+    }
+
+    try {
+      final thumbnailPath =
+          await widget.thumbnailCacheService.getThumbnail(videoPath);
+
+      if (mounted) {
+        setState(() {
+          _thumbnailPath = thumbnailPath;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading video thumbnail: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
+
+    return GestureDetector(
+      onTap: widget.onTap,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Thumbnail
+          if (_thumbnailPath != null && File(_thumbnailPath!).existsSync())
+            Image.file(
+              File(_thumbnailPath!),
+              fit: BoxFit.cover,
+              cacheWidth: 400, // Optimize memory
+              errorBuilder: (context, error, stackTrace) {
+                return _buildVideoPlaceholder();
+              },
+            )
+          else
+            _buildVideoPlaceholder(),
+          // Play button overlay
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.6),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.play_arrow,
+                color: Colors.white,
+                size: 24,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVideoPlaceholder() {
+    return Container(
+      color: Colors.grey[800],
+      child: _isLoading
+          ? const Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+                ),
+              ),
+            )
+          : const Icon(
+              Icons.videocam,
+              color: Colors.white70,
+              size: 32,
+            ),
     );
   }
 }

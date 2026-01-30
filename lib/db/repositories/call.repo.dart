@@ -25,20 +25,20 @@ class CallRepository {
     String? contactProfilePic;
     int contactId = otherUserId;
 
-    if (contact != null) {
-      contactName = contact.name;
-      contactProfilePic = contact.profilePic;
-      contactId = contact.id;
-    } else {
+    // if (contact != null) {
+    //   contactName = contact.name;
+    //   contactProfilePic = contact.profilePic;
+    //   contactId = contact.id;
+    // } else {
       final user = await (db.select(
         db.users,
       )..where((t) => t.id.equals(otherUserId))).getSingleOrNull();
       if (user != null) {
-        contactName = user.name;
+        contactName = user.username ?? user.name;
         contactProfilePic = user.profilePic;
         contactId = user.id;
       }
-    }
+    // }
 
     // Calculate duration if call has ended
     int durationSeconds = 0;

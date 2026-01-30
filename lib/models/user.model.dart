@@ -1,6 +1,7 @@
 class UserModel {
   final int id;
   final String name;
+  final String? username; // Name from contact list
   final String phone;
   final String? role;
   final String? profilePic;
@@ -12,6 +13,7 @@ class UserModel {
   UserModel({
     required this.id,
     required this.name,
+    this.username,
     required this.phone,
     this.role,
     this.profilePic,
@@ -20,6 +22,9 @@ class UserModel {
     this.updatedAt,
     this.createdAt,
   });
+
+  /// Returns username if available, otherwise returns name
+  String get displayName => username ?? name;
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
     // Handle different types for id field
@@ -37,6 +42,7 @@ class UserModel {
     return UserModel(
       id: parsedId,
       name: json['name']?.toString() ?? '',
+      username: json['username']?.toString(),
       role: json['role']?.toString() ?? '',
       phone: json['phone']?.toString() ?? '',
       profilePic: json['profile_pic']?.toString(),
@@ -69,6 +75,7 @@ class UserModel {
     return {
       'id': id,
       'name': name,
+      'username': username,
       'role': role,
       'phone': phone,
       'profile_pic': profilePic,
@@ -94,6 +101,7 @@ class UserModel {
 
   UserModel copyWith({
     String? name,
+    String? username,
     String? role,
     String? phone,
     String? profilePic,
@@ -105,6 +113,7 @@ class UserModel {
     return UserModel(
       id: id,
       name: name ?? this.name,
+      username: username ?? this.username,
       role: role ?? this.role,
       phone: phone ?? this.phone,
       profilePic: profilePic ?? this.profilePic,
@@ -117,6 +126,6 @@ class UserModel {
 
   @override
   String toString() {
-    return 'UserModel(id: $id, name: $name, role: $role, phone: $phone, profilePic: $profilePic, isOnline: $isOnline, callAccess: $callAccess)';
+    return 'UserModel(id: $id, name: $name, username: $username, role: $role, phone: $phone, profilePic: $profilePic, isOnline: $isOnline, callAccess: $callAccess)';
   }
 }

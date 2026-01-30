@@ -9,6 +9,7 @@ part 'sqlite.schema.g.dart';
 class Users extends Table {
   IntColumn get id => integer()();
   TextColumn get name => text()();
+  TextColumn get username => text().nullable()(); // Name from contact list
   TextColumn get phone => text()();
   TextColumn get role => text().nullable()();
   BoolColumn get isOnline => boolean()();

@@ -69,7 +69,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     }
     final query = _searchQuery.toLowerCase().trim();
     return _availableUsers.where((user) {
-      final nameMatch = user.name.toLowerCase().contains(query);
+      final nameMatch = user.displayName.toLowerCase().contains(query);
       final phoneMatch = user.phone.toLowerCase().contains(query);
       return nameMatch || phoneMatch;
     }).toList();
@@ -145,17 +145,22 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
 
         final groupInfoMap = groupInfo.toJson();
 
-        // Add creator information if available
+        // Enrich member data with display names from users table first
+        await _enrichMembersWithDisplayNames(groupInfoMap);
+
+        // Add creator information if available (after enrichment)
         if (conv != null) {
           groupInfoMap['createrId'] = conv.createrId;
-          // Find creator name from members list first
+          // Find creator name from enriched members map
           String? creatorName;
-          if (groupInfo.members != null && groupInfo.members!.isNotEmpty) {
+          if (groupInfoMap['members'] != null) {
+            final List<dynamic> members = groupInfoMap['members'];
             try {
-              final creatorMember = groupInfo.members!.firstWhere(
-                (member) => member.userId == conv.createrId,
+              final creatorMember = members.firstWhere(
+                (member) => member['userId'] == conv.createrId,
               );
-              creatorName = creatorMember.name;
+              // After enrichment, userName will have the displayName
+              creatorName = creatorMember['userName'] ?? creatorMember['name'];
             } catch (e) {
               // Creator not found in members list, try to get from users table
               debugPrint(
@@ -169,7 +174,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
             final creatorUser = await _userRepository.getUserById(
               conv.createrId,
             );
-            creatorName = creatorUser?.name ?? 'Unknown';
+            creatorName = creatorUser?.displayName ?? 'Unknown';
           }
 
           groupInfoMap['createrName'] = creatorName;
@@ -199,6 +204,28 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
       });
       // Start animation to show error message
       _animationController.forward();
+    }
+  }
+
+  /// Enrich member data with display names from users table
+  Future<void> _enrichMembersWithDisplayNames(
+    Map<String, dynamic> groupInfoMap,
+  ) async {
+    try {
+      if (groupInfoMap['members'] == null) return;
+
+      final List<dynamic> members = groupInfoMap['members'];
+      for (var member in members) {
+        if (member is Map<String, dynamic> && member['userId'] != null) {
+          final user = await _userRepository.getUserById(member['userId']);
+          if (user != null) {
+            // Update the member's userName with the displayName from users table
+            member['userName'] = user.displayName;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error enriching members with display names: $e');
     }
   }
 
@@ -243,11 +270,11 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     // }
     try {
       final localContacts = await _contactsRepository.getAllContacts();
-      if (localContacts.isNotEmpty) {
-        setState(() {
-          _availableUsers = localContacts;
-        });
-      } else {
+      // if (localContacts.isNotEmpty) {
+      //   setState(() {
+      //     _availableUsers = localContacts;
+      //   });
+      // } else {
         final contacts = await _contactService.fetchContacts();
         if (contacts.isEmpty) {
           return;
@@ -261,10 +288,15 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
           final users = usersData
               .map((userJson) => UserModel.fromJson(userJson))
               .toList();
+
+          // Enrich users with display names from local database
+          final enrichedUsers = await _userUtils.enrichUsersWithDisplayNames(users);
+
+
           setState(() {
-            _availableUsers = users;
+            _availableUsers = enrichedUsers;
           });
-        }
+        // }
       }
     } catch (_) {}
   }
@@ -691,87 +723,134 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                             color: themeColor.primaryLight.withOpacity(0.6),
                           ),
                         ),
-                        child: Row(
+                        child: Column(
                           children: [
-                            if (_filteredUsers.isNotEmpty) ...[
-                              Checkbox(
-                                value:
-                                    _filteredUsers.every(
-                                      (u) => _selectedUserIds.contains(u.id),
-                                    ) &&
-                                    _filteredUsers.isNotEmpty,
-                                tristate: true,
-                                onChanged: (value) {
-                                  setDialogState(() {
-                                    if (value == true) {
-                                      _selectedUserIds.addAll(
-                                        _filteredUsers.map((u) => u.id),
-                                      );
-                                    } else {
-                                      // Remove only filtered users from selection
-                                      for (var userId in _filteredUsers.map(
-                                        (u) => u.id,
-                                      )) {
-                                        _selectedUserIds.remove(userId);
-                                      }
-                                    }
-                                  });
-                                },
-                                activeColor: themeColor.primary,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                              ),
-                            ],
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    _filteredUsers.isEmpty
-                                        ? 'No remaining contacts'
-                                        : _filteredUsers.every(
-                                                (u) => _selectedUserIds
-                                                    .contains(u.id),
-                                              ) &&
-                                              _filteredUsers.isNotEmpty
-                                        ? 'Deselect All'
-                                        : 'Select All',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    _searchQuery.isEmpty
-                                        ? '${_availableUsers.length} available contact${_availableUsers.length > 1 ? 's' : ''}'
-                                        : '${_filteredUsers.length} result${_filteredUsers.length > 1 ? 's' : ''}',
-                                    style: TextStyle(
-                                      color: Colors.grey.shade600,
-                                      fontSize: 12,
+                            Row(
+                              children: [
+                                if (_filteredUsers.isNotEmpty) ...[
+                                  Checkbox(
+                                    value:
+                                        _filteredUsers.every(
+                                          (u) => _selectedUserIds.contains(u.id),
+                                        ) &&
+                                        _filteredUsers.isNotEmpty,
+                                    tristate: true,
+                                    onChanged: (value) {
+                                      setDialogState(() {
+                                        if (value == true) {
+                                          _selectedUserIds.addAll(
+                                            _filteredUsers.map((u) => u.id),
+                                          );
+                                        } else {
+                                          // Remove only filtered users from selection
+                                          for (var userId in _filteredUsers.map(
+                                            (u) => u.id,
+                                          )) {
+                                            _selectedUserIds.remove(userId);
+                                          }
+                                        }
+                                      });
+                                    },
+                                    activeColor: themeColor.primary,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(4),
                                     ),
                                   ),
                                 ],
-                              ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _filteredUsers.isEmpty
+                                            ? 'No remaining contacts'
+                                            : _filteredUsers.every(
+                                                    (u) => _selectedUserIds
+                                                        .contains(u.id),
+                                                  ) &&
+                                                  _filteredUsers.isNotEmpty
+                                            ? 'Deselect All'
+                                            : 'Select All',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        _searchQuery.isEmpty
+                                            ? '${_availableUsers.length} available contact${_availableUsers.length > 1 ? 's' : ''}'
+                                            : '${_filteredUsers.length} result${_filteredUsers.length > 1 ? 's' : ''}',
+                                        style: TextStyle(
+                                          color: Colors.grey.shade600,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (_selectedUserIds.isNotEmpty)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: themeColor.primary,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      '${_selectedUserIds.length} selected',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
-                            if (_selectedUserIds.isNotEmpty)
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: themeColor.primary,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  '${_selectedUserIds.length} selected',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w500,
+                            const SizedBox(height: 12),
+                            // Select Staff Only Button
+                            if (_filteredUsers.any((u) => u.role?.toLowerCase() == 'staff'))
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    setDialogState(() {
+                                      // Get all staff users from filtered list
+                                      final staffUsers = _filteredUsers
+                                          .where((u) => u.role?.toLowerCase() == 'staff')
+                                          .map((u) => u.id)
+                                          .toList();
+                                      
+                                      // Add staff users to selection
+                                      _selectedUserIds.addAll(staffUsers);
+                                    });
+                                  },
+                                  icon: const Icon(
+                                    Icons.badge,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    'Select Staff Only (${_filteredUsers.where((u) => u.role?.toLowerCase() == 'staff').length})',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.blue.shade600,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                      horizontal: 16,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    elevation: 0,
                                   ),
                                 ),
                               ),
@@ -912,9 +991,9 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                                                               null
                                                           ? Text(
                                                               user
-                                                                      .name
+                                                                      .displayName
                                                                       .isNotEmpty
-                                                                  ? user.name[0]
+                                                                  ? user.displayName[0]
                                                                         .toUpperCase()
                                                                   : '?',
                                                               style: TextStyle(
@@ -966,21 +1045,47 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                                                   crossAxisAlignment:
                                                       CrossAxisAlignment.start,
                                                   children: [
-                                                    Text(
-                                                      user.name,
-                                                      style: TextStyle(
-                                                        fontWeight: isSelected
-                                                            ? FontWeight.bold
-                                                            : FontWeight.w500,
-                                                        fontSize: 16,
-                                                        color: isSelected
-                                                            ? Colors
-                                                                  .teal
-                                                                  .shade700
-                                                            : Colors
-                                                                  .grey
-                                                                  .shade800,
-                                                      ),
+                                                    Row(
+                                                      children: [
+                                                        Flexible(
+                                                          child: Text(
+                                                            user.displayName,
+                                                            style: TextStyle(
+                                                              fontWeight: isSelected
+                                                                  ? FontWeight.bold
+                                                                  : FontWeight.w500,
+                                                              fontSize: 16,
+                                                              color: isSelected
+                                                                  ? Colors
+                                                                        .teal
+                                                                        .shade700
+                                                                  : Colors
+                                                                        .grey
+                                                                        .shade800,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                        if (user.role?.toLowerCase() == 'staff')
+                                                          Container(
+                                                            margin: const EdgeInsets.only(left: 6),
+                                                            padding: const EdgeInsets.symmetric(
+                                                              horizontal: 6,
+                                                              vertical: 2,
+                                                            ),
+                                                            decoration: BoxDecoration(
+                                                              color: Colors.blue.shade600,
+                                                              borderRadius: BorderRadius.circular(6),
+                                                            ),
+                                                            child: const Text(
+                                                              'Staff',
+                                                              style: TextStyle(
+                                                                color: Colors.white,
+                                                                fontSize: 10,
+                                                                fontWeight: FontWeight.bold,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                      ],
                                                     ),
                                                     const SizedBox(height: 2),
                                                     Text(
@@ -2385,9 +2490,8 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
                                     'Members (${_memberSearchQuery.isEmpty ? (_groupInfo?['members']?.length ?? 0) : _filteredMembers.length})',

@@ -120,9 +120,15 @@ class CallsPageState extends ConsumerState<CallsPage>
         // Save to local DB
         await callRepo.insertCalls(calls);
 
+        // Enrich calls with local user display names (includes username from contacts)
+        final enrichedCalls = await UserUtils().enrichCallsWithDisplayNames(
+          calls,
+          currentUser?.id ?? 0,
+        );
+
         // Update UI with fresh data from server, preserving duration if it exists
         if (mounted) {
-          final newHistory = calls.map(_mapCallModelToHistoryItem).toList();
+          final newHistory = enrichedCalls.map(_mapCallModelToHistoryItem).toList();
 
           // Merge with existing data to preserve durationSeconds if server data has 0
           final mergedHistory = _mergeCallHistory(_callHistory, newHistory);
@@ -555,6 +561,7 @@ class CallsPageState extends ConsumerState<CallsPage>
       }
     }
   }
+
 
   // Map persisted CallModel to UI-friendly CallHistoryItem
   CallHistoryItem _mapCallModelToHistoryItem(CallModel model) {

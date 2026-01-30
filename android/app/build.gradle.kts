@@ -20,6 +20,7 @@ android {
     buildToolsVersion = "36.0.0"
     ndkVersion = "28.2.13676358"
 
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -42,7 +43,7 @@ android {
     defaultConfig {
         applicationId = "com.aiexch.amigo"
         minSdk = flutter.minSdkVersion
-        targetSdk = 36  // Updated for plugin compatibility
+        targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true

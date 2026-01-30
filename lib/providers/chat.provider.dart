@@ -18,6 +18,7 @@ import '../models/user.model.dart';
 import '../services/socket/ws-message.handler.dart';
 import '../services/user-status.service.dart';
 import '../types/socket.types.dart';
+import '../utils/user.utils.dart';
 
 /// State class for DM list
 class ChatState {
@@ -415,8 +416,13 @@ class ChatNotifier extends Notifier<ChatState> {
         //   }
         // }
 
+        // Enrich DMs with local user display names (includes username from contacts)
+        final enrichedDmList = await UserUtils().enrichDmsWithDisplayNames(
+          dmList,
+        );
+
         // Update Provider state
-        final sortedDms = await filterAndSortConversations(dmList);
+        final sortedDms = await filterAndSortConversations(enrichedDmList);
         state = state.copyWith(
           dmList: sortedDms,
           isLoading: false,
@@ -1452,13 +1458,19 @@ class ChatNotifier extends Notifier<ChatState> {
     debugPrint('✅ recieved ack message at chat provider');
     debugPrint('✅ payload: ${payload.toJson()}');
     try {
-      // Update message status in local DB
+      // CRITICAL: Update message IDs FIRST to avoid UNIQUE constraint violations
+      // This must happen before any status updates that use the canonical ID
       await _messageRepo.updateMessageId(
         payload.optimisticId,
         payload.canonicalId,
       );
 
-      // update message status in the status table based on delivered_to and read_by
+      await _messageStatusRepo.updateMessageId(
+        payload.optimisticId,
+        payload.canonicalId,
+      );
+
+      // Now safe to update message status in the status table based on delivered_to and read_by
       // First, handle users who have read the message (they should have both deliveredAt and readAt)
       if (payload.readBy != null && payload.readBy!.isNotEmpty) {
         debugPrint('✅ updating readAt for users: ${payload.readBy}');
@@ -1527,11 +1539,6 @@ class ChatNotifier extends Notifier<ChatState> {
 
       await _conversationsRepo.updateLastMessageId(
         payload.convId,
-        payload.canonicalId,
-      );
-
-      await _messageStatusRepo.updateMessageId(
-        payload.optimisticId,
         payload.canonicalId,
       );
     } catch (e) {
@@ -1760,10 +1767,15 @@ class ChatNotifier extends Notifier<ChatState> {
         );
         if (existingIndex != -1) return;
 
+        // Try to get user from local DB to use displayName (includes username)
+        final displayName =
+            await UserUtils().getDisplayNameForUserId(message.createrId) ??
+            message.createrName;
+
         final newDM = DmModel(
           conversationId: convId,
           recipientId: message.createrId,
-          recipientName: message.createrName,
+          recipientName: displayName,
           recipientPhone: message.createrPhone,
           isRecipientOnline: true,
           unreadCount: 0,

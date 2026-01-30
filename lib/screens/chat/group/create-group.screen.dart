@@ -63,7 +63,7 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
         _filteredUsers = List.from(_allUsers);
       } else {
         _filteredUsers = _allUsers.where((user) {
-          return user.name.toLowerCase().contains(query) ||
+          return user.displayName.toLowerCase().contains(query) ||
               user.phone.toLowerCase().contains(query);
         }).toList();
       }
@@ -91,9 +91,12 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
             .map((userData) => UserModel.fromJson(userData))
             .toList();
 
+        // Enrich users with display names from local database
+        final enrichedUsers = await UserUtils().enrichUsersWithDisplayNames(users);
+
         setState(() {
-          _allUsers = users;
-          _filteredUsers = List.from(users);
+          _allUsers = enrichedUsers;
+          _filteredUsers = List.from(enrichedUsers);
           _isLoading = false;
         });
       } else {
@@ -491,7 +494,7 @@ class UserListItem extends ConsumerWidget {
                   : null,
               child: user.profilePic == null
                   ? Text(
-                      _getInitials(user.name),
+                      _getInitials(user.displayName),
                       style: TextStyle(
                         color: themeColor.primary,
                         fontWeight: FontWeight.bold,
@@ -516,7 +519,7 @@ class UserListItem extends ConsumerWidget {
           ],
         ),
         title: Text(
-          user.name,
+          user.displayName,
           style: TextStyle(
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
             fontSize: 16,

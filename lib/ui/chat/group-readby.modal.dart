@@ -484,7 +484,7 @@ class _ReadByModalState extends ConsumerState<ReadByModal>
     int index,
   ) {
     final user = memberWithStatus.user;
-    final name = user.name;
+    final name = user.displayName;
     final profilePic = user.profilePic;
 
     return AnimatedBuilder(

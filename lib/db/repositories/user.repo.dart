@@ -11,6 +11,7 @@ class UserRepository {
     return UserModel(
       id: user.id,
       name: user.name,
+      username: user.username,
       phone: user.phone,
       role: user.role,
       profilePic: user.profilePic,
@@ -33,6 +34,7 @@ class UserRepository {
       name: user.name.isEmpty && existingUser != null
           ? existingUser.name
           : user.name,
+      username: Value(user.username ?? existingUser?.username),
       phone: user.phone.isEmpty && existingUser != null
           ? existingUser.phone
           : user.phone,
@@ -60,6 +62,7 @@ class UserRepository {
         name: user.name.isEmpty && existingUser != null
             ? existingUser.name
             : user.name,
+        username: Value(user.username ?? existingUser?.username),
         phone: user.phone.isEmpty && existingUser != null
             ? existingUser.phone
             : user.phone,
@@ -98,6 +101,7 @@ class UserRepository {
         // User exists, check if any data has changed
         bool hasChanged = 
             user.name != existingUser.name ||
+            user.username != existingUser.username ||
             user.phone != existingUser.phone ||
             user.role != existingUser.role ||
             user.profilePic != existingUser.profilePic ||
@@ -115,6 +119,7 @@ class UserRepository {
         final userCompanion = UsersCompanion.insert(
           id: Value(user.id),
           name: user.name,
+          username: Value(user.username),
           phone: user.phone,
           role: Value(user.role),
           profilePic: Value(user.profilePic),
@@ -131,6 +136,7 @@ class UserRepository {
         final companion = UsersCompanion(
           id: Value(user.id),
           name: user.name.isNotEmpty ? Value(user.name) : const Value.absent(),
+          username: user.username != null ? Value(user.username) : const Value.absent(),
           phone: user.phone.isNotEmpty ? Value(user.phone) : const Value.absent(),
           role: user.role != null ? Value(user.role) : const Value.absent(),
           profilePic: user.profilePic != null
@@ -155,6 +161,7 @@ class UserRepository {
       final userCompanion = UsersCompanion.insert(
         id: Value(user.id),
         name: user.name,
+        username: Value(user.username),
         phone: user.phone,
         role: Value(user.role),
         profilePic: Value(user.profilePic),
@@ -290,6 +297,7 @@ class UserRepository {
     final companion = UsersCompanion(
       id: Value(user.id),
       name: user.name.isNotEmpty ? Value(user.name) : const Value.absent(),
+      username: user.username != null ? Value(user.username) : const Value.absent(),
       phone: user.phone.isNotEmpty ? Value(user.phone) : const Value.absent(),
       role: user.role != null ? Value(user.role) : const Value.absent(),
       profilePic: user.profilePic != null
@@ -312,6 +320,30 @@ class UserRepository {
     final db = sqliteDatabase.database;
     await (db.update(db.users)..where((t) => t.id.equals(userId))).write(
       UsersCompanion(name: Value(name)),
+    );
+  }
+
+  /// Update user's username (contact name)
+  Future<void> updateUserUsername(int userId, String? username) async {
+    final db = sqliteDatabase.database;
+    await (db.update(db.users)..where((t) => t.id.equals(userId))).write(
+      UsersCompanion(username: Value(username)),
+    );
+  }
+
+  /// Update user's username and role together
+  /// This ensures role is preserved when updating username from contacts
+  Future<void> updateUserUsernameAndRole(
+    int userId,
+    String? username,
+    String? role,
+  ) async {
+    final db = sqliteDatabase.database;
+    await (db.update(db.users)..where((t) => t.id.equals(userId))).write(
+      UsersCompanion(
+        username: Value(username),
+        role: Value(role),
+      ),
     );
   }
 
@@ -386,6 +418,7 @@ class UserRepository {
         final userCompanion = UsersCompanion.insert(
           id: Value(user.id),
           name: user.name,
+          username: Value(user.username),
           phone: user.phone,
           role: Value(user.role),
           profilePic: Value(user.profilePic),

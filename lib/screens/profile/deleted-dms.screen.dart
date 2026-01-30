@@ -1,4 +1,5 @@
 import 'package:amigo/db/repositories/conversations.repo.dart';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -34,9 +35,14 @@ class _DeletedChatsPageState extends ConsumerState<DeletedChatsPage> {
     try {
       final deletedChats = await _userService.getChatList('deleted_dm');
 
+      // Enrich with local display names (includes username from contacts)
+      final enrichedChats = await UserUtils().enrichDeletedChatsWithDisplayNames(
+        deletedChats['data'],
+      );
+
       if (mounted) {
         setState(() {
-          _deletedChats = deletedChats['data'];
+          _deletedChats = enrichedChats;
           _isLoading = false;
         });
       }
