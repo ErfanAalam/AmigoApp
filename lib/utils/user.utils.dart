@@ -3,7 +3,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-  import '../db/repositories/user.repo.dart';
+import '../db/repositories/user.repo.dart';
 import '../models/call.model.dart';
 import '../models/conversations.model.dart';
 import '../models/user.model.dart';
@@ -101,9 +101,7 @@ class UserUtils {
 
         if (user != null) {
           // Update DM with displayName from local user (includes username if available)
-          final enrichedDm = dm.copyWith(
-            recipientName: user.displayName,
-          );
+          final enrichedDm = dm.copyWith(recipientName: user.displayName);
           enrichedDms.add(enrichedDm);
         } else {
           // User not found in local DB, keep original DM
@@ -217,9 +215,7 @@ class UserUtils {
 
         if (localUser != null && localUser.username != null) {
           // Update user with username from local database
-          final enrichedUser = user.copyWith(
-            username: localUser.username,
-          );
+          final enrichedUser = user.copyWith(username: localUser.username);
           enrichedUsers.add(enrichedUser);
         } else {
           // User not found in local DB or no username, keep original user

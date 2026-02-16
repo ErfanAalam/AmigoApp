@@ -1,10 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/widgets.dart';
-import 'package:flutter/material.dart' as material;
 
 import '../../types/socket.types.dart';
-import '../../utils/navigation-helper.util.dart';
+import '../../ui/snackbar.dart';
 import '../cookies.service.dart';
 import 'transport.manager.dart';
 import 'transport.service.dart';
@@ -18,11 +17,11 @@ enum WebSocketConnectionState {
 }
 
 /// WebSocket service that provides reliable real-time communication.
-/// 
+///
 /// This service uses the TransportManager internally to automatically handle
 /// fallback between different transports (WebSocket → SSE → HTTP Long Polling)
 /// ensuring maximum connectivity even in restrictive network environments.
-/// 
+///
 /// The public interface remains unchanged for backward compatibility.
 class WebSocketService {
   static final WebSocketService _instance = WebSocketService._internal();
@@ -35,7 +34,6 @@ class WebSocketService {
   // Connection state tracking
   WebSocketConnectionState _connectionState =
       WebSocketConnectionState.disconnected;
-  bool _isDialogShowing = false;
 
   // Stream controllers for different events
   final StreamController<WebSocketConnectionState> _connectionStateController =
@@ -67,13 +65,15 @@ class WebSocketService {
       _connectionState == WebSocketConnectionState.connected;
 
   /// Get the current transport type being used (for diagnostics)
-  TransportType? get currentTransportType => _transportManager.currentTransportType;
+  TransportType? get currentTransportType =>
+      _transportManager.currentTransportType;
 
   /// Stream of transport type changes (for diagnostics/UI)
-  Stream<TransportType> get transportTypeStream => _transportManager.transportTypeStream;
+  Stream<TransportType> get transportTypeStream =>
+      _transportManager.transportTypeStream;
 
   /// Initialize connection with automatic transport fallback.
-  /// 
+  ///
   /// This will attempt to connect using the best available transport:
   /// 1. WebSocket (preferred)
   /// 2. SSE (Server-Sent Events)
@@ -101,9 +101,10 @@ class WebSocketService {
       final success = await _transportManager.connect(accessToken);
 
       if (success) {
-        _isDialogShowing = false;
         _updateConnectionState(WebSocketConnectionState.connected);
-        debugPrint('✅ Connected successfully via ${_transportManager.currentTransportType?.name}');
+        debugPrint(
+          '✅ Connected successfully via ${_transportManager.currentTransportType?.name}',
+        );
       } else {
         debugPrint('❌ All transport connections failed');
         _updateConnectionState(WebSocketConnectionState.error);
@@ -124,7 +125,9 @@ class WebSocketService {
     _transportTypeSub?.cancel();
 
     // Subscribe to connection state changes
-    _connectionStateSub = _transportManager.connectionStateStream.listen((state) {
+    _connectionStateSub = _transportManager.connectionStateStream.listen((
+      state,
+    ) {
       final mappedState = _mapTransportState(state);
       _updateConnectionState(mappedState);
 
@@ -174,53 +177,14 @@ class WebSocketService {
   }
 
   void _showInternetIssueDialog() {
-    // Prevent showing multiple dialogs
-    if (_isDialogShowing) {
-      debugPrint('⚠️ Internet issue dialog is already showing');
-      return;
-    }
-
-    final context = NavigationHelper.navigatorKey.currentContext;
-    if (context == null) {
-      debugPrint(
-        '⚠️ Cannot show internet issue dialog: navigator context is null',
-      );
-      return;
-    }
-
-    _isDialogShowing = true;
-    material
-        .showDialog(
-          context: context,
-          builder: (ctx) => material.AlertDialog(
-            title: const material.Text('Connection issue'),
-            content: material.Text(
-              "We're having trouble connecting to the server. Please check your internet connection.\n\n"
-              "Current transport: ${_transportManager.currentTransportType?.name ?? 'none'}",
-            ),
-            actions: [
-              material.TextButton(
-                onPressed: () {
-                  _isDialogShowing = false;
-                  material.Navigator.of(ctx).pop();
-                  reconnect();
-                },
-                child: const material.Text('Retry'),
-              ),
-              material.TextButton(
-                onPressed: () {
-                  _isDialogShowing = false;
-                  material.Navigator.of(ctx).pop();
-                },
-                child: const material.Text('OK'),
-              ),
-            ],
-          ),
-        )
-        .then((_) {
-          // Reset flag if dialog is dismissed by other means (e.g., back button)
-          _isDialogShowing = false;
-        });
+    final transportType =
+        _transportManager.currentTransportType?.name ?? 'none';
+    Snack.show(
+      "Connection issue: Having trouble connecting to the server. Please check your internet connection.",
+      backgroundColor: Color.fromRGBO(2, 63, 154, 1),
+      duration: const Duration(seconds: 4),
+    );
+    debugPrint('⚠️ Connection issue - Current transport: $transportType');
   }
 
   /// Update connection state and notify listeners

@@ -1,12 +1,17 @@
+import 'dart:async';
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/socket.types.dart';
 import 'package:drift/drift.dart';
+import 'package:drift/native.dart';
+import 'package:drift/remote.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../sqlite.db.dart';
 import '../sqlite.schema.dart';
 
 class MessageRepository {
   final sqliteDatabase = SqliteDatabase.instance;
+  Timer? _cleanupTimer;
 
   /// Helper method to convert Messages row to MessageModel
   MessageModel _messageToModel(Message message) {
@@ -19,8 +24,7 @@ class MessageRepository {
         MessageStatusType.fromString(message.status) ?? MessageStatusType.sent;
 
     return MessageModel(
-      canonicalId: message.id.toInt(),
-      optimisticId: null, // Optimistic IDs are only temporary
+      id: message.id.toInt(),
       conversationId: message.conversationId,
       senderId: message.senderId,
       senderName: null, // Not stored in Messages table
@@ -41,12 +45,7 @@ class MessageRepository {
   /// Helper method to convert MessageModel to MessagesCompanion for insertion
   MessagesCompanion _modelToCompanion(MessageModel message) {
     // Use canonicalId if available, otherwise optimisticId
-    final messageId = message.canonicalId ?? message.optimisticId;
-    if (messageId == null) {
-      throw ArgumentError(
-        'Message must have either canonicalId or optimisticId',
-      );
-    }
+    final messageId = message.id;
 
     return MessagesCompanion.insert(
       id: Value(BigInt.from(messageId)),
@@ -66,117 +65,149 @@ class MessageRepository {
   }
 
   /// Insert a single message
-  Future<void> insertMessage(MessageModel message) async {
+  Future<Map<String, dynamic>> insertMessage(MessageModel message) async {
     final db = sqliteDatabase.database;
 
     // Wrap in transaction to prevent database locks
-    await db.transaction(() async {
+    final trx_result = await db.transaction<Map<String, dynamic>>(() async {
+      // final existingMessage = await (db.select(
+      //   db.messages,
+      // )..where((t) => t.id.equals(BigInt.from(message.id)))).getSingleOrNull();
+      //
+      // if (existingMessage != null) {
+      //   return;
+      // } else {
+      try {
+        final companion = _modelToCompanion(message);
+        final result = await db.into(db.messages).insert(companion);
+        // print("------------------message id ${message.id}-----------");
+        // print("-----------message insertion result $result---------------");
+        return {"success": true, "result": result};
+      } catch (e) {
+        // debugPrint("-------------------------------");
+        final error = e as DriftRemoteException;
+        final error2 = error.remoteCause as SqliteException;
+        // debugPrint("-------------------------------");
+        // debugPrint("-----------${error2.extendedResultCode}-----------");
+        // debugPrint("-------------------------------");
+        return {
+          "success": false,
+          "errorCode": error2.extendedResultCode,
+          "message": "failed to insert message ",
+        };
+      }
+      // }
       // If we have both canonicalId and optimisticId, we need to replace the optimistic message
       // with the canonical one to prevent duplicates
-      if (message.canonicalId != null && message.optimisticId != null) {
-        // Check if optimistic message exists
-        final optimisticMsg = await (db.select(
-          db.messages,
-        )..where((t) => t.id.equals(BigInt.from(message.optimisticId!))))
-            .getSingleOrNull();
-
-        if (optimisticMsg != null) {
-          // Check if canonical message already exists
-          final canonicalMsg = await (db.select(
-            db.messages,
-          )..where((t) => t.id.equals(BigInt.from(message.canonicalId!))))
-              .getSingleOrNull();
-
-          if (canonicalMsg == null) {
-            // Canonical message doesn't exist, delete optimistic one
-            await (db.delete(db.messages)
-                  ..where((t) => t.id.equals(BigInt.from(message.optimisticId!))))
-                .go();
-          } else {
-            // Canonical message already exists, just delete optimistic one
-            await (db.delete(db.messages)
-                  ..where((t) => t.id.equals(BigInt.from(message.optimisticId!))))
-                .go();
-            // Use existing canonical message data for merge
-            final existingMessage = _messageToModel(canonicalMsg);
-            
-            // Preserve existing body if new body is null/empty and existing has value
-            final bodyValue = (message.body != null && message.body!.isNotEmpty)
-                ? message.body
-                : (existingMessage.body);
-
-            // Preserve existing attachments if new attachments are null/empty and existing has value
-            final attachmentsValue =
-                (message.attachments != null && message.attachments!.isNotEmpty)
-                ? message.attachments
-                : (existingMessage.attachments);
-
-            // Preserve existing metadata if new metadata is null/empty and existing has value
-            final metadataValue =
-                (message.metadata != null && message.metadata!.isNotEmpty)
-                ? message.metadata
-                : (existingMessage.metadata);
-
-            // Preserve existing isReplied flag if new one is false/null but existing is true
-            final isRepliedValue = message.isReplied == true
-                ? true
-                : (existingMessage.isReplied ?? false);
-
-            // Create updated message with preserved values
-            final updatedMessage = message.copyWith(
-              body: bodyValue,
-              attachments: attachmentsValue,
-              metadata: metadataValue,
-              isReplied: isRepliedValue ? true : null,
-            );
-
-            final companion = _modelToCompanion(updatedMessage);
-            await db.into(db.messages).insertOnConflictUpdate(companion);
-            return; // Exit early since we've handled the update
-          }
-        }
-      }
+      // if (message.canonicalId != null && message.optimisticId != null) {
+      //   // Check if optimistic message exists
+      //   final optimisticMsg =
+      //       await (db.select(db.messages)..where(
+      //             (t) => t.id.equals(BigInt.from(message.optimisticId!)),
+      //           ))
+      //           .getSingleOrNull();
+      //
+      //   if (optimisticMsg != null) {
+      //     // Check if canonical message already exists
+      //     final canonicalMsg =
+      //         await (db.select(db.messages)..where(
+      //               (t) => t.id.equals(BigInt.from(message.canonicalId!)),
+      //             ))
+      //             .getSingleOrNull();
+      //
+      //     if (canonicalMsg == null) {
+      //       // Canonical message doesn't exist, delete optimistic one
+      //       await (db.delete(db.messages)..where(
+      //             (t) => t.id.equals(BigInt.from(message.optimisticId!)),
+      //           ))
+      //           .go();
+      //     } else {
+      //       // Canonical message already exists, just delete optimistic one
+      //       await (db.delete(db.messages)..where(
+      //             (t) => t.id.equals(BigInt.from(message.optimisticId!)),
+      //           ))
+      //           .go();
+      //       // Use existing canonical message data for merge
+      //       final existingMessage = _messageToModel(canonicalMsg);
+      //
+      //       // Preserve existing body if new body is null/empty and existing has value
+      //       final bodyValue = (message.body != null && message.body!.isNotEmpty)
+      //           ? message.body
+      //           : (existingMessage.body);
+      //
+      //       // Preserve existing attachments if new attachments are null/empty and existing has value
+      //       final attachmentsValue =
+      //           (message.attachments != null && message.attachments!.isNotEmpty)
+      //           ? message.attachments
+      //           : (existingMessage.attachments);
+      //
+      //       // Preserve existing metadata if new metadata is null/empty and existing has value
+      //       final metadataValue =
+      //           (message.metadata != null && message.metadata!.isNotEmpty)
+      //           ? message.metadata
+      //           : (existingMessage.metadata);
+      //
+      //       // Preserve existing isReplied flag if new one is false/null but existing is true
+      //       final isRepliedValue = message.isReplied == true
+      //           ? true
+      //           : (existingMessage.isReplied ?? false);
+      //
+      //       // Create updated message with preserved values
+      //       final updatedMessage = message.copyWith(
+      //         body: bodyValue,
+      //         attachments: attachmentsValue,
+      //         metadata: metadataValue,
+      //         isReplied: isRepliedValue ? true : null,
+      //       );
+      //
+      //       final companion = _modelToCompanion(updatedMessage);
+      //       await db.into(db.messages).insertOnConflictUpdate(companion);
+      //       return; // Exit early since we've handled the update
+      //     }
+      //   }
+      // }
 
       // Check if message already exists to preserve body and metadata
-      final messageId = message.canonicalId ?? message.optimisticId;
-      MessageModel? existingMessage;
-      if (messageId != null) {
-        existingMessage = await getMessageById(messageId);
-      }
-
-      // Preserve existing body if new body is null/empty and existing has value
-      final bodyValue = (message.body != null && message.body!.isNotEmpty)
-          ? message.body
-          : (existingMessage?.body);
-
-      // Preserve existing attachments if new attachments are null/empty and existing has value
-      final attachmentsValue =
-          (message.attachments != null && message.attachments!.isNotEmpty)
-          ? message.attachments
-          : (existingMessage?.attachments);
-
-      // Preserve existing metadata if new metadata is null/empty and existing has value
-      final metadataValue =
-          (message.metadata != null && message.metadata!.isNotEmpty)
-          ? message.metadata
-          : (existingMessage?.metadata);
-
-      // Preserve existing isReplied flag if new one is false/null but existing is true
-      final isRepliedValue = message.isReplied == true
-          ? true
-          : (existingMessage?.isReplied ?? false);
-
-      // Create updated message with preserved values
-      final updatedMessage = message.copyWith(
-        body: bodyValue,
-        attachments: attachmentsValue,
-        metadata: metadataValue,
-        isReplied: isRepliedValue ? true : null,
-      );
-
-      final companion = _modelToCompanion(updatedMessage);
-      await db.into(db.messages).insertOnConflictUpdate(companion);
+      // final messageId = message.canonicalId ?? message.optimisticId;
+      // MessageModel? existingMessage;
+      // if (messageId != null) {
+      //   existingMessage = await getMessageById(messageId);
+      // }
+      //
+      // // Preserve existing body if new body is null/empty and existing has value
+      // final bodyValue = (message.body != null && message.body!.isNotEmpty)
+      //     ? message.body
+      //     : (existingMessage?.body);
+      //
+      // // Preserve existing attachments if new attachments are null/empty and existing has value
+      // final attachmentsValue =
+      //     (message.attachments != null && message.attachments!.isNotEmpty)
+      //     ? message.attachments
+      //     : (existingMessage?.attachments);
+      //
+      // // Preserve existing metadata if new metadata is null/empty and existing has value
+      // final metadataValue =
+      //     (message.metadata != null && message.metadata!.isNotEmpty)
+      //     ? message.metadata
+      //     : (existingMessage?.metadata);
+      //
+      // // Preserve existing isReplied flag if new one is false/null but existing is true
+      // final isRepliedValue = message.isReplied == true
+      //     ? true
+      //     : (existingMessage?.isReplied ?? false);
+      //
+      // // Create updated message with preserved values
+      // final updatedMessage = message.copyWith(
+      //   body: bodyValue,
+      //   attachments: attachmentsValue,
+      //   metadata: metadataValue,
+      //   isReplied: isRepliedValue ? true : null,
+      // );
+      //
+      // final companion = _modelToCompanion(updatedMessage);
+      // await db.into(db.messages).insertOnConflictUpdate(companion);
     });
+    return trx_result;
   }
 
   /// Insert multiple messages (bulk insert)
@@ -186,45 +217,57 @@ class MessageRepository {
     final db = sqliteDatabase.database;
     await db.transaction(() async {
       for (final message in messages) {
-        // Check if message already exists to preserve body and metadata
-        final messageId = message.canonicalId ?? message.optimisticId;
-        MessageModel? existingMessage;
-        if (messageId != null) {
-          existingMessage = await getMessageById(messageId);
+        final existingMessage =
+            await (db.select(db.messages)
+                  ..where((t) => t.id.equals(BigInt.from(message.id))))
+                .getSingleOrNull();
+
+        if (existingMessage != null) {
+          return;
+        } else {
+          final companion = _modelToCompanion(message);
+          await db.into(db.messages).insert(companion);
+          return; // Exit early since we've handled the update
         }
-
-        // Preserve existing body if new body is null/empty and existing has value
-        final bodyValue = (message.body != null && message.body!.isNotEmpty)
-            ? message.body
-            : (existingMessage?.body);
-
-        // Preserve existing attachments if new attachments are null/empty and existing has value
-        final attachmentsValue =
-            (message.attachments != null && message.attachments!.isNotEmpty)
-            ? message.attachments
-            : (existingMessage?.attachments);
-
-        // Preserve existing metadata if new metadata is null/empty and existing has value
-        final metadataValue =
-            (message.metadata != null && message.metadata!.isNotEmpty)
-            ? message.metadata
-            : (existingMessage?.metadata);
-
-        // Preserve existing isReplied flag if new one is false/null but existing is true
-        final isRepliedValue = message.isReplied == true
-            ? true
-            : (existingMessage?.isReplied ?? false);
-
-        // Create updated message with preserved values
-        final updatedMessage = message.copyWith(
-          body: bodyValue,
-          attachments: attachmentsValue,
-          metadata: metadataValue,
-          isReplied: isRepliedValue ? true : null,
-        );
-
-        final companion = _modelToCompanion(updatedMessage);
-        await db.into(db.messages).insertOnConflictUpdate(companion);
+        // Check if message already exists to preserve body and metadata
+        // final messageId = message.canonicalId ?? message.optimisticId;
+        // MessageModel? existingMessage;
+        // if (messageId != null) {
+        //   existingMessage = await getMessageById(messageId);
+        // }
+        //
+        // // Preserve existing body if new body is null/empty and existing has value
+        // final bodyValue = (message.body != null && message.body!.isNotEmpty)
+        //     ? message.body
+        //     : (existingMessage?.body);
+        //
+        // // Preserve existing attachments if new attachments are null/empty and existing has value
+        // final attachmentsValue =
+        //     (message.attachments != null && message.attachments!.isNotEmpty)
+        //     ? message.attachments
+        //     : (existingMessage?.attachments);
+        //
+        // // Preserve existing metadata if new metadata is null/empty and existing has value
+        // final metadataValue =
+        //     (message.metadata != null && message.metadata!.isNotEmpty)
+        //     ? message.metadata
+        //     : (existingMessage?.metadata);
+        //
+        // // Preserve existing isReplied flag if new one is false/null but existing is true
+        // final isRepliedValue = message.isReplied == true
+        //     ? true
+        //     : (existingMessage?.isReplied ?? false);
+        //
+        // // Create updated message with preserved values
+        // final updatedMessage = message.copyWith(
+        //   body: bodyValue,
+        //   attachments: attachmentsValue,
+        //   metadata: metadataValue,
+        //   isReplied: isRepliedValue ? true : null,
+        // );
+        //
+        // final companion = _modelToCompanion(updatedMessage);
+        // await db.into(db.messages).insertOnConflictUpdate(companion);
       }
     });
   }
@@ -502,6 +545,66 @@ class MessageRepository {
     } catch (e) {
       debugPrint("Error updating message status: $e");
     }
+  }
+
+  /// Partially update a message by ID.
+  ///
+  /// Only the non-null fields you pass will be updated in the database.
+  /// All other columns for that row are left unchanged.
+  ///
+  /// Example:
+  ///   await updateMessageFields(
+  ///     messageId,
+  ///     status: MessageStatusType.delivered,
+  ///     metadata: updatedMetadata,
+  ///   );
+  Future<void> updateMessageFields(
+    int messageId, {
+    MessageStatusType? status,
+    int? newId,
+    Map<String, dynamic>? metadata,
+    Map<String, dynamic>? attachments,
+    String? body,
+    bool? isStarred,
+    bool? isReplied,
+    bool? isForwarded,
+    bool? isDeleted,
+  }) async {
+    // If nothing was provided, there is nothing to do
+    if (status == null &&
+        metadata == null &&
+        attachments == null &&
+        body == null &&
+        isStarred == null &&
+        isReplied == null &&
+        isForwarded == null &&
+        newId == null &&
+        isDeleted == null) {
+      return;
+    }
+
+    final db = sqliteDatabase.database;
+
+    // Drift only updates the columns where the Value is present.
+    final companion = MessagesCompanion(
+      status: status != null ? Value(status.value) : const Value.absent(),
+      id: newId != null ? Value(BigInt.from(newId)) : const Value.absent(),
+      metadata: metadata != null ? Value(metadata) : const Value.absent(),
+      attachments: attachments != null
+          ? Value(attachments)
+          : const Value.absent(),
+      body: body != null ? Value(body) : const Value.absent(),
+      isStarred: isStarred != null ? Value(isStarred) : const Value.absent(),
+      isReplied: isReplied != null ? Value(isReplied) : const Value.absent(),
+      isForwarded: isForwarded != null
+          ? Value(isForwarded)
+          : const Value.absent(),
+      isDeleted: isDeleted != null ? Value(isDeleted) : const Value.absent(),
+    );
+
+    await (db.update(
+      db.messages,
+    )..where((t) => t.id.equals(BigInt.from(messageId)))).write(companion);
   }
 
   /// Update all messages status for a conversation
@@ -967,11 +1070,55 @@ class MessageRepository {
     };
   }
 
-
-  // function to delete all message of id less than or eual to 0 
+  // function to delete all message of id less than or eual to 0
   Future<void> deleteAllMessagesLessThanOrEqualTo0() async {
     final db = sqliteDatabase.database;
-    await (db.delete(db.messages)
-          ..where((t) => t.id.isSmallerOrEqualValue(BigInt.zero))).go();
+    await (db.delete(
+      db.messages,
+    )..where((t) => t.id.isSmallerOrEqualValue(BigInt.zero))).go();
+  }
+
+  // function to delete all message of id less than or equal to 0 and sentAt is more than 10 seconds ago
+  Future<void> removeoptimisticmessagesentatmorethan10sec() async {
+    final db = sqliteDatabase.database;
+
+    // Calculate timestamp 10 seconds ago
+    final tenSecondsAgo = DateTime.now().subtract(const Duration(seconds: 10));
+    final tenSecondsAgoStr = tenSecondsAgo.toIso8601String();
+
+    await (db.delete(db.messages)..where(
+          (t) =>
+              t.id.isSmallerOrEqualValue(BigInt.zero) &
+              t.sentAt.isSmallerOrEqualValue(tenSecondsAgoStr),
+        ))
+        .go();
+  }
+
+  /// Start the automatic cleanup timer that runs every 10 seconds
+  void startCleanupTimer() {
+    _stopCleanupTimer(); // Stop any existing timer first
+
+    _cleanupTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      removeoptimisticmessagesentatmorethan10sec().catchError((error) {
+        debugPrint('❌ Error in optimistic message cleanup: $error');
+      });
+    });
+
+    debugPrint('✅ Optimistic message cleanup timer started (every 10 seconds)');
+  }
+
+  /// Stop the automatic cleanup timer
+  void stopCleanupTimer() {
+    _stopCleanupTimer();
+  }
+
+  void _stopCleanupTimer() {
+    _cleanupTimer?.cancel();
+    _cleanupTimer = null;
+  }
+
+  /// Dispose resources and stop the cleanup timer
+  void dispose() {
+    _stopCleanupTimer();
   }
 }

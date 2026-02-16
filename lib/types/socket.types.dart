@@ -1,3 +1,6 @@
+import 'package:amigo/utils/general.utils.dart';
+import 'package:amigo/utils/user.utils.dart';
+
 /// Chat type enum
 enum ChatType {
   dm('dm'),
@@ -217,8 +220,7 @@ class JoinLeavePayload {
 
 /// Chat message payload
 class ChatMessagePayload {
-  final int optimisticId;
-  final int? canonicalId;
+  final int id;
   final int senderId;
   final String? senderName;
   final int convId;
@@ -231,8 +233,7 @@ class ChatMessagePayload {
   final DateTime sentAt;
 
   ChatMessagePayload({
-    required this.optimisticId,
-    this.canonicalId,
+    required this.id,
     required this.senderId,
     this.senderName,
     required this.convId,
@@ -261,8 +262,7 @@ class ChatMessagePayload {
     }
 
     return ChatMessagePayload(
-      optimisticId: json['optimistic_id'] as int,
-      canonicalId: json['canonical_id'] as int?,
+      id: json['id'] as int,
       senderId: json['sender_id'] as int,
       senderName: json['sender_name'] as String?,
       convId: json['conv_id'] as int,
@@ -281,8 +281,7 @@ class ChatMessagePayload {
 
   Map<String, dynamic> toJson() {
     return {
-      'optimistic_id': optimisticId,
-      if (canonicalId != null) 'canonical_id': canonicalId,
+      'id': id,
       'sender_id': senderId,
       if (senderName != null) 'sender_name': senderName,
       'conv_id': convId,
@@ -299,21 +298,25 @@ class ChatMessagePayload {
 
 /// Chat message acknowledgment payload
 class ChatMessageAckPayload {
-  final int optimisticId;
-  final int canonicalId;
+  final int id;
+  final int? newId;
   final int convId;
   final int senderId;
+  final bool? isFailed;
+  final int? errorCode;
   final DateTime deliveredAt;
   final List<int>? deliveredTo;
   final List<int>? readBy;
   final List<int>? offlineUsers;
 
   ChatMessageAckPayload({
-    required this.optimisticId,
-    required this.canonicalId,
+    required this.id,
+    this.newId,
     required this.convId,
     required this.senderId,
     required this.deliveredAt,
+    this.isFailed,
+    this.errorCode,
     this.deliveredTo,
     this.readBy,
     this.offlineUsers,
@@ -336,11 +339,13 @@ class ChatMessageAckPayload {
     }
 
     return ChatMessageAckPayload(
-      optimisticId: json['optimistic_id'] as int,
-      canonicalId: json['canonical_id'] as int,
+      id: json['id'] as int,
+      newId: json['new_id'],
       convId: json['conv_id'] as int,
       senderId: json['sender_id'] as int,
       deliveredAt: deliveredAt,
+      isFailed: json["is_failed"] != null ? json["is_failed"] as bool : null,
+      errorCode: json["error_code"] != null ? json["error_code"] as int : null,
       deliveredTo: json['delivered_to'] != null
           ? (json['delivered_to'] as List<dynamic>)
                 .map((e) => e as int)
@@ -359,10 +364,12 @@ class ChatMessageAckPayload {
 
   Map<String, dynamic> toJson() {
     return {
-      'optimistic_id': optimisticId,
-      'canonical_id': canonicalId,
+      'id': id,
+      'new_id': newId,
       'conv_id': convId,
       'sender_id': senderId,
+      'error_code': errorCode,
+      'is_failed': isFailed,
       'delivered_at': deliveredAt.toIso8601String(),
       if (deliveredTo != null) 'delivered_to': deliveredTo,
       if (readBy != null) 'read_by': readBy,
@@ -540,7 +547,8 @@ class ConversationActionPayload {
       convId: json['conv_id'] as int,
       convType:
           ChatType.fromString(json['conv_type'] as String?) ?? ChatType.group,
-      action: ConversationActionType.fromString(json['action'] as String?) ??
+      action:
+          ConversationActionType.fromString(json['action'] as String?) ??
           ConversationActionType.memberAdded,
       members: (json['members'] as List<dynamic>? ?? [])
           .map((e) => MembersType.fromJson(e as Map<String, dynamic>))
@@ -757,105 +765,105 @@ class MessageForwardPayload {
   }
 }
 
-/// Single synced message item
-class SyncMessageItem {
-  final int id;
-  final int convId;
-  final ChatType convType;
-  final int senderId;
-  final String? senderName;
-  final String? senderPfp;
-  final MessageType msgType;
-  final String? body;
-  final dynamic attachments;
-  final dynamic metadata;
-  final DateTime sentAt;
-  final DateTime createdAt;
-
-  SyncMessageItem({
-    required this.id,
-    required this.convId,
-    required this.convType,
-    required this.senderId,
-    this.senderName,
-    this.senderPfp,
-    required this.msgType,
-    this.body,
-    this.attachments,
-    this.metadata,
-    required this.sentAt,
-    required this.createdAt,
-  });
-
-  factory SyncMessageItem.fromJson(Map<String, dynamic> json) {
-    DateTime sentAt;
-    try {
-      final sentAtData = json['sent_at'];
-      if (sentAtData is String) {
-        sentAt = DateTime.parse(sentAtData);
-      } else if (sentAtData is DateTime) {
-        sentAt = sentAtData;
-      } else {
-        sentAt = DateTime.now();
-      }
-    } catch (e) {
-      sentAt = DateTime.now();
-    }
-
-    DateTime createdAt;
-    try {
-      final createdAtData = json['created_at'];
-      if (createdAtData is String) {
-        createdAt = DateTime.parse(createdAtData);
-      } else if (createdAtData is DateTime) {
-        createdAt = createdAtData;
-      } else {
-        createdAt = DateTime.now();
-      }
-    } catch (e) {
-      createdAt = DateTime.now();
-    }
-
-    return SyncMessageItem(
-      id: json['id'] as int,
-      convId: json['conv_id'] as int,
-      convType:
-          ChatType.fromString(json['conv_type'] as String?) ?? ChatType.dm,
-      senderId: json['sender_id'] as int,
-      senderName: json['sender_name'] as String?,
-      senderPfp: json['sender_pfp'] as String?,
-      msgType:
-          MessageType.fromString(json['msg_type'] as String?) ??
-          MessageType.text,
-      body: json['body'] as String?,
-      attachments: json['attachments'],
-      metadata: json['metadata'],
-      sentAt: sentAt,
-      createdAt: createdAt,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'conv_id': convId,
-      'conv_type': convType.value,
-      'sender_id': senderId,
-      if (senderName != null) 'sender_name': senderName,
-      if (senderPfp != null) 'sender_pfp': senderPfp,
-      'msg_type': msgType.value,
-      if (body != null) 'body': body,
-      if (attachments != null) 'attachments': attachments,
-      if (metadata != null) 'metadata': metadata,
-      'sent_at': sentAt.toIso8601String(),
-      'created_at': createdAt.toIso8601String(),
-    };
-  }
-}
+// /// Single synced message item
+// class SyncMessageItem {
+//   final int id;
+//   final int convId;
+//   final ChatType convType;
+//   final int senderId;
+//   final String? senderName;
+//   final String? senderPfp;
+//   final MessageType msgType;
+//   final String? body;
+//   final dynamic attachments;
+//   final dynamic metadata;
+//   final DateTime sentAt;
+//   final DateTime createdAt;
+//
+//   SyncMessageItem({
+//     required this.id,
+//     required this.convId,
+//     required this.convType,
+//     required this.senderId,
+//     this.senderName,
+//     this.senderPfp,
+//     required this.msgType,
+//     this.body,
+//     this.attachments,
+//     this.metadata,
+//     required this.sentAt,
+//     required this.createdAt,
+//   });
+//
+//   factory SyncMessageItem.fromJson(Map<String, dynamic> json) {
+//     DateTime sentAt;
+//     try {
+//       final sentAtData = json['sent_at'];
+//       if (sentAtData is String) {
+//         sentAt = DateTime.parse(sentAtData);
+//       } else if (sentAtData is DateTime) {
+//         sentAt = sentAtData;
+//       } else {
+//         sentAt = DateTime.now();
+//       }
+//     } catch (e) {
+//       sentAt = DateTime.now();
+//     }
+//
+//     DateTime createdAt;
+//     try {
+//       final createdAtData = json['created_at'];
+//       if (createdAtData is String) {
+//         createdAt = DateTime.parse(createdAtData);
+//       } else if (createdAtData is DateTime) {
+//         createdAt = createdAtData;
+//       } else {
+//         createdAt = DateTime.now();
+//       }
+//     } catch (e) {
+//       createdAt = DateTime.now();
+//     }
+//
+//     return SyncMessageItem(
+//       id: json['id'] as int,
+//       convId: json['conv_id'] as int,
+//       convType:
+//           ChatType.fromString(json['conv_type'] as String?) ?? ChatType.dm,
+//       senderId: json['sender_id'] as int,
+//       senderName: json['sender_name'] as String?,
+//       senderPfp: json['sender_pfp'] as String?,
+//       msgType:
+//           MessageType.fromString(json['msg_type'] as String?) ??
+//           MessageType.text,
+//       body: json['body'] as String?,
+//       attachments: json['attachments'],
+//       metadata: json['metadata'],
+//       sentAt: sentAt,
+//       createdAt: createdAt,
+//     );
+//   }
+//
+//   Map<String, dynamic> toJson() {
+//     return {
+//       'id': id,
+//       'conv_id': convId,
+//       'conv_type': convType.value,
+//       'sender_id': senderId,
+//       if (senderName != null) 'sender_name': senderName,
+//       if (senderPfp != null) 'sender_pfp': senderPfp,
+//       'msg_type': msgType.value,
+//       if (body != null) 'body': body,
+//       if (attachments != null) 'attachments': attachments,
+//       if (metadata != null) 'metadata': metadata,
+//       'sent_at': sentAt.toIso8601String(),
+//       'created_at': createdAt.toIso8601String(),
+//     };
+//   }
+// }
 
 /// Sync messages payload - sent on reconnection with missed messages
 class SyncMessagesPayload {
-  final List<SyncMessageItem> messages;
+  final List<ChatMessagePayload> messages;
   final DateTime syncTimestamp;
   final int totalCount;
 
@@ -882,7 +890,7 @@ class SyncMessagesPayload {
 
     return SyncMessagesPayload(
       messages: (json['messages'] as List<dynamic>? ?? [])
-          .map((e) => SyncMessageItem.fromJson(e as Map<String, dynamic>))
+          .map((e) => ChatMessagePayload.fromJson(e as Map<String, dynamic>))
           .toList(),
       syncTimestamp: syncTimestamp,
       totalCount: json['total_count'] as int? ?? 0,

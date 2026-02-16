@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:amigo/types/socket.types.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
 
 import 'auth.api-client.dart';
 
@@ -118,9 +120,7 @@ class ChatsServices {
     bool? isAdminOrStaff,
   ]) async {
     try {
-      final body = <String, dynamic>{
-        'message_ids': messageIds,
-      };
+      final body = <String, dynamic>{'message_ids': messageIds};
       if (isAdminOrStaff != null) {
         body['is_admin_or_staff'] = isAdminOrStaff;
       }
@@ -145,10 +145,7 @@ class ChatsServices {
     try {
       final response = await _apiService.authenticatedDelete(
         '/chat/delete-message-for-me',
-        body: {
-          'message_ids': messageIds,
-          'conversation_id': conversationId,
-        },
+        body: {'message_ids': messageIds, 'conversation_id': conversationId},
       );
       return response.data;
     } catch (e) {
@@ -198,10 +195,7 @@ class ChatsServices {
     try {
       final response = await _apiService.authenticatedPost(
         '/chat/messages/delivered',
-        data: {
-          'message_id': messageId,
-          'conversation_id': conversationId,
-        },
+        data: {'message_id': messageId, 'conversation_id': conversationId},
       );
       if (response.data is String) {
         return jsonDecode(response.data as String);
@@ -212,6 +206,65 @@ class ChatsServices {
         'success': false,
         'error': e.toString(),
         'message': 'Failed to mark message as delivered',
+      };
+    }
+  }
+
+  // Future<Map<String, dynamic>> getMessageStatuses({
+  //   required int conversationId,
+  //   int page = 1,
+  //   int limit = 1000,
+  // }) async {
+  //   try {
+  //     final response = await _apiService.authenticatedGet(
+  //       '/chat/get-message-statuses/$conversationId?page=$page&limit=$limit',
+  //     );
+  //
+  //     if (response.data is String) {
+  //       return jsonDecode(response.data as String);
+  //     }
+  //     return response.data;
+  //   } catch (e) {
+  //     return {
+  //       'success': false,
+  //       'error': e.toString(),
+  //       'message': 'Failed to get message statuses',
+  //     };
+  //   }
+  // }
+
+  Future<Map<String, dynamic>> sync_message_via_polling() async {
+    try {
+      final response = await _apiService.authenticatedGet(
+        '/chat/sync-messages-via-polling',
+      );
+      // print("----------------------testing-----------");
+      // print("----------------------$response-----------");
+
+      // print(response);
+      if (response.data is String) {
+        return jsonDecode(response.data as String);
+      }
+      return response.data;
+      // final dynamic raw = response.data is String
+      //     ? jsonDecode(response.data as String)
+      //     : response.data;
+      //
+      // if (raw is! Map<String, dynamic>) return [];
+      //
+      // final messages = raw['messages'];
+      // if (messages is! List) return [];
+      //
+      // return List.from(messages)
+      //     .whereType<Map<String, dynamic>>()
+      //     .map((e) => ChatMessagePayload.fromJson(e))
+      //     .toList();
+    } catch (e) {
+      debugPrint("error in syncing message through polling $e");
+      return {
+        'success': false,
+        'error': e.toString(),
+        'message': 'failed to sync message via polling',
       };
     }
   }

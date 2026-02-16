@@ -2715,6 +2715,21 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   ).withConverter<Map<String, dynamic>?>($MessagesTable.$convertermetadata);
+  static const VerificationMeta _isFailedMeta = const VerificationMeta(
+    'isFailed',
+  );
+  @override
+  late final GeneratedColumn<bool> isFailed = GeneratedColumn<bool>(
+    'is_failed',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_failed" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
   static const VerificationMeta _isPinnedMeta = const VerificationMeta(
     'isPinned',
   );
@@ -2809,6 +2824,7 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     status,
     attachments,
     metadata,
+    isFailed,
     isPinned,
     isStarred,
     isReplied,
@@ -2871,6 +2887,12 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
       );
     } else if (isInserting) {
       context.missing(_statusMeta);
+    }
+    if (data.containsKey('is_failed')) {
+      context.handle(
+        _isFailedMeta,
+        isFailed.isAcceptableOrUnknown(data['is_failed']!, _isFailedMeta),
+      );
     }
     if (data.containsKey('is_pinned')) {
       context.handle(
@@ -2958,6 +2980,10 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
           data['${effectivePrefix}metadata'],
         ),
       ),
+      isFailed: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_failed'],
+      )!,
       isPinned: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}is_pinned'],
@@ -3005,6 +3031,7 @@ class Message extends DataClass implements Insertable<Message> {
   final String status;
   final Map<String, dynamic>? attachments;
   final Map<String, dynamic>? metadata;
+  final bool isFailed;
   final bool isPinned;
   final bool isStarred;
   final bool isReplied;
@@ -3020,6 +3047,7 @@ class Message extends DataClass implements Insertable<Message> {
     required this.status,
     this.attachments,
     this.metadata,
+    required this.isFailed,
     required this.isPinned,
     required this.isStarred,
     required this.isReplied,
@@ -3048,6 +3076,7 @@ class Message extends DataClass implements Insertable<Message> {
         $MessagesTable.$convertermetadata.toSql(metadata),
       );
     }
+    map['is_failed'] = Variable<bool>(isFailed);
     map['is_pinned'] = Variable<bool>(isPinned);
     map['is_starred'] = Variable<bool>(isStarred);
     map['is_replied'] = Variable<bool>(isReplied);
@@ -3071,6 +3100,7 @@ class Message extends DataClass implements Insertable<Message> {
       metadata: metadata == null && nullToAbsent
           ? const Value.absent()
           : Value(metadata),
+      isFailed: Value(isFailed),
       isPinned: Value(isPinned),
       isStarred: Value(isStarred),
       isReplied: Value(isReplied),
@@ -3096,6 +3126,7 @@ class Message extends DataClass implements Insertable<Message> {
         json['attachments'],
       ),
       metadata: serializer.fromJson<Map<String, dynamic>?>(json['metadata']),
+      isFailed: serializer.fromJson<bool>(json['isFailed']),
       isPinned: serializer.fromJson<bool>(json['isPinned']),
       isStarred: serializer.fromJson<bool>(json['isStarred']),
       isReplied: serializer.fromJson<bool>(json['isReplied']),
@@ -3116,6 +3147,7 @@ class Message extends DataClass implements Insertable<Message> {
       'status': serializer.toJson<String>(status),
       'attachments': serializer.toJson<Map<String, dynamic>?>(attachments),
       'metadata': serializer.toJson<Map<String, dynamic>?>(metadata),
+      'isFailed': serializer.toJson<bool>(isFailed),
       'isPinned': serializer.toJson<bool>(isPinned),
       'isStarred': serializer.toJson<bool>(isStarred),
       'isReplied': serializer.toJson<bool>(isReplied),
@@ -3134,6 +3166,7 @@ class Message extends DataClass implements Insertable<Message> {
     String? status,
     Value<Map<String, dynamic>?> attachments = const Value.absent(),
     Value<Map<String, dynamic>?> metadata = const Value.absent(),
+    bool? isFailed,
     bool? isPinned,
     bool? isStarred,
     bool? isReplied,
@@ -3149,6 +3182,7 @@ class Message extends DataClass implements Insertable<Message> {
     status: status ?? this.status,
     attachments: attachments.present ? attachments.value : this.attachments,
     metadata: metadata.present ? metadata.value : this.metadata,
+    isFailed: isFailed ?? this.isFailed,
     isPinned: isPinned ?? this.isPinned,
     isStarred: isStarred ?? this.isStarred,
     isReplied: isReplied ?? this.isReplied,
@@ -3170,6 +3204,7 @@ class Message extends DataClass implements Insertable<Message> {
           ? data.attachments.value
           : this.attachments,
       metadata: data.metadata.present ? data.metadata.value : this.metadata,
+      isFailed: data.isFailed.present ? data.isFailed.value : this.isFailed,
       isPinned: data.isPinned.present ? data.isPinned.value : this.isPinned,
       isStarred: data.isStarred.present ? data.isStarred.value : this.isStarred,
       isReplied: data.isReplied.present ? data.isReplied.value : this.isReplied,
@@ -3192,6 +3227,7 @@ class Message extends DataClass implements Insertable<Message> {
           ..write('status: $status, ')
           ..write('attachments: $attachments, ')
           ..write('metadata: $metadata, ')
+          ..write('isFailed: $isFailed, ')
           ..write('isPinned: $isPinned, ')
           ..write('isStarred: $isStarred, ')
           ..write('isReplied: $isReplied, ')
@@ -3212,6 +3248,7 @@ class Message extends DataClass implements Insertable<Message> {
     status,
     attachments,
     metadata,
+    isFailed,
     isPinned,
     isStarred,
     isReplied,
@@ -3231,6 +3268,7 @@ class Message extends DataClass implements Insertable<Message> {
           other.status == this.status &&
           other.attachments == this.attachments &&
           other.metadata == this.metadata &&
+          other.isFailed == this.isFailed &&
           other.isPinned == this.isPinned &&
           other.isStarred == this.isStarred &&
           other.isReplied == this.isReplied &&
@@ -3248,6 +3286,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   final Value<String> status;
   final Value<Map<String, dynamic>?> attachments;
   final Value<Map<String, dynamic>?> metadata;
+  final Value<bool> isFailed;
   final Value<bool> isPinned;
   final Value<bool> isStarred;
   final Value<bool> isReplied;
@@ -3263,6 +3302,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.status = const Value.absent(),
     this.attachments = const Value.absent(),
     this.metadata = const Value.absent(),
+    this.isFailed = const Value.absent(),
     this.isPinned = const Value.absent(),
     this.isStarred = const Value.absent(),
     this.isReplied = const Value.absent(),
@@ -3279,6 +3319,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     required String status,
     this.attachments = const Value.absent(),
     this.metadata = const Value.absent(),
+    this.isFailed = const Value.absent(),
     this.isPinned = const Value.absent(),
     this.isStarred = const Value.absent(),
     this.isReplied = const Value.absent(),
@@ -3299,6 +3340,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Expression<String>? status,
     Expression<String>? attachments,
     Expression<String>? metadata,
+    Expression<bool>? isFailed,
     Expression<bool>? isPinned,
     Expression<bool>? isStarred,
     Expression<bool>? isReplied,
@@ -3315,6 +3357,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       if (status != null) 'status': status,
       if (attachments != null) 'attachments': attachments,
       if (metadata != null) 'metadata': metadata,
+      if (isFailed != null) 'is_failed': isFailed,
       if (isPinned != null) 'is_pinned': isPinned,
       if (isStarred != null) 'is_starred': isStarred,
       if (isReplied != null) 'is_replied': isReplied,
@@ -3333,6 +3376,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Value<String>? status,
     Value<Map<String, dynamic>?>? attachments,
     Value<Map<String, dynamic>?>? metadata,
+    Value<bool>? isFailed,
     Value<bool>? isPinned,
     Value<bool>? isStarred,
     Value<bool>? isReplied,
@@ -3349,6 +3393,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       status: status ?? this.status,
       attachments: attachments ?? this.attachments,
       metadata: metadata ?? this.metadata,
+      isFailed: isFailed ?? this.isFailed,
       isPinned: isPinned ?? this.isPinned,
       isStarred: isStarred ?? this.isStarred,
       isReplied: isReplied ?? this.isReplied,
@@ -3389,6 +3434,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
         $MessagesTable.$convertermetadata.toSql(metadata.value),
       );
     }
+    if (isFailed.present) {
+      map['is_failed'] = Variable<bool>(isFailed.value);
+    }
     if (isPinned.present) {
       map['is_pinned'] = Variable<bool>(isPinned.value);
     }
@@ -3421,6 +3469,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
           ..write('status: $status, ')
           ..write('attachments: $attachments, ')
           ..write('metadata: $metadata, ')
+          ..write('isFailed: $isFailed, ')
           ..write('isPinned: $isPinned, ')
           ..write('isStarred: $isStarred, ')
           ..write('isReplied: $isReplied, ')
@@ -5190,6 +5239,7 @@ typedef $$MessagesTableCreateCompanionBuilder =
       required String status,
       Value<Map<String, dynamic>?> attachments,
       Value<Map<String, dynamic>?> metadata,
+      Value<bool> isFailed,
       Value<bool> isPinned,
       Value<bool> isStarred,
       Value<bool> isReplied,
@@ -5207,6 +5257,7 @@ typedef $$MessagesTableUpdateCompanionBuilder =
       Value<String> status,
       Value<Map<String, dynamic>?> attachments,
       Value<Map<String, dynamic>?> metadata,
+      Value<bool> isFailed,
       Value<bool> isPinned,
       Value<bool> isStarred,
       Value<bool> isReplied,
@@ -5272,6 +5323,11 @@ class $$MessagesTableFilterComposer
   get metadata => $composableBuilder(
     column: $table.metadata,
     builder: (column) => ColumnWithTypeConverterFilters(column),
+  );
+
+  ColumnFilters<bool> get isFailed => $composableBuilder(
+    column: $table.isFailed,
+    builder: (column) => ColumnFilters(column),
   );
 
   ColumnFilters<bool> get isPinned => $composableBuilder(
@@ -5354,6 +5410,11 @@ class $$MessagesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get isFailed => $composableBuilder(
+    column: $table.isFailed,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<bool> get isPinned => $composableBuilder(
     column: $table.isPinned,
     builder: (column) => ColumnOrderings(column),
@@ -5424,6 +5485,9 @@ class $$MessagesTableAnnotationComposer
   get metadata =>
       $composableBuilder(column: $table.metadata, builder: (column) => column);
 
+  GeneratedColumn<bool> get isFailed =>
+      $composableBuilder(column: $table.isFailed, builder: (column) => column);
+
   GeneratedColumn<bool> get isPinned =>
       $composableBuilder(column: $table.isPinned, builder: (column) => column);
 
@@ -5481,6 +5545,7 @@ class $$MessagesTableTableManager
                 Value<String> status = const Value.absent(),
                 Value<Map<String, dynamic>?> attachments = const Value.absent(),
                 Value<Map<String, dynamic>?> metadata = const Value.absent(),
+                Value<bool> isFailed = const Value.absent(),
                 Value<bool> isPinned = const Value.absent(),
                 Value<bool> isStarred = const Value.absent(),
                 Value<bool> isReplied = const Value.absent(),
@@ -5496,6 +5561,7 @@ class $$MessagesTableTableManager
                 status: status,
                 attachments: attachments,
                 metadata: metadata,
+                isFailed: isFailed,
                 isPinned: isPinned,
                 isStarred: isStarred,
                 isReplied: isReplied,
@@ -5513,6 +5579,7 @@ class $$MessagesTableTableManager
                 required String status,
                 Value<Map<String, dynamic>?> attachments = const Value.absent(),
                 Value<Map<String, dynamic>?> metadata = const Value.absent(),
+                Value<bool> isFailed = const Value.absent(),
                 Value<bool> isPinned = const Value.absent(),
                 Value<bool> isStarred = const Value.absent(),
                 Value<bool> isReplied = const Value.absent(),
@@ -5528,6 +5595,7 @@ class $$MessagesTableTableManager
                 status: status,
                 attachments: attachments,
                 metadata: metadata,
+                isFailed: isFailed,
                 isPinned: isPinned,
                 isStarred: isStarred,
                 isReplied: isReplied,

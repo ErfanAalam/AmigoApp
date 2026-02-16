@@ -401,7 +401,7 @@ class ChatHelpers {
     required int? currentUserId,
     required void Function(void Function()) setState,
   }) async {
-    final wasPinned = message.canonicalId == currentPinnedMessageId;
+    final wasPinned = message.id == currentPinnedMessageId;
 
     setState(() {
       if (wasPinned) {
@@ -412,7 +412,7 @@ class ChatHelpers {
     });
 
     // Set to null when unpinning, otherwise set to message canonicalId
-    final newPinnedMessageId = wasPinned ? null : message.canonicalId;
+    final newPinnedMessageId = wasPinned ? null : message.id;
 
     await conversationRepo.updatePinnedMessage(
       conversationId,
@@ -421,7 +421,7 @@ class ChatHelpers {
 
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     final pinMessagePayload = MessagePinPayload(
-      messageId: message.canonicalId!,
+      messageId: message.id,
       messageType: message.type,
       senderId: currentUserId!,
       convId: conversationId,
@@ -620,7 +620,7 @@ class ChatHelpers {
     if (type == 'image' || type == 'video') {
       return true;
     }
-    
+
     // Check attachments category
     if (message.attachments != null) {
       final attachmentData = message.attachments as Map<String, dynamic>;
@@ -630,20 +630,22 @@ class ChatHelpers {
         return categoryLower == 'images' || categoryLower == 'videos';
       }
     }
-    
+
     return false;
   }
 
   /// Find consecutive media message groups (4 or more images/videos)
   /// Returns a list of ranges [startIndex, endIndex] for each group
-  static List<MediaGroup> findConsecutiveMediaGroups(List<MessageModel> messages) {
+  static List<MediaGroup> findConsecutiveMediaGroups(
+    List<MessageModel> messages,
+  ) {
     final groups = <MediaGroup>[];
     int? groupStart;
     int consecutiveCount = 0;
 
     for (int i = 0; i < messages.length; i++) {
       final message = messages[i];
-      
+
       if (isImageOrVideoMessage(message)) {
         if (groupStart == null) {
           groupStart = i;
@@ -652,11 +654,13 @@ class ChatHelpers {
       } else {
         // Non-media message breaks the sequence
         if (consecutiveCount >= 4 && groupStart != null) {
-          groups.add(MediaGroup(
-            startIndex: groupStart,
-            endIndex: i - 1,
-            messages: messages.sublist(groupStart, i),
-          ));
+          groups.add(
+            MediaGroup(
+              startIndex: groupStart,
+              endIndex: i - 1,
+              messages: messages.sublist(groupStart, i),
+            ),
+          );
         }
         groupStart = null;
         consecutiveCount = 0;
@@ -665,11 +669,13 @@ class ChatHelpers {
 
     // Check if the last messages form a group
     if (consecutiveCount >= 4 && groupStart != null) {
-      groups.add(MediaGroup(
-        startIndex: groupStart,
-        endIndex: messages.length - 1,
-        messages: messages.sublist(groupStart),
-      ));
+      groups.add(
+        MediaGroup(
+          startIndex: groupStart,
+          endIndex: messages.length - 1,
+          messages: messages.sublist(groupStart),
+        ),
+      );
     }
 
     return groups;

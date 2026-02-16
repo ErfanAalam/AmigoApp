@@ -383,8 +383,7 @@ Future<void> _storeMessageFromNotificationBackground(
 
     // Convert to MessageModel and store in local DB
     final messageModel = MessageModel(
-      optimisticId: chatMessagePayload.optimisticId,
-      canonicalId: chatMessagePayload.canonicalId,
+      id: chatMessagePayload.id,
       conversationId: chatMessagePayload.convId,
       senderId: chatMessagePayload.senderId,
       senderName: chatMessagePayload.senderName,
@@ -409,8 +408,7 @@ Future<void> _storeMessageFromNotificationBackground(
     final conversationRepo = ConversationRepository();
     final conversationId = chatMessagePayload.convId;
     // Use canonicalId if available, otherwise use optimisticId (which is always present)
-    final messageId =
-        chatMessagePayload.canonicalId ?? chatMessagePayload.optimisticId;
+    final messageId = chatMessagePayload.id;
 
     // Get current conversation to check unread count
     final conversation = await conversationRepo.getConversationById(
@@ -438,7 +436,7 @@ Future<void> _storeMessageFromNotificationBackground(
     }
 
     debugPrint(
-      '✅ [BACKGROUND] Stored message from FCM notification: ${chatMessagePayload.canonicalId ?? chatMessagePayload.optimisticId}',
+      '✅ [BACKGROUND] Stored message from FCM notification: ${chatMessagePayload.id}',
     );
 
     debugPrint("calling delivery receipt from background handler");
@@ -464,7 +462,7 @@ Future<void> sendDeliveryReceipt(ChatMessagePayload message) async {
     }
 
     // Only send receipt if we have a canonical (server) message ID
-    final messageId = message.canonicalId;
+    final messageId = message.id;
     if (messageId == null) {
       debugPrint('⚠️ Cannot send delivery receipt: no canonical message ID');
       return;

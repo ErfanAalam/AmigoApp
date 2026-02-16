@@ -193,6 +193,9 @@ class ChatNotifier extends Notifier<ChatState> {
       _listenersSetup = true;
     }
 
+    // Start the optimistic message cleanup timer
+    // _messageRepo.startCleanupTimer();
+
     // Load conversations from local DB and then from server
     Future.microtask(() async {
       await loadConvsFromLocal();
@@ -466,7 +469,7 @@ class ChatNotifier extends Notifier<ChatState> {
                 // ------------------------------------------------------------------------------------
                 final msg = MessageModel(
                   conversationId: metadataLastMsg?.conversationId ?? 0,
-                  canonicalId: metadataLastMsg?.id,
+                  id: metadataLastMsg != null ? metadataLastMsg.id : 0,
                   senderId: metadataLastMsg?.senderId ?? 0,
                   senderName: metadataLastMsg?.senderName,
                   type:
@@ -1347,8 +1350,9 @@ class ChatNotifier extends Notifier<ChatState> {
       // Insert message into local DB
       await _messageRepo.insertMessage(
         MessageModel(
-          optimisticId: payload.optimisticId,
-          canonicalId: payload.canonicalId,
+          // optimisticId: payload.optimisticId,
+          // canonicalId: payload.canonicalId,
+          id: payload.id,
           conversationId: payload.convId,
           senderId: payload.senderId,
           type: payload.msgType,
@@ -1381,7 +1385,7 @@ class ChatNotifier extends Notifier<ChatState> {
             : (dm.unreadCount ?? 0) + 1;
 
         final updatedConversation = dm.copyWith(
-          lastMessageId: payload.canonicalId,
+          lastMessageId: payload.id,
           lastMessageType: payload.msgType.value,
           lastMessageBody: payload.body,
           lastMessageAt: payload.sentAt.toIso8601String(),
@@ -1414,7 +1418,7 @@ class ChatNotifier extends Notifier<ChatState> {
             : group.unreadCount + 1;
 
         final updatedGroup = group.copyWith(
-          lastMessageId: payload.canonicalId,
+          lastMessageId: payload.id,
           lastMessageType: payload.msgType.value,
           lastMessageBody: payload.body,
           lastMessageAt: payload.sentAt.toIso8601String(),
@@ -1438,16 +1442,13 @@ class ChatNotifier extends Notifier<ChatState> {
         convType == ChatType.dm ? newDmUnreadCount : newGrpUnreadCount,
       );
 
-      if (payload.canonicalId != null) {
-        await _conversationsRepo.updateLastMessage(
-          convId,
-          payload.canonicalId!,
-        );
-      } else {
-        debugPrint(
-          '❌ canonicalId is null, skipping last message update in DB for: \n opt message id: ${payload.optimisticId}, msg body : ${payload.body}',
-        );
-      }
+      // if (payload.canonicalId != null) {
+      await _conversationsRepo.updateLastMessage(convId, payload.id);
+      // } else {
+      //   debugPrint(
+      //     '❌ canonicalId is null, skipping last message update in DB for: \n opt message id: ${payload.optimisticId}, msg body : ${payload.body}',
+      //   );
+      // }
     } catch (e) {
       debugPrint('❌ Error handling new message: $e');
     }
@@ -1457,18 +1458,21 @@ class ChatNotifier extends Notifier<ChatState> {
   Future<void> _handleAckMessage(ChatMessageAckPayload payload) async {
     debugPrint('✅ recieved ack message at chat provider');
     debugPrint('✅ payload: ${payload.toJson()}');
+    if (payload.isFailed == true) {
+      return;
+    }
     try {
       // CRITICAL: Update message IDs FIRST to avoid UNIQUE constraint violations
       // This must happen before any status updates that use the canonical ID
-      await _messageRepo.updateMessageId(
-        payload.optimisticId,
-        payload.canonicalId,
-      );
+      // await _messageRepo.updateMessageId(
+      //   payload.optimisticId,
+      //   payload.canonicalId,
+      // );
 
-      await _messageStatusRepo.updateMessageId(
-        payload.optimisticId,
-        payload.canonicalId,
-      );
+      // await _messageStatusRepo.updateMessageId(
+      //   payload.optimisticId,
+      //   payload.canonicalId,
+      // );
 
       // Now safe to update message status in the status table based on delivered_to and read_by
       // First, handle users who have read the message (they should have both deliveredAt and readAt)
@@ -1477,13 +1481,13 @@ class ChatNotifier extends Notifier<ChatState> {
         for (final userId in payload.readBy!) {
           // Users who read must have been delivered first, so set both timestamps
           await _messageStatusRepo.updateDeliveredAtForUser(
-            messageId: payload.canonicalId,
+            messageId: payload.id,
             userId: userId,
             conversationId: payload.convId,
             deliveredAt: payload.deliveredAt.toIso8601String(),
           );
           await _messageStatusRepo.updateReadAtForUser(
-            messageId: payload.canonicalId,
+            messageId: payload.id,
             userId: userId,
             conversationId: payload.convId,
             readAt: payload.deliveredAt.toIso8601String(),
@@ -1505,7 +1509,7 @@ class ChatNotifier extends Notifier<ChatState> {
           debugPrint('✅ updating deliveredAt for users: $onlyDeliveredUsers');
           for (final userId in onlyDeliveredUsers) {
             await _messageStatusRepo.updateDeliveredAtForUser(
-              messageId: payload.canonicalId,
+              messageId: payload.id,
               userId: userId,
               conversationId: payload.convId,
               deliveredAt: payload.deliveredAt.toIso8601String(),
@@ -1535,12 +1539,9 @@ class ChatNotifier extends Notifier<ChatState> {
         status = MessageStatusType.sent;
       }
 
-      await _messageRepo.updateMessageStatus(payload.canonicalId, status);
+      await _messageRepo.updateMessageStatus(payload.id, status);
 
-      await _conversationsRepo.updateLastMessageId(
-        payload.convId,
-        payload.canonicalId,
-      );
+      await _conversationsRepo.updateLastMessageId(payload.convId, payload.id);
     } catch (e) {
       debugPrint('❌ Error handling ack message: $e');
     }
@@ -1553,7 +1554,7 @@ class ChatNotifier extends Notifier<ChatState> {
   ) async {
     try {
       // Ensure we have a valid message ID (use optimistic ID if canonical is not available yet)
-      final messageId = lastMessage.canonicalId ?? lastMessage.optimisticId;
+      final messageId = lastMessage.id;
 
       if (messageId == null) {
         return;
@@ -2058,8 +2059,9 @@ class ChatNotifier extends Notifier<ChatState> {
       }
 
       final systemMessage = MessageModel(
-        canonicalId: payload.eventId,
-        optimisticId: null,
+        // canonicalId: payload.eventId,
+        // optimisticId: null,
+        id: payload.eventId,
         conversationId: payload.convId,
         senderId: payload.actorId ?? 0,
         senderName: payload.actorName,
@@ -2138,6 +2140,9 @@ class ChatNotifier extends Notifier<ChatState> {
   void dispose() {
     if (_isDisposed) return; // Prevent multiple dispose calls
     _isDisposed = true;
+
+    // Stop the cleanup timer
+    // _messageRepo.stopCleanupTimer();
 
     _typingSubscription?.cancel();
     _messageSubscription?.cancel();

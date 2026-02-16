@@ -1,8 +1,9 @@
+import 'dart:ffi';
+
 import 'package:amigo/types/socket.types.dart';
 
 class MessageModel {
-  final int? canonicalId;
-  final int? optimisticId;
+  final int id;
   final int conversationId;
   final int senderId;
   final String? senderName;
@@ -13,6 +14,7 @@ class MessageModel {
   final Map<String, dynamic>? attachments;
   final Map<String, dynamic>? metadata;
   final String? localMediaPath;
+  final bool? isFailed;
   final bool? isStarred;
   final bool? isReplied;
   final bool? isForwarded;
@@ -20,8 +22,7 @@ class MessageModel {
   final String sentAt;
 
   MessageModel({
-    this.canonicalId,
-    this.optimisticId,
+    required this.id,
     required this.conversationId,
     required this.senderId,
     this.senderName,
@@ -29,6 +30,7 @@ class MessageModel {
     required this.type,
     this.body,
     required this.status,
+    this.isFailed,
     this.attachments,
     this.metadata,
     this.localMediaPath,
@@ -60,14 +62,13 @@ class MessageModel {
     } else {
       messageStatus = MessageStatusType.sent;
     }
-
     // Parse IDs - canonical_id takes precedence, then id, then optimistic_id
-    final canonicalId = json['canonical_id'] != null
-        ? _parseToInt(json['canonical_id'])
-        : (json['id'] != null ? _parseToInt(json['id']) : null);
-    final optimisticId = json['optimistic_id'] != null
-        ? _parseToInt(json['optimistic_id'])
-        : null;
+    // final canonicalId = json['canonical_id'] != null
+    //     ? _parseToInt(json['canonical_id'])
+    //     : (json['id'] != null ? _parseToInt(json['id']) : null);
+    // final optimisticId = json['optimistic_id'] != null
+    //     ? _parseToInt(json['optimistic_id'])
+    //     : null;
 
     // Parse sentAt - check sent_at first, then created_at for backward compatibility
     final sentAt =
@@ -96,8 +97,7 @@ class MessageModel {
         json['is_deleted'] == 'true';
 
     return MessageModel(
-      canonicalId: canonicalId,
-      optimisticId: optimisticId,
+      id: _parseToInt(json['id']),
       conversationId: _parseToInt(json['conversation_id'] ?? json['conv_id']),
       senderId: _parseToInt(json['sender_id']),
       senderName: json['sender_name']?.toString(),
@@ -125,11 +125,17 @@ class MessageModel {
     return 0;
   }
 
+  // static BigInt _parseToBigInt(dynamic value) {
+  //   if (value == null) return BigInt.zero;
+  //   if (value is BigInt) return value;
+  //   if (value is int) return BigInt.from(value);
+  //   if (value is String) return BigInt.tryParse(value) ?? BigInt.zero;
+  //   return BigInt.zero;
+  // }
+
   Map<String, dynamic> toJson() {
     return {
-      if (canonicalId != null) 'canonical_id': canonicalId,
-      if (canonicalId != null) 'id': canonicalId, // For backward compatibility
-      if (optimisticId != null) 'optimistic_id': optimisticId,
+      "id": id,
       'conversation_id': conversationId,
       'sender_id': senderId,
       if (senderName != null) 'sender_name': senderName,
@@ -160,12 +166,11 @@ class MessageModel {
       type == MessageType.forwarded || isForwarded == true;
 
   /// Get the message ID (canonical if available, otherwise optimistic)
-  int get id => canonicalId ?? optimisticId ?? 0;
+  // int get id => canonicalId ?? optimisticId ?? 0;
 
   /// Create a copy of this message with updated fields
   MessageModel copyWith({
-    int? canonicalId,
-    int? optimisticId,
+    int? id,
     int? conversationId,
     int? senderId,
     String? senderName,
@@ -175,6 +180,7 @@ class MessageModel {
     MessageStatusType? status,
     Map<String, dynamic>? metadata,
     Map<String, dynamic>? attachments,
+    bool? isFailed,
     bool? isPinned,
     bool? isStarred,
     bool? isReplied,
@@ -184,8 +190,7 @@ class MessageModel {
     String? localMediaPath,
   }) {
     return MessageModel(
-      canonicalId: canonicalId ?? this.canonicalId,
-      optimisticId: optimisticId ?? this.optimisticId,
+      id: id ?? this.id,
       conversationId: conversationId ?? this.conversationId,
       senderId: senderId ?? this.senderId,
       senderName: senderName ?? this.senderName,
@@ -195,6 +200,7 @@ class MessageModel {
       status: status ?? this.status,
       metadata: metadata ?? this.metadata,
       attachments: attachments ?? this.attachments,
+      isFailed: isFailed ?? this.isFailed,
       isStarred: isStarred ?? this.isStarred,
       isReplied: isReplied ?? this.isReplied,
       isForwarded: isForwarded ?? this.isForwarded,

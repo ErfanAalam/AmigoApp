@@ -312,7 +312,7 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
             fileToUpload,
           );
 
-          final optimisticMessageId = Snowflake.generateNegative();
+          final messageId = await Snowflake.generateMessageId();
 
           if (uploadResponse['success'] == true &&
               uploadResponse['data'] != null) {
@@ -321,7 +321,7 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
             // Send to each selected conversation via WebSocket
             for (final conversationId in _selectedConversations) {
               final newMsg = MessageModel(
-                optimisticId: optimisticMessageId,
+                id: messageId,
                 conversationId: conversationId,
                 senderId: _currentUserDetails!.id,
                 senderName: _currentUserDetails!.name,
@@ -343,7 +343,7 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
               // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
               final messagePayload = ChatMessagePayload(
-                optimisticId: optimisticMessageId,
+                id: messageId,
                 convId: conversationId,
                 senderId: _currentUserDetails!.id,
                 senderName: _currentUserDetails!.name,
@@ -408,7 +408,8 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
 
       // Show success message
       if (mounted) {
-        final message = 'Sent $successCount file(s) to ${_selectedConversations.length} chat(s)' +
+        final message =
+            'Sent $successCount file(s) to ${_selectedConversations.length} chat(s)' +
             (failCount > 0 ? ' ($failCount failed)' : '');
         if (successCount > 0) {
           Snack.success(message);

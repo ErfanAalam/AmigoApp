@@ -54,7 +54,7 @@ Future<void> openImagePreview({
         // Start caching in background (don't wait for it)
         ChatHelpers.cacheMediaForMessage(
           url: imageUrl,
-          messageId: message.canonicalId!,
+          messageId: message.id,
           mediaCacheService: mediaCacheService,
           checkExistingCache: checkExistingCache,
           debugPrefix: debugPrefix,
@@ -62,10 +62,7 @@ Future<void> openImagePreview({
       } else {
         // Update database with local path if not already set
         if (message.localMediaPath == null) {
-          await messagesRepo.updateLocalMediaPath(
-            message.canonicalId!,
-            localPath,
-          );
+          await messagesRepo.updateLocalMediaPath(message.id, localPath);
         }
       }
     }
@@ -146,10 +143,7 @@ Future<void> openVideoPreview({
 
         if (localPath != null) {
           // Update database with local path
-          await messagesRepo.updateLocalMediaPath(
-            message.canonicalId!,
-            localPath,
-          );
+          await messagesRepo.updateLocalMediaPath(message.id, localPath);
 
           // Update the message in memory if callback provided
           if (onMessageUpdated != null && mounted) {
@@ -234,12 +228,12 @@ Future<String?> generateVideoThumbnail(String videoUrl) async {
   }
 }
 
-  /// Generate video thumbnail with caching support (backwards compatibility)
-  ///
-  /// [videoUrl] - URL or local path of the video file
-  /// [thumbnailCache] - Map to cache thumbnail paths by video URL (for backwards compatibility)
-  /// [thumbnailFutures] - Map to track ongoing thumbnail generation futures (for backwards compatibility)
-  /// Returns the path to the generated thumbnail file, or null if generation fails
+/// Generate video thumbnail with caching support (backwards compatibility)
+///
+/// [videoUrl] - URL or local path of the video file
+/// [thumbnailCache] - Map to cache thumbnail paths by video URL (for backwards compatibility)
+/// [thumbnailFutures] - Map to track ongoing thumbnail generation futures (for backwards compatibility)
+/// Returns the path to the generated thumbnail file, or null if generation fails
 Future<String?> generateVideoThumbnailWithCache(
   String videoUrl,
   Map<String, String?> thumbnailCache,
@@ -249,10 +243,10 @@ Future<String?> generateVideoThumbnailWithCache(
     // Use persistent cache service
     final thumbnailCacheService = ThumbnailCacheService();
     final thumbnailPath = await thumbnailCacheService.getThumbnail(videoUrl);
-    
+
     // Update the old cache maps for backwards compatibility
     thumbnailCache[videoUrl] = thumbnailPath;
-    
+
     return thumbnailPath;
   } catch (e) {
     debugPrint('❌ Error generating video thumbnail with cache: $e');
@@ -290,19 +284,19 @@ Future<void> openUnifiedMediaPreview({
     final List<String?> localPaths = [];
     for (final message in messages) {
       String? localPath = message.localMediaPath;
-      
+
       if (localPath == null || !io.File(localPath).existsSync()) {
         final attachments = message.attachments;
         final mediaUrl = attachments?['url'] as String?;
-        
+
         if (mediaUrl != null) {
           localPath = await mediaCacheService.getCachedFilePath(mediaUrl);
-          
+
           if (localPath == null) {
             // Start caching in background
             ChatHelpers.cacheMediaForMessage(
               url: mediaUrl,
-              messageId: message.canonicalId ?? message.id,
+              messageId: message.id,
               mediaCacheService: mediaCacheService,
               checkExistingCache: false,
               debugPrefix: 'unified preview',
@@ -310,7 +304,7 @@ Future<void> openUnifiedMediaPreview({
           }
         }
       }
-      
+
       localPaths.add(localPath);
     }
 
@@ -338,3 +332,4 @@ Future<void> openUnifiedMediaPreview({
     }
   }
 }
+

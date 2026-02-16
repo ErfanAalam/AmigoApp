@@ -91,6 +91,7 @@ class Messages extends Table {
   TextColumn get attachments =>
       text().nullable().map(const JsonMapConverter())();
   TextColumn get metadata => text().nullable().map(const JsonMapConverter())();
+  BoolColumn get isFailed => boolean().withDefault(const Constant(true))();
   BoolColumn get isPinned => boolean().withDefault(const Constant(false))();
   BoolColumn get isStarred => boolean().withDefault(const Constant(false))();
   BoolColumn get isReplied => boolean().withDefault(const Constant(false))();

@@ -269,33 +269,34 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     //   debugPrint('Error loading available users: $e');
     // }
     try {
-      final localContacts = await _contactsRepository.getAllContacts();
+      // final localContacts = await _contactsRepository.getAllContacts();
       // if (localContacts.isNotEmpty) {
       //   setState(() {
       //     _availableUsers = localContacts;
       //   });
       // } else {
-        final contacts = await _contactService.fetchContacts();
-        if (contacts.isEmpty) {
-          return;
-        }
-        final contactsData = contacts
-            .map((contact) => contact.phoneNumber)
+      final contacts = await _contactService.fetchContacts();
+      if (contacts.isEmpty) {
+        return;
+      }
+      final contactsData = contacts
+          .map((contact) => contact.phoneNumber)
+          .toList();
+      final response = await _userService.getAvailableUsers(contactsData);
+      if (response['success'] == true && response['data'] != null) {
+        final usersData = response['data'] as List<dynamic>;
+        final users = usersData
+            .map((userJson) => UserModel.fromJson(userJson))
             .toList();
-        final response = await _userService.getAvailableUsers(contactsData);
-        if (response['success'] == true && response['data'] != null) {
-          final usersData = response['data'] as List<dynamic>;
-          final users = usersData
-              .map((userJson) => UserModel.fromJson(userJson))
-              .toList();
+        print("Available users from the server $users");
+        // Enrich users with display names from local database
+        final enrichedUsers = await _userUtils.enrichUsersWithDisplayNames(
+          users,
+        );
 
-          // Enrich users with display names from local database
-          final enrichedUsers = await _userUtils.enrichUsersWithDisplayNames(users);
-
-
-          setState(() {
-            _availableUsers = enrichedUsers;
-          });
+        setState(() {
+          _availableUsers = enrichedUsers;
+        });
         // }
       }
     } catch (_) {}
@@ -731,7 +732,8 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                                   Checkbox(
                                     value:
                                         _filteredUsers.every(
-                                          (u) => _selectedUserIds.contains(u.id),
+                                          (u) =>
+                                              _selectedUserIds.contains(u.id),
                                         ) &&
                                         _filteredUsers.isNotEmpty,
                                     tristate: true,
@@ -760,7 +762,8 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         _filteredUsers.isEmpty
@@ -813,7 +816,9 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                             ),
                             const SizedBox(height: 12),
                             // Select Staff Only Button
-                            if (_filteredUsers.any((u) => u.role?.toLowerCase() == 'staff'))
+                            if (_filteredUsers.any(
+                              (u) => u.role?.toLowerCase() == 'staff',
+                            ))
                               SizedBox(
                                 width: double.infinity,
                                 child: ElevatedButton.icon(
@@ -821,18 +826,19 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                                     setDialogState(() {
                                       // Get all staff users from filtered list
                                       final staffUsers = _filteredUsers
-                                          .where((u) => u.role?.toLowerCase() == 'staff')
+                                          .where(
+                                            (u) =>
+                                                u.role?.toLowerCase() ==
+                                                'staff',
+                                          )
                                           .map((u) => u.id)
                                           .toList();
-                                      
+
                                       // Add staff users to selection
                                       _selectedUserIds.addAll(staffUsers);
                                     });
                                   },
-                                  icon: const Icon(
-                                    Icons.badge,
-                                    size: 18,
-                                  ),
+                                  icon: const Icon(Icons.badge, size: 18),
                                   label: Text(
                                     'Select Staff Only (${_filteredUsers.where((u) => u.role?.toLowerCase() == 'staff').length})',
                                     style: const TextStyle(
@@ -1051,9 +1057,12 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                                                           child: Text(
                                                             user.displayName,
                                                             style: TextStyle(
-                                                              fontWeight: isSelected
-                                                                  ? FontWeight.bold
-                                                                  : FontWeight.w500,
+                                                              fontWeight:
+                                                                  isSelected
+                                                                  ? FontWeight
+                                                                        .bold
+                                                                  : FontWeight
+                                                                        .w500,
                                                               fontSize: 16,
                                                               color: isSelected
                                                                   ? Colors
@@ -1065,23 +1074,38 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                                                             ),
                                                           ),
                                                         ),
-                                                        if (user.role?.toLowerCase() == 'staff')
+                                                        if (user.role
+                                                                ?.toLowerCase() ==
+                                                            'staff')
                                                           Container(
-                                                            margin: const EdgeInsets.only(left: 6),
-                                                            padding: const EdgeInsets.symmetric(
-                                                              horizontal: 6,
-                                                              vertical: 2,
-                                                            ),
-                                                            decoration: BoxDecoration(
-                                                              color: Colors.blue.shade600,
-                                                              borderRadius: BorderRadius.circular(6),
-                                                            ),
+                                                            margin:
+                                                                const EdgeInsets.only(
+                                                                  left: 6,
+                                                                ),
+                                                            padding:
+                                                                const EdgeInsets.symmetric(
+                                                                  horizontal: 6,
+                                                                  vertical: 2,
+                                                                ),
+                                                            decoration:
+                                                                BoxDecoration(
+                                                                  color: Colors
+                                                                      .blue
+                                                                      .shade600,
+                                                                  borderRadius:
+                                                                      BorderRadius.circular(
+                                                                        6,
+                                                                      ),
+                                                                ),
                                                             child: const Text(
                                                               'Staff',
                                                               style: TextStyle(
-                                                                color: Colors.white,
+                                                                color: Colors
+                                                                    .white,
                                                                 fontSize: 10,
-                                                                fontWeight: FontWeight.bold,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold,
                                                               ),
                                                             ),
                                                           ),
@@ -1840,17 +1864,22 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
 
   Future<void> _showRemoveAllMembersDialog() async {
     if (!_isCurrentUserCreator()) {
-      _showSnackBar('Only the group creator can remove all members', isError: true);
+      _showSnackBar(
+        'Only the group creator can remove all members',
+        isError: true,
+      );
       return;
     }
 
     if (_groupInfo?['members'] == null) return;
     final List<dynamic> members = _groupInfo!['members'];
     final creatorId = _groupInfo?['createrId'] ?? _groupInfo?['created_by'];
-    
+
     // Filter out the creator from the list
-    final membersToRemove = members.where((member) => member['userId'] != creatorId).toList();
-    
+    final membersToRemove = members
+        .where((member) => member['userId'] != creatorId)
+        .toList();
+
     if (membersToRemove.isEmpty) {
       _showSnackBar('No members to remove', isError: true);
       return;
@@ -1925,15 +1954,14 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                                   text: 'Are you sure you want to remove all ',
                                 ),
                                 TextSpan(
-                                  text: '${membersToRemove.length} member${membersToRemove.length > 1 ? 's' : ''}',
+                                  text:
+                                      '${membersToRemove.length} member${membersToRemove.length > 1 ? 's' : ''}',
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     color: Colors.red.shade700,
                                   ),
                                 ),
-                                const TextSpan(
-                                  text: ' from this group?',
-                                ),
+                                const TextSpan(text: ' from this group?'),
                               ],
                             ),
                           ),
@@ -2055,7 +2083,10 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
 
   Future<void> _removeAllMembers(List<dynamic> membersToRemove) async {
     if (!_isCurrentUserCreator()) {
-      _showSnackBar('Only the group creator can remove all members', isError: true);
+      _showSnackBar(
+        'Only the group creator can remove all members',
+        isError: true,
+      );
       return;
     }
 
@@ -2516,9 +2547,8 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                                             backgroundColor: themeColor.primary,
                                             foregroundColor: Colors.white,
                                             shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(
-                                                20,
-                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
                                             ),
                                             padding: const EdgeInsets.symmetric(
                                               horizontal: 16,
@@ -2532,18 +2562,21 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                                           builder: (context) {
                                             final List<dynamic> members =
                                                 _groupInfo!['members'];
-                                            final creatorId = _groupInfo?['createrId'] ??
+                                            final creatorId =
+                                                _groupInfo?['createrId'] ??
                                                 _groupInfo?['created_by'];
                                             final membersToRemove = members
-                                                .where((member) =>
-                                                    member['userId'] !=
-                                                    creatorId)
+                                                .where(
+                                                  (member) =>
+                                                      member['userId'] !=
+                                                      creatorId,
+                                                )
                                                 .toList();
-                                            
+
                                             if (membersToRemove.isEmpty) {
                                               return const SizedBox.shrink();
                                             }
-                                            
+
                                             return Padding(
                                               padding: EdgeInsets.only(
                                                 left: _isCurrentUserAdmin()
@@ -2551,7 +2584,8 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                                                     : 0,
                                               ),
                                               child: ElevatedButton.icon(
-                                                onPressed: _showRemoveAllMembersDialog,
+                                                onPressed:
+                                                    _showRemoveAllMembersDialog,
                                                 icon: const Icon(
                                                   Icons.delete_sweep,
                                                   size: 18,
@@ -2563,14 +2597,14 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
                                                   shape: RoundedRectangleBorder(
                                                     borderRadius:
                                                         BorderRadius.circular(
-                                                      20,
-                                                    ),
+                                                          20,
+                                                        ),
                                                   ),
                                                   padding:
                                                       const EdgeInsets.symmetric(
-                                                    horizontal: 16,
-                                                    vertical: 8,
-                                                  ),
+                                                        horizontal: 16,
+                                                        vertical: 8,
+                                                      ),
                                                 ),
                                               ),
                                             );

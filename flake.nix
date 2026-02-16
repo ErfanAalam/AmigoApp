@@ -59,7 +59,7 @@
             ++ [ pinnedJDK androidCustomPackage ];
 
           JAVA_HOME = pinnedJDK;
-          GRADLE_USER_HOME = "/home/gaz/.gradle";
+          GRADLE_USER_HOME = "/home/erfan/.gradle";
           GRADLE_OPTS =
             "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidCustomPackage}/share/android-sdk/build-tools/36.0.0/aapt2";
         };

@@ -39,6 +39,10 @@ class TransportManager {
   Timer? _upgradeTimer;
   static const Duration _upgradeCheckInterval = Duration(minutes: 5);
 
+  // Sync message polling - every 5s when not using WebSocket
+  Timer? _syncPollingTimer;
+  static const Duration _syncPollingInterval = Duration(seconds: 5);
+
   // Stream controllers
   final StreamController<TransportConnectionState> _connectionStateController =
       StreamController<TransportConnectionState>.broadcast();
@@ -55,16 +59,17 @@ class TransportManager {
 
   // Getters
   TransportType? get currentTransportType => _currentTransportType;
-  bool get isConnected =>
-      _currentTransport?.isConnected ?? false;
+  bool get isConnected => _currentTransport?.isConnected ?? false;
   TransportConnectionState get connectionState =>
-      _currentTransport?.connectionState ?? TransportConnectionState.disconnected;
+      _currentTransport?.connectionState ??
+      TransportConnectionState.disconnected;
 
   Stream<TransportConnectionState> get connectionStateStream =>
       _connectionStateController.stream;
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
   Stream<String> get errorStream => _errorController.stream;
-  Stream<TransportType> get transportTypeStream => _transportTypeController.stream;
+  Stream<TransportType> get transportTypeStream =>
+      _transportTypeController.stream;
 
   /// Connect using the best available transport with automatic fallback
   Future<bool> connect(String token) async {
@@ -112,7 +117,10 @@ class TransportManager {
 
     // 3. Try Long Polling (always available as last resort)
     debugPrint('[TRANSPORT-MGR] Attempting Long Polling connection');
-    connected = await _tryTransport(_pollingTransport, TransportType.longPolling);
+    connected = await _tryTransport(
+      _pollingTransport,
+      TransportType.longPolling,
+    );
     if (connected) {
       _isConnecting = false;
       _startUpgradeTimer();
@@ -141,7 +149,7 @@ class TransportManager {
 
       final success = await transport.connect(_authToken!);
       final duration = DateTime.now().difference(startTime);
-      
+
       if (success) {
         _currentTransport = transport;
         _currentTransportType = type;
@@ -152,6 +160,10 @@ class TransportManager {
 
         _connectionStateController.add(TransportConnectionState.connected);
         _transportTypeController.add(type);
+
+        if (type != TransportType.websocket) {
+          _startSyncPollingTimer();
+        }
 
         _logConnectionSuccess(type, duration);
         return true;
@@ -169,7 +181,9 @@ class TransportManager {
     debugPrint('[TRANSPORT-MGR] ✅ Connected via ${type.name}');
     debugPrint('[TRANSPORT-MGR] Connection time: ${duration.inMilliseconds}ms');
     debugPrint('[TRANSPORT-MGR] Reconnect attempts: $_reconnectAttempts');
-    debugPrint('[TRANSPORT-MGR] WS failures: $_wsFailures, SSE failures: $_sseFailures');
+    debugPrint(
+      '[TRANSPORT-MGR] WS failures: $_wsFailures, SSE failures: $_sseFailures',
+    );
   }
 
   void _logConnectionFailure(
@@ -182,7 +196,9 @@ class TransportManager {
     debugPrint('[TRANSPORT-MGR] Error: $error');
     debugPrint('[TRANSPORT-MGR] Duration: ${duration.inMilliseconds}ms');
     debugPrint('[TRANSPORT-MGR] Reconnect attempts: $_reconnectAttempts');
-    debugPrint('[TRANSPORT-MGR] WS failures: $_wsFailures, SSE failures: $_sseFailures');
+    debugPrint(
+      '[TRANSPORT-MGR] WS failures: $_wsFailures, SSE failures: $_sseFailures',
+    );
     if (stackTrace != null) {
       debugPrint('[TRANSPORT-MGR] Stack trace: $stackTrace');
     }
@@ -239,7 +255,8 @@ class TransportManager {
     }
 
     // Calculate delay with exponential backoff + jitter
-    final baseDelay = _baseReconnectDelay.inMilliseconds *
+    final baseDelay =
+        _baseReconnectDelay.inMilliseconds *
         (1 << min(_reconnectAttempts, 5)); // Cap exponential at 2^5
     final jitter = Random().nextInt(1000); // Add up to 1 second jitter
     final delay = Duration(
@@ -281,6 +298,22 @@ class TransportManager {
     _upgradeTimer = null;
   }
 
+  void _startSyncPollingTimer() {
+    _stopSyncPollingTimer();
+    _syncPollingTimer = Timer.periodic(_syncPollingInterval, (_) {
+      if (_currentTransportType != TransportType.websocket &&
+          _currentTransport != null) {
+        _pollingTransport.sync_message_polling();
+      }
+    });
+    debugPrint('[TRANSPORT-MGR] Sync message polling started (every 5s)');
+  }
+
+  void _stopSyncPollingTimer() {
+    _syncPollingTimer?.cancel();
+    _syncPollingTimer = null;
+  }
+
   /// Attempt to upgrade to a better transport
   Future<void> _attemptUpgrade() async {
     if (_authToken == null || !isConnected) return;
@@ -311,14 +344,18 @@ class TransportManager {
       }
     }
 
-    debugPrint('[TRANSPORT-MGR] Upgrade attempt failed, staying on current transport');
+    debugPrint(
+      '[TRANSPORT-MGR] Upgrade attempt failed, staying on current transport',
+    );
   }
 
   Future<void> _switchTransport(
     TransportService newTransport,
     TransportType newType,
   ) async {
-    debugPrint('[TRANSPORT-MGR] Switching from ${_currentTransportType?.name} to ${newType.name}');
+    debugPrint(
+      '[TRANSPORT-MGR] Switching from ${_currentTransportType?.name} to ${newType.name}',
+    );
 
     // Clean up old transport
     await _cleanupCurrentTransport();
@@ -326,6 +363,12 @@ class TransportManager {
     // Set new transport
     _currentTransport = newTransport;
     _currentTransportType = newType;
+
+    if (newType != TransportType.websocket) {
+      _startSyncPollingTimer();
+    } else {
+      _stopSyncPollingTimer();
+    }
 
     // Subscribe to new transport
     _subscribeToTransport(newTransport);
@@ -335,6 +378,7 @@ class TransportManager {
   }
 
   Future<void> _cleanupCurrentTransport() async {
+    _stopSyncPollingTimer();
     _transportConnectionSub?.cancel();
     _transportMessageSub?.cancel();
     _transportErrorSub?.cancel();
@@ -395,6 +439,7 @@ class TransportManager {
   void dispose() {
     _reconnectTimer?.cancel();
     _stopUpgradeTimer();
+    _stopSyncPollingTimer();
     _transportConnectionSub?.cancel();
     _transportMessageSub?.cancel();
     _transportErrorSub?.cancel();
@@ -409,4 +454,3 @@ class TransportManager {
     _transportTypeController.close();
   }
 }
-

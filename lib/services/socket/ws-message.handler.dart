@@ -166,6 +166,12 @@ class WebSocketMessageHandler {
   Stream<SyncMessagesPayload> get syncMessagesStream =>
       _syncMessagesController.stream;
 
+  /// Add a message directly to the messageNewStream
+  /// This is used by transports (like LongPollingTransport) to add synced messages
+  void addMessage(ChatMessagePayload payload) {
+    _messageNewController.add(payload);
+  }
+
   /// Initialize the handler - call this once when app starts
   void initialize() {
     if (_isInitialized) {
@@ -295,8 +301,7 @@ class WebSocketMessageHandler {
 
             // Push a synthetic system ChatMessagePayload so message listeners update in-place
             final systemMessagePayload = ChatMessagePayload(
-              optimisticId: actionPayload.eventId,
-              canonicalId: actionPayload.eventId,
+              id: actionPayload.eventId,
               senderId: actionPayload.actorId ?? 0,
               senderName: actionPayload.actorName,
               convId: actionPayload.convId,
@@ -306,8 +311,9 @@ class WebSocketMessageHandler {
               attachments: null,
               metadata: {
                 'action': actionPayload.action.value,
-                'members':
-                    actionPayload.members.map((m) => m.toJson()).toList(),
+                'members': actionPayload.members
+                    .map((m) => m.toJson())
+                    .toList(),
               },
               replyToMessageId: null,
               sentAt: actionPayload.actionAt,
@@ -399,7 +405,9 @@ class WebSocketMessageHandler {
           break;
 
         case WSMessageType.authForceLogout:
-          debugPrint('🚪 Force logout received: ${message.miscPayload?.message}');
+          debugPrint(
+            '🚪 Force logout received: ${message.miscPayload?.message}',
+          );
           // Handle force logout - user logged in on another device
           _handleForceLogout(message.miscPayload);
           break;
@@ -491,25 +499,25 @@ class WebSocketMessageHandler {
           if (payload != null) {
             debugPrint('🔄 Syncing ${payload.totalCount} missed messages');
             _syncMessagesController.add(payload);
-            
+
             // Also emit individual messages as new messages so chat UI updates
             // This ensures message lists get updated regardless of which screen user is on
             for (final syncMsg in payload.messages) {
-              final chatPayload = ChatMessagePayload(
-                optimisticId: syncMsg.id, // Use server ID as optimistic ID
-                canonicalId: syncMsg.id,
-                senderId: syncMsg.senderId,
-                senderName: syncMsg.senderName,
-                convId: syncMsg.convId,
-                convType: syncMsg.convType,
-                msgType: syncMsg.msgType,
-                body: syncMsg.body,
-                attachments: syncMsg.attachments,
-                metadata: syncMsg.metadata,
-                replyToMessageId: null,
-                sentAt: syncMsg.sentAt,
-              );
-              _messageNewController.add(chatPayload);
+              // final chatPayload = ChatMessagePayload(
+              //   optimisticId: syncMsg.id, // Use server ID as optimistic ID
+              //   canonicalId: syncMsg.id,
+              //   senderId: syncMsg.senderId,
+              //   senderName: syncMsg.senderName,
+              //   convId: syncMsg.convId,
+              //   convType: syncMsg.convType,
+              //   msgType: syncMsg.msgType,
+              //   body: syncMsg.body,
+              //   attachments: syncMsg.attachments,
+              //   metadata: syncMsg.metadata,
+              //   replyToMessageId: null,
+              //   sentAt: syncMsg.sentAt,
+              // );
+              _messageNewController.add(syncMsg);
             }
           }
           break;
@@ -634,13 +642,16 @@ class WebSocketMessageHandler {
 
   /// Handle force logout when user logs in on another device
   void _handleForceLogout(MiscPayload? payload) async {
-    final messageText = payload?.message ?? 
+    final messageText =
+        payload?.message ??
         'You have been logged out because you logged in on another device';
 
     // Get the navigator context
     final context = NavigationHelper.navigatorKey.currentContext;
     if (context == null) {
-      debugPrint('⚠️ Cannot show force logout dialog: Navigator context is null');
+      debugPrint(
+        '⚠️ Cannot show force logout dialog: Navigator context is null',
+      );
       // Still proceed with logout even without context
       await AuthService().logout();
       return;

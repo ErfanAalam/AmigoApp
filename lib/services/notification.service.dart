@@ -269,8 +269,7 @@ class NotificationService {
 
       // Convert to MessageModel and store in local DB
       final messageModel = MessageModel(
-        optimisticId: chatMessagePayload.optimisticId,
-        canonicalId: chatMessagePayload.canonicalId,
+        id: chatMessagePayload.id,
         conversationId: chatMessagePayload.convId,
         senderId: chatMessagePayload.senderId,
         senderName: chatMessagePayload.senderName,
@@ -291,7 +290,7 @@ class NotificationService {
       await _messageRepo.insertMessage(messageModel);
 
       debugPrint(
-        '✅ Stored message from FCM notification: ${chatMessagePayload.canonicalId ?? chatMessagePayload.optimisticId}',
+        '✅ Stored message from FCM notification: ${chatMessagePayload.id}',
       );
 
       // Send delivery receipt to backend
@@ -314,7 +313,7 @@ class NotificationService {
       }
 
       // Only send receipt if we have a canonical (server) message ID
-      final messageId = message.canonicalId;
+      final messageId = message.id;
       if (messageId == null) {
         debugPrint('⚠️ Cannot send delivery receipt: no canonical message ID');
         return;

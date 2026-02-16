@@ -1,17 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:amigo/api/chat.api-client.dart';
+import 'package:amigo/types/socket.types.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../../env.dart';
+import 'ws-message.handler.dart';
 
 /// Transport type enumeration
-enum TransportType {
-  websocket,
-  sse,
-  longPolling,
-}
+enum TransportType { websocket, sse, longPolling }
 
 /// Connection state for transports
 enum TransportConnectionState {
@@ -21,6 +20,8 @@ enum TransportConnectionState {
   reconnecting,
   error,
 }
+
+final ChatsServices _chatsServices = ChatsServices();
 
 /// Abstract transport interface
 abstract class TransportService {
@@ -75,7 +76,7 @@ class WebSocketTransport implements TransportService {
   Timer? _pingTimer;
   int _missedPongs = 0;
   static const Duration _pingInterval = Duration(seconds: 30);
-  static const int _maxMissedPongs = 3;
+  static const int _maxMissedPongs = 10;
 
   @override
   TransportType get transportType => TransportType.websocket;
@@ -189,7 +190,9 @@ class WebSocketTransport implements TransportService {
       }
 
       if (_missedPongs >= _maxMissedPongs) {
-        debugPrint('[WS-TRANSPORT] Connection stale, missed $_missedPongs pongs');
+        debugPrint(
+          '[WS-TRANSPORT] Connection stale, missed $_missedPongs pongs',
+        );
         _stopHeartbeat();
         _handleError('Connection stale - missed pongs');
         return;
@@ -207,10 +210,12 @@ class WebSocketTransport implements TransportService {
   void _sendPing() {
     if (_socket == null) return;
     try {
-      _socket!.add(json.encode({
-        'type': 'ping',
-        'timestamp': DateTime.now().toIso8601String(),
-      }));
+      _socket!.add(
+        json.encode({
+          'type': 'ping',
+          'timestamp': DateTime.now().toIso8601String(),
+        }),
+      );
       _missedPongs++;
     } catch (e) {
       debugPrint('[WS-TRANSPORT] Error sending ping: $e');
@@ -220,10 +225,12 @@ class WebSocketTransport implements TransportService {
   void _sendPong() {
     if (_socket == null) return;
     try {
-      _socket!.add(json.encode({
-        'type': 'pong',
-        'timestamp': DateTime.now().toIso8601String(),
-      }));
+      _socket!.add(
+        json.encode({
+          'type': 'pong',
+          'timestamp': DateTime.now().toIso8601String(),
+        }),
+      );
     } catch (e) {
       debugPrint('[WS-TRANSPORT] Error sending pong: $e');
     }
@@ -335,7 +342,9 @@ class SSETransport implements TransportService {
       final response = await _client!.send(request);
 
       if (response.statusCode != 200) {
-        throw Exception('SSE connection failed with status ${response.statusCode}');
+        throw Exception(
+          'SSE connection failed with status ${response.statusCode}',
+        );
       }
 
       _updateConnectionState(TransportConnectionState.connected);
@@ -506,24 +515,32 @@ class LongPollingTransport implements TransportService {
   }
 
   Future<void> _poll() async {
+    debugPrint("-----------------a----------------");
     if (!_isPolling || _token == null) return;
 
+    debugPrint("-----------------1----------------");
     try {
-      var pollUrl = '${Environment.pollingUrl}?token=${Uri.encodeComponent(_token!)}';
+      var pollUrl =
+          '${Environment.pollingUrl}?token=${Uri.encodeComponent(_token!)}';
       if (_lastMessageId != null) {
         pollUrl += '&last_message_id=${Uri.encodeComponent(_lastMessageId!)}';
       }
+      debugPrint("-----------------2----------------");
 
       final response = await _client!
           .get(Uri.parse(pollUrl))
-          .timeout(const Duration(seconds: 35)); // Slightly longer than server timeout
+          .timeout(
+            const Duration(seconds: 35),
+          ); // Slightly longer than server timeout
 
       if (!_isPolling) return;
+      debugPrint("-----------------3----------------");
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body) as Map<String, dynamic>;
         final messages = data['messages'] as List<dynamic>?;
         _lastMessageId = data['last_message_id'] as String?;
+        debugPrint("-----------------4----------------");
 
         if (messages != null) {
           for (final msg in messages) {
@@ -532,15 +549,19 @@ class LongPollingTransport implements TransportService {
             }
           }
         }
+        debugPrint("-----------------5----------------");
       } else if (response.statusCode == 401) {
         _updateConnectionState(TransportConnectionState.error);
+        debugPrint("-----------------6----------------");
         _errorController.add('Authentication failed');
         _isPolling = false;
         return;
       }
+      debugPrint("-----------------7----------------");
 
       // Continue polling
       if (_isPolling) {
+        debugPrint("-----------------8----------------");
         // Small delay before next poll to prevent tight loop on errors
         _pollTimer = Timer(const Duration(milliseconds: 100), _poll);
       }
@@ -583,7 +604,8 @@ class LongPollingTransport implements TransportService {
       if (response.statusCode == 200) {
         // Check if there's a response message (like ack)
         try {
-          final responseData = json.decode(response.body) as Map<String, dynamic>;
+          final responseData =
+              json.decode(response.body) as Map<String, dynamic>;
           if (responseData['type'] != null) {
             _messageController.add(responseData);
           }
@@ -599,6 +621,49 @@ class LongPollingTransport implements TransportService {
     }
   }
 
+  Future<void> sync_message_polling() async {
+    // debugPrint("------------------------------------------");
+    try {
+      final messages = await _chatsServices.sync_message_via_polling();
+      // debugPrint(
+      //   "--------------------response for syncing message---------------------",
+      // );
+      // debugPrint('Synced ${messages.length} message(s)');
+      debugPrint("------------------$messages----------");
+      // return messages;
+      if (messages["data"] == null) return;
+
+      // Get the WebSocketMessageHandler instance to add messages to its stream
+      final messageHandler = WebSocketMessageHandler();
+
+      for (final syncMsg in messages["data"]) {
+        print("syncMsg : $syncMsg");
+        final chatPayload = ChatMessagePayload.fromJson(syncMsg);
+        print("chatPayload : ${chatPayload.toJson()}");
+        // final chatPayload = ChatMessagePayload(
+        //   optimisticId: syncMsg["id"], // Use server ID as optimistic ID
+        //   canonicalId: syncMsg["id"],
+        //   senderId: syncMsg["senderId"],
+        //   senderName: syncMsg["senderName"],
+        //   convId: syncMsg["convId"],
+        //   convType: syncMsg["convType"],
+        //   msgType: syncMsg["msgType"],
+        //   body: syncMsg["body"],
+        //   attachments: syncMsg["attachments"],
+        //   metadata: syncMsg["metadata"],
+        //   replyToMessageId: null,
+        //   sentAt: syncMsg["sentAt"],
+        // );
+        // Add to WebSocketMessageHandler's controller so it reaches chat.provider
+        messageHandler.addMessage(chatPayload);
+      }
+    } catch (e) {
+      debugPrint("error in calling the api for syncing message via polling");
+      return;
+      // return [];
+    }
+  }
+
   @override
   void dispose() {
     _isPolling = false;
@@ -609,4 +674,3 @@ class LongPollingTransport implements TransportService {
     _errorController.close();
   }
 }
-
