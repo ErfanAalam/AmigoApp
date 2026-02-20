@@ -93,8 +93,8 @@ class ConversationRepository {
       type: conv.type,
       title: conv.title,
       createrId: conv.createrId,
-      lastMessageId: conv.lastMessageId,
-      pinnedMessageId: conv.pinnedMessageId,
+      lastMessageId: conv.lastMessageId?.toInt(),
+      pinnedMessageId: conv.pinnedMessageId?.toInt(),
       unreadCount: conv.unreadCount,
       isDeleted: conv.isDeleted,
       isPinned: conv.isPinned,
@@ -133,8 +133,8 @@ class ConversationRepository {
         type: conv.type,
         title: Value(conv.title),
         createrId: conv.createrId,
-        lastMessageId: Value(conv.lastMessageId),
-        pinnedMessageId: Value(conv.pinnedMessageId),
+        lastMessageId: Value(conv.lastMessageId != null ? BigInt.from(conv.lastMessageId!) : null),
+        pinnedMessageId: Value(conv.pinnedMessageId != null ? BigInt.from(conv.pinnedMessageId!) : null),
         unreadCount: Value(conv.unreadCount ?? 0),
         createdAt: Value(conv.createdAt),
         isDeleted: Value(conv.isDeleted ?? false),
@@ -203,8 +203,8 @@ class ConversationRepository {
       type: Value(conversation.type),
       title: Value(conversation.title),
       createrId: Value(conversation.createrId),
-      lastMessageId: Value(conversation.lastMessageId),
-      pinnedMessageId: Value(conversation.pinnedMessageId),
+      lastMessageId: Value(conversation.lastMessageId != null ? BigInt.from(conversation.lastMessageId!) : null),
+      pinnedMessageId: Value(conversation.pinnedMessageId != null ? BigInt.from(conversation.pinnedMessageId!) : null),
       unreadCount: Value(conversation.unreadCount ?? 0),
       createdAt: Value(conversation.createdAt),
       isDeleted: Value(conversation.isDeleted ?? false),
@@ -297,7 +297,7 @@ class ConversationRepository {
       db.conversations,
     )..where((t) => t.id.equals(conversationId))).write(
       ConversationsCompanion(
-        pinnedMessageId: Value(pinnedMessageId),
+        pinnedMessageId: Value(pinnedMessageId != null ? BigInt.from(pinnedMessageId) : null),
         updatedAt: Value(DateTime.now().toIso8601String()),
       ),
     );
@@ -394,7 +394,7 @@ class ConversationRepository {
       db.conversations,
     )..where((t) => t.id.equals(conversationId))).write(
       ConversationsCompanion(
-        lastMessageId: Value(lastMessageId),
+        lastMessageId: Value(BigInt.from(lastMessageId)),
         updatedAt: Value(DateTime.now().toIso8601String()),
       ),
     );
@@ -408,7 +408,7 @@ class ConversationRepository {
     final db = sqliteDatabase.database;
     await (db.update(db.conversations)
           ..where((t) => t.id.equals(conversationId)))
-        .write(ConversationsCompanion(lastMessageId: Value(lastMessageId)));
+        .write(ConversationsCompanion(lastMessageId: Value(BigInt.from(lastMessageId))));
   }
 
   /// Mark conversation as deleted (soft delete)
@@ -507,8 +507,8 @@ class ConversationRepository {
         recipientName: recipientUser.name,
         recipientPhone: recipientUser.phone,
         recipientProfilePic: recipientUser.profilePic,
-        pinnedMessageId: conv.pinnedMessageId,
-        lastMessageId: conv.lastMessageId,
+        pinnedMessageId: conv.pinnedMessageId?.toInt(),
+        lastMessageId: conv.lastMessageId?.toInt(),
         unreadCount: conv.unreadCount,
         isRecipientOnline: recipientUser.isOnline,
         isDeleted: conv.isDeleted,
@@ -578,12 +578,12 @@ class ConversationRepository {
       String? lastMessageType;
       String? lastMessageBody;
       String? lastMessageAt;
-      int? lastMessageId = conv.lastMessageId;
+      int? lastMessageId = conv.lastMessageId?.toInt();
 
       if (conv.lastMessageId != null) {
         final lastMessage =
             await (db.select(db.messages)
-                  ..where((t) => t.id.equals(BigInt.from(conv.lastMessageId!))))
+                  ..where((t) => t.id.equals(conv.lastMessageId!)))
                 .getSingleOrNull();
 
         if (lastMessage != null) {
@@ -606,7 +606,7 @@ class ConversationRepository {
         recipientName: recipientUser.username ?? recipientUser.name,
         recipientPhone: recipientUser.phone,
         recipientProfilePic: recipientUser.profilePic,
-        pinnedMessageId: conv.pinnedMessageId,
+        pinnedMessageId: conv.pinnedMessageId?.toInt(),
         lastMessageId: lastMessageId,
         lastMessageType: lastMessageType,
         lastMessageBody: lastMessageBody,
@@ -664,12 +664,12 @@ class ConversationRepository {
     String? lastMessageType;
     String? lastMessageBody;
     String? lastMessageAt;
-    int? lastMessageId = conv.lastMessageId;
+    int? lastMessageId = conv.lastMessageId?.toInt();
 
     if (conv.lastMessageId != null) {
       final lastMessage =
           await (db.select(db.messages)
-                ..where((t) => t.id.equals(BigInt.from(conv.lastMessageId!))))
+                ..where((t) => t.id.equals(conv.lastMessageId!)))
               .getSingleOrNull();
 
       if (lastMessage != null) {
@@ -691,7 +691,7 @@ class ConversationRepository {
       recipientName: recipientUser.username ?? recipientUser.name,
       recipientPhone: recipientUser.phone,
       recipientProfilePic: recipientUser.profilePic,
-      pinnedMessageId: conv.pinnedMessageId,
+      pinnedMessageId: conv.pinnedMessageId?.toInt(),
       lastMessageId: lastMessageId,
       lastMessageType: lastMessageType,
       lastMessageBody: lastMessageBody,
@@ -735,12 +735,12 @@ class ConversationRepository {
       String? lastMessageType;
       String? lastMessageBody;
       String? lastMessageAt;
-      int? lastMessageId = conv.lastMessageId;
+      int? lastMessageId = conv.lastMessageId?.toInt();
 
       if (conv.lastMessageId != null) {
         final lastMessage =
             await (db.select(db.messages)
-                  ..where((t) => t.id.equals(BigInt.from(conv.lastMessageId!))))
+                  ..where((t) => t.id.equals(conv.lastMessageId!)))
                 .getSingleOrNull();
 
         if (lastMessage != null) {
@@ -766,7 +766,7 @@ class ConversationRepository {
       final groupModel = GroupModel(
         conversationId: conv.id,
         title: conv.title ?? 'Group Chat',
-        pinnedMessageId: conv.pinnedMessageId,
+        pinnedMessageId: conv.pinnedMessageId?.toInt(),
         lastMessageId: lastMessageId,
         lastMessageType: lastMessageType,
         lastMessageBody: lastMessageBody,
@@ -805,12 +805,12 @@ class ConversationRepository {
     String? lastMessageType;
     String? lastMessageBody;
     String? lastMessageAt;
-    int? lastMessageId = conv.lastMessageId;
+    int? lastMessageId = conv.lastMessageId?.toInt();
 
     if (conv.lastMessageId != null) {
       final lastMessage =
           await (db.select(db.messages)
-                ..where((t) => t.id.equals(BigInt.from(conv.lastMessageId!))))
+                ..where((t) => t.id.equals(conv.lastMessageId!)))
               .getSingleOrNull();
 
       if (lastMessage != null) {
@@ -835,7 +835,7 @@ class ConversationRepository {
     return GroupModel(
       conversationId: conv.id,
       title: conv.title ?? 'Group Chat',
-      pinnedMessageId: conv.pinnedMessageId,
+      pinnedMessageId: conv.pinnedMessageId?.toInt(),
       lastMessageId: lastMessageId,
       lastMessageType: lastMessageType,
       lastMessageBody: lastMessageBody,
@@ -901,12 +901,12 @@ class ConversationRepository {
     String? lastMessageType;
     String? lastMessageBody;
     String? lastMessageAt;
-    int? lastMessageId = conv.lastMessageId;
+    int? lastMessageId = conv.lastMessageId?.toInt();
 
     if (conv.lastMessageId != null) {
       final lastMessage =
           await (db.select(db.messages)
-                ..where((t) => t.id.equals(BigInt.from(conv.lastMessageId!))))
+                ..where((t) => t.id.equals(conv.lastMessageId!)))
               .getSingleOrNull();
 
       if (lastMessage != null) {
@@ -932,7 +932,7 @@ class ConversationRepository {
       conversationId: conv.id,
       title: conv.title ?? 'Group Chat',
       members: members,
-      pinnedMessageId: conv.pinnedMessageId,
+      pinnedMessageId: conv.pinnedMessageId?.toInt(),
       lastMessageId: lastMessageId,
       lastMessageType: lastMessageType,
       lastMessageBody: lastMessageBody,

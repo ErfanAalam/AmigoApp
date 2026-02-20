@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../api/auth.api-client.dart';
+import '../../api/api_service.dart';
 import '../../models/country.model.dart' as country_model;
 import '../../providers/theme-color.provider.dart';
 import '../../ui/country-selector.modal.dart';
@@ -22,7 +22,7 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
   bool _isLoading = false;
   Map<String, dynamic>? _statusData;
 
-  final ApiService apiService = ApiService();
+  final apiService = ApiService();
 
   @override
   void dispose() {
@@ -62,9 +62,9 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
       _statusData = null;
     });
 
-    final response = await apiService.getSignupRequestStatus(
+    final response = (await apiService.auth.getSignupRequestStatus(
       _completePhoneNumber.replaceAll(' ', ''),
-    );
+    )).toMap();
 
     setState(() {
       _isLoading = false;
@@ -85,7 +85,9 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
         _statusData = null;
       });
     } else {
-      Snack.error('Error checking status: ${response['message'] ?? 'Unknown error'}');
+      Snack.error(
+        'Error checking status: ${response['message'] ?? 'Unknown error'}',
+      );
       setState(() {
         _statusData = null;
       });
@@ -218,7 +220,8 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
                         children: [
                           // Phone Number Field
                           material.Column(
-                            crossAxisAlignment: material.CrossAxisAlignment.start,
+                            crossAxisAlignment:
+                                material.CrossAxisAlignment.start,
                             children: [
                               material.Text(
                                 'Phone Number',
@@ -245,8 +248,8 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
                                       color: material.Colors.transparent,
                                       child: material.InkWell(
                                         onTap: _showCountrySelector,
-                                        borderRadius: material
-                                            .BorderRadius.circular(16),
+                                        borderRadius:
+                                            material.BorderRadius.circular(16),
                                         child: material.Padding(
                                           padding:
                                               const material.EdgeInsets.symmetric(
@@ -259,29 +262,22 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
                                             children: [
                                               material.Text(
                                                 _selectedCountry.flag,
-                                                style:
-                                                    const material.TextStyle(
+                                                style: const material.TextStyle(
                                                   fontSize: 20,
                                                 ),
                                               ),
-                                              const material.SizedBox(
-                                                width: 8,
-                                              ),
+                                              const material.SizedBox(width: 8),
                                               material.Text(
                                                 _selectedCountry.dialCode,
                                                 style: material.TextStyle(
                                                   fontSize: 16,
-                                                  fontWeight: material
-                                                      .FontWeight
-                                                      .w600,
-                                                  color: material
-                                                      .Colors
-                                                      .grey[800],
+                                                  fontWeight:
+                                                      material.FontWeight.w600,
+                                                  color:
+                                                      material.Colors.grey[800],
                                                 ),
                                               ),
-                                              const material.SizedBox(
-                                                width: 4,
-                                              ),
+                                              const material.SizedBox(width: 4),
                                               material.Icon(
                                                 material
                                                     .Icons
@@ -302,8 +298,8 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
                                     child: material.Container(
                                       decoration: material.BoxDecoration(
                                         color: material.Colors.grey[50],
-                                        borderRadius: material
-                                            .BorderRadius.circular(16),
+                                        borderRadius:
+                                            material.BorderRadius.circular(16),
                                         border: material.Border.all(
                                           color: material.Colors.grey[200]!,
                                         ),
@@ -331,11 +327,9 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
                                                 material.FontWeight.w500,
                                           ),
                                           decoration: material.InputDecoration(
-                                            hintText:
-                                                'Enter your phone number',
+                                            hintText: 'Enter your phone number',
                                             hintStyle: material.TextStyle(
-                                              color:
-                                                  material.Colors.grey[400],
+                                              color: material.Colors.grey[400],
                                               fontSize: 15,
                                             ),
                                             border: material.InputBorder.none,
@@ -393,9 +387,9 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
                                           width: 20,
                                           child:
                                               material.CircularProgressIndicator(
-                                            color: material.Colors.white,
-                                            strokeWidth: 2,
-                                          ),
+                                                color: material.Colors.white,
+                                                strokeWidth: 2,
+                                              ),
                                         )
                                       else ...[
                                         material.Text(
@@ -436,7 +430,9 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
                                 color: _getStatusMaterialColor(
                                   _statusData!['status'] ?? 'pending',
                                 ).withOpacity(0.1),
-                                borderRadius: material.BorderRadius.circular(12),
+                                borderRadius: material.BorderRadius.circular(
+                                  12,
+                                ),
                                 border: material.Border.all(
                                   color: _getStatusMaterialColor(
                                     _statusData!['status'] ?? 'pending',
@@ -451,7 +447,9 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
                                   material.Row(
                                     children: [
                                       material.Container(
-                                        padding: const material.EdgeInsets.all(8),
+                                        padding: const material.EdgeInsets.all(
+                                          8,
+                                        ),
                                         decoration: material.BoxDecoration(
                                           color: _getStatusMaterialColor(
                                             _statusData!['status'] ?? 'pending',
@@ -465,7 +463,8 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
                                           style: const material.TextStyle(
                                             color: material.Colors.white,
                                             fontSize: 16,
-                                            fontWeight: material.FontWeight.bold,
+                                            fontWeight:
+                                                material.FontWeight.bold,
                                           ),
                                         ),
                                       ),
@@ -479,20 +478,25 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
                                               'Status',
                                               style: material.TextStyle(
                                                 fontSize: 12,
-                                                color: material.Colors.grey[600],
-                                                fontWeight: material.FontWeight.w500,
+                                                color:
+                                                    material.Colors.grey[600],
+                                                fontWeight:
+                                                    material.FontWeight.w500,
                                               ),
                                             ),
                                             const material.SizedBox(height: 2),
                                             material.Text(
-                                              (_statusData!['status'] ?? 'pending')
+                                              (_statusData!['status'] ??
+                                                      'pending')
                                                   .toString()
                                                   .toUpperCase(),
                                               style: material.TextStyle(
                                                 fontSize: 18,
-                                                fontWeight: material.FontWeight.bold,
+                                                fontWeight:
+                                                    material.FontWeight.bold,
                                                 color: _getStatusMaterialColor(
-                                                  _statusData!['status'] ?? 'pending',
+                                                  _statusData!['status'] ??
+                                                      'pending',
                                                 ),
                                               ),
                                             ),
@@ -519,10 +523,12 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
                                         const material.SizedBox(width: 8),
                                         material.Expanded(
                                           child: material.Text(
-                                            '${_statusData!['first_name'] ?? ''} ${_statusData!['last_name'] ?? ''}'.trim(),
+                                            '${_statusData!['first_name'] ?? ''} ${_statusData!['last_name'] ?? ''}'
+                                                .trim(),
                                             style: material.TextStyle(
                                               fontSize: 14,
-                                              fontWeight: material.FontWeight.w600,
+                                              fontWeight:
+                                                  material.FontWeight.w600,
                                               color: material.Colors.grey[800],
                                             ),
                                           ),
@@ -535,7 +541,9 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
                                     material.Row(
                                       children: [
                                         material.Icon(
-                                          material.Icons.calendar_today_outlined,
+                                          material
+                                              .Icons
+                                              .calendar_today_outlined,
                                           size: 18,
                                           color: material.Colors.grey[600],
                                         ),
@@ -553,7 +561,9 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
                                     ),
                                   ],
                                   if (_statusData!['rejected_reason'] != null &&
-                                      _statusData!['rejected_reason'].toString().isNotEmpty) ...[
+                                      _statusData!['rejected_reason']
+                                          .toString()
+                                          .isNotEmpty) ...[
                                     const material.SizedBox(height: 16),
                                     material.Divider(
                                       color: material.Colors.grey[300],
@@ -572,23 +582,29 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
                                         const material.SizedBox(width: 8),
                                         material.Expanded(
                                           child: material.Column(
-                                            crossAxisAlignment:
-                                                material.CrossAxisAlignment.start,
+                                            crossAxisAlignment: material
+                                                .CrossAxisAlignment
+                                                .start,
                                             children: [
                                               material.Text(
                                                 'Rejection Reason',
                                                 style: material.TextStyle(
                                                   fontSize: 12,
-                                                  fontWeight: material.FontWeight.w600,
-                                                  color: material.Colors.grey[700],
+                                                  fontWeight:
+                                                      material.FontWeight.w600,
+                                                  color:
+                                                      material.Colors.grey[700],
                                                 ),
                                               ),
-                                              const material.SizedBox(height: 4),
+                                              const material.SizedBox(
+                                                height: 4,
+                                              ),
                                               material.Text(
                                                 _statusData!['rejected_reason'],
                                                 style: material.TextStyle(
                                                   fontSize: 13,
-                                                  color: material.Colors.grey[800],
+                                                  color:
+                                                      material.Colors.grey[800],
                                                 ),
                                               ),
                                             ],
@@ -629,7 +645,8 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
                           ),
                           child: material.Row(
                             mainAxisSize: material.MainAxisSize.min,
-                            mainAxisAlignment: material.MainAxisAlignment.center,
+                            mainAxisAlignment:
+                                material.MainAxisAlignment.center,
                             children: [
                               const material.Icon(
                                 material.Icons.arrow_back_rounded,
@@ -675,4 +692,3 @@ class _SignupStatusScreenState extends ConsumerState<SignupStatusScreen> {
     }
   }
 }
-

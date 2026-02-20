@@ -21,8 +21,8 @@ class ConversationMemberRepository {
       unreadCount: member.unreadCount,
       joinedAt: member.joinedAt,
       removedAt: member.removedAt,
-      lastReadMessageId: member.lastReadMessageId,
-      lastDeliveredMessageId: member.lastDeliveredMessageId,
+      lastReadMessageId: member.lastReadMessageId?.toInt(),
+      lastDeliveredMessageId: member.lastDeliveredMessageId?.toInt(),
     );
   }
 
@@ -49,11 +49,16 @@ class ConversationMemberRepository {
         joinedAt: Value(member.joinedAt ?? existingMember?.joinedAt),
         removedAt: Value(member.removedAt ?? existingMember?.removedAt),
         lastReadMessageId: Value(
-          member.lastReadMessageId ?? existingMember?.lastReadMessageId,
+          () {
+            final value = member.lastReadMessageId ?? existingMember?.lastReadMessageId;
+            return value != null ? BigInt.from(value) : null;
+          }(),
         ),
         lastDeliveredMessageId: Value(
-          member.lastDeliveredMessageId ??
-              existingMember?.lastDeliveredMessageId,
+          () {
+            final value = member.lastDeliveredMessageId ?? existingMember?.lastDeliveredMessageId;
+            return value != null ? BigInt.from(value) : null;
+          }(),
         ),
       );
       await db
@@ -111,8 +116,8 @@ class ConversationMemberRepository {
           unreadCount: Value(member.unreadCount ?? 0),
           joinedAt: Value(member.joinedAt),
           removedAt: Value(member.removedAt),
-          lastReadMessageId: Value(member.lastReadMessageId),
-          lastDeliveredMessageId: Value(member.lastDeliveredMessageId),
+          lastReadMessageId: Value(member.lastReadMessageId != null ? BigInt.from(member.lastReadMessageId!) : null),
+          lastDeliveredMessageId: Value(member.lastDeliveredMessageId != null ? BigInt.from(member.lastDeliveredMessageId!) : null),
         );
         await db.into(db.conversationMembers).insert(memberCompanion);
       }
@@ -157,8 +162,8 @@ class ConversationMemberRepository {
         unreadCount: Value(member.unreadCount ?? 0),
         joinedAt: Value(member.joinedAt),
         removedAt: Value(member.removedAt),
-        lastReadMessageId: Value(member.lastReadMessageId),
-        lastDeliveredMessageId: Value(member.lastDeliveredMessageId),
+        lastReadMessageId: Value(member.lastReadMessageId != null ? BigInt.from(member.lastReadMessageId!) : null),
+        lastDeliveredMessageId: Value(member.lastDeliveredMessageId != null ? BigInt.from(member.lastDeliveredMessageId!) : null),
       );
       await db.into(db.conversationMembers).insert(memberCompanion);
     }
@@ -204,10 +209,10 @@ class ConversationMemberRepository {
           ? Value(member.removedAt!)
           : const Value.absent(),
       lastReadMessageId: member.lastReadMessageId != null
-          ? Value(member.lastReadMessageId!)
+          ? Value(BigInt.from(member.lastReadMessageId!))
           : const Value.absent(),
       lastDeliveredMessageId: member.lastDeliveredMessageId != null
-          ? Value(member.lastDeliveredMessageId!)
+          ? Value(BigInt.from(member.lastDeliveredMessageId!))
           : const Value.absent(),
     );
 
@@ -382,7 +387,7 @@ class ConversationMemberRepository {
       db.conversationMembers,
     )..where((t) => t.id.equals(memberId))).write(
       ConversationMembersCompanion(
-        lastReadMessageId: Value(lastReadMessageId),
+        lastReadMessageId: Value(BigInt.from(lastReadMessageId)),
         unreadCount: const Value(0),
       ),
     );
@@ -398,7 +403,7 @@ class ConversationMemberRepository {
       db.conversationMembers,
     )..where((t) => t.id.equals(memberId))).write(
       ConversationMembersCompanion(
-        lastDeliveredMessageId: Value(lastDeliveredMessageId),
+        lastDeliveredMessageId: Value(BigInt.from(lastDeliveredMessageId)),
       ),
     );
   }

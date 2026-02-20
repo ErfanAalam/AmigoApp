@@ -55,7 +55,7 @@ NIX_ENFORCE_NO_NATIVE='1'
 export NIX_ENFORCE_NO_NATIVE
 NIX_HARDENING_ENABLE='bindnow format fortify fortify3 pic relro stackclashprotection stackprotector strictoverflow zerocallusedregs'
 export NIX_HARDENING_ENABLE
-NIX_LDFLAGS='-rpath /home/gaz/workspace/amigo/AmigoApp/outputs/out/lib  -L/nix/store/l34flfzgyi085i20h52lg48ksmy1lnc1-dart-3.9.2/lib -L/nix/store/b2jdp6hfygj6mxndszl0yyczprm1h8b3-gettext-0.25.1/lib -L/nix/store/l34flfzgyi085i20h52lg48ksmy1lnc1-dart-3.9.2/lib -L/nix/store/b2jdp6hfygj6mxndszl0yyczprm1h8b3-gettext-0.25.1/lib'
+NIX_LDFLAGS='-rpath /home/gaz/workspace/amigo/amigo-app/outputs/out/lib  -L/nix/store/l34flfzgyi085i20h52lg48ksmy1lnc1-dart-3.9.2/lib -L/nix/store/b2jdp6hfygj6mxndszl0yyczprm1h8b3-gettext-0.25.1/lib -L/nix/store/l34flfzgyi085i20h52lg48ksmy1lnc1-dart-3.9.2/lib -L/nix/store/b2jdp6hfygj6mxndszl0yyczprm1h8b3-gettext-0.25.1/lib'
 export NIX_LDFLAGS
 NIX_NO_SELF_RPATH='1'
 NIX_PKG_CONFIG_WRAPPER_TARGET_TARGET_x86_64_unknown_linux_gnu='1'
@@ -154,7 +154,7 @@ name='flutter-dev-shell-env'
 export name
 nativeBuildInputs=''
 export nativeBuildInputs
-out='/home/gaz/workspace/amigo/AmigoApp/outputs/out'
+out='/home/gaz/workspace/amigo/amigo-app/outputs/out'
 export out
 outputBin='out'
 outputDev='out'
@@ -185,7 +185,7 @@ preConfigurePhases=' updateAutotoolsGnuConfigScriptsPhase'
 declare -a preFixupHooks=('_moveToShare' '_multioutDocs' '_multioutDevs' )
 preferLocalBuild='1'
 export preferLocalBuild
-prefix='/home/gaz/workspace/amigo/AmigoApp/outputs/out'
+prefix='/home/gaz/workspace/amigo/amigo-app/outputs/out'
 declare -a propagatedBuildDepFiles=('propagated-build-build-deps' 'propagated-native-build-inputs' 'propagated-build-target-deps' )
 propagatedBuildInputs=''
 export propagatedBuildInputs

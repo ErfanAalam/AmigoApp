@@ -96,7 +96,7 @@ class _SnackOverlay extends StatefulWidget {
 }
 
 class _SnackOverlayState extends State<_SnackOverlay>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
@@ -104,6 +104,7 @@ class _SnackOverlayState extends State<_SnackOverlay>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     _controller = AnimationController(
       duration: const Duration(milliseconds: 300),
@@ -130,6 +131,14 @@ class _SnackOverlayState extends State<_SnackOverlay>
     });
   }
 
+  @override
+  void didChangeMetrics() {
+    // Rebuild when keyboard appears/disappears
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   void _animateOut() async {
     await _controller.reverse();
     widget.onDismiss();
@@ -137,18 +146,23 @@ class _SnackOverlayState extends State<_SnackOverlay>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final mediaQuery = MediaQuery.of(context);
+    final bottomPadding = mediaQuery.padding.bottom;
+    final keyboardHeight = mediaQuery.viewInsets.bottom;
 
-    return Positioned(
+    return AnimatedPositioned(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
       left: 10,
       right: 10,
-      bottom: bottomPadding + 80,
+      bottom: bottomPadding + 12 + keyboardHeight,
       child: SlideTransition(
         position: _slideAnimation,
         child: FadeTransition(
@@ -189,6 +203,22 @@ class _SnackOverlayState extends State<_SnackOverlay>
                             color: widget.backgroundColor,
                             fontSize: 14,
                             decoration: TextDecoration.none,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: _animateOut,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: widget.backgroundColor.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            m.Icons.close_rounded,
+                            size: 16,
+                            color: widget.backgroundColor,
                           ),
                         ),
                       ),
@@ -347,7 +377,7 @@ class _TaskSnackOverlay extends StatefulWidget {
 }
 
 class _TaskSnackOverlayState extends State<_TaskSnackOverlay>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
@@ -364,6 +394,7 @@ class _TaskSnackOverlayState extends State<_TaskSnackOverlay>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.registerState(this);
 
     _message = widget.message;
@@ -388,6 +419,14 @@ class _TaskSnackOverlayState extends State<_TaskSnackOverlay>
 
     _controller.forward();
     _scheduleAutoDismissIfNeeded();
+  }
+
+  @override
+  void didChangeMetrics() {
+    // Rebuild when keyboard appears/disappears
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void updateLoading({required String message}) {
@@ -434,6 +473,7 @@ class _TaskSnackOverlayState extends State<_TaskSnackOverlay>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _autoDismissTimer?.cancel();
     _controller.dispose();
     super.dispose();
@@ -468,6 +508,7 @@ class _TaskSnackOverlayState extends State<_TaskSnackOverlay>
   @override
   Widget build(BuildContext context) {
     final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
 
     return ValueListenableBuilder<int>(
       valueListenable: widget.orderListenable,
@@ -475,7 +516,7 @@ class _TaskSnackOverlayState extends State<_TaskSnackOverlay>
         final double itemHeight = 74;
         final double gap = 12;
         final double bottom =
-            bottomPadding + 80 + (order * (itemHeight + gap));
+            bottomPadding + 15 + keyboardHeight + (order * (itemHeight + gap));
 
         return AnimatedPositioned(
           duration: const Duration(milliseconds: 180),
@@ -516,6 +557,22 @@ class _TaskSnackOverlayState extends State<_TaskSnackOverlay>
                               color: _tone,
                               fontSize: 14,
                               decoration: TextDecoration.none,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: _animateOut,
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: _tone.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              m.Icons.close_rounded,
+                              size: 16,
+                              color: _tone,
                             ),
                           ),
                         ),

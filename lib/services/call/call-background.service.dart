@@ -15,7 +15,7 @@ import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
-import '../../api/chat.api-client.dart';
+import '../../api/api_service.dart';
 import '../../models/call.model.dart';
 import '../../utils/call.utils.dart';
 import '../../types/socket.types.dart';
@@ -462,22 +462,22 @@ Future<void> sendDeliveryReceipt(ChatMessagePayload message) async {
     }
 
     // Only send receipt if we have a canonical (server) message ID
-    final messageId = message.id;
-    if (messageId == null) {
-      debugPrint('⚠️ Cannot send delivery receipt: no canonical message ID');
-      return;
-    }
+    // final messageId = message.id;
+    // if (messageId == null) {
+    //   debugPrint('⚠️ Cannot send delivery receipt: no canonical message ID');
+    //   return;
+    // }
 
     // Send delivery receipt via API
     // The backend will handle WebSocket broadcast to the sender
-    final chatApi = ChatsServices();
-    await chatApi.markMessageDelivered(
-      messageId: messageId,
+    final apiService = ApiService();
+    await apiService.chat.markMessageDelivered(
+      messageId: message.id,
       conversationId: message.convId,
     );
 
     debugPrint(
-      '📬 Sent delivery receipt for message $messageId to sender ${message.senderId}',
+      '📬 Sent delivery receipt for message ${message.id} to sender ${message.senderId}',
     );
   } catch (e) {
     debugPrint('⚠️ Error sending delivery receipt: $e');

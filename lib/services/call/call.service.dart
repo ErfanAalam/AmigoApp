@@ -65,10 +65,8 @@ class CallService {
   StreamSubscription<CallPayload>? _callAnswerSubscription;
   StreamSubscription<CallPayload>? _callIceSubscription;
   StreamSubscription<CallPayload>? _callAcceptSubscription;
-  StreamSubscription<CallPayload>? _callDeclineSubscription;
-  StreamSubscription<CallPayload>? _callEndSubscription;
+  StreamSubscription<CallPayload>? _callTerminateSubscription;
   StreamSubscription<CallPayload>? _callRingingSubscription;
-  StreamSubscription<CallPayload>? _callMissedSubscription;
   StreamSubscription<CallPayload>? _callErrorSubscription;
 
   // Proximity control for global screen lock
@@ -146,15 +144,11 @@ class CallService {
       _callAcceptSubscription = handler.callAcceptStream.listen(
         _handleCallAccept,
       );
-      _callDeclineSubscription = handler.callDeclineStream.listen(
-        _handleCallDecline,
+      _callTerminateSubscription = handler.callTerminateStream.listen(
+        _handleCallTerminate,
       );
-      _callEndSubscription = handler.callEndStream.listen(_handleCallEnd);
       _callRingingSubscription = handler.callRingingStream.listen(
         _handleIncomingCall,
-      );
-      _callMissedSubscription = handler.callMissedStream.listen(
-        _handleCallMissed,
       );
       _callErrorSubscription = handler.callErrorStream.listen(_handleCallError);
 
@@ -568,7 +562,7 @@ class CallService {
       );
 
       final wsmsg = WSMessage(
-        type: WSMessageType.callDecline,
+        type: WSMessageType.callTerminate,
         payload: callDeclinePayload,
         wsTimestamp: DateTime.now(),
       ).toJson();
@@ -632,7 +626,7 @@ class CallService {
       
 
       final wsmsg = WSMessage(
-        type: WSMessageType.callEnd,
+        type: WSMessageType.callTerminate,
         payload: callEndPayload,
         wsTimestamp: DateTime.now(),
       ).toJson();
@@ -1109,11 +1103,10 @@ class CallService {
     }
   }
 
-  /// Handle call decline message
-  void _handleCallDecline(CallPayload payload) async {
-    // For outgoing calls, be more lenient with callId matching
+  /// Handle call terminate message (replaces call:decline, call:end, call:missed)
+  void _handleCallTerminate(CallPayload payload) async {
     if (_activeCall == null) {
-      debugPrint('[CALL] Ignoring call:decline for callId=${payload.callId} - no active call');
+      debugPrint('[CALL] Ignoring call:terminate for callId=${payload.callId} - no active call');
       return;
     }
 
@@ -1123,71 +1116,55 @@ class CallService {
                          _activeCall!.callId == 0;
 
     if (!callIdMatches && !isOutgoingCall) {
-      debugPrint('[CALL] Ignoring call:decline for callId=${payload.callId} - callId mismatch. Active: ${_activeCall!.callId}');
+      debugPrint('[CALL] Ignoring call:terminate for callId=${payload.callId} - callId mismatch. Active: ${_activeCall!.callId}');
       return;
     }
 
-    debugPrint('[CALL] Handling call:decline for callId=${payload.callId}, ActiveCallId: ${_activeCall!.callId}');
+    // Extract reason from payload data
+    final reason = payload.data is Map 
+        ? (payload.data as Map)['reason']?.toString() 
+        : null;
+    
+    debugPrint('[CALL] Handling call:terminate for callId=${payload.callId}, reason=$reason, ActiveCallId: ${_activeCall!.callId}');
+    
     FlutterRingtonePlayer().stop();
+    
     // Update callId if provided and different (or if it was 0)
     if (payload.callId != null && (_activeCall!.callId != payload.callId || _activeCall!.callId == 0)) {
       debugPrint('[CALL] Updating callId from ${_activeCall!.callId} to ${payload.callId}');
       _activeCall = _activeCall!.copyWith(callId: payload.callId);
     }
     
-    // IMPORTANT: Update status to declined BEFORE cleanup so UI can show it
-    // This is especially important for outgoing calls where the caller needs to see "declined"
-    _activeCall = _activeCall!.copyWith(status: CallStatus.declined);
-    debugPrint('[CALL] Call status updated to declined for callId=${_activeCall!.callId}');
-    
-    // Cancel the call started timer since call is being declined
+    // Cancel the call started timer
     _callStartedTimer?.cancel();
     _callStartedTimer = null;
-    // Stop status polling since call is being declined
+    
+    // Stop status polling
     _stopStatusPolling();
     
-    // Wait a bit to allow UI to update before cleanup
-    await Future.delayed(const Duration(milliseconds: 500));
+    // Route to appropriate handler based on reason
+    final messageMap = _createMessageMap(payload);
     
-    _handleCallDeclinedInternal(_createMessageMap(payload));
-    await FlutterCallkitIncoming.endAllCalls();
-    FlutterRingtonePlayer().stop();
-  }
-
-  /// Handle call end message
-  void _handleCallEnd(CallPayload payload) async {
-    // Only process if this call matches the active call
-    if (_activeCall == null || _activeCall!.callId != payload.callId) {
-      debugPrint('[CALL] Ignoring call:end for callId=${payload.callId} - not active call or no active call');
-      return;
+    if (reason == 'user_declined' || reason == 'caller_cancelled' || reason == 'declined_via_polling') {
+      // IMPORTANT: Update status to declined BEFORE cleanup so UI can show it
+      // This is especially important for outgoing calls where the caller needs to see "declined"
+      _activeCall = _activeCall!.copyWith(status: CallStatus.declined);
+      debugPrint('[CALL] Call status updated to declined for callId=${_activeCall!.callId}');
+      
+      // Wait a bit to allow UI to update before cleanup
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      _handleCallDeclinedInternal(messageMap);
+    } else if (reason == 'user_hangup' || reason == 'ended_via_polling' || reason == null) {
+      // Default to ended if no specific reason or if it's a hangup
+      _handleCallEndedInternal(messageMap);
+    } else if (reason == 'missed' || reason == 'missed_via_polling') {
+      _handleCallMissedInternal(messageMap);
+    } else {
+      // Default to ended for unknown reasons
+      _handleCallEndedInternal(messageMap);
     }
-    FlutterRingtonePlayer().stop();
-    debugPrint('[CALL] Handling call:end for callId=${payload.callId}');
-    // Cancel the call started timer since call is ending
-    _callStartedTimer?.cancel();
-    _callStartedTimer = null;
-    // Stop status polling since call is ending
-    _stopStatusPolling();
-    _handleCallEndedInternal(_createMessageMap(payload));
-    await FlutterCallkitIncoming.endAllCalls();
-    FlutterRingtonePlayer().stop();
-  }
-
-  /// Handle call missed message
-  void _handleCallMissed(CallPayload payload) async {
-    // Only process if this call matches the active call
-    if (_activeCall == null || _activeCall!.callId != payload.callId) {
-      debugPrint('[CALL] Ignoring call:missed for callId=${payload.callId} - not active call or no active call');
-      return;
-    }
-
-    debugPrint('[CALL] Handling call:missed for callId=${payload.callId}');
-    // Cancel the call started timer since call is missed
-    _callStartedTimer?.cancel();
-    _callStartedTimer = null;
-    // Stop status polling since call is missed
-    _stopStatusPolling();
-    _handleCallMissedInternal(_createMessageMap(payload));
+    
     await FlutterCallkitIncoming.endAllCalls();
     FlutterRingtonePlayer().stop();
   }
@@ -1814,10 +1791,8 @@ class CallService {
     _callAnswerSubscription?.cancel();
     _callIceSubscription?.cancel();
     _callAcceptSubscription?.cancel();
-    _callDeclineSubscription?.cancel();
-    _callEndSubscription?.cancel();
+    _callTerminateSubscription?.cancel();
     _callRingingSubscription?.cancel();
-    _callMissedSubscription?.cancel();
     _callErrorSubscription?.cancel();
     _cleanup();
   }

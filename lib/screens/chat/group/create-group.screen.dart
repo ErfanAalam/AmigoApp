@@ -4,8 +4,7 @@ import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../api/group.api-client.dart';
-import '../../../api/user.api-client.dart';
+import '../../../api/api_service.dart';
 import '../../../db/repositories/conversation-member.repo.dart';
 import '../../../models/group.model.dart';
 import '../../../models/user.model.dart';
@@ -26,8 +25,7 @@ class CreateGroupPage extends ConsumerStatefulWidget {
 }
 
 class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
-  final GroupsService _groupsService = GroupsService();
-  final UserService _userService = UserService();
+  final apiService = ApiService();
   final ContactService _contactService = ContactService();
   final TextEditingController _groupNameController = TextEditingController();
   final TextEditingController _searchController = TextEditingController();
@@ -83,7 +81,9 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
           .toList();
 
       // Load available users from the same API used in contacts
-      final response = await _userService.getAvailableUsers(contactPhones);
+      final response = (await apiService.user.getAvailableUsers(
+        contactPhones,
+      )).toMap();
 
       if (response['success'] && response['data'] != null) {
         final List<dynamic> usersData = response['data'];
@@ -92,7 +92,9 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
             .toList();
 
         // Enrich users with display names from local database
-        final enrichedUsers = await UserUtils().enrichUsersWithDisplayNames(users);
+        final enrichedUsers = await UserUtils().enrichUsersWithDisplayNames(
+          users,
+        );
 
         setState(() {
           _allUsers = enrichedUsers;
@@ -162,10 +164,10 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
     });
 
     try {
-      final response = await _groupsService.createGroup(
-        groupName,
-        _selectedUserIds.toList(),
-      );
+      final response = (await apiService.group.createGroup(
+        title: groupName,
+        memberIds: _selectedUserIds.toList(),
+      )).toMap();
 
       if (response['success']) {
         if (mounted) {
@@ -359,7 +361,9 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
                       size: 20,
                     ),
                     label: Text(
-                      _areAllFilteredUsersSelected ? 'Deselect All' : 'Select All',
+                      _areAllFilteredUsersSelected
+                          ? 'Deselect All'
+                          : 'Select All',
                       style: TextStyle(
                         color: themeColor.primary,
                         fontWeight: FontWeight.w600,

@@ -86,7 +86,6 @@ dependencies:
   flutter_ringtone_player: ^4.0.0+4
   drift_db_viewer: ^2.1.0
   connectivity_plus: ^7.0.0
-  internet_connection_checker_plus: ^2.9.1+2
 
 dev_dependencies:
   flutter_test:

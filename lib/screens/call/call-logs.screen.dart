@@ -5,7 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../api/auth.api-client.dart';
+import '../../api/api_service.dart';
 import '../../models/call.model.dart';
 import '../../providers/call.provider.dart';
 import '../../providers/theme-color.provider.dart';
@@ -20,7 +20,7 @@ class CallsPage extends ConsumerStatefulWidget {
 
 class CallsPageState extends ConsumerState<CallsPage>
     with WidgetsBindingObserver {
-  final ApiService _apiService = ApiService();
+  final apiService = ApiService();
   List<CallHistoryItem> _callHistory = [];
   bool _isLoading =
       false; // Start with false, will be set to true only if needed
@@ -106,10 +106,8 @@ class CallsPageState extends ConsumerState<CallsPage>
 
     // Step 2: Fetch from server in background and update
     try {
-      final response = await _apiService.authenticatedGet(
-        '/call/history?limit=50',
-      );
-      final data = response.data;
+      final response = (await apiService.user.getCallHistory(50)).toMap();
+      final data = response['data'];
 
       if (data['success'] == true && data['data'] != null) {
         final List<dynamic> callsData = data['data'];
@@ -128,7 +126,9 @@ class CallsPageState extends ConsumerState<CallsPage>
 
         // Update UI with fresh data from server, preserving duration if it exists
         if (mounted) {
-          final newHistory = enrichedCalls.map(_mapCallModelToHistoryItem).toList();
+          final newHistory = enrichedCalls
+              .map(_mapCallModelToHistoryItem)
+              .toList();
 
           // Merge with existing data to preserve durationSeconds if server data has 0
           final mergedHistory = _mergeCallHistory(_callHistory, newHistory);
@@ -527,7 +527,8 @@ class CallsPageState extends ConsumerState<CallsPage>
   String _formatDateTime(DateTime dateTime) {
     final now = DateTime.now();
     final difference = now.difference(dateTime);
-    final timeStr = '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+    final timeStr =
+        '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
 
     if (difference.inDays == 0) {
       // Today - show time only
@@ -561,7 +562,6 @@ class CallsPageState extends ConsumerState<CallsPage>
       }
     }
   }
-
 
   // Map persisted CallModel to UI-friendly CallHistoryItem
   CallHistoryItem _mapCallModelToHistoryItem(CallModel model) {

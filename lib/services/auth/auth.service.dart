@@ -1,10 +1,12 @@
 import 'package:amigo/db/sqlite.db.dart';
+import 'package:amigo/types/network.types.dart';
+import 'package:amigo/utils/network.utils.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
-import '../../api/auth.api-client.dart';
+import '../../api/api_service.dart';
 import '../../providers/chat.provider.dart';
 import '../../providers/draft.provider.dart';
 import '../../providers/notification-badge.provider.dart';
@@ -21,7 +23,6 @@ import 'package:dio/dio.dart';
 
 import '../socket/websocket.service.dart';
 import '../user-status.service.dart';
-import '../../api/auth.api-client.dart' as api;
 
 class AuthService {
   static const String _authStatusKey = 'auth_status';
@@ -35,7 +36,11 @@ class AuthService {
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   final CookieService _cookieService = CookieService();
 
-  final NotificationService notificationService = NotificationService();
+  /// Lazy getter for ApiService - only accessed after initialization
+  ApiService get apiService => ApiService();
+
+  /// Lazy getter for NotificationService - only accessed after initialization
+  NotificationService get notificationService => NotificationService();
 
   // Check if user is authenticated
   Future<bool> isAuthenticated() async {
@@ -72,11 +77,16 @@ class AuthService {
       // This ensures that if Device A is closed and Device B logs in, Device A will be logged out
       // when it opens the app again
       // NOTE: Skip server validation when offline to allow users to use the app offline
+      // final isOnline =
+      //     NetworkConnectivityUtil().currentQuality != NetworkQuality.offline;
+
+      // if (isOnline) {
       try {
-        final apiService = api.ApiService();
-        final isTokenValid = await apiService.validateRefreshToken();
-        if (!isTokenValid) {
-          debugPrint('🚪 Refresh token invalidated - user logged in on another device');
+        final result = await apiService.client.validateRefreshToken();
+        if (!result.isSuccess) {
+          debugPrint(
+            '🚪 Refresh token invalidated - user logged in on another device',
+          );
           await logout();
           return false;
         }
@@ -88,14 +98,16 @@ class AuthService {
             e.type == DioExceptionType.receiveTimeout ||
             e.type == DioExceptionType.connectionError ||
             e.type == DioExceptionType.unknown) {
-          debugPrint('⚠️ Cannot validate token (offline) - allowing offline access');
+          debugPrint(
+            '⚠️ Cannot validate token (offline) - allowing offline access',
+          );
           // Return true based on local checks only when offline
           return true;
         }
         // For other DioExceptions, rethrow to be handled by outer catch
         rethrow;
       }
-
+      // }
       return true;
     } catch (e) {
       debugPrint('❌ Error checking authentication: $e');
@@ -128,8 +140,8 @@ class AuthService {
       final fcmToken = notificationService.fcmToken;
 
       if (fcmToken != null && fcmToken.isNotEmpty) {
-        final response = await ApiService().updateFCMToken(fcmToken);
-        if (response['success'] == true) {
+        final result = await apiService.auth.updateFCMToken(fcmToken);
+        if (result.isSuccess) {
           debugPrint('✅ FCM token sent to backend successfully');
         } else {
           if (retry == null || retry <= 0) {
@@ -160,7 +172,7 @@ class AuthService {
       } catch (_) {}
 
       try {
-        await ApiService().authenticatedGet("/auth/logout");
+        await apiService.client.get("/auth/logout");
       } catch (e) {
         debugPrint('⚠️ Server logout failed (continuing with local logout)');
       }

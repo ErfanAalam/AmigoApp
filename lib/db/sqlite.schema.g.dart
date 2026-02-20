@@ -1301,22 +1301,22 @@ class $ConversationsTable extends Conversations
     'lastMessageId',
   );
   @override
-  late final GeneratedColumn<int> lastMessageId = GeneratedColumn<int>(
+  late final GeneratedColumn<BigInt> lastMessageId = GeneratedColumn<BigInt>(
     'last_message_id',
     aliasedName,
     true,
-    type: DriftSqlType.int,
+    type: DriftSqlType.bigInt,
     requiredDuringInsert: false,
   );
   static const VerificationMeta _pinnedMessageIdMeta = const VerificationMeta(
     'pinnedMessageId',
   );
   @override
-  late final GeneratedColumn<int> pinnedMessageId = GeneratedColumn<int>(
+  late final GeneratedColumn<BigInt> pinnedMessageId = GeneratedColumn<BigInt>(
     'pinned_message_id',
     aliasedName,
     true,
-    type: DriftSqlType.int,
+    type: DriftSqlType.bigInt,
     requiredDuringInsert: false,
   );
   static const VerificationMeta _isDeletedMeta = const VerificationMeta(
@@ -1569,11 +1569,11 @@ class $ConversationsTable extends Conversations
         data['${effectivePrefix}unread_count'],
       ),
       lastMessageId: attachedDatabase.typeMapping.read(
-        DriftSqlType.int,
+        DriftSqlType.bigInt,
         data['${effectivePrefix}last_message_id'],
       ),
       pinnedMessageId: attachedDatabase.typeMapping.read(
-        DriftSqlType.int,
+        DriftSqlType.bigInt,
         data['${effectivePrefix}pinned_message_id'],
       ),
       isDeleted: attachedDatabase.typeMapping.read(
@@ -1619,8 +1619,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
   final String? title;
   final int createrId;
   final int? unreadCount;
-  final int? lastMessageId;
-  final int? pinnedMessageId;
+  final BigInt? lastMessageId;
+  final BigInt? pinnedMessageId;
   final bool isDeleted;
   final bool isPinned;
   final bool isFavorite;
@@ -1657,10 +1657,10 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       map['unread_count'] = Variable<int>(unreadCount);
     }
     if (!nullToAbsent || lastMessageId != null) {
-      map['last_message_id'] = Variable<int>(lastMessageId);
+      map['last_message_id'] = Variable<BigInt>(lastMessageId);
     }
     if (!nullToAbsent || pinnedMessageId != null) {
-      map['pinned_message_id'] = Variable<int>(pinnedMessageId);
+      map['pinned_message_id'] = Variable<BigInt>(pinnedMessageId);
     }
     map['is_deleted'] = Variable<bool>(isDeleted);
     map['is_pinned'] = Variable<bool>(isPinned);
@@ -1718,8 +1718,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       title: serializer.fromJson<String?>(json['title']),
       createrId: serializer.fromJson<int>(json['createrId']),
       unreadCount: serializer.fromJson<int?>(json['unreadCount']),
-      lastMessageId: serializer.fromJson<int?>(json['lastMessageId']),
-      pinnedMessageId: serializer.fromJson<int?>(json['pinnedMessageId']),
+      lastMessageId: serializer.fromJson<BigInt?>(json['lastMessageId']),
+      pinnedMessageId: serializer.fromJson<BigInt?>(json['pinnedMessageId']),
       isDeleted: serializer.fromJson<bool>(json['isDeleted']),
       isPinned: serializer.fromJson<bool>(json['isPinned']),
       isFavorite: serializer.fromJson<bool>(json['isFavorite']),
@@ -1738,8 +1738,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       'title': serializer.toJson<String?>(title),
       'createrId': serializer.toJson<int>(createrId),
       'unreadCount': serializer.toJson<int?>(unreadCount),
-      'lastMessageId': serializer.toJson<int?>(lastMessageId),
-      'pinnedMessageId': serializer.toJson<int?>(pinnedMessageId),
+      'lastMessageId': serializer.toJson<BigInt?>(lastMessageId),
+      'pinnedMessageId': serializer.toJson<BigInt?>(pinnedMessageId),
       'isDeleted': serializer.toJson<bool>(isDeleted),
       'isPinned': serializer.toJson<bool>(isPinned),
       'isFavorite': serializer.toJson<bool>(isFavorite),
@@ -1756,8 +1756,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     Value<String?> title = const Value.absent(),
     int? createrId,
     Value<int?> unreadCount = const Value.absent(),
-    Value<int?> lastMessageId = const Value.absent(),
-    Value<int?> pinnedMessageId = const Value.absent(),
+    Value<BigInt?> lastMessageId = const Value.absent(),
+    Value<BigInt?> pinnedMessageId = const Value.absent(),
     bool? isDeleted,
     bool? isPinned,
     bool? isFavorite,
@@ -1876,8 +1876,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
   final Value<String?> title;
   final Value<int> createrId;
   final Value<int?> unreadCount;
-  final Value<int?> lastMessageId;
-  final Value<int?> pinnedMessageId;
+  final Value<BigInt?> lastMessageId;
+  final Value<BigInt?> pinnedMessageId;
   final Value<bool> isDeleted;
   final Value<bool> isPinned;
   final Value<bool> isFavorite;
@@ -1924,8 +1924,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     Expression<String>? title,
     Expression<int>? createrId,
     Expression<int>? unreadCount,
-    Expression<int>? lastMessageId,
-    Expression<int>? pinnedMessageId,
+    Expression<BigInt>? lastMessageId,
+    Expression<BigInt>? pinnedMessageId,
     Expression<bool>? isDeleted,
     Expression<bool>? isPinned,
     Expression<bool>? isFavorite,
@@ -1958,8 +1958,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     Value<String?>? title,
     Value<int>? createrId,
     Value<int?>? unreadCount,
-    Value<int?>? lastMessageId,
-    Value<int?>? pinnedMessageId,
+    Value<BigInt?>? lastMessageId,
+    Value<BigInt?>? pinnedMessageId,
     Value<bool>? isDeleted,
     Value<bool>? isPinned,
     Value<bool>? isFavorite,
@@ -2005,10 +2005,10 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
       map['unread_count'] = Variable<int>(unreadCount.value);
     }
     if (lastMessageId.present) {
-      map['last_message_id'] = Variable<int>(lastMessageId.value);
+      map['last_message_id'] = Variable<BigInt>(lastMessageId.value);
     }
     if (pinnedMessageId.present) {
-      map['pinned_message_id'] = Variable<int>(pinnedMessageId.value);
+      map['pinned_message_id'] = Variable<BigInt>(pinnedMessageId.value);
     }
     if (isDeleted.present) {
       map['is_deleted'] = Variable<bool>(isDeleted.value);
@@ -2142,23 +2142,25 @@ class $ConversationMembersTable extends ConversationMembers
     'lastReadMessageId',
   );
   @override
-  late final GeneratedColumn<int> lastReadMessageId = GeneratedColumn<int>(
-    'last_read_message_id',
-    aliasedName,
-    true,
-    type: DriftSqlType.int,
-    requiredDuringInsert: false,
-  );
+  late final GeneratedColumn<BigInt> lastReadMessageId =
+      GeneratedColumn<BigInt>(
+        'last_read_message_id',
+        aliasedName,
+        true,
+        type: DriftSqlType.bigInt,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _lastDeliveredMessageIdMeta =
       const VerificationMeta('lastDeliveredMessageId');
   @override
-  late final GeneratedColumn<int> lastDeliveredMessageId = GeneratedColumn<int>(
-    'last_delivered_message_id',
-    aliasedName,
-    true,
-    type: DriftSqlType.int,
-    requiredDuringInsert: false,
-  );
+  late final GeneratedColumn<BigInt> lastDeliveredMessageId =
+      GeneratedColumn<BigInt>(
+        'last_delivered_message_id',
+        aliasedName,
+        true,
+        type: DriftSqlType.bigInt,
+        requiredDuringInsert: false,
+      );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -2290,11 +2292,11 @@ class $ConversationMembersTable extends ConversationMembers
         data['${effectivePrefix}removed_at'],
       ),
       lastReadMessageId: attachedDatabase.typeMapping.read(
-        DriftSqlType.int,
+        DriftSqlType.bigInt,
         data['${effectivePrefix}last_read_message_id'],
       ),
       lastDeliveredMessageId: attachedDatabase.typeMapping.read(
-        DriftSqlType.int,
+        DriftSqlType.bigInt,
         data['${effectivePrefix}last_delivered_message_id'],
       ),
     );
@@ -2315,8 +2317,8 @@ class ConversationMember extends DataClass
   final int unreadCount;
   final String? joinedAt;
   final String? removedAt;
-  final int? lastReadMessageId;
-  final int? lastDeliveredMessageId;
+  final BigInt? lastReadMessageId;
+  final BigInt? lastDeliveredMessageId;
   const ConversationMember({
     required this.id,
     required this.conversationId,
@@ -2343,10 +2345,12 @@ class ConversationMember extends DataClass
       map['removed_at'] = Variable<String>(removedAt);
     }
     if (!nullToAbsent || lastReadMessageId != null) {
-      map['last_read_message_id'] = Variable<int>(lastReadMessageId);
+      map['last_read_message_id'] = Variable<BigInt>(lastReadMessageId);
     }
     if (!nullToAbsent || lastDeliveredMessageId != null) {
-      map['last_delivered_message_id'] = Variable<int>(lastDeliveredMessageId);
+      map['last_delivered_message_id'] = Variable<BigInt>(
+        lastDeliveredMessageId,
+      );
     }
     return map;
   }
@@ -2386,8 +2390,10 @@ class ConversationMember extends DataClass
       unreadCount: serializer.fromJson<int>(json['unreadCount']),
       joinedAt: serializer.fromJson<String?>(json['joinedAt']),
       removedAt: serializer.fromJson<String?>(json['removedAt']),
-      lastReadMessageId: serializer.fromJson<int?>(json['lastReadMessageId']),
-      lastDeliveredMessageId: serializer.fromJson<int?>(
+      lastReadMessageId: serializer.fromJson<BigInt?>(
+        json['lastReadMessageId'],
+      ),
+      lastDeliveredMessageId: serializer.fromJson<BigInt?>(
         json['lastDeliveredMessageId'],
       ),
     );
@@ -2403,8 +2409,10 @@ class ConversationMember extends DataClass
       'unreadCount': serializer.toJson<int>(unreadCount),
       'joinedAt': serializer.toJson<String?>(joinedAt),
       'removedAt': serializer.toJson<String?>(removedAt),
-      'lastReadMessageId': serializer.toJson<int?>(lastReadMessageId),
-      'lastDeliveredMessageId': serializer.toJson<int?>(lastDeliveredMessageId),
+      'lastReadMessageId': serializer.toJson<BigInt?>(lastReadMessageId),
+      'lastDeliveredMessageId': serializer.toJson<BigInt?>(
+        lastDeliveredMessageId,
+      ),
     };
   }
 
@@ -2416,8 +2424,8 @@ class ConversationMember extends DataClass
     int? unreadCount,
     Value<String?> joinedAt = const Value.absent(),
     Value<String?> removedAt = const Value.absent(),
-    Value<int?> lastReadMessageId = const Value.absent(),
-    Value<int?> lastDeliveredMessageId = const Value.absent(),
+    Value<BigInt?> lastReadMessageId = const Value.absent(),
+    Value<BigInt?> lastDeliveredMessageId = const Value.absent(),
   }) => ConversationMember(
     id: id ?? this.id,
     conversationId: conversationId ?? this.conversationId,
@@ -2506,8 +2514,8 @@ class ConversationMembersCompanion extends UpdateCompanion<ConversationMember> {
   final Value<int> unreadCount;
   final Value<String?> joinedAt;
   final Value<String?> removedAt;
-  final Value<int?> lastReadMessageId;
-  final Value<int?> lastDeliveredMessageId;
+  final Value<BigInt?> lastReadMessageId;
+  final Value<BigInt?> lastDeliveredMessageId;
   const ConversationMembersCompanion({
     this.id = const Value.absent(),
     this.conversationId = const Value.absent(),
@@ -2540,8 +2548,8 @@ class ConversationMembersCompanion extends UpdateCompanion<ConversationMember> {
     Expression<int>? unreadCount,
     Expression<String>? joinedAt,
     Expression<String>? removedAt,
-    Expression<int>? lastReadMessageId,
-    Expression<int>? lastDeliveredMessageId,
+    Expression<BigInt>? lastReadMessageId,
+    Expression<BigInt>? lastDeliveredMessageId,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -2565,8 +2573,8 @@ class ConversationMembersCompanion extends UpdateCompanion<ConversationMember> {
     Value<int>? unreadCount,
     Value<String?>? joinedAt,
     Value<String?>? removedAt,
-    Value<int?>? lastReadMessageId,
-    Value<int?>? lastDeliveredMessageId,
+    Value<BigInt?>? lastReadMessageId,
+    Value<BigInt?>? lastDeliveredMessageId,
   }) {
     return ConversationMembersCompanion(
       id: id ?? this.id,
@@ -2607,10 +2615,10 @@ class ConversationMembersCompanion extends UpdateCompanion<ConversationMember> {
       map['removed_at'] = Variable<String>(removedAt.value);
     }
     if (lastReadMessageId.present) {
-      map['last_read_message_id'] = Variable<int>(lastReadMessageId.value);
+      map['last_read_message_id'] = Variable<BigInt>(lastReadMessageId.value);
     }
     if (lastDeliveredMessageId.present) {
-      map['last_delivered_message_id'] = Variable<int>(
+      map['last_delivered_message_id'] = Variable<BigInt>(
         lastDeliveredMessageId.value,
       );
     }
@@ -3515,11 +3523,11 @@ class $MessageStatusModelTable extends MessageStatusModel
     'messageId',
   );
   @override
-  late final GeneratedColumn<int> messageId = GeneratedColumn<int>(
+  late final GeneratedColumn<BigInt> messageId = GeneratedColumn<BigInt>(
     'message_id',
     aliasedName,
     false,
-    type: DriftSqlType.int,
+    type: DriftSqlType.bigInt,
     requiredDuringInsert: true,
   );
   static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
@@ -3635,7 +3643,7 @@ class $MessageStatusModelTable extends MessageStatusModel
         data['${effectivePrefix}conversation_id'],
       )!,
       messageId: attachedDatabase.typeMapping.read(
-        DriftSqlType.int,
+        DriftSqlType.bigInt,
         data['${effectivePrefix}message_id'],
       )!,
       userId: attachedDatabase.typeMapping.read(
@@ -3663,7 +3671,7 @@ class MessageStatusModelData extends DataClass
     implements Insertable<MessageStatusModelData> {
   final BigInt id;
   final int conversationId;
-  final int messageId;
+  final BigInt messageId;
   final int userId;
   final String? deliveredAt;
   final String? readAt;
@@ -3680,7 +3688,7 @@ class MessageStatusModelData extends DataClass
     final map = <String, Expression>{};
     map['id'] = Variable<BigInt>(id);
     map['conversation_id'] = Variable<int>(conversationId);
-    map['message_id'] = Variable<int>(messageId);
+    map['message_id'] = Variable<BigInt>(messageId);
     map['user_id'] = Variable<int>(userId);
     if (!nullToAbsent || deliveredAt != null) {
       map['delivered_at'] = Variable<String>(deliveredAt);
@@ -3714,7 +3722,7 @@ class MessageStatusModelData extends DataClass
     return MessageStatusModelData(
       id: serializer.fromJson<BigInt>(json['id']),
       conversationId: serializer.fromJson<int>(json['conversationId']),
-      messageId: serializer.fromJson<int>(json['messageId']),
+      messageId: serializer.fromJson<BigInt>(json['messageId']),
       userId: serializer.fromJson<int>(json['userId']),
       deliveredAt: serializer.fromJson<String?>(json['deliveredAt']),
       readAt: serializer.fromJson<String?>(json['readAt']),
@@ -3726,7 +3734,7 @@ class MessageStatusModelData extends DataClass
     return <String, dynamic>{
       'id': serializer.toJson<BigInt>(id),
       'conversationId': serializer.toJson<int>(conversationId),
-      'messageId': serializer.toJson<int>(messageId),
+      'messageId': serializer.toJson<BigInt>(messageId),
       'userId': serializer.toJson<int>(userId),
       'deliveredAt': serializer.toJson<String?>(deliveredAt),
       'readAt': serializer.toJson<String?>(readAt),
@@ -3736,7 +3744,7 @@ class MessageStatusModelData extends DataClass
   MessageStatusModelData copyWith({
     BigInt? id,
     int? conversationId,
-    int? messageId,
+    BigInt? messageId,
     int? userId,
     Value<String?> deliveredAt = const Value.absent(),
     Value<String?> readAt = const Value.absent(),
@@ -3795,7 +3803,7 @@ class MessageStatusModelCompanion
     extends UpdateCompanion<MessageStatusModelData> {
   final Value<BigInt> id;
   final Value<int> conversationId;
-  final Value<int> messageId;
+  final Value<BigInt> messageId;
   final Value<int> userId;
   final Value<String?> deliveredAt;
   final Value<String?> readAt;
@@ -3810,7 +3818,7 @@ class MessageStatusModelCompanion
   MessageStatusModelCompanion.insert({
     this.id = const Value.absent(),
     required int conversationId,
-    required int messageId,
+    required BigInt messageId,
     required int userId,
     this.deliveredAt = const Value.absent(),
     this.readAt = const Value.absent(),
@@ -3820,7 +3828,7 @@ class MessageStatusModelCompanion
   static Insertable<MessageStatusModelData> custom({
     Expression<BigInt>? id,
     Expression<int>? conversationId,
-    Expression<int>? messageId,
+    Expression<BigInt>? messageId,
     Expression<int>? userId,
     Expression<String>? deliveredAt,
     Expression<String>? readAt,
@@ -3838,7 +3846,7 @@ class MessageStatusModelCompanion
   MessageStatusModelCompanion copyWith({
     Value<BigInt>? id,
     Value<int>? conversationId,
-    Value<int>? messageId,
+    Value<BigInt>? messageId,
     Value<int>? userId,
     Value<String?>? deliveredAt,
     Value<String?>? readAt,
@@ -3863,7 +3871,7 @@ class MessageStatusModelCompanion
       map['conversation_id'] = Variable<int>(conversationId.value);
     }
     if (messageId.present) {
-      map['message_id'] = Variable<int>(messageId.value);
+      map['message_id'] = Variable<BigInt>(messageId.value);
     }
     if (userId.present) {
       map['user_id'] = Variable<int>(userId.value);
@@ -4569,8 +4577,8 @@ typedef $$ConversationsTableCreateCompanionBuilder =
       Value<String?> title,
       required int createrId,
       Value<int?> unreadCount,
-      Value<int?> lastMessageId,
-      Value<int?> pinnedMessageId,
+      Value<BigInt?> lastMessageId,
+      Value<BigInt?> pinnedMessageId,
       Value<bool> isDeleted,
       Value<bool> isPinned,
       Value<bool> isFavorite,
@@ -4586,8 +4594,8 @@ typedef $$ConversationsTableUpdateCompanionBuilder =
       Value<String?> title,
       Value<int> createrId,
       Value<int?> unreadCount,
-      Value<int?> lastMessageId,
-      Value<int?> pinnedMessageId,
+      Value<BigInt?> lastMessageId,
+      Value<BigInt?> pinnedMessageId,
       Value<bool> isDeleted,
       Value<bool> isPinned,
       Value<bool> isFavorite,
@@ -4631,12 +4639,12 @@ class $$ConversationsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<int> get lastMessageId => $composableBuilder(
+  ColumnFilters<BigInt> get lastMessageId => $composableBuilder(
     column: $table.lastMessageId,
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<int> get pinnedMessageId => $composableBuilder(
+  ColumnFilters<BigInt> get pinnedMessageId => $composableBuilder(
     column: $table.pinnedMessageId,
     builder: (column) => ColumnFilters(column),
   );
@@ -4711,12 +4719,12 @@ class $$ConversationsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<int> get lastMessageId => $composableBuilder(
+  ColumnOrderings<BigInt> get lastMessageId => $composableBuilder(
     column: $table.lastMessageId,
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<int> get pinnedMessageId => $composableBuilder(
+  ColumnOrderings<BigInt> get pinnedMessageId => $composableBuilder(
     column: $table.pinnedMessageId,
     builder: (column) => ColumnOrderings(column),
   );
@@ -4783,12 +4791,12 @@ class $$ConversationsTableAnnotationComposer
     builder: (column) => column,
   );
 
-  GeneratedColumn<int> get lastMessageId => $composableBuilder(
+  GeneratedColumn<BigInt> get lastMessageId => $composableBuilder(
     column: $table.lastMessageId,
     builder: (column) => column,
   );
 
-  GeneratedColumn<int> get pinnedMessageId => $composableBuilder(
+  GeneratedColumn<BigInt> get pinnedMessageId => $composableBuilder(
     column: $table.pinnedMessageId,
     builder: (column) => column,
   );
@@ -4853,8 +4861,8 @@ class $$ConversationsTableTableManager
                 Value<String?> title = const Value.absent(),
                 Value<int> createrId = const Value.absent(),
                 Value<int?> unreadCount = const Value.absent(),
-                Value<int?> lastMessageId = const Value.absent(),
-                Value<int?> pinnedMessageId = const Value.absent(),
+                Value<BigInt?> lastMessageId = const Value.absent(),
+                Value<BigInt?> pinnedMessageId = const Value.absent(),
                 Value<bool> isDeleted = const Value.absent(),
                 Value<bool> isPinned = const Value.absent(),
                 Value<bool> isFavorite = const Value.absent(),
@@ -4885,8 +4893,8 @@ class $$ConversationsTableTableManager
                 Value<String?> title = const Value.absent(),
                 required int createrId,
                 Value<int?> unreadCount = const Value.absent(),
-                Value<int?> lastMessageId = const Value.absent(),
-                Value<int?> pinnedMessageId = const Value.absent(),
+                Value<BigInt?> lastMessageId = const Value.absent(),
+                Value<BigInt?> pinnedMessageId = const Value.absent(),
                 Value<bool> isDeleted = const Value.absent(),
                 Value<bool> isPinned = const Value.absent(),
                 Value<bool> isFavorite = const Value.absent(),
@@ -4944,8 +4952,8 @@ typedef $$ConversationMembersTableCreateCompanionBuilder =
       Value<int> unreadCount,
       Value<String?> joinedAt,
       Value<String?> removedAt,
-      Value<int?> lastReadMessageId,
-      Value<int?> lastDeliveredMessageId,
+      Value<BigInt?> lastReadMessageId,
+      Value<BigInt?> lastDeliveredMessageId,
     });
 typedef $$ConversationMembersTableUpdateCompanionBuilder =
     ConversationMembersCompanion Function({
@@ -4956,8 +4964,8 @@ typedef $$ConversationMembersTableUpdateCompanionBuilder =
       Value<int> unreadCount,
       Value<String?> joinedAt,
       Value<String?> removedAt,
-      Value<int?> lastReadMessageId,
-      Value<int?> lastDeliveredMessageId,
+      Value<BigInt?> lastReadMessageId,
+      Value<BigInt?> lastDeliveredMessageId,
     });
 
 class $$ConversationMembersTableFilterComposer
@@ -5004,12 +5012,12 @@ class $$ConversationMembersTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<int> get lastReadMessageId => $composableBuilder(
+  ColumnFilters<BigInt> get lastReadMessageId => $composableBuilder(
     column: $table.lastReadMessageId,
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<int> get lastDeliveredMessageId => $composableBuilder(
+  ColumnFilters<BigInt> get lastDeliveredMessageId => $composableBuilder(
     column: $table.lastDeliveredMessageId,
     builder: (column) => ColumnFilters(column),
   );
@@ -5059,12 +5067,12 @@ class $$ConversationMembersTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<int> get lastReadMessageId => $composableBuilder(
+  ColumnOrderings<BigInt> get lastReadMessageId => $composableBuilder(
     column: $table.lastReadMessageId,
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<int> get lastDeliveredMessageId => $composableBuilder(
+  ColumnOrderings<BigInt> get lastDeliveredMessageId => $composableBuilder(
     column: $table.lastDeliveredMessageId,
     builder: (column) => ColumnOrderings(column),
   );
@@ -5104,12 +5112,12 @@ class $$ConversationMembersTableAnnotationComposer
   GeneratedColumn<String> get removedAt =>
       $composableBuilder(column: $table.removedAt, builder: (column) => column);
 
-  GeneratedColumn<int> get lastReadMessageId => $composableBuilder(
+  GeneratedColumn<BigInt> get lastReadMessageId => $composableBuilder(
     column: $table.lastReadMessageId,
     builder: (column) => column,
   );
 
-  GeneratedColumn<int> get lastDeliveredMessageId => $composableBuilder(
+  GeneratedColumn<BigInt> get lastDeliveredMessageId => $composableBuilder(
     column: $table.lastDeliveredMessageId,
     builder: (column) => column,
   );
@@ -5165,8 +5173,8 @@ class $$ConversationMembersTableTableManager
                 Value<int> unreadCount = const Value.absent(),
                 Value<String?> joinedAt = const Value.absent(),
                 Value<String?> removedAt = const Value.absent(),
-                Value<int?> lastReadMessageId = const Value.absent(),
-                Value<int?> lastDeliveredMessageId = const Value.absent(),
+                Value<BigInt?> lastReadMessageId = const Value.absent(),
+                Value<BigInt?> lastDeliveredMessageId = const Value.absent(),
               }) => ConversationMembersCompanion(
                 id: id,
                 conversationId: conversationId,
@@ -5187,8 +5195,8 @@ class $$ConversationMembersTableTableManager
                 Value<int> unreadCount = const Value.absent(),
                 Value<String?> joinedAt = const Value.absent(),
                 Value<String?> removedAt = const Value.absent(),
-                Value<int?> lastReadMessageId = const Value.absent(),
-                Value<int?> lastDeliveredMessageId = const Value.absent(),
+                Value<BigInt?> lastReadMessageId = const Value.absent(),
+                Value<BigInt?> lastDeliveredMessageId = const Value.absent(),
               }) => ConversationMembersCompanion.insert(
                 id: id,
                 conversationId: conversationId,
@@ -5629,7 +5637,7 @@ typedef $$MessageStatusModelTableCreateCompanionBuilder =
     MessageStatusModelCompanion Function({
       Value<BigInt> id,
       required int conversationId,
-      required int messageId,
+      required BigInt messageId,
       required int userId,
       Value<String?> deliveredAt,
       Value<String?> readAt,
@@ -5638,7 +5646,7 @@ typedef $$MessageStatusModelTableUpdateCompanionBuilder =
     MessageStatusModelCompanion Function({
       Value<BigInt> id,
       Value<int> conversationId,
-      Value<int> messageId,
+      Value<BigInt> messageId,
       Value<int> userId,
       Value<String?> deliveredAt,
       Value<String?> readAt,
@@ -5663,7 +5671,7 @@ class $$MessageStatusModelTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<int> get messageId => $composableBuilder(
+  ColumnFilters<BigInt> get messageId => $composableBuilder(
     column: $table.messageId,
     builder: (column) => ColumnFilters(column),
   );
@@ -5703,7 +5711,7 @@ class $$MessageStatusModelTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<int> get messageId => $composableBuilder(
+  ColumnOrderings<BigInt> get messageId => $composableBuilder(
     column: $table.messageId,
     builder: (column) => ColumnOrderings(column),
   );
@@ -5741,7 +5749,7 @@ class $$MessageStatusModelTableAnnotationComposer
     builder: (column) => column,
   );
 
-  GeneratedColumn<int> get messageId =>
+  GeneratedColumn<BigInt> get messageId =>
       $composableBuilder(column: $table.messageId, builder: (column) => column);
 
   GeneratedColumn<int> get userId =>
@@ -5798,7 +5806,7 @@ class $$MessageStatusModelTableTableManager
               ({
                 Value<BigInt> id = const Value.absent(),
                 Value<int> conversationId = const Value.absent(),
-                Value<int> messageId = const Value.absent(),
+                Value<BigInt> messageId = const Value.absent(),
                 Value<int> userId = const Value.absent(),
                 Value<String?> deliveredAt = const Value.absent(),
                 Value<String?> readAt = const Value.absent(),
@@ -5814,7 +5822,7 @@ class $$MessageStatusModelTableTableManager
               ({
                 Value<BigInt> id = const Value.absent(),
                 required int conversationId,
-                required int messageId,
+                required BigInt messageId,
                 required int userId,
                 Value<String?> deliveredAt = const Value.absent(),
                 Value<String?> readAt = const Value.absent(),

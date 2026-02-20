@@ -3,8 +3,7 @@ import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../../api/chat.api-client.dart';
-import '../../api/user.api-client.dart';
+import '../../api/api_service.dart';
 import '../../config/app-colors.config.dart';
 import '../../providers/chat.provider.dart';
 import '../../providers/theme-color.provider.dart';
@@ -20,8 +19,7 @@ class DeletedChatsPage extends ConsumerStatefulWidget {
 
 class _DeletedChatsPageState extends ConsumerState<DeletedChatsPage> {
   final ConversationRepository _conversationRepo = ConversationRepository();
-  final ChatsServices _chatsServices = ChatsServices();
-  final UserService _userService = UserService();
+  final apiService = ApiService();
   List<dynamic> _deletedChats = [];
   bool _isLoading = true;
 
@@ -33,12 +31,20 @@ class _DeletedChatsPageState extends ConsumerState<DeletedChatsPage> {
 
   Future<void> _loadDeletedChats() async {
     try {
-      final deletedChats = await _userService.getChatList('deleted_dm');
+      final result = await apiService.user.getChatList('deleted_dm');
+
+      if (!result.isSuccess || result.data == null) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+        return;
+      }
 
       // Enrich with local display names (includes username from contacts)
-      final enrichedChats = await UserUtils().enrichDeletedChatsWithDisplayNames(
-        deletedChats['data'],
-      );
+      final enrichedChats = await UserUtils()
+          .enrichDeletedChatsWithDisplayNames(result.data! as List<dynamic>);
 
       if (mounted) {
         setState(() {
@@ -60,7 +66,7 @@ class _DeletedChatsPageState extends ConsumerState<DeletedChatsPage> {
     try {
       final conversationId = chatData['conversationId'] as int;
       await _conversationRepo.markAsDeleted(conversationId, false);
-      await _chatsServices.reviveChat(conversationId);
+      await apiService.chat.reviveChat(conversationId);
 
       if (mounted) {
         setState(() {

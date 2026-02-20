@@ -53,8 +53,8 @@ class Conversations extends Table {
   IntColumn get createrId => integer()();
   IntColumn get unreadCount =>
       integer().withDefault(const Constant(0)).nullable()();
-  IntColumn get lastMessageId => integer().nullable()();
-  IntColumn get pinnedMessageId => integer().nullable()();
+  Int64Column get lastMessageId => int64().nullable()();
+  Int64Column get pinnedMessageId => int64().nullable()();
   BoolColumn get isDeleted => boolean().withDefault(const Constant(false))();
   BoolColumn get isPinned => boolean().withDefault(const Constant(false))();
   BoolColumn get isFavorite => boolean().withDefault(const Constant(false))();
@@ -76,8 +76,8 @@ class ConversationMembers extends Table {
   IntColumn get unreadCount => integer().withDefault(const Constant(0))();
   TextColumn get joinedAt => text().nullable()();
   TextColumn get removedAt => text().nullable()();
-  IntColumn get lastReadMessageId => integer().nullable()();
-  IntColumn get lastDeliveredMessageId => integer().nullable()();
+  Int64Column get lastReadMessageId => int64().nullable()();
+  Int64Column get lastDeliveredMessageId => int64().nullable()();
 }
 
 // Messages Table
@@ -106,7 +106,7 @@ class Messages extends Table {
 class MessageStatusModel extends Table {
   Int64Column get id => int64().autoIncrement()();
   IntColumn get conversationId => integer()();
-  IntColumn get messageId => integer()();
+  Int64Column get messageId => int64()();
   IntColumn get userId => integer()();
   TextColumn get deliveredAt => text().nullable()();
   TextColumn get readAt => text().nullable()();

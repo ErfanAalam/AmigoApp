@@ -1,28 +1,27 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
-class IpService {
-  static final IpService _instance = IpService._internal();
-  factory IpService() => _instance;
-  IpService._internal();
+/// IP service client for getting user's IP address
+class IpClient {
+  static final IpClient _instance = IpClient._internal();
+  factory IpClient() => _instance;
+  IpClient._internal();
+
+  /// List of IP detection services as fallbacks
+  static const List<String> _ipServices = [
+    'https://api.ipify.org?format=json',
+    'https://httpbin.org/ip',
+    'https://api.my-ip.io/ip.json',
+    'https://ipapi.co/json/',
+  ];
 
   /// Get user's current IP address using multiple fallback services
   Future<Map<String, dynamic>> getCurrentIp() async {
-    // List of IP detection services as fallbacks
-    final List<String> ipServices = [
-      'https://api.ipify.org?format=json',
-      'https://httpbin.org/ip',
-      'https://api.my-ip.io/ip.json',
-      'https://ipapi.co/json/',
-    ];
-
-    for (String serviceUrl in ipServices) {
+    for (final serviceUrl in _ipServices) {
       try {
-        print('🌐 Attempting to get IP from: $serviceUrl');
-
         final response = await http
             .get(Uri.parse(serviceUrl), headers: {'Accept': 'application/json'})
-            .timeout(Duration(seconds: 10));
+            .timeout(const Duration(seconds: 10));
 
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
@@ -38,9 +37,6 @@ class IpService {
           }
 
           if (ip != null && ip.isNotEmpty) {
-            print('🌐 IP Address retrieved successfully: $ip');
-            print('   Service used: $serviceUrl');
-
             return {
               'success': true,
               'ip': ip,
@@ -50,12 +46,10 @@ class IpService {
           }
         }
       } catch (e) {
-        print('🌐 Failed to get IP from $serviceUrl: $e');
         continue; // Try next service
       }
     }
 
-    print('🌐 Failed to retrieve IP address from all services');
     return {
       'success': false,
       'error': 'Failed to retrieve IP address from all services',
@@ -66,14 +60,12 @@ class IpService {
   /// Get detailed IP information including location data
   Future<Map<String, dynamic>> getDetailedIpInfo() async {
     try {
-      print('🌐 Getting detailed IP information...');
-
       final response = await http
           .get(
             Uri.parse('https://ipapi.co/json/'),
             headers: {'Accept': 'application/json'},
           )
-          .timeout(Duration(seconds: 15));
+          .timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -95,8 +87,6 @@ class IpService {
         throw Exception('HTTP ${response.statusCode}');
       }
     } catch (e) {
-      print('🌐 Failed to get detailed IP info: $e');
-
       // Fallback to basic IP only
       final basicIp = await getCurrentIp();
       if (basicIp['success']) {

@@ -11,7 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
-import '../../api/chat.api-client.dart';
+import '../../api/api_service.dart';
 import '../../db/repositories/conversation-member.repo.dart';
 import '../../db/repositories/message-status.repo.dart';
 import '../../models/group.model.dart';
@@ -110,7 +110,7 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
   UserModel? _currentUserDetails;
 
   // Services
-  final ChatsServices _chatsServices = ChatsServices();
+  final apiService = ApiService();
   final WebSocketService _webSocket = WebSocketService();
 
   // Repositories
@@ -308,15 +308,14 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
         try {
           // Upload the file first
           final fileToUpload = File(file.path);
-          final uploadResponse = await _chatsServices.sendMediaMessage(
+          final uploadResult = await apiService.chat.sendMediaMessage(
             fileToUpload,
           );
 
           final messageId = await Snowflake.generateMessageId();
 
-          if (uploadResponse['success'] == true &&
-              uploadResponse['data'] != null) {
-            final mediaData = uploadResponse['data'];
+          if (uploadResult.isSuccess && uploadResult.data != null) {
+            final mediaData = uploadResult.data!;
 
             // Send to each selected conversation via WebSocket
             for (final conversationId in _selectedConversations) {

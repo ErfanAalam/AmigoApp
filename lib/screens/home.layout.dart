@@ -2,7 +2,7 @@ import 'package:amigo/providers/call.provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../api/user.api-client.dart';
+import '../api/api_service.dart';
 import '../models/user.model.dart';
 import '../providers/chat.provider.dart';
 import '../providers/notification-badge.provider.dart';
@@ -29,7 +29,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
   final GlobalKey<GroupsPageState> _groupsPageKey =
       GlobalKey<GroupsPageState>();
   final GlobalKey<CallsPageState> _callsPageKey = GlobalKey<CallsPageState>();
-  final UserService _userService = UserService();
+  final apiService = ApiService();
 
   late final PageController _pageController;
 
@@ -66,16 +66,16 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     final currentUser = await UserUtils().getUserDetails();
 
     if (currentUser == null) {
-      final response = await _userService.getUser();
-      if (response['success'] == true) {
+      final response = await apiService.user.getUser();
+      if (response.isSuccess && response.hasData) {
         final userDetail = {
-          'id': response['data']['id'],
-          'name': response['data']['name'],
-          'phone': response['data']['phone'],
-          'role': response['data']['role'],
-          'profile_pic': response['data']['profile_pic'],
-          'created_at': response['data']['created_at'],
-          'call_access': response['data']['call_access'],
+          'id': response.data!['id'],
+          'name': response.data!['name'],
+          'phone': response.data!['phone'],
+          'role': response.data!['role'],
+          'profile_pic': response.data!['profile_pic'],
+          'created_at': response.data!['created_at'],
+          'call_access': response.data!['call_access'],
         };
 
         await UserUtils().saveUserDetails(UserModel.fromJson(userDetail));

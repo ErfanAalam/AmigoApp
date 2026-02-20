@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../api/auth.api-client.dart';
-import '../../api/user.api-client.dart';
+import '../../api/api_service.dart';
 import '../../models/country.model.dart' as country_model;
 import '../../models/user.model.dart';
 import '../../providers/theme-color.provider.dart';
@@ -35,11 +34,10 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   bool _isOtpSent = false;
   bool _isLoading = false;
 
-  final ApiService apiService = ApiService();
+  final apiService = ApiService();
   final AuthService authService = AuthService();
   final NotificationService notificationService = NotificationService();
   final WebSocketService wsService = WebSocketService();
-  final UserService userService = UserService();
   @override
   void dispose() {
     _firstNameController.dispose();
@@ -107,9 +105,9 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       return;
     }
 
-    final response = await apiService.generateSignupOtp(
+    final response = (await apiService.auth.generateSignupOtp(
       _completePhoneNumber.replaceAll(' ', ''),
-    );
+    )).toMap();
 
     if (response['success']) {
       setState(() {
@@ -137,12 +135,12 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       _isLoading = true;
     });
 
-    final response = await apiService.verifySignupOtp(
-      _completePhoneNumber.replaceAll(' ', ''),
-      int.parse(_otpController.text),
-      _firstNameController.text,
-      _lastNameController.text,
-    );
+    final response = (await apiService.auth.verifySignupOtp(
+      phoneNumber: _completePhoneNumber.replaceAll(' ', ''),
+      otp: int.parse(_otpController.text),
+      firstName: _firstNameController.text,
+      lastName: _lastNameController.text,
+    )).toMap();
 
     // final response = await apiService.requestSignup(
     //   _firstNameController.text,
@@ -172,7 +170,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       });
 
       final appVersion = await UserUtils().getAppVersion();
-      await userService.updateUser({'app_version': appVersion});
+      await apiService.user.updateUser({'app_version': appVersion});
 
       final userDetail = {
         'id': response['data']['id'],
@@ -188,6 +186,9 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
 
       // // Send FCM token to backend after successful signup
       await authService.sendFCMTokenToBackend(3);
+
+      // connect to websocket after successful login
+      await wsService.connect();
     } else {
       if (mounted) {
         Snack.error('Error verifying Signup OTP');

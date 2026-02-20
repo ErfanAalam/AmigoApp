@@ -1,21 +1,38 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 
+import '../../utils/network.utils.dart';
+import '../../types/network.types.dart';
+import '../../api/api_service.dart';
+import '../../services/cookies.service.dart';
 import 'transport.service.dart';
 
 /// Transport manager that handles fallback logic between transports.
-/// Priority: WebSocket → SSE → HTTP Long Polling
+/// Priority: WebSocket → HTTP Long Polling
+/// When in polling mode, continuously attempts to reconnect to WebSocket in background
 class TransportManager {
   static final TransportManager _instance = TransportManager._internal();
   factory TransportManager() => _instance;
   TransportManager._internal();
 
+  // Network connectivity utility
+  final NetworkConnectivityUtil _networkUtil = NetworkConnectivityUtil();
+
+  // Services for token refresh
+  final CookieService _cookieService = CookieService();
+  final ApiService _apiService = ApiService();
+
   // Transport instances
   TransportService? _currentTransport;
   final WebSocketTransport _wsTransport = WebSocketTransport();
-  final SSETransport _sseTransport = SSETransport();
   final LongPollingTransport _pollingTransport = LongPollingTransport();
+
+  // Auth error tracking
+  bool _isRefreshingToken = false;
+  int _authErrorCount = 0;
+  static const int _maxAuthRetries = 2;
 
   // Connection state
   TransportType? _currentTransportType;
@@ -25,8 +42,15 @@ class TransportManager {
 
   // Failure tracking for fallback logic
   int _wsFailures = 0;
-  int _sseFailures = 0;
   static const int _maxFailuresBeforeFallback = 3;
+
+  // Network monitoring subscriptions
+  StreamSubscription<TransmissionMode>? _transmissionModeSubscription;
+  StreamSubscription<NetworkState>? _networkStateSubscription;
+
+  // Background WebSocket reconnection when in polling mode
+  Timer? _wsReconnectTimer;
+  static const Duration _wsReconnectInterval = Duration(seconds: 10);
 
   // Reconnection with exponential backoff
   Timer? _reconnectTimer;
@@ -34,14 +58,6 @@ class TransportManager {
   static const int _maxReconnectAttempts = 50;
   static const Duration _baseReconnectDelay = Duration(seconds: 2);
   static const Duration _maxReconnectDelay = Duration(seconds: 60);
-
-  // Upgrade timer - periodically try to upgrade to better transport
-  Timer? _upgradeTimer;
-  static const Duration _upgradeCheckInterval = Duration(minutes: 5);
-
-  // Sync message polling - every 5s when not using WebSocket
-  Timer? _syncPollingTimer;
-  static const Duration _syncPollingInterval = Duration(seconds: 5);
 
   // Stream controllers
   final StreamController<TransportConnectionState> _connectionStateController =
@@ -71,7 +87,18 @@ class TransportManager {
   Stream<TransportType> get transportTypeStream =>
       _transportTypeController.stream;
 
+  /// Get current network state
+  NetworkState get currentNetworkState => _networkUtil.currentState;
+
+  /// Get network state stream
+  Stream<NetworkState> get networkStateStream => _networkUtil.stateStream;
+
+  /// Get transmission mode stream
+  Stream<TransmissionMode> get transmissionModeStream =>
+      _networkUtil.transmissionModeStream;
+
   /// Connect using the best available transport with automatic fallback
+  /// Uses network utility to determine optimal transport mode
   Future<bool> connect(String token) async {
     if (_isConnecting) {
       debugPrint('[TRANSPORT-MGR] Already connecting, skipping');
@@ -84,47 +111,72 @@ class TransportManager {
 
     debugPrint('[TRANSPORT-MGR] Starting connection attempt');
 
-    // Try transports in order of preference
+    // Check network state first
+    final networkState = await _networkUtil.checkNetwork();
+    debugPrint('[TRANSPORT-MGR] Network state: $networkState');
+
+    // If network is not available, schedule reconnect
+    if (!networkState.isAvailable) {
+      debugPrint('[TRANSPORT-MGR] Network not available, scheduling reconnect');
+      _isConnecting = false;
+      if (_allowReconnect) {
+        _scheduleReconnect();
+      }
+      return false;
+    }
+
+    // Determine preferred transport based on network state
+    final preferredMode = networkState.preferredTransmissionMode;
     bool connected = false;
 
-    // 1. Try WebSocket first (if not too many failures)
-    if (_wsFailures < _maxFailuresBeforeFallback) {
-      debugPrint('[TRANSPORT-MGR] Attempting WebSocket connection');
+    // Try preferred transport first, then fallback
+    if (preferredMode == TransmissionMode.websocket &&
+        networkState.isWebSocketAvailable &&
+        _wsFailures < _maxFailuresBeforeFallback) {
+      debugPrint(
+        '[TRANSPORT-MGR] Network recommends WebSocket, attempting connection',
+      );
       connected = await _tryTransport(_wsTransport, TransportType.websocket);
       if (connected) {
-        _wsFailures = 0; // Reset on success
+        _wsFailures = 0;
         _isConnecting = false;
-        _startUpgradeTimer();
+        _stopBackgroundWsReconnect();
         return true;
       }
       _wsFailures++;
       debugPrint('[TRANSPORT-MGR] WebSocket failed (failures: $_wsFailures)');
     }
 
-    // 2. Try SSE (if not too many failures)
-    if (_sseFailures < _maxFailuresBeforeFallback) {
-      debugPrint('[TRANSPORT-MGR] Attempting SSE connection');
-      connected = await _tryTransport(_sseTransport, TransportType.sse);
+    // Fallback to polling if WebSocket failed or not preferred
+    if (!connected && networkState.isPollingAvailable) {
+      debugPrint('[TRANSPORT-MGR] Attempting Long Polling connection');
+      connected = await _tryTransport(
+        _pollingTransport,
+        TransportType.longPolling,
+      );
       if (connected) {
-        _sseFailures = 0;
         _isConnecting = false;
-        _startUpgradeTimer();
+        _startBackgroundWsReconnect();
         return true;
       }
-      _sseFailures++;
-      debugPrint('[TRANSPORT-MGR] SSE failed (failures: $_sseFailures)');
     }
 
-    // 3. Try Long Polling (always available as last resort)
-    debugPrint('[TRANSPORT-MGR] Attempting Long Polling connection');
-    connected = await _tryTransport(
-      _pollingTransport,
-      TransportType.longPolling,
-    );
-    if (connected) {
-      _isConnecting = false;
-      _startUpgradeTimer();
-      return true;
+    // If preferred mode is polling but it failed, try WebSocket as last resort
+    if (!connected &&
+        preferredMode == TransmissionMode.longPolling &&
+        networkState.isWebSocketAvailable &&
+        _wsFailures < _maxFailuresBeforeFallback) {
+      debugPrint(
+        '[TRANSPORT-MGR] Polling failed, trying WebSocket as fallback',
+      );
+      connected = await _tryTransport(_wsTransport, TransportType.websocket);
+      if (connected) {
+        _wsFailures = 0;
+        _isConnecting = false;
+        _stopBackgroundWsReconnect();
+        return true;
+      }
+      _wsFailures++;
     }
 
     _isConnecting = false;
@@ -154,16 +206,13 @@ class TransportManager {
         _currentTransport = transport;
         _currentTransportType = type;
         _reconnectAttempts = 0;
+        _authErrorCount = 0; // Reset auth error count on successful connection
 
         // Subscribe to transport events
         _subscribeToTransport(transport);
 
         _connectionStateController.add(TransportConnectionState.connected);
         _transportTypeController.add(type);
-
-        if (type != TransportType.websocket) {
-          _startSyncPollingTimer();
-        }
 
         _logConnectionSuccess(type, duration);
         return true;
@@ -181,9 +230,7 @@ class TransportManager {
     debugPrint('[TRANSPORT-MGR] ✅ Connected via ${type.name}');
     debugPrint('[TRANSPORT-MGR] Connection time: ${duration.inMilliseconds}ms');
     debugPrint('[TRANSPORT-MGR] Reconnect attempts: $_reconnectAttempts');
-    debugPrint(
-      '[TRANSPORT-MGR] WS failures: $_wsFailures, SSE failures: $_sseFailures',
-    );
+    debugPrint('[TRANSPORT-MGR] WS failures: $_wsFailures');
   }
 
   void _logConnectionFailure(
@@ -196,9 +243,7 @@ class TransportManager {
     debugPrint('[TRANSPORT-MGR] Error: $error');
     debugPrint('[TRANSPORT-MGR] Duration: ${duration.inMilliseconds}ms');
     debugPrint('[TRANSPORT-MGR] Reconnect attempts: $_reconnectAttempts');
-    debugPrint(
-      '[TRANSPORT-MGR] WS failures: $_wsFailures, SSE failures: $_sseFailures',
-    );
+    debugPrint('[TRANSPORT-MGR] WS failures: $_wsFailures');
     if (stackTrace != null) {
       debugPrint('[TRANSPORT-MGR] Stack trace: $stackTrace');
     }
@@ -221,11 +266,20 @@ class TransportManager {
     });
 
     _transportMessageSub = transport.messageStream.listen((message) {
+      print("-----------------------------------------------------------");
+      print('[TRANSPORT-MGR] Received message: $message');
+      print("-----------------------------------------------------------");
       _messageController.add(message);
     });
 
     _transportErrorSub = transport.errorStream.listen((error) {
-      _errorController.add(error);
+      // Check for authentication errors
+      if (error.toString().startsWith('AUTH_ERROR:')) {
+        debugPrint('[TRANSPORT-MGR] Authentication error detected: $error');
+        _handleAuthenticationError();
+      } else {
+        _errorController.add(error);
+      }
     });
   }
 
@@ -238,11 +292,91 @@ class TransportManager {
     // Increment failure count for current transport type
     if (_currentTransportType == TransportType.websocket) {
       _wsFailures++;
-    } else if (_currentTransportType == TransportType.sse) {
-      _sseFailures++;
+      _stopBackgroundWsReconnect();
     }
 
     _scheduleReconnect();
+  }
+
+  /// Handle authentication errors by refreshing token and retrying connection
+  Future<void> _handleAuthenticationError() async {
+    if (_isRefreshingToken) {
+      debugPrint('[TRANSPORT-MGR] Token refresh already in progress');
+      return;
+    }
+
+    if (_authErrorCount >= _maxAuthRetries) {
+      debugPrint('[TRANSPORT-MGR] Max auth retries reached, giving up');
+      _errorController.add('Authentication failed after multiple attempts');
+      return;
+    }
+
+    _isRefreshingToken = true;
+    _authErrorCount++;
+
+    try {
+      debugPrint('[TRANSPORT-MGR] Attempting to refresh token...');
+
+      // Refresh token using the API client
+      final dio = _apiService.client.dio;
+      final response = await dio.post(
+        '${dio.options.baseUrl}/auth/refresh-mobile',
+        options: Options(
+          headers: {'Content-Type': 'application/json'},
+          validateStatus: (status) =>
+              status != null &&
+              (status >= 200 && status < 300 || status == 401 || status == 404),
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        debugPrint('[TRANSPORT-MGR] ✅ Token refreshed successfully');
+
+        // Get new access token from cookies
+        final newToken = await _cookieService.getAccessToken();
+
+        if (newToken != null) {
+          // Reset auth error count on successful refresh
+          _authErrorCount = 0;
+
+          // Disconnect current transport
+          await _cleanupCurrentTransport();
+
+          // Retry connection with new token
+          debugPrint(
+            '[TRANSPORT-MGR] Retrying connection with refreshed token...',
+          );
+          _authToken = newToken;
+
+          // Small delay before retry
+          await Future.delayed(const Duration(milliseconds: 500));
+
+          final success = await connect(newToken);
+          if (success) {
+            debugPrint(
+              '[TRANSPORT-MGR] ✅ Reconnected successfully after token refresh',
+            );
+          } else {
+            debugPrint(
+              '[TRANSPORT-MGR] ❌ Reconnection failed after token refresh',
+            );
+          }
+        } else {
+          debugPrint('[TRANSPORT-MGR] ❌ No access token found after refresh');
+          _errorController.add('Failed to get new access token after refresh');
+        }
+      } else {
+        debugPrint(
+          '[TRANSPORT-MGR] ❌ Token refresh failed (Status: ${response.statusCode})',
+        );
+        _errorController.add('Token refresh failed - please login again');
+      }
+    } catch (e) {
+      debugPrint('[TRANSPORT-MGR] ❌ Token refresh error: $e');
+      _errorController.add('Token refresh error: $e');
+    } finally {
+      _isRefreshingToken = false;
+    }
   }
 
   void _scheduleReconnect() {
@@ -277,76 +411,83 @@ class TransportManager {
     });
   }
 
-  /// Start timer to periodically attempt upgrade to better transport
-  void _startUpgradeTimer() {
-    _upgradeTimer?.cancel();
+  /// Start background WebSocket reconnection attempts when in polling mode
+  /// This keeps trying to reconnect to WebSocket when network conditions improve
+  void _startBackgroundWsReconnect() {
+    _stopBackgroundWsReconnect();
 
-    // Only start upgrade timer if we're on a fallback transport
-    if (_currentTransportType == TransportType.websocket) {
-      return; // Already on best transport
-    }
-
-    _upgradeTimer = Timer.periodic(_upgradeCheckInterval, (timer) {
-      _attemptUpgrade();
-    });
-
-    debugPrint('[TRANSPORT-MGR] Upgrade timer started');
-  }
-
-  void _stopUpgradeTimer() {
-    _upgradeTimer?.cancel();
-    _upgradeTimer = null;
-  }
-
-  void _startSyncPollingTimer() {
-    _stopSyncPollingTimer();
-    _syncPollingTimer = Timer.periodic(_syncPollingInterval, (_) {
-      if (_currentTransportType != TransportType.websocket &&
-          _currentTransport != null) {
-        _pollingTransport.sync_message_polling();
+    // Listen to network state changes to upgrade when WebSocket becomes available
+    _networkStateSubscription?.cancel();
+    _networkStateSubscription = _networkUtil.stateStream.listen((networkState) {
+      // Only upgrade if we're in polling mode and WebSocket becomes available
+      if (_currentTransportType == TransportType.longPolling &&
+          !_isConnecting &&
+          networkState.isWebSocketAvailable &&
+          networkState.preferredTransmissionMode ==
+              TransmissionMode.websocket &&
+          _wsFailures < _maxFailuresBeforeFallback) {
+        debugPrint(
+          '[TRANSPORT-MGR] Network conditions improved, attempting WebSocket upgrade',
+        );
+        _attemptWebSocketUpgrade();
       }
     });
-    debugPrint('[TRANSPORT-MGR] Sync message polling started (every 5s)');
-  }
 
-  void _stopSyncPollingTimer() {
-    _syncPollingTimer?.cancel();
-    _syncPollingTimer = null;
-  }
-
-  /// Attempt to upgrade to a better transport
-  Future<void> _attemptUpgrade() async {
-    if (_authToken == null || !isConnected) return;
-
-    debugPrint('[TRANSPORT-MGR] Attempting transport upgrade');
-
-    // Reset failure counters to allow retrying better transports
-    _wsFailures = 0;
-    _sseFailures = 0;
-
-    // If on polling, try SSE
-    if (_currentTransportType == TransportType.longPolling) {
-      final sseTransport = SSETransport();
-      final success = await sseTransport.connect(_authToken!);
-      if (success) {
-        await _switchTransport(sseTransport, TransportType.sse);
+    // Also use periodic timer as backup
+    _wsReconnectTimer = Timer.periodic(_wsReconnectInterval, (timer) async {
+      // Only try if we're still in polling mode and not already connecting
+      if (_currentTransportType != TransportType.longPolling || _isConnecting) {
         return;
       }
-    }
 
-    // If on SSE or polling, try WebSocket
-    if (_currentTransportType != TransportType.websocket) {
-      final wsTransport = WebSocketTransport();
-      final success = await wsTransport.connect(_authToken!);
-      if (success) {
-        await _switchTransport(wsTransport, TransportType.websocket);
+      // Check network state before attempting
+      final networkState = _networkUtil.currentState;
+      if (!networkState.isWebSocketAvailable ||
+          networkState.preferredTransmissionMode !=
+              TransmissionMode.websocket) {
+        return; // Don't try if network doesn't support WebSocket
+      }
+
+      // Don't try if we've had too many failures recently
+      if (_wsFailures >= _maxFailuresBeforeFallback) {
+        // Reset failures after some time to allow retry
+        if (_reconnectAttempts % 5 == 0) {
+          _wsFailures = 0;
+        }
         return;
       }
-    }
 
-    debugPrint(
-      '[TRANSPORT-MGR] Upgrade attempt failed, staying on current transport',
-    );
+      debugPrint('[TRANSPORT-MGR] Background WebSocket reconnection attempt');
+      await _attemptWebSocketUpgrade();
+    });
+
+    debugPrint('[TRANSPORT-MGR] Background WebSocket reconnection started');
+  }
+
+  /// Attempt to upgrade from polling to WebSocket
+  Future<void> _attemptWebSocketUpgrade() async {
+    if (_authToken == null || _isConnecting) return;
+
+    final testWsTransport = WebSocketTransport();
+    final success = await testWsTransport.connect(_authToken!);
+
+    if (success) {
+      debugPrint(
+        '[TRANSPORT-MGR] Background WebSocket reconnection successful, switching transport',
+      );
+      await _switchTransport(testWsTransport, TransportType.websocket);
+      _stopBackgroundWsReconnect(); // Stop timer since we've upgraded
+    } else {
+      testWsTransport.dispose();
+      _wsFailures++;
+    }
+  }
+
+  void _stopBackgroundWsReconnect() {
+    _wsReconnectTimer?.cancel();
+    _wsReconnectTimer = null;
+    _networkStateSubscription?.cancel();
+    _networkStateSubscription = null;
   }
 
   Future<void> _switchTransport(
@@ -363,11 +504,12 @@ class TransportManager {
     // Set new transport
     _currentTransport = newTransport;
     _currentTransportType = newType;
+    _wsFailures = 0; // Reset failures on successful switch
 
-    if (newType != TransportType.websocket) {
-      _startSyncPollingTimer();
-    } else {
-      _stopSyncPollingTimer();
+    if (newType == TransportType.websocket) {
+      _stopBackgroundWsReconnect(); // Stop background reconnection when on WebSocket
+    } else if (newType == TransportType.longPolling) {
+      _startBackgroundWsReconnect(); // Start background reconnection when in polling
     }
 
     // Subscribe to new transport
@@ -378,7 +520,7 @@ class TransportManager {
   }
 
   Future<void> _cleanupCurrentTransport() async {
-    _stopSyncPollingTimer();
+    _stopBackgroundWsReconnect();
     _transportConnectionSub?.cancel();
     _transportMessageSub?.cancel();
     _transportErrorSub?.cancel();
@@ -402,7 +544,7 @@ class TransportManager {
   Future<void> disconnect() async {
     _allowReconnect = false;
     _reconnectTimer?.cancel();
-    _stopUpgradeTimer();
+    _stopBackgroundWsReconnect();
     await _cleanupCurrentTransport();
     _currentTransport = null;
     _currentTransportType = null;
@@ -415,19 +557,25 @@ class TransportManager {
     await disconnect();
     _authToken = null;
     _wsFailures = 0;
-    _sseFailures = 0;
     _reconnectAttempts = 0;
     debugPrint('[TRANSPORT-MGR] Shutdown complete');
   }
 
   /// Force reconnect with fresh state
+  /// Checks network state first and uses optimal transport
   Future<bool> reconnect() async {
     _allowReconnect = true;
     _wsFailures = 0;
-    _sseFailures = 0;
     _reconnectAttempts = 0;
 
     await _cleanupCurrentTransport();
+
+    // Check network before reconnecting
+    final networkState = await _networkUtil.checkNetwork();
+    if (!networkState.isAvailable) {
+      debugPrint('[TRANSPORT-MGR] Network not available for reconnect');
+      return false;
+    }
 
     if (_authToken != null) {
       return await connect(_authToken!);
@@ -438,14 +586,14 @@ class TransportManager {
   /// Dispose all resources
   void dispose() {
     _reconnectTimer?.cancel();
-    _stopUpgradeTimer();
-    _stopSyncPollingTimer();
+    _stopBackgroundWsReconnect();
     _transportConnectionSub?.cancel();
     _transportMessageSub?.cancel();
     _transportErrorSub?.cancel();
+    _transmissionModeSubscription?.cancel();
+    _networkStateSubscription?.cancel();
 
     _wsTransport.dispose();
-    _sseTransport.dispose();
     _pollingTransport.dispose();
 
     _connectionStateController.close();

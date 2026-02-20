@@ -1,7 +1,7 @@
+import 'package:amigo/api/api_service.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:flutter/material.dart';
 
-import '../../../api/user.api-client.dart';
 import '../../../models/community.model.dart';
 import '../../../models/group.model.dart';
 import '../../../types/socket.types.dart';
@@ -10,8 +10,7 @@ import 'group-messaging.screen.dart';
 class CommunityInnerGroupsPage extends StatefulWidget {
   final CommunityModel community;
 
-  const CommunityInnerGroupsPage({Key? key, required this.community})
-    : super(key: key);
+  const CommunityInnerGroupsPage({super.key, required this.community});
 
   @override
   State<CommunityInnerGroupsPage> createState() =>
@@ -19,10 +18,7 @@ class CommunityInnerGroupsPage extends StatefulWidget {
 }
 
 class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
-  final UserService _userService = UserService();
-  // final GroupsRepository _groupsRepo = GroupsRepository();
-  final ConversationRepository _conversationRepository =
-      ConversationRepository();
+  final apiService = ApiService();
   late Future<List<CommunityGroupModel>> _innerGroupsFuture;
   final TextEditingController _searchController = TextEditingController();
   List<CommunityGroupModel> _allInnerGroups = [];
@@ -166,7 +162,9 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
     }
 
     try {
-      final response = await _userService.getChatList('community_group');
+      final response = (await apiService.user.getChatList(
+        'community_group',
+      )).toMap();
 
       if (response['success']) {
         final dynamic responseData = response['data'];
@@ -544,10 +542,10 @@ class CommunityInnerGroupListItem extends StatelessWidget {
   final VoidCallback onTap;
 
   const CommunityInnerGroupListItem({
-    Key? key,
+    super.key,
     required this.innerGroup,
     required this.onTap,
-  }) : super(key: key);
+  });
 
   String _formatTime(String? dateTimeString) {
     if (dateTimeString == null) return '';

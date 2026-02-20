@@ -10,8 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/models/message.model.dart';
 
-import '../api/auth.api-client.dart';
-import '../api/chat.api-client.dart';
+import '../api/api_service.dart';
 import '../types/socket.types.dart';
 import '../utils/user.utils.dart';
 import 'call/call-background.service.dart';
@@ -51,6 +50,9 @@ class NotificationService {
 
   // Message repository for storing messages from notifications
   final MessageRepository _messageRepo = MessageRepository();
+  
+  /// Lazy getter for ApiService - only accessed after initialization
+  ApiService get apiService => ApiService();
 
   /// Initialize the notification service
   Future<void> initialize() async {
@@ -313,22 +315,21 @@ class NotificationService {
       }
 
       // Only send receipt if we have a canonical (server) message ID
-      final messageId = message.id;
-      if (messageId == null) {
-        debugPrint('⚠️ Cannot send delivery receipt: no canonical message ID');
-        return;
-      }
+      // final messageId = message.id;
+      // if (messageId == null) {
+      //   debugPrint('⚠️ Cannot send delivery receipt: no canonical message ID');
+      //   return;
+      // }
 
       // Send delivery receipt via API
       // The backend will handle WebSocket broadcast to the sender
-      final chatApi = ChatsServices();
-      await chatApi.markMessageDelivered(
-        messageId: messageId,
+      await apiService.chat.markMessageDelivered(
+        messageId: message.id,
         conversationId: message.convId,
       );
 
       debugPrint(
-        '📬 Sent delivery receipt for message $messageId to sender ${message.senderId}',
+        '📬 Sent delivery receipt for message ${message.id} to sender ${message.senderId}',
       );
     } catch (e) {
       debugPrint('⚠️ Error sending delivery receipt: $e');
@@ -588,7 +589,7 @@ class NotificationService {
     if (_fcmToken == null) return;
 
     try {
-      await ApiService().updateFCMToken(_fcmToken!);
+      await apiService.auth.updateFCMToken(_fcmToken!);
     } catch (e) {
       debugPrint('❌ Error sending FCM token to backend');
     }

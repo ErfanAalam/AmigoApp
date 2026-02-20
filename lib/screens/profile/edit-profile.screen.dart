@@ -4,8 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 
-import '../../api/auth.api-client.dart';
-import '../../api/user.api-client.dart';
+import '../../api/api_service.dart';
 import '../../models/user.model.dart';
 import '../../providers/theme-color.provider.dart';
 import '../../ui/snackbar.dart';
@@ -32,9 +31,8 @@ class _EditProfileModalState extends ConsumerState<EditProfileModal>
   late Animation<double> _fadeAnimation;
 
   final TextEditingController _nameController = TextEditingController();
-  final UserService _userService = UserService();
   final ImagePicker _picker = ImagePicker();
-  final ApiService _apiService = ApiService();
+  final apiService = ApiService();
   File? _selectedImage;
   bool _isLoading = false;
   String? _profilePicUrl;
@@ -132,13 +130,19 @@ class _EditProfileModalState extends ConsumerState<EditProfileModal>
       Map<String, dynamic> updateData = {'name': _nameController.text.trim()};
 
       if (_selectedImage != null) {
-        final response = await _apiService.sendMedia(file: _selectedImage!);
-        final imageUrl = response['data']['url'];
+        final uploadResult = await apiService.client.uploadMedia(
+          file: _selectedImage!,
+        );
+        if (!uploadResult.isSuccess || uploadResult.data == null) {
+          _showErrorSnackBar(uploadResult.message);
+          return;
+        }
+        final imageUrl = uploadResult.data!['url'] as String;
         updateData['profile_pic'] = imageUrl;
       }
-      final response = await _userService.updateUser(updateData);
+      final result = await apiService.user.updateUser(updateData);
 
-      if (response['success']) {
+      if (result.isSuccess) {
         // Update the user data with new information
         Map<String, dynamic> updatedUserData = Map.from(widget.userData);
         updatedUserData['name'] = _nameController.text.trim();
@@ -154,7 +158,7 @@ class _EditProfileModalState extends ConsumerState<EditProfileModal>
         _showSuccessSnackBar('Profile updated successfully!');
         Navigator.of(context).pop();
       } else {
-        _showErrorSnackBar(response['message'] ?? 'Failed to update profile');
+        _showErrorSnackBar(result.message);
       }
     } catch (e) {
       _showErrorSnackBar('An error occurred: $e');

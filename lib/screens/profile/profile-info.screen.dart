@@ -9,8 +9,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:drift_db_viewer/drift_db_viewer.dart';
-import '../../api/auth.api-client.dart';
-import '../../api/user.api-client.dart';
+import '../../api/api_service.dart';
 import '../../config/app-colors.config.dart';
 import '../../models/user.model.dart';
 import '../../providers/theme-color.provider.dart';
@@ -30,10 +29,9 @@ class ProfilePage extends ConsumerStatefulWidget {
 class _ProfilePageState extends ConsumerState<ProfilePage> {
   final AuthService _authService = AuthService();
   // final CookieService _cookieService = CookieService();
-  final UserService _userService = UserService();
+  final apiService = ApiService();
   final ConversationRepository _conversationRepo = ConversationRepository();
   final ImagePicker _picker = ImagePicker();
-  final ApiService _apiService = ApiService();
 
   Map<String, dynamic>? userData;
   bool isLoading = true;
@@ -92,10 +90,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           isLoading = false;
         });
       } else {
-        final response = await _userService.getUser();
-        if (response['success'] == true) {
+        final result = await apiService.user.getUser();
+        if (result.isSuccess && result.data != null) {
           setState(() {
-            userData = response['data'];
+            userData = result.data!;
             isLoading = false;
           });
         } else {
@@ -190,28 +188,26 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
     try {
       // 1) Upload image to media server
-      final uploadResponse = await _apiService.sendMedia(file: imageFile);
-      if (!(uploadResponse['success'] == true)) {
-        _showErrorSnackBar(uploadResponse['message'] ?? 'Upload failed');
+      final uploadResult = await apiService.client.uploadMedia(file: imageFile);
+      if (!uploadResult.isSuccess || uploadResult.data == null) {
+        _showErrorSnackBar(uploadResult.message);
         return;
       }
-      final imageUrl = uploadResponse['data']['url'] as String;
+      final imageUrl = uploadResult.data!['url'] as String;
 
       // 2) Update remote profile via API
-      final updateResponse = await _userService.updateUser({
+      final updateResult = await apiService.user.updateUser({
         'profile_pic': imageUrl,
       });
 
-      if (updateResponse['success'] == true) {
+      if (updateResult.isSuccess) {
         final updatedUser = UserModel.fromJson(
           userData ?? {},
         ).copyWith(profilePic: imageUrl);
         await UserUtils().updateUserDetails(updatedUser);
         if (mounted) setState(() => userData = updatedUser.toJson());
       } else {
-        _showErrorSnackBar(
-          updateResponse['message'] ?? 'Failed to update profile',
-        );
+        _showErrorSnackBar(updateResult.message);
       }
     } finally {
       if (mounted) setState(() => isUpdatingProfilePic = false);

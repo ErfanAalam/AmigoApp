@@ -1,6 +1,3 @@
-import 'package:amigo/utils/general.utils.dart';
-import 'package:amigo/utils/user.utils.dart';
-
 /// Chat type enum
 enum ChatType {
   dm('dm'),
@@ -130,7 +127,6 @@ enum WSMessageType {
   messageNew('message:new'),
   messageAck('message:ack'),
   messagePin('message:pin'),
-  messageReply('message:reply'),
   messageForward('message:forward'),
   messageDelete('message:delete'),
   messageSync('message:sync'),
@@ -140,17 +136,15 @@ enum WSMessageType {
   callOffer('call:offer'),
   callAnswer('call:answer'),
   callIce('call:ice'),
-  callAccept('call:accept'),
-  callDecline('call:decline'),
-  callEnd('call:end'),
   callRinging('call:ringing'),
-  callMissed('call:missed'),
+  callAccept('call:accept'),
+  callTerminate('call:terminate'),
   callError('call:error'),
   socketHealthCheck('socket:health_check'),
-  authForceLogout('auth:force_logout'),
-  ping('ping'),
-  pong('pong'),
-  socketError('socket:error');
+  socketPing('socket:ping'),
+  socketPong('socket:pong'),
+  socketError('socket:error'),
+  authForceLogout('auth:force_logout');
 
   final String value;
   const WSMessageType(this.value);
@@ -162,6 +156,35 @@ enum WSMessageType {
     } catch (e) {
       return null;
     }
+  }
+}
+
+/// Vital WebSocket message type enum - critical events that must be processed
+/// even if client misses some messages (e.g., due to reconnection)
+enum VitalWSMessageType {
+  conversationNew('conversation:new'),
+  conversationAction('conversation:action'),
+  messagePin('message:pin'),
+  messageForward('message:forward'),
+  messageDelete('message:delete'),
+  messageNew('message:new'),
+  messageDelivered('message:delivered');
+
+  final String value;
+  const VitalWSMessageType(this.value);
+
+  static VitalWSMessageType? fromString(String? value) {
+    if (value == null) return null;
+    try {
+      return VitalWSMessageType.values.firstWhere((e) => e.value == value);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Check if a WSMessageType is a vital message type
+  static bool isVital(WSMessageType type) {
+    return VitalWSMessageType.values.any((v) => v.value == type.value);
   }
 }
 
@@ -261,8 +284,19 @@ class ChatMessagePayload {
       sentAt = DateTime.now();
     }
 
+    // Handle both string and int IDs (server sends bigint as string in JSON)
+    final idValue = json['id'];
+    final id = idValue is String ? int.parse(idValue) : (idValue as int);
+    
+    final replyToMessageIdValue = json['reply_to_message_id'];
+    final replyToMessageId = replyToMessageIdValue != null
+        ? (replyToMessageIdValue is String 
+            ? int.parse(replyToMessageIdValue) 
+            : (replyToMessageIdValue as int?))
+        : null;
+
     return ChatMessagePayload(
-      id: json['id'] as int,
+      id: id,
       senderId: json['sender_id'] as int,
       senderName: json['sender_name'] as String?,
       convId: json['conv_id'] as int,
@@ -274,14 +308,14 @@ class ChatMessagePayload {
       body: json['body'] as String?,
       attachments: json['attachments'],
       metadata: json['metadata'],
-      replyToMessageId: json['reply_to_message_id'] as int?,
+      replyToMessageId: replyToMessageId,
       sentAt: sentAt,
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
-      'id': id,
+      'id': id.toString(), // Convert bigint to string for WebSocket transmission
       'sender_id': senderId,
       if (senderName != null) 'sender_name': senderName,
       'conv_id': convId,
@@ -290,7 +324,7 @@ class ChatMessagePayload {
       if (body != null) 'body': body,
       if (attachments != null) 'attachments': attachments,
       if (metadata != null) 'metadata': metadata,
-      if (replyToMessageId != null) 'reply_to_message_id': replyToMessageId,
+      if (replyToMessageId != null) 'reply_to_message_id': replyToMessageId.toString(), // Convert bigint to string
       'sent_at': sentAt.toIso8601String(),
     };
   }
@@ -338,9 +372,20 @@ class ChatMessageAckPayload {
       deliveredAt = DateTime.now();
     }
 
+    // Handle both string and int IDs (server sends bigint as string in JSON)
+    final idValue = json['id'];
+    final id = idValue is String ? int.parse(idValue) : (idValue as int);
+    
+    final newIdValue = json['new_id'];
+    final newId = newIdValue != null
+        ? (newIdValue is String 
+            ? int.parse(newIdValue) 
+            : (newIdValue as int?))
+        : null;
+
     return ChatMessageAckPayload(
-      id: json['id'] as int,
-      newId: json['new_id'],
+      id: id,
+      newId: newId,
       convId: json['conv_id'] as int,
       senderId: json['sender_id'] as int,
       deliveredAt: deliveredAt,
@@ -364,8 +409,8 @@ class ChatMessageAckPayload {
 
   Map<String, dynamic> toJson() {
     return {
-      'id': id,
-      'new_id': newId,
+      'id': id.toString(), // Convert bigint to string for WebSocket transmission
+      if (newId != null) 'new_id': newId.toString(), // Convert bigint to string
       'conv_id': convId,
       'sender_id': senderId,
       'error_code': errorCode,
@@ -430,12 +475,15 @@ class DeleteMessagePayload {
   });
 
   factory DeleteMessagePayload.fromJson(Map<String, dynamic> json) {
+    // Handle both string and int IDs (server sends bigint as string in JSON)
+    final messageIds = (json['message_ids'] as List<dynamic>)
+        .map((e) => e is String ? int.parse(e) : (e as int))
+        .toList();
+    
     return DeleteMessagePayload(
       convId: json['conv_id'] as int,
       senderId: json['sender_id'] as int,
-      messageIds: (json['message_ids'] as List<dynamic>)
-          .map((e) => e as int)
-          .toList(),
+      messageIds: messageIds,
     );
   }
 
@@ -443,7 +491,7 @@ class DeleteMessagePayload {
     return {
       'conv_id': convId,
       'sender_id': senderId,
-      'message_ids': messageIds,
+      'message_ids': messageIds.map((id) => id.toString()).toList(), // Convert bigint IDs to strings
     };
   }
 }
@@ -698,9 +746,15 @@ class MessagePinPayload {
   });
 
   factory MessagePinPayload.fromJson(Map<String, dynamic> json) {
+    // Handle both string and int IDs (server sends bigint as string in JSON)
+    final messageIdValue = json['message_id'];
+    final messageId = messageIdValue is String 
+        ? int.parse(messageIdValue) 
+        : (messageIdValue as int);
+    
     return MessagePinPayload(
       convId: json['conv_id'] as int,
-      messageId: json['message_id'] as int,
+      messageId: messageId,
       messageType:
           MessageType.fromString(json['message_type'] as String?) ??
           MessageType.text,
@@ -714,7 +768,7 @@ class MessagePinPayload {
   Map<String, dynamic> toJson() {
     return {
       'conv_id': convId,
-      'message_id': messageId,
+      'message_id': messageId.toString(), // Convert bigint to string for WebSocket transmission
       'message_type': messageType.value,
       'sender_id': senderId,
       if (senderName != null) 'sender_name': senderName,
@@ -741,13 +795,16 @@ class MessageForwardPayload {
   });
 
   factory MessageForwardPayload.fromJson(Map<String, dynamic> json) {
+    // Handle both string and int IDs (server sends bigint as string in JSON)
+    final forwardedMessageIds = (json['forwarded_message_ids'] as List<dynamic>)
+        .map((e) => e is String ? int.parse(e) : (e as int))
+        .toList();
+    
     return MessageForwardPayload(
       sourceConvId: json['source_conv_id'] as int,
       forwarderId: json['forwarder_id'] as int,
       forwarderName: json['forwarder_name'] as String?,
-      forwardedMessageIds: (json['forwarded_message_ids'] as List<dynamic>)
-          .map((e) => e as int)
-          .toList(),
+      forwardedMessageIds: forwardedMessageIds,
       targetConvIds: (json['target_conv_ids'] as List<dynamic>)
           .map((e) => e as int)
           .toList(),
@@ -759,7 +816,7 @@ class MessageForwardPayload {
       'source_conv_id': sourceConvId,
       'forwarder_id': forwarderId,
       if (forwarderName != null) 'forwarder_name': forwarderName,
-      'forwarded_message_ids': forwardedMessageIds,
+      'forwarded_message_ids': forwardedMessageIds.map((id) => id.toString()).toList(), // Convert bigint IDs to strings
       'target_conv_ids': targetConvIds,
     };
   }
@@ -937,8 +994,14 @@ class MessageDeliveredPayload {
       deliveredAt = DateTime.now();
     }
 
+    // Handle both string and int IDs (server sends bigint as string in JSON)
+    final messageIdValue = json['message_id'];
+    final messageId = messageIdValue is String 
+        ? int.parse(messageIdValue) 
+        : (messageIdValue as int);
+    
     return MessageDeliveredPayload(
-      messageId: json['message_id'] as int,
+      messageId: messageId,
       convId: json['conv_id'] as int,
       senderId: json['sender_id'] as int,
       recipientId: json['recipient_id'] as int,
@@ -948,7 +1011,7 @@ class MessageDeliveredPayload {
 
   Map<String, dynamic> toJson() {
     return {
-      'message_id': messageId,
+      'message_id': messageId.toString(), // Convert bigint to string for WebSocket transmission
       'conv_id': convId,
       'sender_id': senderId,
       'recipient_id': recipientId,
@@ -1150,11 +1213,9 @@ class WSMessage {
       case WSMessageType.callOffer:
       case WSMessageType.callAnswer:
       case WSMessageType.callIce:
-      case WSMessageType.callAccept:
-      case WSMessageType.callDecline:
-      case WSMessageType.callEnd:
       case WSMessageType.callRinging:
-      case WSMessageType.callMissed:
+      case WSMessageType.callAccept:
+      case WSMessageType.callTerminate:
       case WSMessageType.callError:
         try {
           return CallPayload.fromJson(payloadJson);
@@ -1162,14 +1223,14 @@ class WSMessage {
           // If parsing fails, return raw payload
           return payloadJson;
         }
-      case WSMessageType.ping:
-      case WSMessageType.pong:
+      case WSMessageType.socketPing:
+      case WSMessageType.socketPong:
+        // Ping/pong messages have no payload
+        return null;
       case WSMessageType.socketHealthCheck:
       case WSMessageType.socketError:
+      case WSMessageType.authForceLogout:
         return MiscPayload.fromJson(payloadJson);
-      default:
-        // For other types, return raw payload
-        return payloadJson;
     }
   }
 

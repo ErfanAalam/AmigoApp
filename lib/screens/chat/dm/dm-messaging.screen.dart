@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:amigo/api/api_service.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/db/repositories/user.repo.dart';
@@ -16,7 +17,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
-import '../../../api/chat.api-client.dart';
 import '../../../db/repositories/message-status.repo.dart';
 import '../../../models/user.model.dart';
 import '../../../providers/chat.provider.dart';
@@ -65,8 +65,7 @@ class InnerChatPage extends ConsumerStatefulWidget {
 
 class _InnerChatPageState extends ConsumerState<InnerChatPage>
     with TickerProviderStateMixin {
-  final ChatsServices _chatsServices = ChatsServices();
-  // final UserService _userService = UserService();
+  final apiService = ApiService();
   final ConversationRepository _conversationsRepo = ConversationRepository();
   final MessageRepository _messagesRepo = MessageRepository();
   final MessageStatusRepository _messageStatusRepo = MessageStatusRepository();
@@ -682,6 +681,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       widget.dm.conversationId,
     );
 
+    print("-----------------------------------------------------------");
+    print("needSync : ${needSync}");
+    print("-----------------------------------------------------------");
     // ===========================================================================
     // ===========================================================================
     // TEMPORARY NEED SYNC LOGIC CHANGE
@@ -696,14 +698,17 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           _syncStatus = 'Sync complete';
         });
       }
-      final firstPageResponse = await _chatsServices.getConversationHistory(
+      final firstPageResponse = await apiService.chat.getConversationHistory(
         conversationId: widget.dm.conversationId,
         page: 1,
         limit: 100,
       );
+      print("-----------------------------------------------------------");
+      print("firstPageResponse : ${firstPageResponse}");
+      print("-----------------------------------------------------------");
 
       final firstPageHistory = ConversationHistoryResponse.fromJson(
-        firstPageResponse['data'],
+        firstPageResponse.data as Map<String, dynamic>,
       );
 
       // Process first page
@@ -761,11 +766,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       int totalSynced = 0;
 
       // First, get the first page to know total count
-      final firstPageResponse = await _chatsServices.getConversationHistory(
+      final firstPageResponse = (await apiService.chat.getConversationHistory(
         conversationId: widget.dm.conversationId,
         page: page,
         limit: limit,
-      );
+      )).toMap();
 
       if (firstPageResponse['success'] != true ||
           firstPageResponse['data'] == null) {
@@ -815,11 +820,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
       // Continue fetching remaining pages
       while (hasMorePages && _canSetState) {
-        final response = await _chatsServices.getConversationHistory(
+        final response = (await apiService.chat.getConversationHistory(
           conversationId: widget.dm.conversationId,
           page: page,
           limit: limit,
-        );
+        )).toMap();
 
         if (response['success'] != true || response['data'] == null) {
           break; // Stop on error
@@ -908,11 +913,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       bool hasMorePages = true;
 
       while (hasMorePages && _canSetState) {
-        final response = await _chatsServices.getMessageStatuses(
+        final response = (await apiService.chat.getMessageStatuses(
           conversationId: widget.dm.conversationId,
           page: page,
           limit: limit,
-        );
+        )).toMap();
 
         if (response['success'] != true || response['data'] == null) {
           break; // Stop on error
@@ -3288,7 +3293,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     int? lastProgressUpdate = -1;
 
-    final response = await _chatsServices.sendMediaMessage(
+    final response = (await apiService.chat.sendMediaMessage(
       mediaFile,
       onSendProgress: (sent, total) {
         // Calculate progress percentage
@@ -3318,7 +3323,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           }
         }
       },
-    );
+    )).toMap();
+
     if (response['success'] == true && response['data'] != null) {
       final mediaData = MediaResponse.fromJson(response['data']);
 
@@ -3710,7 +3716,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         }
 
         // Call API
-        final response = await _chatsServices.deleteMessage([messageId]);
+        final response = (await apiService.chat.deleteMessage([
+          messageId,
+        ])).toMap();
 
         if (response['success'] == true) {
           // Update provider
@@ -3763,9 +3771,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       }
 
       // Call API
-      final response = await _chatsServices.deleteMessageForMe([
-        messageId,
-      ], widget.dm.conversationId);
+      final response = (await apiService.chat.deleteMessageForMe(
+        messageIds: [messageId],
+        conversationId: widget.dm.conversationId,
+      )).toMap();
 
       if (response['success'] == true) {
         // delete from local database

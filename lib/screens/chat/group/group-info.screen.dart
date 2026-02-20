@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:amigo/api/user.api-client.dart';
 import 'package:amigo/db/repositories/contacts.repo.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/user.repo.dart';
@@ -10,7 +9,7 @@ import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../api/group.api-client.dart';
+import '../../../api/api_service.dart';
 import '../../../db/repositories/conversation-member.repo.dart';
 import '../../../models/group.model.dart';
 import '../../../models/user.model.dart';
@@ -28,10 +27,7 @@ class GroupInfoPage extends ConsumerStatefulWidget {
 
 class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     with SingleTickerProviderStateMixin {
-  final GroupsService _groupsService = GroupsService();
   final ContactService _contactService = ContactService();
-  final UserService _userService = UserService();
-  final ContactsRepository _contactsRepository = ContactsRepository();
 
   final ConversationRepository _conversationRepository =
       ConversationRepository();
@@ -40,6 +36,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
   final UserRepository _userRepository = UserRepository();
 
   final UserUtils _userUtils = UserUtils();
+  final apiService = ApiService();
 
   Map<String, dynamic>? _groupInfo;
   List<UserModel> _availableUsers = [];
@@ -282,13 +279,15 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
       final contactsData = contacts
           .map((contact) => contact.phoneNumber)
           .toList();
-      final response = await _userService.getAvailableUsers(contactsData);
+      final response = (await apiService.user.getAvailableUsers(
+        contactsData,
+      )).toMap();
       if (response['success'] == true && response['data'] != null) {
         final usersData = response['data'] as List<dynamic>;
         final users = usersData
             .map((userJson) => UserModel.fromJson(userJson))
             .toList();
-        print("Available users from the server $users");
+        // print("Available users from the server $users");
         // Enrich users with display names from local database
         final enrichedUsers = await _userUtils.enrichUsersWithDisplayNames(
           users,
@@ -427,10 +426,10 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
         _isUpdatingTitle = true;
       });
 
-      final response = await _groupsService.updateGroupTitle(
-        widget.group.conversationId,
-        newTitle,
-      );
+      final response = (await apiService.group.updateGroupTitle(
+        title: newTitle,
+        conversationId: widget.group.conversationId,
+      )).toMap();
 
       if (response['success'] == true) {
         setState(() {
@@ -1254,10 +1253,10 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
       final id = TaskSnack.show(message: 'Adding Members...');
 
       // Add all members at once
-      final response = await _groupsService.addMember(
-        widget.group.conversationId,
-        userIds,
-      );
+      final response = (await apiService.group.addMember(
+        conversationId: widget.group.conversationId,
+        userIds: userIds,
+      )).toMap();
 
       // Show result message
       if (response['success'] == true) {
@@ -1318,10 +1317,10 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
         // Show loading indicator
         final id = TaskSnack.show(message: 'Promoting $userName to admin...');
 
-        final response = await _groupsService.promoteToAdmin(
-          widget.group.conversationId,
-          userId,
-        );
+        final response = (await apiService.group.promoteToAdmin(
+          conversationId: widget.group.conversationId,
+          userId: userId,
+        )).toMap();
 
         if (response['success'] == true) {
           TaskSnack.resolve(
@@ -1374,10 +1373,10 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
         // Show loading indicator
         final id = TaskSnack.show(message: 'Demoting $userName to member');
 
-        final response = await _groupsService.demoteToAdmin(
-          widget.group.conversationId,
-          userId,
-        );
+        final response = (await apiService.group.demoteToMember(
+          conversationId: widget.group.conversationId,
+          userId: userId,
+        )).toMap();
 
         if (response['success'] == true) {
           TaskSnack.resolve(
@@ -1835,10 +1834,10 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
 
     if (confirmed == true) {
       try {
-        final response = await _groupsService.removeMember(
-          widget.group.conversationId,
-          userId,
-        );
+        final response = (await apiService.group.removeMember(
+          conversationId: widget.group.conversationId,
+          userId: userId,
+        )).toMap();
 
         if (response['success'] == true) {
           _showSnackBar('$userName removed from group');
@@ -2100,10 +2099,10 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
       for (var member in membersToRemove) {
         final userId = member['userId'];
         try {
-          final response = await _groupsService.removeMember(
-            widget.group.conversationId,
-            userId,
-          );
+          final response = (await apiService.group.removeMember(
+            conversationId: widget.group.conversationId,
+            userId: userId,
+          )).toMap();
 
           if (response['success'] == true) {
             successCount++;
@@ -2346,9 +2345,9 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
       // Show loading indicator
       final loadingId = TaskSnack.show(message: 'Deleting group');
 
-      final response = await _groupsService.deleteGroup(
+      final response = (await apiService.group.deleteGroup(
         widget.group.conversationId,
-      );
+      )).toMap();
 
       if (response['success'] == true) {
         // Delete from local database

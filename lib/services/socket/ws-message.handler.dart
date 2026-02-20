@@ -69,16 +69,10 @@ class WebSocketMessageHandler {
   final StreamController<CallPayload> _callAcceptController =
       StreamController<CallPayload>.broadcast();
 
-  final StreamController<CallPayload> _callDeclineController =
-      StreamController<CallPayload>.broadcast();
-
-  final StreamController<CallPayload> _callEndController =
-      StreamController<CallPayload>.broadcast();
-
   final StreamController<CallPayload> _callRingingController =
       StreamController<CallPayload>.broadcast();
 
-  final StreamController<CallPayload> _callMissedController =
+  final StreamController<CallPayload> _callTerminateController =
       StreamController<CallPayload>.broadcast();
 
   final StreamController<CallPayload> _callErrorController =
@@ -147,17 +141,12 @@ class WebSocketMessageHandler {
   /// Get stream for call accept events (type: 'call:accept')
   Stream<CallPayload> get callAcceptStream => _callAcceptController.stream;
 
-  /// Get stream for call decline events (type: 'call:decline')
-  Stream<CallPayload> get callDeclineStream => _callDeclineController.stream;
-
-  /// Get stream for call end events (type: 'call:end')
-  Stream<CallPayload> get callEndStream => _callEndController.stream;
-
   /// Get stream for call ringing events (type: 'call:ringing')
   Stream<CallPayload> get callRingingStream => _callRingingController.stream;
 
-  /// Get stream for call missed events (type: 'call:missed')
-  Stream<CallPayload> get callMissedStream => _callMissedController.stream;
+  /// Get stream for call terminate events (type: 'call:terminate')
+  Stream<CallPayload> get callTerminateStream =>
+      _callTerminateController.stream;
 
   /// Get stream for call error events (type: 'call:error')
   Stream<CallPayload> get callErrorStream => _callErrorController.stream;
@@ -276,6 +265,9 @@ class WebSocketMessageHandler {
   /// Handle incoming WebSocket messages and route them to appropriate streams
   void _handleMessage(WSMessage message) async {
     try {
+      print("-----------------------------------------------------------");
+      print("message : ${message.type.toString()}");
+      print("-----------------------------------------------------------");
       // Route messages to appropriate streams based on type
       switch (message.type) {
         // ---------------------------------------------------
@@ -324,6 +316,10 @@ class WebSocketMessageHandler {
 
         case WSMessageType.messageNew:
           final payload = message.chatMessagePayload;
+          print("-----------------------------------------------------------");
+          print("payload : ${payload.toString()}");
+          print("-----------------------------------------------------------");
+
           if (payload != null) {
             _messageNewController.add(payload);
           }
@@ -345,14 +341,6 @@ class WebSocketMessageHandler {
           final payload = message.messagePinPayload;
           if (payload != null) {
             _messagePinController.add(payload);
-          }
-          break;
-
-        case WSMessageType.messageReply:
-          // Reply messages are now ChatMessagePayload with replyToMessageId
-          final payload = message.chatMessagePayload;
-          if (payload != null) {
-            _messageNewController.add(payload);
           }
           break;
 
@@ -384,24 +372,18 @@ class WebSocketMessageHandler {
           }
           break;
 
-        case WSMessageType.ping:
-          // final payload = message.miscPayload;
-          // if (payload != null) {
-          //   _showHealthCheckDialog(payload);
-          // }
+        case WSMessageType.socketPing:
+          // Ping messages have no payload
           debugPrint('🏓 Ping received from server');
           break;
 
-        case WSMessageType.pong:
-          // final payload = message.miscPayload;
-          // if (payload != null) {
-          //   _showHealthCheckDialog(payload);
-          // }
+        case WSMessageType.socketPong:
+          // Pong messages have no payload
           debugPrint('🏓 Pong received from server');
           break;
 
         case WSMessageType.socketError:
-          debugPrint('❌ WebSocket error: ${message.miscPayload?.message}');
+          debugPrint('❌ WebSocket error: ${message.payload.toString()}');
           break;
 
         case WSMessageType.authForceLogout:
@@ -455,20 +437,6 @@ class WebSocketMessageHandler {
           }
           break;
 
-        case WSMessageType.callDecline:
-          final payload = message.callPayload;
-          if (payload != null) {
-            _callDeclineController.add(payload);
-          }
-          break;
-
-        case WSMessageType.callEnd:
-          final payload = message.callPayload;
-          if (payload != null) {
-            _callEndController.add(payload);
-          }
-          break;
-
         case WSMessageType.callRinging:
           final payload = message.callPayload;
           if (payload != null) {
@@ -476,10 +444,10 @@ class WebSocketMessageHandler {
           }
           break;
 
-        case WSMessageType.callMissed:
+        case WSMessageType.callTerminate:
           final payload = message.callPayload;
           if (payload != null) {
-            _callMissedController.add(payload);
+            _callTerminateController.add(payload);
           }
           break;
 
@@ -705,10 +673,8 @@ class WebSocketMessageHandler {
     _callAnswerController.close();
     _callIceController.close();
     _callAcceptController.close();
-    _callDeclineController.close();
-    _callEndController.close();
     _callRingingController.close();
-    _callMissedController.close();
+    _callTerminateController.close();
     _callErrorController.close();
     _syncMessagesController.close();
     _isInitialized = false;

@@ -8,8 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../api/chat.api-client.dart';
-import '../../api/user.api-client.dart';
+import '../../api/api_service.dart';
 import '../../db/repositories/conversation-member.repo.dart';
 import '../../models/contact.model.dart';
 import '../../models/user.model.dart';
@@ -42,8 +41,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
   bool _isSearching = false;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
-  final UserService _userService = UserService();
-  final ChatsServices _chatsServices = ChatsServices();
+  final apiService = ApiService();
   AnimationController? _searchAnimationController;
   Animation<Offset>? _searchAnimation;
 
@@ -90,11 +88,11 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
     if (_contacts.isEmpty) return;
     try {
       List<String> contactsData = getContactsForBackend();
-      final response = await _userService.getAvailableUsers(contactsData);
-      if (response['success'] == true && response['data'] != null) {
-        List<dynamic> usersData = response['data'] is List
-            ? response['data']
-            : response['data']['data'] ?? [];
+      final result = await apiService.user.getAvailableUsers(contactsData);
+      if (result.isSuccess && result.data != null) {
+        List<dynamic> usersData = result.data! is List
+            ? result.data! as List<dynamic>
+            : (result.data!['data'] as List<dynamic>?) ?? [];
         List<UserModel> users = usersData
             .map((userJson) => UserModel.fromJson(userJson))
             .toList();
@@ -285,11 +283,13 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
       // Get contacts in backend format
       List<String> contactsData = getContactsForBackend();
 
-      final response = await _userService.getAvailableUsers(contactsData);
+      final result = await apiService.user.getAvailableUsers(contactsData);
 
-      if (response['success'] == true) {
+      if (result.isSuccess && result.data != null) {
         // Handle both response structures: direct array or nested data
-        List<dynamic> usersData = response['data'];
+        List<dynamic> usersData = result.data! is List
+            ? result.data! as List<dynamic>
+            : (result.data!['data'] as List<dynamic>?) ?? [];
         List<UserModel> users = usersData
             .map((userJson) => UserModel.fromJson(userJson))
             .toList();
@@ -400,14 +400,14 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
   }
 
   void startConversation(UserModel user) async {
-    final response = await _chatsServices.createChat(user.id.toString());
-    if (response['success'] && response['data'] != null) {
+    final result = await apiService.chat.createChat(user.id.toString());
+    if (result.isSuccess && result.data != null) {
       try {
         // store the recipient info in the user table
         await _userRepository.insertUser(user);
 
         // Create ConversationModel from the response
-        final conversationData = response['data'];
+        final conversationData = result.data!;
         if (conversationData['existing'] == true) {
           final dm = await _conversationRepository.getDmByConversationId(
             conversationData['id'],
@@ -507,7 +507,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
       }
     } else {
       Snack.error(
-        'Failed to create chat: ${response['message'] ?? 'Unknown error'}',
+        'Failed to create chat: ${result.message}',
       );
       // if (mounted) {
       //   try {
@@ -1046,7 +1046,7 @@ class FindUserDialog extends ConsumerStatefulWidget {
 
 class _FindUserDialogState extends ConsumerState<FindUserDialog> {
   final TextEditingController _phoneController = TextEditingController();
-  final UserService _userService = UserService();
+  final apiService = ApiService();
   bool _isSearching = false;
   List<UserModel> _searchResults = [];
   String? _errorMessage;
@@ -1558,15 +1558,15 @@ class _FindUserDialogState extends ConsumerState<FindUserDialog> {
     });
 
     try {
-      final response = await _userService.getAvailableUsers([
+      final result = await apiService.user.getAvailableUsers([
         _phoneController.text.trim(),
       ]);
 
-      if (response['success'] == true && response['data'] != null) {
+      if (result.isSuccess && result.data != null) {
         // Handle both response structures: direct array or nested data
-        List<dynamic> usersData = response['data'] is List
-            ? response['data']
-            : response['data']['data'] ?? [];
+        List<dynamic> usersData = result.data! is List
+            ? result.data! as List<dynamic>
+            : (result.data!['data'] as List<dynamic>?) ?? [];
         List<UserModel> users = usersData
             .map((userJson) => UserModel.fromJson(userJson))
             .toList();
@@ -1579,7 +1579,7 @@ class _FindUserDialogState extends ConsumerState<FindUserDialog> {
         });
       } else {
         setState(() {
-          _errorMessage = '${response['message'] ?? 'Unknown error'}';
+          _errorMessage = result.message;
         });
       }
     } catch (e) {

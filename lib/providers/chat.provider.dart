@@ -7,9 +7,7 @@ import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/chat.types.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../api/chat.api-client.dart';
-import '../api/group.api-client.dart';
-import '../api/user.api-client.dart';
+import '../api/api_service.dart';
 import '../db/repositories/conversation-member.repo.dart';
 import '../db/repositories/message-status.repo.dart';
 import '../models/community.model.dart';
@@ -157,7 +155,7 @@ final chatProvider = NotifierProvider<ChatNotifier, ChatState>(
 );
 
 class ChatNotifier extends Notifier<ChatState> {
-  final UserService _userService = UserService();
+  final apiService = ApiService();
   final UserRepository _userRepo = UserRepository();
   final ConversationRepository _conversationsRepo = ConversationRepository();
   final MessageRepository _messageRepo = MessageRepository();
@@ -165,9 +163,6 @@ class ChatNotifier extends Notifier<ChatState> {
       ConversationMemberRepository();
   final WebSocketMessageHandler _messageHandler = WebSocketMessageHandler();
   final UserStatusService _userStatusService = UserStatusService();
-  final ChatsServices _chatsServices = ChatsServices();
-  final GroupsService _groupsService = GroupsService();
-
   final MessageStatusRepository _messageStatusRepo = MessageStatusRepository();
 
   StreamSubscription<ConnectionStatus>? _onlineStatusSubscription;
@@ -256,9 +251,10 @@ class ChatNotifier extends Notifier<ChatState> {
       state = state.copyWith(isLoading: true);
     }
 
-    final response = await _userService.getChatList('dm');
-    if (response['success']) {
-      final List<dynamic> conversationsList = response['data'];
+    final response = await apiService.user.getChatList('dm');
+    if (response.isSuccess) {
+      final List<dynamic> conversationsList =
+          response.data as List<dynamic> ?? [];
 
       if (conversationsList.isNotEmpty) {
         // Fetch all existing IDs from DB first
@@ -443,13 +439,12 @@ class ChatNotifier extends Notifier<ChatState> {
     // Load groups
     try {
       debugPrint('🔄 Loading groups from server...');
-      final groupResponse = await _userService.getChatList('group');
-      debugPrint('📦 Group response success: ${groupResponse['success']}');
+      final groupResponse = await apiService.user.getChatList('group');
 
-      if (groupResponse['success']) {
-        final List<dynamic> groupsList = groupResponse['data'] is List
-            ? groupResponse['data']
-            : [];
+      if (groupResponse.isSuccess) {
+        debugPrint('📦 Group response success: ${groupResponse.isSuccess}');
+        final List<dynamic> groupsList =
+            groupResponse.data as List<dynamic> ?? [];
 
         debugPrint('📊 Groups list length: ${groupsList.length}');
 
@@ -612,9 +607,7 @@ class ChatNotifier extends Notifier<ChatState> {
         debugPrint('✅ Groups state updated successfully');
       } else {
         // If group response failed, ensure loading state is cleared
-        debugPrint(
-          '❌ Failed to load groups: ${groupResponse['message'] ?? 'Unknown error'}',
-        );
+        debugPrint('❌ Failed to load groups: ${groupResponse.message}');
         state = state.copyWith(isLoading: false);
       }
     } catch (e, stackTrace) {
@@ -1086,8 +1079,8 @@ class ChatNotifier extends Notifier<ChatState> {
             // state = state.copyWith(favoriteChats: newFavorite);
             break;
           case 'delete':
-            final response = await _chatsServices.deleteDm(conversationId);
-            if (response['success']) {
+            final response = await apiService.chat.deleteDm(conversationId);
+            if (response.isSuccess) {
               // delete from local DB
               await _conversationsRepo.deleteConversation(conversationId);
 
@@ -1165,8 +1158,8 @@ class ChatNotifier extends Notifier<ChatState> {
             );
             break;
           case 'delete':
-            final response = await _groupsService.deleteGroup(conversationId);
-            if (response['success']) {
+            final response = await apiService.group.deleteGroup(conversationId);
+            if (response.isSuccess) {
               await _conversationsRepo.deleteConversation(conversationId);
             }
             break;

@@ -15,7 +15,7 @@ import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../../../api/chat.api-client.dart';
+import '../../../api/api_service.dart';
 import '../../../db/repositories/conversation-member.repo.dart';
 import '../../../db/repositories/message-status.repo.dart';
 import '../../../models/community.model.dart';
@@ -78,7 +78,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     with TickerProviderStateMixin {
   // final GroupsService _groupsService = GroupsService();
   // final UserService _userService = UserService();
-  final ChatsServices _chatsServices = ChatsServices();
+  final apiService = ApiService();
   final MessageRepository _messagesRepo = MessageRepository();
   final ConversationRepository _conversationRepo = ConversationRepository();
   final UserRepository _userRepo = UserRepository();
@@ -760,14 +760,24 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           _syncStatus = 'Sync complete';
         });
       }
-      final firstPageResponse = await _chatsServices.getConversationHistory(
+      final firstPageResult = await apiService.chat.getConversationHistory(
         conversationId: widget.group.conversationId,
         page: 1,
         limit: 100,
       );
 
+      if (!firstPageResult.isSuccess || firstPageResult.data == null) {
+        if (mounted) {
+          setState(() {
+            _isSyncingMessages = false;
+            _syncStatus = 'Sync failed';
+          });
+        }
+        return;
+      }
+
       final firstPageHistory = ConversationHistoryResponse.fromJson(
-        firstPageResponse['data'],
+        firstPageResult.data!,
       );
 
       final List<ConversationMemberModel> membersOfConversation =
@@ -850,14 +860,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       int totalSynced = 0;
 
       // First, get the first page to know total count
-      final firstPageResponse = await _chatsServices.getConversationHistory(
+      final firstPageResult = await apiService.chat.getConversationHistory(
         conversationId: widget.group.conversationId,
         page: page,
         limit: limit,
       );
 
-      if (firstPageResponse['success'] != true ||
-          firstPageResponse['data'] == null) {
+      if (!firstPageResult.isSuccess || firstPageResult.data == null) {
         // Failed to fetch, stop syncing
         if (mounted) {
           setState(() {
@@ -869,7 +878,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       }
 
       final firstPageHistory = ConversationHistoryResponse.fromJson(
-        firstPageResponse['data'],
+        firstPageResult.data!,
       );
 
       final List<ConversationMemberModel> membersOfConversation =
@@ -938,18 +947,18 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
       // Continue fetching remaining pages
       while (hasMorePages && mounted && !_isDisposed) {
-        final response = await _chatsServices.getConversationHistory(
+        final result = await apiService.chat.getConversationHistory(
           conversationId: widget.group.conversationId,
           page: page,
           limit: limit,
         );
 
-        if (response['success'] != true || response['data'] == null) {
+        if (!result.isSuccess || result.data == null) {
           break; // Stop on error
         }
 
         final historyResponse = ConversationHistoryResponse.fromJson(
-          response['data'],
+          result.data!,
         );
 
         if (historyResponse.messages.isEmpty) {
@@ -1031,14 +1040,14 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       bool hasMorePages = true;
 
       while (hasMorePages && mounted && !_isDisposed) {
-        final response = await _chatsServices.getMessageStatuses(
+        final result = await apiService.chat.getMessageStatuses(
           conversationId: widget.group.conversationId,
           page: page,
           limit: limit,
         );
 
-        if (response['success'] == true) {
-          final statusesData = response['data'];
+        if (result.isSuccess && result.data != null) {
+          final statusesData = result.data!;
           final List<dynamic> statuses = statusesData['statuses'] ?? [];
 
           if (statuses.isEmpty) {
@@ -1962,7 +1971,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     int? lastProgressUpdate = -1;
 
-    final response = await _chatsServices.sendMediaMessage(
+    final result = await apiService.chat.sendMediaMessage(
       mediaFile,
       onSendProgress: (sent, total) {
         // Calculate progress percentage
@@ -1993,8 +2002,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         }
       },
     );
-    if (response['success'] == true && response['data'] != null) {
-      final mediaData = MediaResponse.fromJson(response['data']);
+    if (result.isSuccess && result.data != null) {
+      final mediaData = MediaResponse.fromJson(result.data!);
       // return mediaData;
 
       // Clear upload progress before sending message
@@ -4267,12 +4276,12 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   void _bulkDeleteMessages() async {
-    final response = await _chatsServices.deleteMessage(
+    final result = await apiService.chat.deleteMessage(
       _selectedMessages.map((id) => id).toList(),
-      _isAdminOrStaff,
+      isAdminOrStaff: _isAdminOrStaff,
     );
 
-    if (response['success'] == true) {
+    if (result.isSuccess) {
       setState(() {
         _messages.removeWhere(
           (message) => _selectedMessages.contains(message.id),
@@ -4465,9 +4474,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           debugPrint('❌ Error deleting messages: $e');
         });
 
-    final deleteResponse = _isAdminOrStaff
-        ? await _chatsServices.deleteMessage([messageId], _isAdminOrStaff)
-        : await _chatsServices.deleteMessage([messageId]);
+    final deleteResult = await apiService.chat.deleteMessage(
+      [messageId],
+      isAdminOrStaff: _isAdminOrStaff,
+    );
 
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     final deleteMessagePayload = DeleteMessagePayload(

@@ -11,8 +11,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
-import 'api/auth.api-client.dart';
-import 'api/user.api-client.dart';
+import 'api/api_service.dart';
+import 'package:dio/dio.dart';
 import 'models/group.model.dart';
 import 'screens/auth/login.screen.dart';
 import 'screens/call/in-call.screen.dart';
@@ -34,19 +34,35 @@ import 'utils/navigation-helper.util.dart';
 import 'utils/ringtone.util.dart';
 
 void main() async {
+  print("🚀 Starting Amigo Chat App...");
   material.WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize services
-  await CookieService().init();
+  final cookieService = CookieService();
+  await cookieService.init();
 
+  // Initialize API service
+  final dio = Dio();
+  final authService = AuthService();
+  await ApiService.initialize(
+    dio: dio,
+    cookieService: cookieService,
+    authService: authService,
+  );
+
+  print("============== checkpoint 1 ================");
   // Initialize WebSocket service (will be used in MyApp widget)
   WebSocketService();
 
+  print("============== checkpoint 2 ================");
   // Initialize UserStatusService
   UserStatusService();
 
+  print("============== checkpoint 3 ================");
   // Initialize WebSocket message handler (will be initialized in MyApp when authenticated)
   WebSocketMessageHandler();
+
+  print("============== checkpoint 4 ================");
 
   // Initialize NotificationService
   await NotificationService().initialize();
@@ -56,6 +72,7 @@ void main() async {
 
   // Initialize RingtoneManager for call audio
   await RingtoneManager.init();
+  print("============== checkpoint 5 ================");
 
   // await TestBGService().initializeService();
 
@@ -77,7 +94,6 @@ class _MyAppState extends material.State<MyApp>
   final UserStatusService _userStatusService = UserStatusService();
   final NotificationService _notificationService = NotificationService();
   final ApiService _apiService = ApiService();
-  final UserService _userService = UserService();
   bool _isLoading = true;
   bool _isAuthenticated = false;
   StreamSubscription? _intentDataStreamSubscription;
@@ -208,7 +224,10 @@ class _MyAppState extends material.State<MyApp>
         await _websocketService.connect();
 
         final appVersion = await UserUtils().getAppVersion();
-        await _userService.updateUser({'app_version': appVersion});
+        final updateResult = await _apiService.user.updateUser({'app_version': appVersion});
+        if (!updateResult.isSuccess) {
+          debugPrint('⚠️ Failed to update app version: ${updateResult.message}');
+        }
 
         // await _apiService.updateUserLocationAndIp();
         // Wait a bit for WebSocket to establish connection
@@ -269,7 +288,7 @@ class _MyAppState extends material.State<MyApp>
           }
         }
 
-        await _apiService.updateUserLocationAndIp();
+        await _apiService.auth.updateUserLocationAndIp();
       } catch (e) {
         debugPrint('❌ Failed to establish WebSocket connection in main.dart');
       }

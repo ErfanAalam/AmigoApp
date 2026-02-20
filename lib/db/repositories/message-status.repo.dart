@@ -12,7 +12,7 @@ class MessageStatusRepository {
     return MessageStatusModel(
       id: status.id,
       conversationId: status.conversationId,
-      messageId: status.messageId,
+      messageId: status.messageId.toInt(),
       userId: status.userId,
       deliveredAt: status.deliveredAt,
       readAt: status.readAt,
@@ -37,7 +37,7 @@ class MessageStatusRepository {
 
     final companion = MessageStatusModelCompanion.insert(
       conversationId: conversationId,
-      messageId: messageId,
+      messageId: BigInt.from(messageId),
       userId: userId,
       deliveredAt: Value(deliveredAt ?? existingStatus?.deliveredAt),
       readAt: Value(readAt ?? existingStatus?.readAt),
@@ -65,7 +65,7 @@ class MessageStatusRepository {
 
         final companion = MessageStatusModelCompanion.insert(
           conversationId: status['conversationId'] as int,
-          messageId: messageId,
+          messageId: BigInt.from(messageId),
           userId: userId,
           deliveredAt: Value(
             (status['deliveredAt'] as String?) ?? existingStatus?.deliveredAt,
@@ -126,7 +126,7 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final statuses = await (db.select(
       db.messageStatusModel,
-    )..where((t) => t.messageId.equals(messageId))).get();
+    )..where((t) => t.messageId.equals(BigInt.from(messageId)))).get();
     return statuses.map((status) => _statusToModel(status)).toList();
   }
 
@@ -159,7 +159,7 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final rows =
         await (db.select(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(messageId) & t.readAt.isNotNull(),
+              (t) => t.messageId.equals(BigInt.from(messageId)) & t.readAt.isNotNull(),
             ))
             .get();
     return rows;
@@ -171,7 +171,7 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final rows =
         await (db.select(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(messageId) & t.deliveredAt.isNotNull(),
+              (t) => t.messageId.equals(BigInt.from(messageId)) & t.deliveredAt.isNotNull(),
             ))
             .get();
     return rows;
@@ -196,7 +196,7 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final statuses =
         await (db.select(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
+              (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
             ))
             .get();
 
@@ -229,7 +229,7 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final statuses =
         await (db.select(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(messageId) & t.readAt.isNotNull(),
+              (t) => t.messageId.equals(BigInt.from(messageId)) & t.readAt.isNotNull(),
             ))
             .get();
     return statuses.map((status) => _statusToModel(status)).toList();
@@ -242,7 +242,7 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final statuses =
         await (db.select(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(messageId) & t.deliveredAt.isNotNull(),
+              (t) => t.messageId.equals(BigInt.from(messageId)) & t.deliveredAt.isNotNull(),
             ))
             .get();
     return statuses.map((status) => _statusToModel(status)).toList();
@@ -263,7 +263,7 @@ class MessageStatusRepository {
     if (existing != null) {
       // Update existing status
       await (db.update(db.messageStatusModel)..where(
-            (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
+            (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
           ))
           .write(MessageStatusModelCompanion(deliveredAt: Value(timestamp)));
     } else {
@@ -299,7 +299,7 @@ class MessageStatusRepository {
     if (existing != null) {
       // Update existing status
       await (db.update(db.messageStatusModel)..where(
-            (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
+            (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
           ))
           .write(
             MessageStatusModelCompanion(
@@ -349,7 +349,7 @@ class MessageStatusRepository {
 
         if (existing != null) {
           await (db.update(db.messageStatusModel)..where(
-                (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
+                (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
               ))
               .write(
                 MessageStatusModelCompanion(deliveredAt: Value(timestamp)),
@@ -393,7 +393,7 @@ class MessageStatusRepository {
 
         if (existing != null) {
           await (db.update(db.messageStatusModel)..where(
-                (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
+                (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
               ))
               .write(
                 MessageStatusModelCompanion(
@@ -430,7 +430,7 @@ class MessageStatusRepository {
   }) async {
     final db = sqliteDatabase.database;
     await (db.update(db.messageStatusModel)
-          ..where((t) => t.messageId.equals(messageId)))
+          ..where((t) => t.messageId.equals(BigInt.from(messageId))))
         .write(MessageStatusModelCompanion(deliveredAt: Value(deliveredAt)));
   }
 
@@ -452,7 +452,7 @@ class MessageStatusRepository {
       if (existing != null) {
         // Update existing status
         await (db.update(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
+              (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
             ))
             .write(
               MessageStatusModelCompanion(deliveredAt: Value(deliveredAt)),
@@ -491,7 +491,7 @@ class MessageStatusRepository {
       if (existing != null) {
         // Update existing status
         await (db.update(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
+              (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
             ))
             .write(MessageStatusModelCompanion(readAt: Value(readAt)));
       } else {
@@ -524,7 +524,7 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     await (db.delete(
       db.messageStatusModel,
-    )..where((t) => t.messageId.equals(messageId))).go();
+    )..where((t) => t.messageId.equals(BigInt.from(messageId)))).go();
   }
 
   /// Delete message statuses by conversationId
@@ -543,7 +543,7 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final deleted =
         await (db.delete(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
+              (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
             ))
             .go();
     return deleted > 0;
@@ -562,7 +562,7 @@ class MessageStatusRepository {
         await (db.selectOnly(db.messageStatusModel)
               ..addColumns([db.messageStatusModel.id.count()])
               ..where(
-                db.messageStatusModel.messageId.equals(messageId) &
+                db.messageStatusModel.messageId.equals(BigInt.from(messageId)) &
                     db.messageStatusModel.readAt.isNotNull(),
               ))
             .getSingle();
@@ -576,7 +576,7 @@ class MessageStatusRepository {
         await (db.selectOnly(db.messageStatusModel)
               ..addColumns([db.messageStatusModel.id.count()])
               ..where(
-                db.messageStatusModel.messageId.equals(messageId) &
+                db.messageStatusModel.messageId.equals(BigInt.from(messageId)) &
                     db.messageStatusModel.deliveredAt.isNotNull(),
               ))
             .getSingle();
@@ -589,7 +589,7 @@ class MessageStatusRepository {
     final totalCount =
         await (db.selectOnly(db.messageStatusModel)
               ..addColumns([db.messageStatusModel.id.count()])
-              ..where(db.messageStatusModel.messageId.equals(messageId)))
+              ..where(db.messageStatusModel.messageId.equals(BigInt.from(messageId))))
             .getSingle();
     final readCount = await getReadCountByMessageId(messageId);
     return (totalCount.read(db.messageStatusModel.id.count()) ?? 0) - readCount;
@@ -601,7 +601,7 @@ class MessageStatusRepository {
     final totalCount =
         await (db.selectOnly(db.messageStatusModel)
               ..addColumns([db.messageStatusModel.id.count()])
-              ..where(db.messageStatusModel.messageId.equals(messageId)))
+              ..where(db.messageStatusModel.messageId.equals(BigInt.from(messageId))))
             .getSingle();
     final deliveredCount = await getDeliveredCountByMessageId(messageId);
     return (totalCount.read(db.messageStatusModel.id.count()) ?? 0) -
@@ -624,8 +624,8 @@ class MessageStatusRepository {
   Future<void> updateMessageId(int optimisticId, int canonicalId) async {
     final db = sqliteDatabase.database;
     await (db.update(db.messageStatusModel)
-          ..where((t) => t.messageId.equals(optimisticId)))
-        .write(MessageStatusModelCompanion(messageId: Value(canonicalId)));
+          ..where((t) => t.messageId.equals(BigInt.from(optimisticId))))
+        .write(MessageStatusModelCompanion(messageId: Value(BigInt.from(canonicalId))));
   }
 
   /// Mark all messages in a conversation as read for a user where readAt is null
