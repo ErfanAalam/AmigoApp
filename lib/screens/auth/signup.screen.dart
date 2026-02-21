@@ -7,7 +7,8 @@ import '../../models/user.model.dart';
 import '../../providers/theme-color.provider.dart';
 import '../../services/notification.service.dart';
 import '../../services/auth/auth.service.dart';
-import '../../services/socket/websocket.service.dart';
+import '../../services/socket/transport.manager.dart';
+import '../../services/cookies.service.dart';
 import '../../ui/country-selector.modal.dart';
 import '../../ui/setup-loading.popup.dart';
 import '../../ui/snackbar.dart';
@@ -37,7 +38,8 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   final apiService = ApiService();
   final AuthService authService = AuthService();
   final NotificationService notificationService = NotificationService();
-  final WebSocketService wsService = WebSocketService();
+  final TransportManager transportManager = TransportManager();
+  final CookieService cookieService = CookieService();
   @override
   void dispose() {
     _firstNameController.dispose();
@@ -188,7 +190,10 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       await authService.sendFCMTokenToBackend(3);
 
       // connect to websocket after successful login
-      await wsService.connect();
+      final accessToken = await cookieService.getAccessToken();
+      if (accessToken != null) {
+        await transportManager.connect(accessToken);
+      }
     } else {
       if (mounted) {
         Snack.error('Error verifying Signup OTP');

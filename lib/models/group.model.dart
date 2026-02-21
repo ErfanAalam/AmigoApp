@@ -1,3 +1,5 @@
+import 'package:amigo/utils/chat/chat-helpers.utils.dart';
+
 class GroupModel {
   final int conversationId;
   final String title;
@@ -43,7 +45,9 @@ class GroupModel {
       metadata: json['metadata'] != null
           ? GroupMetadata.fromJson(json['metadata'])
           : null,
-      lastMessageId: json['lastMessageId'] ?? json['last_message_id'],
+      lastMessageId: ChatHelpers.parseToInt(
+        json['lastMessageId'] ?? json['last_message_id'],
+      ),
       lastMessageType: json['lastMessageType'] ?? json['last_message_type'],
       lastMessageBody: json['lastMessageBody'] ?? json['last_message_body'],
       lastMessageAt: json['lastMessageAt'] ?? json['last_message_at'],
@@ -61,7 +65,9 @@ class GroupModel {
           json['joined_at'] ??
           json['userJoinedAt'] ??
           DateTime.now().toIso8601String(),
-      pinnedMessageId: json['pinnedMessageId'] ?? json['pinned_message_id'],
+      pinnedMessageId: ChatHelpers.parseToInt(
+        json['pinnedMessageId'] ?? json['pinned_message_id'],
+      ),
     );
   }
 
@@ -274,7 +280,7 @@ class GroupLastMessage {
 
   factory GroupLastMessage.fromJson(Map<String, dynamic> json) {
     return GroupLastMessage(
-      id: json['id'] ?? 0,
+      id: ChatHelpers.parseToInt(json['id']),
       body: json['body'] ?? '',
       type: json['type'] ?? 'text',
       senderId: json['sender_id'] ?? json['senderId'] ?? 0,

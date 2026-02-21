@@ -141,20 +141,20 @@ class UserProfileModal extends StatelessWidget {
                           ),
                         ),
                 ),
-                if (isOnline == true)
-                  Positioned(
-                    right: 20,
-                    bottom: 20,
-                    child: Container(
-                      width: 24,
-                      height: 24,
-                      decoration: BoxDecoration(
-                        color: Colors.green,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 3),
-                      ),
-                    ),
-                  ),
+                // if (isOnline == true)
+                //   Positioned(
+                //     right: 20,
+                //     bottom: 20,
+                //     child: Container(
+                //       width: 24,
+                //       height: 24,
+                //       decoration: BoxDecoration(
+                //         color: Colors.green,
+                //         shape: BoxShape.circle,
+                //         border: Border.all(color: Colors.white, width: 3),
+                //       ),
+                //     ),
+                //   ),
               ],
             ),
           ),
@@ -164,17 +164,17 @@ class UserProfileModal extends StatelessWidget {
             child: Column(
               children: [
                 Text(
-                  dm.recipientName!,
+                  dm.recipientName,
                   style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  isOnline == true ? 'Online' : 'Offline',
-                  style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-                ),
+                // const SizedBox(height: 8),
+                // Text(
+                //   isOnline == true ? 'Online' : 'Offline',
+                //   style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                // ),
               ],
             ),
           ),

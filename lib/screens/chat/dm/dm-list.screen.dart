@@ -451,7 +451,7 @@ class ChatListItem extends ConsumerWidget {
   final int conversationId;
 
   const ChatListItem({
-    Key? key,
+    super.key,
     required this.conversation,
     required this.onTap,
     this.onLongPress,
@@ -463,7 +463,7 @@ class ChatListItem extends ConsumerWidget {
     this.isMuted = false,
     this.isFavorite = false,
     required this.conversationId,
-  }) : super(key: key);
+  });
 
   String _formatTime(String dateTimeString) {
     try {
@@ -773,12 +773,12 @@ class ChatListItem extends ConsumerWidget {
           const SizedBox(height: 4),
           Container(
             padding: EdgeInsets.symmetric(
-              horizontal: (conversation.unreadCount ?? 0).toString().length <= 2 ? 6 : 8,
+              horizontal: (conversation.unreadCount ?? 0).toString().length <= 2
+                  ? 6
+                  : 8,
               vertical: 1.3,
             ),
-            constraints: const BoxConstraints(
-              minWidth: 20,
-            ),
+            constraints: const BoxConstraints(minWidth: 20),
             decoration: BoxDecoration(
               color: isMuted ? Colors.grey : themeColor.primary,
               borderRadius: BorderRadius.circular(12),

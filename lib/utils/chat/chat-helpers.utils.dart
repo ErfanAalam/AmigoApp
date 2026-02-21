@@ -6,13 +6,13 @@ import 'package:amigo/types/socket.types.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/call/call.service.dart';
-import '../../services/socket/websocket.service.dart';
+import '../../services/socket/transport.manager.dart';
 import '../../ui/snackbar.dart';
 import '../animations.utils.dart';
 
 class ChatHelpers {
   static final MessageRepository messageRepo = MessageRepository();
-  static final WebSocketService webSocketService = WebSocketService();
+  static final TransportManager transportManager = TransportManager();
   static final ConversationRepository conversationRepo =
       ConversationRepository();
   // Check if a message is a media message (image, video, audio, document)
@@ -209,6 +209,14 @@ class ChatHelpers {
     if (value is int) return value;
     if (value is String) return int.tryParse(value) ?? 0;
     return 0;
+  }
+
+  static BigInt parseToBigInt(dynamic value) {
+    if (value == null) return BigInt.zero;
+    if (value is BigInt) return value;
+    if (value is int) return BigInt.from(value);
+    if (value is String) return BigInt.tryParse(value) ?? BigInt.zero;
+    return BigInt.zero;
   }
 
   /// Check if date separator should be shown (WhatsApp style - once per date group)
@@ -434,7 +442,7 @@ class ChatHelpers {
       wsTimestamp: DateTime.now(),
     ).toJson();
 
-    webSocketService.sendMessage(wsmsg).catchError((e) {
+    transportManager.sendMessage(wsmsg).catchError((e) {
       debugPrint('❌ Error sending message pin: $e');
     });
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>

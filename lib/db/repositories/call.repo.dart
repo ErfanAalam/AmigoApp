@@ -15,54 +15,38 @@ class CallRepository {
     final isIncoming = call.calleeId == currentUserId;
     final otherUserId = isIncoming ? call.callerId : call.calleeId;
 
-    // Try to get contact info from Contacts table first
-    Contact? contact = await (db.select(
-      db.contacts,
-    )..where((t) => t.id.equals(otherUserId))).getSingleOrNull();
-
-    // If not found in contacts, try Users table
+    // Get contact info from Users table
     String contactName = 'Unknown';
     String? contactProfilePic;
     int contactId = otherUserId;
 
-    // if (contact != null) {
-    //   contactName = contact.name;
-    //   contactProfilePic = contact.profilePic;
-    //   contactId = contact.id;
-    // } else {
-      final user = await (db.select(
-        db.users,
-      )..where((t) => t.id.equals(otherUserId))).getSingleOrNull();
-      if (user != null) {
-        contactName = user.username ?? user.name;
-        contactProfilePic = user.profilePic;
-        contactId = user.id;
-      }
-    // }
-
-    // Calculate duration if call has ended
-    int durationSeconds = 0;
-    if (call.endedAt != null && call.endedAt!.isNotEmpty) {
-      try {
-        final startTime = DateTime.parse(call.startedAt);
-        final endTime = DateTime.parse(call.endedAt!);
-        durationSeconds = endTime.difference(startTime).inSeconds;
-      } catch (_) {
-        durationSeconds = 0;
-      }
+    final user = await (db.select(
+      db.users,
+    )..where((t) => t.id.equals(otherUserId))).getSingleOrNull();
+    if (user != null) {
+      contactName = user.username ?? user.name;
+      contactProfilePic = user.profilePic;
+      contactId = user.id;
     }
 
     // Parse dates
     DateTime? startedAt;
+    DateTime? answeredAt;
     DateTime? endedAt;
     DateTime createdAt;
 
     try {
       startedAt = DateTime.parse(call.startedAt);
-      createdAt = startedAt;
     } catch (_) {
       startedAt = DateTime.now();
-      createdAt = DateTime.now();
+    }
+
+    if (call.answeredAt != null && call.answeredAt!.isNotEmpty) {
+      try {
+        answeredAt = DateTime.parse(call.answeredAt!);
+      } catch (_) {
+        answeredAt = null;
+      }
     }
 
     if (call.endedAt != null && call.endedAt!.isNotEmpty) {
@@ -73,6 +57,23 @@ class CallRepository {
       }
     }
 
+    // Parse createdAt, fallback to startedAt if not available
+    if (call.createdAt != null && call.createdAt!.isNotEmpty) {
+      try {
+        createdAt = DateTime.parse(call.createdAt!);
+      } catch (_) {
+        createdAt = startedAt ?? DateTime.now();
+      }
+    } else {
+      createdAt = startedAt ?? DateTime.now();
+    }
+
+    // Use duration_seconds from DB if available, otherwise calculate
+    int durationSeconds = call.durationSeconds;
+    if (durationSeconds == 0 && endedAt != null && startedAt != null) {
+      durationSeconds = endedAt.difference(startedAt).inSeconds;
+    }
+
     return CallModel(
       id: call.id,
       callerId: call.callerId,
@@ -81,11 +82,11 @@ class CallRepository {
       contactName: contactName,
       contactProfilePic: contactProfilePic,
       startedAt: startedAt,
-      answeredAt: null, // Not stored in DB, would need to be added
+      answeredAt: answeredAt,
       endedAt: endedAt,
       durationSeconds: durationSeconds,
       status: CallStatus.fromString(call.status),
-      reason: null, // Not stored in DB
+      reason: call.reason,
       callType: isIncoming ? CallType.incoming : CallType.outgoing,
       createdAt: createdAt,
     );
@@ -106,9 +107,12 @@ class CallRepository {
       callerId: call.callerId,
       calleeId: call.calleeId,
       startedAt: call.startedAt.toIso8601String(),
+      answeredAt: Value(call.answeredAt?.toIso8601String() ?? existingCall?.answeredAt),
       endedAt: Value(call.endedAt?.toIso8601String() ?? existingCall?.endedAt),
+      durationSeconds: Value(call.durationSeconds),
       status: call.status.value,
-      callType: call.callType == CallType.incoming ? 'incoming' : 'outgoing',
+      reason: Value(call.reason ?? existingCall?.reason),
+      createdAt: call.createdAt.toIso8601String(),
     );
     await db.into(db.calls).insertOnConflictUpdate(companion);
   }
@@ -131,13 +135,16 @@ class CallRepository {
           callerId: call.callerId,
           calleeId: call.calleeId,
           startedAt: call.startedAt.toIso8601String(),
+          answeredAt: Value(
+            call.answeredAt?.toIso8601String() ?? existingCall?.answeredAt,
+          ),
           endedAt: Value(
             call.endedAt?.toIso8601String() ?? existingCall?.endedAt,
           ),
+          durationSeconds: Value(call.durationSeconds),
           status: call.status.value,
-          callType: call.callType == CallType.incoming
-              ? 'incoming'
-              : 'outgoing',
+          reason: Value(call.reason ?? existingCall?.reason),
+          createdAt: call.createdAt.toIso8601String(),
         );
         await db.into(db.calls).insertOnConflictUpdate(companion);
       }
@@ -209,21 +216,19 @@ class CallRepository {
   /// Get calls by type (incoming/outgoing)
   Future<List<CallModel>> getCallsByType(CallType type, int userId) async {
     final db = sqliteDatabase.database;
-    final callTypeStr = type == CallType.incoming ? 'incoming' : 'outgoing';
 
     final query = db.select(db.calls);
 
+    // Filter by caller/callee based on call type
     if (type == CallType.incoming) {
       query.where((t) => t.calleeId.equals(userId));
     } else {
       query.where((t) => t.callerId.equals(userId));
     }
 
-    query
-      ..where((t) => t.callType.equals(callTypeStr))
-      ..orderBy([
-        (t) => OrderingTerm(expression: t.startedAt, mode: OrderingMode.desc),
-      ]);
+    query.orderBy([
+      (t) => OrderingTerm(expression: t.startedAt, mode: OrderingMode.desc),
+    ]);
 
     final calls = await query.get();
 
@@ -371,10 +376,26 @@ class CallRepository {
   /// Update call end time and status
   Future<void> endCall(int callId, CallStatus status, DateTime? endedAt) async {
     final db = sqliteDatabase.database;
+    final call = await (db.select(
+      db.calls,
+    )..where((t) => t.id.equals(callId))).getSingleOrNull();
+    
+    // Calculate duration if we have start and end times
+    int? durationSeconds;
+    if (endedAt != null && call != null) {
+      try {
+        final startTime = DateTime.parse(call.startedAt);
+        durationSeconds = endedAt.difference(startTime).inSeconds;
+      } catch (_) {
+        // Keep existing duration if calculation fails
+      }
+    }
+    
     await (db.update(db.calls)..where((t) => t.id.equals(callId))).write(
       CallsCompanion(
         status: Value(status.value),
         endedAt: Value(endedAt?.toIso8601String()),
+        durationSeconds: durationSeconds != null ? Value(durationSeconds) : const Value.absent(),
       ),
     );
   }
@@ -409,20 +430,14 @@ class CallRepository {
   /// Get call count by type
   Future<int> getCallCountByType(int userId, CallType type) async {
     final db = sqliteDatabase.database;
-    final callTypeStr = type == CallType.incoming ? 'incoming' : 'outgoing';
 
     final query = db.selectOnly(db.calls)..addColumns([db.calls.id.count()]);
 
+    // Filter by caller/callee based on call type
     if (type == CallType.incoming) {
-      query.where(
-        db.calls.calleeId.equals(userId) &
-            db.calls.callType.equals(callTypeStr),
-      );
+      query.where(db.calls.calleeId.equals(userId));
     } else {
-      query.where(
-        db.calls.callerId.equals(userId) &
-            db.calls.callType.equals(callTypeStr),
-      );
+      query.where(db.calls.callerId.equals(userId));
     }
 
     final result = await query.getSingle();
@@ -541,18 +556,14 @@ class CallRepository {
     // Incoming calls
     final incomingQuery = db.selectOnly(db.calls)
       ..addColumns([db.calls.id.count()])
-      ..where(
-        db.calls.calleeId.equals(userId) & db.calls.callType.equals('incoming'),
-      );
+      ..where(db.calls.calleeId.equals(userId));
     final incomingResult = await incomingQuery.getSingle();
     final incoming = incomingResult.read(db.calls.id.count()) ?? 0;
 
     // Outgoing calls
     final outgoingQuery = db.selectOnly(db.calls)
       ..addColumns([db.calls.id.count()])
-      ..where(
-        db.calls.callerId.equals(userId) & db.calls.callType.equals('outgoing'),
-      );
+      ..where(db.calls.callerId.equals(userId));
     final outgoingResult = await outgoingQuery.getSingle();
     final outgoing = outgoingResult.read(db.calls.id.count()) ?? 0;
 

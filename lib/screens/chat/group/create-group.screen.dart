@@ -11,7 +11,7 @@ import '../../../models/user.model.dart';
 import '../../../providers/chat.provider.dart';
 import '../../../providers/theme-color.provider.dart';
 import '../../../services/contact.service.dart';
-import '../../../services/socket/websocket.service.dart';
+import '../../../services/socket/transport.manager.dart';
 import '../../../types/socket.types.dart';
 import '../../../utils/route-transitions.util.dart';
 import '../../../ui/snackbar.dart';
@@ -29,7 +29,7 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
   final ContactService _contactService = ContactService();
   final TextEditingController _groupNameController = TextEditingController();
   final TextEditingController _searchController = TextEditingController();
-  final WebSocketService _websocketService = WebSocketService();
+  final TransportManager _transportManager = TransportManager();
 
   final ConversationRepository _conversationRepo = ConversationRepository();
   final ConversationMemberRepository _conversationMemberRepo =
@@ -219,7 +219,7 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
             wsTimestamp: DateTime.now(),
           ).toJson();
 
-          await _websocketService.sendMessage(wsmsg);
+          await _transportManager.sendMessage(wsmsg);
           // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
           // Add the new group to the chat provider state

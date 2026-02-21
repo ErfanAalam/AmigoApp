@@ -35,9 +35,7 @@ class UserClient extends BaseApiClient {
   }
 
   /// Update user information
-  Future<ApiResult<dynamic>> updateUser(
-    Map<String, dynamic> data,
-  ) async {
+  Future<ApiResult<dynamic>> updateUser(Map<String, dynamic> data) async {
     return post('/user/update-user', data: data);
   }
 

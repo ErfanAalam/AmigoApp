@@ -26,7 +26,8 @@ import 'services/call/call-foreground.service.dart';
 import 'services/call/call.service.dart';
 import 'services/cookies.service.dart';
 import 'services/notification.service.dart';
-import 'services/socket/websocket.service.dart';
+import 'services/socket/transport.manager.dart';
+import 'services/socket/transport.service.dart';
 import 'services/socket/ws-message.handler.dart';
 import 'services/user-status.service.dart';
 import 'ui/loading-dots.widget.dart';
@@ -34,7 +35,9 @@ import 'utils/navigation-helper.util.dart';
 import 'utils/ringtone.util.dart';
 
 void main() async {
-  print("🚀 Starting Amigo Chat App...");
+  debugPrint("---------------------------------------------------------------");
+  debugPrint("🚀 Starting Amigo Chat App...");
+  debugPrint("---------------------------------------------------------------");
   material.WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize services
@@ -50,19 +53,14 @@ void main() async {
     authService: authService,
   );
 
-  print("============== checkpoint 1 ================");
-  // Initialize WebSocket service (will be used in MyApp widget)
-  WebSocketService();
+  // Initialize Transport Manager (will be used in MyApp widget)
+  TransportManager();
 
-  print("============== checkpoint 2 ================");
   // Initialize UserStatusService
   UserStatusService();
 
-  print("============== checkpoint 3 ================");
   // Initialize WebSocket message handler (will be initialized in MyApp when authenticated)
   WebSocketMessageHandler();
-
-  print("============== checkpoint 4 ================");
 
   // Initialize NotificationService
   await NotificationService().initialize();
@@ -72,7 +70,6 @@ void main() async {
 
   // Initialize RingtoneManager for call audio
   await RingtoneManager.init();
-  print("============== checkpoint 5 ================");
 
   // await TestBGService().initializeService();
 
@@ -90,7 +87,7 @@ class MyApp extends material.StatefulWidget {
 class _MyAppState extends material.State<MyApp>
     with material.WidgetsBindingObserver {
   final AuthService _authService = AuthService();
-  final WebSocketService _websocketService = WebSocketService();
+  final TransportManager _transportManager = TransportManager();
   final UserStatusService _userStatusService = UserStatusService();
   final NotificationService _notificationService = NotificationService();
   final ApiService _apiService = ApiService();
@@ -221,12 +218,20 @@ class _MyAppState extends material.State<MyApp>
         WebSocketMessageHandler().initialize();
 
         // Connect to WebSocket and wait for connection
-        await _websocketService.connect();
+        final cookieService = CookieService();
+        final accessToken = await cookieService.getAccessToken();
+        if (accessToken != null) {
+          await _transportManager.connect(accessToken);
+        }
 
         final appVersion = await UserUtils().getAppVersion();
-        final updateResult = await _apiService.user.updateUser({'app_version': appVersion});
+        final updateResult = await _apiService.user.updateUser({
+          'app_version': appVersion,
+        });
         if (!updateResult.isSuccess) {
-          debugPrint('⚠️ Failed to update app version: ${updateResult.message}');
+          debugPrint(
+            '⚠️ Failed to update app version: ${updateResult.message}',
+          );
         }
 
         // await _apiService.updateUserLocationAndIp();
@@ -297,8 +302,8 @@ class _MyAppState extends material.State<MyApp>
 
   void _setupWebSocketListeners() {
     // Listen to WebSocket connection state changes
-    _websocketService.connectionStateStream.listen((state) {
-      if (state == WebSocketConnectionState.disconnected) {
+    _transportManager.connectionStateStream.listen((state) {
+      if (state == TransportConnectionState.disconnected) {
         // Clear all user online status when disconnected
         _userStatusService.clearAllStatus();
       }
@@ -308,7 +313,7 @@ class _MyAppState extends material.State<MyApp>
     // which is initialized when user is authenticated
 
     // Listen to WebSocket errors
-    _websocketService.errorStream.listen((error) {
+    _transportManager.errorStream.listen((error) {
       debugPrint('❌ WebSocket error in main app');
     });
 
@@ -339,17 +344,8 @@ class _MyAppState extends material.State<MyApp>
     // Add a delay to ensure navigator is ready and app is fully initialized
     Future.delayed(const Duration(milliseconds: 150), () async {
       try {
-        print("checkpoint 1");
         final convId = data['conv_id'] as int?;
         final convType = data['conv_type'];
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print("convType -> ${convType}");
-        print(
-          "--------------------------------------------------------------------------------",
-        );
-        print("checkpoint 2");
         if (convId == null || convType == null) {
           debugPrint(
             '❌ Either ConversationId Or ConversationType is null in notification data',
@@ -357,10 +353,8 @@ class _MyAppState extends material.State<MyApp>
           return;
         }
 
-        print("checkpoint 3");
         // Try to fetch the conversation from local DB with retry
         await _fetchAndNavigateToConversationWithRetry(convId, convType);
-        print("checkpoint 4");
       } catch (e) {
         debugPrint('❌ Error navigating to conversation from notification: $e');
       }
@@ -376,7 +370,6 @@ class _MyAppState extends material.State<MyApp>
   }) async {
     for (int attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        print("checkpoint 3.1");
         // Check if navigator is ready
         if (NavigationHelper.navigatorKey.currentContext == null) {
           debugPrint(
@@ -388,10 +381,8 @@ class _MyAppState extends material.State<MyApp>
 
         // First, try to get it as a DM conversation
         final conversationsRepo = ConversationRepository();
-        print("checkpoint 3.2");
 
         if (convType == ChatType.dm) {
-          print("checkpoint 3.3");
           final dm = await conversationsRepo.getDmByConversationId(
             conversationId,
           );
@@ -399,15 +390,12 @@ class _MyAppState extends material.State<MyApp>
             debugPrint('✅ Found DM conversation, navigating...');
             _navigateToDM(dm);
 
-            print("checkpoint 3.4");
             return;
           } else {
             debugPrint(
               '⏳ DM conversation data incomplete, retrying... (attempt ${attempt + 1}/$maxRetries)',
             );
             await Future.delayed(retryDelay);
-
-            print("checkpoint 3.5");
             continue;
           }
         } else if (convType == ChatType.group) {
@@ -518,7 +506,7 @@ class _MyAppState extends material.State<MyApp>
     // Ensure wakelock is disabled when app is disposed
     WakelockPlus.disable();
     _intentDataStreamSubscription?.cancel();
-    _websocketService.dispose();
+    _transportManager.dispose();
     WebSocketMessageHandler().dispose();
     _userStatusService.dispose();
     _notificationService.dispose();

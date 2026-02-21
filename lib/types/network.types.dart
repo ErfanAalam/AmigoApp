@@ -176,6 +176,7 @@ enum TransmissionMode {
 }
 
 /// WebSocket connectivity test result
+
 class WebSocketTestResult {
   final bool isAvailable;
   final int? connectionTimeMs;
@@ -199,37 +200,6 @@ class WebSocketTestResult {
 
   factory WebSocketTestResult.failure(String error) {
     return WebSocketTestResult(
-      isAvailable: false,
-      error: error,
-      testedAt: DateTime.now(),
-    );
-  }
-}
-
-/// Polling connectivity test result
-class PollingTestResult {
-  final bool isAvailable;
-  final int? responseTimeMs;
-  final String? error;
-  final DateTime testedAt;
-
-  PollingTestResult({
-    required this.isAvailable,
-    this.responseTimeMs,
-    this.error,
-    required this.testedAt,
-  });
-
-  factory PollingTestResult.success(int responseTimeMs) {
-    return PollingTestResult(
-      isAvailable: true,
-      responseTimeMs: responseTimeMs,
-      testedAt: DateTime.now(),
-    );
-  }
-
-  factory PollingTestResult.failure(String error) {
-    return PollingTestResult(
       isAvailable: false,
       error: error,
       testedAt: DateTime.now(),

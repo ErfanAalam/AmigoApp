@@ -21,7 +21,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 
-import '../socket/websocket.service.dart';
+import '../socket/transport.manager.dart';
 import '../user-status.service.dart';
 
 class AuthService {
@@ -168,7 +168,7 @@ class AuthService {
     try {
       // Ensure websocket is fully shut down and won't auto-reconnect
       try {
-        await WebSocketService().shutdown();
+        await TransportManager().shutdown();
       } catch (_) {}
 
       try {

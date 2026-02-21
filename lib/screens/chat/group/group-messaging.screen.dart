@@ -28,7 +28,7 @@ import '../../../config/app-colors.config.dart';
 import '../../../services/draft-message.service.dart';
 import '../../../services/media-cache.service.dart';
 import '../../../services/notification.service.dart';
-import '../../../services/socket/websocket.service.dart';
+import '../../../services/socket/transport.manager.dart';
 import '../../../services/socket/ws-message.handler.dart';
 import '../../../types/socket.types.dart';
 import '../../../ui/chat/attachment.action-sheet.dart';
@@ -85,7 +85,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _messageController = TextEditingController();
   final FocusNode _messageFocusNode = FocusNode();
-  final WebSocketService _webSocket = WebSocketService();
+  final TransportManager _transportManager = TransportManager();
   // final WebSocketMessageHandler _messageHandler = WebSocketMessageHandler();
   final UserUtils _userUtils = UserUtils();
   final ConversationMemberRepository _conversationMemberRepo =
@@ -651,7 +651,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       wsTimestamp: DateTime.now(),
     ).toJson();
 
-    await _webSocket.sendMessage(wsmsg);
+    await _transportManager.sendMessage(wsmsg);
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
     // start silent message sync (from server to local DB)
@@ -2436,7 +2436,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      await _webSocket.sendMessage(wsmsg).catchError((e) async {
+      await _transportManager.sendMessage(wsmsg).catchError((e) async {
         debugPrint('Error sending message: $e');
         // Mark mes!= null ? json["is_failed"] as bool : null,sage as failed in DB and UI
         await _markMessageAsFailed(newMsg.id);
@@ -2600,7 +2600,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      await _webSocket.sendMessage(wsmsg).catchError((e) {
+      await _transportManager.sendMessage(wsmsg).catchError((e) {
         debugPrint('Error sending typing indicator');
       });
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -4314,7 +4314,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      _webSocket.sendMessage(wsmsg).catchError((e) {
+      _transportManager.sendMessage(wsmsg).catchError((e) {
         debugPrint('❌ Error sending message delete: $e');
       });
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -4492,7 +4492,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       wsTimestamp: DateTime.now(),
     ).toJson();
 
-    _webSocket.sendMessage(wsmsg).catchError((e) {
+    _transportManager.sendMessage(wsmsg).catchError((e) {
       debugPrint('❌ Error sending message delete: $e');
     });
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -4763,7 +4763,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       wsTimestamp: DateTime.now(),
     ).toJson();
 
-    _webSocket.sendMessage(wsmsg).catchError((e) {
+    _transportManager.sendMessage(wsmsg).catchError((e) {
       debugPrint('❌ Error sending conversation:leave in deactivate: $e');
     });
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -4854,7 +4854,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       wsTimestamp: DateTime.now(),
     ).toJson();
 
-    _webSocket.sendMessage(wsmsg).catchError((e) {
+    _transportManager.sendMessage(wsmsg).catchError((e) {
       debugPrint('❌ Error sending conversation:leave in dispose: $e');
     });
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>

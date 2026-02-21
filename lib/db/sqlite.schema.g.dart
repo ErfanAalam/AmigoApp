@@ -847,6 +847,17 @@ class $CallsTable extends Calls with TableInfo<$CallsTable, Call> {
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _answeredAtMeta = const VerificationMeta(
+    'answeredAt',
+  );
+  @override
+  late final GeneratedColumn<String> answeredAt = GeneratedColumn<String>(
+    'answered_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _endedAtMeta = const VerificationMeta(
     'endedAt',
   );
@@ -858,6 +869,18 @@ class $CallsTable extends Calls with TableInfo<$CallsTable, Call> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _durationSecondsMeta = const VerificationMeta(
+    'durationSeconds',
+  );
+  @override
+  late final GeneratedColumn<int> durationSeconds = GeneratedColumn<int>(
+    'duration_seconds',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   static const VerificationMeta _statusMeta = const VerificationMeta('status');
   @override
   late final GeneratedColumn<String> status = GeneratedColumn<String>(
@@ -867,12 +890,21 @@ class $CallsTable extends Calls with TableInfo<$CallsTable, Call> {
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
-  static const VerificationMeta _callTypeMeta = const VerificationMeta(
-    'callType',
+  static const VerificationMeta _reasonMeta = const VerificationMeta('reason');
+  @override
+  late final GeneratedColumn<String> reason = GeneratedColumn<String>(
+    'reason',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
   );
   @override
-  late final GeneratedColumn<String> callType = GeneratedColumn<String>(
-    'call_type',
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+    'created_at',
     aliasedName,
     false,
     type: DriftSqlType.string,
@@ -884,9 +916,12 @@ class $CallsTable extends Calls with TableInfo<$CallsTable, Call> {
     callerId,
     calleeId,
     startedAt,
+    answeredAt,
     endedAt,
+    durationSeconds,
     status,
-    callType,
+    reason,
+    createdAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -927,10 +962,25 @@ class $CallsTable extends Calls with TableInfo<$CallsTable, Call> {
     } else if (isInserting) {
       context.missing(_startedAtMeta);
     }
+    if (data.containsKey('answered_at')) {
+      context.handle(
+        _answeredAtMeta,
+        answeredAt.isAcceptableOrUnknown(data['answered_at']!, _answeredAtMeta),
+      );
+    }
     if (data.containsKey('ended_at')) {
       context.handle(
         _endedAtMeta,
         endedAt.isAcceptableOrUnknown(data['ended_at']!, _endedAtMeta),
+      );
+    }
+    if (data.containsKey('duration_seconds')) {
+      context.handle(
+        _durationSecondsMeta,
+        durationSeconds.isAcceptableOrUnknown(
+          data['duration_seconds']!,
+          _durationSecondsMeta,
+        ),
       );
     }
     if (data.containsKey('status')) {
@@ -941,13 +991,19 @@ class $CallsTable extends Calls with TableInfo<$CallsTable, Call> {
     } else if (isInserting) {
       context.missing(_statusMeta);
     }
-    if (data.containsKey('call_type')) {
+    if (data.containsKey('reason')) {
       context.handle(
-        _callTypeMeta,
-        callType.isAcceptableOrUnknown(data['call_type']!, _callTypeMeta),
+        _reasonMeta,
+        reason.isAcceptableOrUnknown(data['reason']!, _reasonMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
       );
     } else if (isInserting) {
-      context.missing(_callTypeMeta);
+      context.missing(_createdAtMeta);
     }
     return context;
   }
@@ -974,17 +1030,29 @@ class $CallsTable extends Calls with TableInfo<$CallsTable, Call> {
         DriftSqlType.string,
         data['${effectivePrefix}started_at'],
       )!,
+      answeredAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}answered_at'],
+      ),
       endedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}ended_at'],
       ),
+      durationSeconds: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}duration_seconds'],
+      )!,
       status: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}status'],
       )!,
-      callType: attachedDatabase.typeMapping.read(
+      reason: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
-        data['${effectivePrefix}call_type'],
+        data['${effectivePrefix}reason'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}created_at'],
       )!,
     );
   }
@@ -1000,17 +1068,23 @@ class Call extends DataClass implements Insertable<Call> {
   final int callerId;
   final int calleeId;
   final String startedAt;
+  final String? answeredAt;
   final String? endedAt;
+  final int durationSeconds;
   final String status;
-  final String callType;
+  final String? reason;
+  final String createdAt;
   const Call({
     required this.id,
     required this.callerId,
     required this.calleeId,
     required this.startedAt,
+    this.answeredAt,
     this.endedAt,
+    required this.durationSeconds,
     required this.status,
-    required this.callType,
+    this.reason,
+    required this.createdAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1019,11 +1093,18 @@ class Call extends DataClass implements Insertable<Call> {
     map['caller_id'] = Variable<int>(callerId);
     map['callee_id'] = Variable<int>(calleeId);
     map['started_at'] = Variable<String>(startedAt);
+    if (!nullToAbsent || answeredAt != null) {
+      map['answered_at'] = Variable<String>(answeredAt);
+    }
     if (!nullToAbsent || endedAt != null) {
       map['ended_at'] = Variable<String>(endedAt);
     }
+    map['duration_seconds'] = Variable<int>(durationSeconds);
     map['status'] = Variable<String>(status);
-    map['call_type'] = Variable<String>(callType);
+    if (!nullToAbsent || reason != null) {
+      map['reason'] = Variable<String>(reason);
+    }
+    map['created_at'] = Variable<String>(createdAt);
     return map;
   }
 
@@ -1033,11 +1114,18 @@ class Call extends DataClass implements Insertable<Call> {
       callerId: Value(callerId),
       calleeId: Value(calleeId),
       startedAt: Value(startedAt),
+      answeredAt: answeredAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(answeredAt),
       endedAt: endedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(endedAt),
+      durationSeconds: Value(durationSeconds),
       status: Value(status),
-      callType: Value(callType),
+      reason: reason == null && nullToAbsent
+          ? const Value.absent()
+          : Value(reason),
+      createdAt: Value(createdAt),
     );
   }
 
@@ -1051,9 +1139,12 @@ class Call extends DataClass implements Insertable<Call> {
       callerId: serializer.fromJson<int>(json['callerId']),
       calleeId: serializer.fromJson<int>(json['calleeId']),
       startedAt: serializer.fromJson<String>(json['startedAt']),
+      answeredAt: serializer.fromJson<String?>(json['answeredAt']),
       endedAt: serializer.fromJson<String?>(json['endedAt']),
+      durationSeconds: serializer.fromJson<int>(json['durationSeconds']),
       status: serializer.fromJson<String>(json['status']),
-      callType: serializer.fromJson<String>(json['callType']),
+      reason: serializer.fromJson<String?>(json['reason']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
     );
   }
   @override
@@ -1064,9 +1155,12 @@ class Call extends DataClass implements Insertable<Call> {
       'callerId': serializer.toJson<int>(callerId),
       'calleeId': serializer.toJson<int>(calleeId),
       'startedAt': serializer.toJson<String>(startedAt),
+      'answeredAt': serializer.toJson<String?>(answeredAt),
       'endedAt': serializer.toJson<String?>(endedAt),
+      'durationSeconds': serializer.toJson<int>(durationSeconds),
       'status': serializer.toJson<String>(status),
-      'callType': serializer.toJson<String>(callType),
+      'reason': serializer.toJson<String?>(reason),
+      'createdAt': serializer.toJson<String>(createdAt),
     };
   }
 
@@ -1075,17 +1169,23 @@ class Call extends DataClass implements Insertable<Call> {
     int? callerId,
     int? calleeId,
     String? startedAt,
+    Value<String?> answeredAt = const Value.absent(),
     Value<String?> endedAt = const Value.absent(),
+    int? durationSeconds,
     String? status,
-    String? callType,
+    Value<String?> reason = const Value.absent(),
+    String? createdAt,
   }) => Call(
     id: id ?? this.id,
     callerId: callerId ?? this.callerId,
     calleeId: calleeId ?? this.calleeId,
     startedAt: startedAt ?? this.startedAt,
+    answeredAt: answeredAt.present ? answeredAt.value : this.answeredAt,
     endedAt: endedAt.present ? endedAt.value : this.endedAt,
+    durationSeconds: durationSeconds ?? this.durationSeconds,
     status: status ?? this.status,
-    callType: callType ?? this.callType,
+    reason: reason.present ? reason.value : this.reason,
+    createdAt: createdAt ?? this.createdAt,
   );
   Call copyWithCompanion(CallsCompanion data) {
     return Call(
@@ -1093,9 +1193,16 @@ class Call extends DataClass implements Insertable<Call> {
       callerId: data.callerId.present ? data.callerId.value : this.callerId,
       calleeId: data.calleeId.present ? data.calleeId.value : this.calleeId,
       startedAt: data.startedAt.present ? data.startedAt.value : this.startedAt,
+      answeredAt: data.answeredAt.present
+          ? data.answeredAt.value
+          : this.answeredAt,
       endedAt: data.endedAt.present ? data.endedAt.value : this.endedAt,
+      durationSeconds: data.durationSeconds.present
+          ? data.durationSeconds.value
+          : this.durationSeconds,
       status: data.status.present ? data.status.value : this.status,
-      callType: data.callType.present ? data.callType.value : this.callType,
+      reason: data.reason.present ? data.reason.value : this.reason,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
     );
   }
 
@@ -1106,16 +1213,29 @@ class Call extends DataClass implements Insertable<Call> {
           ..write('callerId: $callerId, ')
           ..write('calleeId: $calleeId, ')
           ..write('startedAt: $startedAt, ')
+          ..write('answeredAt: $answeredAt, ')
           ..write('endedAt: $endedAt, ')
+          ..write('durationSeconds: $durationSeconds, ')
           ..write('status: $status, ')
-          ..write('callType: $callType')
+          ..write('reason: $reason, ')
+          ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, callerId, calleeId, startedAt, endedAt, status, callType);
+  int get hashCode => Object.hash(
+    id,
+    callerId,
+    calleeId,
+    startedAt,
+    answeredAt,
+    endedAt,
+    durationSeconds,
+    status,
+    reason,
+    createdAt,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1124,9 +1244,12 @@ class Call extends DataClass implements Insertable<Call> {
           other.callerId == this.callerId &&
           other.calleeId == this.calleeId &&
           other.startedAt == this.startedAt &&
+          other.answeredAt == this.answeredAt &&
           other.endedAt == this.endedAt &&
+          other.durationSeconds == this.durationSeconds &&
           other.status == this.status &&
-          other.callType == this.callType);
+          other.reason == this.reason &&
+          other.createdAt == this.createdAt);
 }
 
 class CallsCompanion extends UpdateCompanion<Call> {
@@ -1134,48 +1257,63 @@ class CallsCompanion extends UpdateCompanion<Call> {
   final Value<int> callerId;
   final Value<int> calleeId;
   final Value<String> startedAt;
+  final Value<String?> answeredAt;
   final Value<String?> endedAt;
+  final Value<int> durationSeconds;
   final Value<String> status;
-  final Value<String> callType;
+  final Value<String?> reason;
+  final Value<String> createdAt;
   const CallsCompanion({
     this.id = const Value.absent(),
     this.callerId = const Value.absent(),
     this.calleeId = const Value.absent(),
     this.startedAt = const Value.absent(),
+    this.answeredAt = const Value.absent(),
     this.endedAt = const Value.absent(),
+    this.durationSeconds = const Value.absent(),
     this.status = const Value.absent(),
-    this.callType = const Value.absent(),
+    this.reason = const Value.absent(),
+    this.createdAt = const Value.absent(),
   });
   CallsCompanion.insert({
     this.id = const Value.absent(),
     required int callerId,
     required int calleeId,
     required String startedAt,
+    this.answeredAt = const Value.absent(),
     this.endedAt = const Value.absent(),
+    this.durationSeconds = const Value.absent(),
     required String status,
-    required String callType,
+    this.reason = const Value.absent(),
+    required String createdAt,
   }) : callerId = Value(callerId),
        calleeId = Value(calleeId),
        startedAt = Value(startedAt),
        status = Value(status),
-       callType = Value(callType);
+       createdAt = Value(createdAt);
   static Insertable<Call> custom({
     Expression<int>? id,
     Expression<int>? callerId,
     Expression<int>? calleeId,
     Expression<String>? startedAt,
+    Expression<String>? answeredAt,
     Expression<String>? endedAt,
+    Expression<int>? durationSeconds,
     Expression<String>? status,
-    Expression<String>? callType,
+    Expression<String>? reason,
+    Expression<String>? createdAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (callerId != null) 'caller_id': callerId,
       if (calleeId != null) 'callee_id': calleeId,
       if (startedAt != null) 'started_at': startedAt,
+      if (answeredAt != null) 'answered_at': answeredAt,
       if (endedAt != null) 'ended_at': endedAt,
+      if (durationSeconds != null) 'duration_seconds': durationSeconds,
       if (status != null) 'status': status,
-      if (callType != null) 'call_type': callType,
+      if (reason != null) 'reason': reason,
+      if (createdAt != null) 'created_at': createdAt,
     });
   }
 
@@ -1184,18 +1322,24 @@ class CallsCompanion extends UpdateCompanion<Call> {
     Value<int>? callerId,
     Value<int>? calleeId,
     Value<String>? startedAt,
+    Value<String?>? answeredAt,
     Value<String?>? endedAt,
+    Value<int>? durationSeconds,
     Value<String>? status,
-    Value<String>? callType,
+    Value<String?>? reason,
+    Value<String>? createdAt,
   }) {
     return CallsCompanion(
       id: id ?? this.id,
       callerId: callerId ?? this.callerId,
       calleeId: calleeId ?? this.calleeId,
       startedAt: startedAt ?? this.startedAt,
+      answeredAt: answeredAt ?? this.answeredAt,
       endedAt: endedAt ?? this.endedAt,
+      durationSeconds: durationSeconds ?? this.durationSeconds,
       status: status ?? this.status,
-      callType: callType ?? this.callType,
+      reason: reason ?? this.reason,
+      createdAt: createdAt ?? this.createdAt,
     );
   }
 
@@ -1214,14 +1358,23 @@ class CallsCompanion extends UpdateCompanion<Call> {
     if (startedAt.present) {
       map['started_at'] = Variable<String>(startedAt.value);
     }
+    if (answeredAt.present) {
+      map['answered_at'] = Variable<String>(answeredAt.value);
+    }
     if (endedAt.present) {
       map['ended_at'] = Variable<String>(endedAt.value);
+    }
+    if (durationSeconds.present) {
+      map['duration_seconds'] = Variable<int>(durationSeconds.value);
     }
     if (status.present) {
       map['status'] = Variable<String>(status.value);
     }
-    if (callType.present) {
-      map['call_type'] = Variable<String>(callType.value);
+    if (reason.present) {
+      map['reason'] = Variable<String>(reason.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
     }
     return map;
   }
@@ -1233,9 +1386,12 @@ class CallsCompanion extends UpdateCompanion<Call> {
           ..write('callerId: $callerId, ')
           ..write('calleeId: $calleeId, ')
           ..write('startedAt: $startedAt, ')
+          ..write('answeredAt: $answeredAt, ')
           ..write('endedAt: $endedAt, ')
+          ..write('durationSeconds: $durationSeconds, ')
           ..write('status: $status, ')
-          ..write('callType: $callType')
+          ..write('reason: $reason, ')
+          ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
   }
@@ -4351,9 +4507,12 @@ typedef $$CallsTableCreateCompanionBuilder =
       required int callerId,
       required int calleeId,
       required String startedAt,
+      Value<String?> answeredAt,
       Value<String?> endedAt,
+      Value<int> durationSeconds,
       required String status,
-      required String callType,
+      Value<String?> reason,
+      required String createdAt,
     });
 typedef $$CallsTableUpdateCompanionBuilder =
     CallsCompanion Function({
@@ -4361,9 +4520,12 @@ typedef $$CallsTableUpdateCompanionBuilder =
       Value<int> callerId,
       Value<int> calleeId,
       Value<String> startedAt,
+      Value<String?> answeredAt,
       Value<String?> endedAt,
+      Value<int> durationSeconds,
       Value<String> status,
-      Value<String> callType,
+      Value<String?> reason,
+      Value<String> createdAt,
     });
 
 class $$CallsTableFilterComposer extends Composer<_$AppDatabase, $CallsTable> {
@@ -4394,8 +4556,18 @@ class $$CallsTableFilterComposer extends Composer<_$AppDatabase, $CallsTable> {
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<String> get answeredAt => $composableBuilder(
+    column: $table.answeredAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get endedAt => $composableBuilder(
     column: $table.endedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get durationSeconds => $composableBuilder(
+    column: $table.durationSeconds,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4404,8 +4576,13 @@ class $$CallsTableFilterComposer extends Composer<_$AppDatabase, $CallsTable> {
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<String> get callType => $composableBuilder(
-    column: $table.callType,
+  ColumnFilters<String> get reason => $composableBuilder(
+    column: $table.reason,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -4439,8 +4616,18 @@ class $$CallsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get answeredAt => $composableBuilder(
+    column: $table.answeredAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get endedAt => $composableBuilder(
     column: $table.endedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get durationSeconds => $composableBuilder(
+    column: $table.durationSeconds,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -4449,8 +4636,13 @@ class $$CallsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<String> get callType => $composableBuilder(
-    column: $table.callType,
+  ColumnOrderings<String> get reason => $composableBuilder(
+    column: $table.reason,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
   );
 }
@@ -4476,14 +4668,27 @@ class $$CallsTableAnnotationComposer
   GeneratedColumn<String> get startedAt =>
       $composableBuilder(column: $table.startedAt, builder: (column) => column);
 
+  GeneratedColumn<String> get answeredAt => $composableBuilder(
+    column: $table.answeredAt,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get endedAt =>
       $composableBuilder(column: $table.endedAt, builder: (column) => column);
+
+  GeneratedColumn<int> get durationSeconds => $composableBuilder(
+    column: $table.durationSeconds,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get status =>
       $composableBuilder(column: $table.status, builder: (column) => column);
 
-  GeneratedColumn<String> get callType =>
-      $composableBuilder(column: $table.callType, builder: (column) => column);
+  GeneratedColumn<String> get reason =>
+      $composableBuilder(column: $table.reason, builder: (column) => column);
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
 }
 
 class $$CallsTableTableManager
@@ -4518,17 +4723,23 @@ class $$CallsTableTableManager
                 Value<int> callerId = const Value.absent(),
                 Value<int> calleeId = const Value.absent(),
                 Value<String> startedAt = const Value.absent(),
+                Value<String?> answeredAt = const Value.absent(),
                 Value<String?> endedAt = const Value.absent(),
+                Value<int> durationSeconds = const Value.absent(),
                 Value<String> status = const Value.absent(),
-                Value<String> callType = const Value.absent(),
+                Value<String?> reason = const Value.absent(),
+                Value<String> createdAt = const Value.absent(),
               }) => CallsCompanion(
                 id: id,
                 callerId: callerId,
                 calleeId: calleeId,
                 startedAt: startedAt,
+                answeredAt: answeredAt,
                 endedAt: endedAt,
+                durationSeconds: durationSeconds,
                 status: status,
-                callType: callType,
+                reason: reason,
+                createdAt: createdAt,
               ),
           createCompanionCallback:
               ({
@@ -4536,17 +4747,23 @@ class $$CallsTableTableManager
                 required int callerId,
                 required int calleeId,
                 required String startedAt,
+                Value<String?> answeredAt = const Value.absent(),
                 Value<String?> endedAt = const Value.absent(),
+                Value<int> durationSeconds = const Value.absent(),
                 required String status,
-                required String callType,
+                Value<String?> reason = const Value.absent(),
+                required String createdAt,
               }) => CallsCompanion.insert(
                 id: id,
                 callerId: callerId,
                 calleeId: calleeId,
                 startedAt: startedAt,
+                answeredAt: answeredAt,
                 endedAt: endedAt,
+                durationSeconds: durationSeconds,
                 status: status,
-                callType: callType,
+                reason: reason,
+                createdAt: createdAt,
               ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), BaseReferences(db, table, e)))

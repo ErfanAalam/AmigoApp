@@ -1,5 +1,5 @@
-import 'dart:ffi';
-
+import 'package:amigo/utils/chat/chat-helpers.utils.dart';
+import 'package:flutter/foundation.dart';
 import 'package:amigo/types/socket.types.dart';
 
 class MessageModel {
@@ -64,10 +64,10 @@ class MessageModel {
     }
     // Parse IDs - canonical_id takes precedence, then id, then optimistic_id
     // final canonicalId = json['canonical_id'] != null
-    //     ? _parseToInt(json['canonical_id'])
-    //     : (json['id'] != null ? _parseToInt(json['id']) : null);
+    //     ? ChatHelpers.parseToInt(json['canonical_id'])
+    //     : (json['id'] != null ? ChatHelpers.parseToInt(json['id']) : null);
     // final optimisticId = json['optimistic_id'] != null
-    //     ? _parseToInt(json['optimistic_id'])
+    //     ? ChatHelpers.parseToInt(json['optimistic_id'])
     //     : null;
 
     // Parse sentAt - check sent_at first, then created_at for backward compatibility
@@ -97,9 +97,11 @@ class MessageModel {
         json['is_deleted'] == 'true';
 
     return MessageModel(
-      id: _parseToInt(json['id']),
-      conversationId: _parseToInt(json['conversation_id'] ?? json['conv_id']),
-      senderId: _parseToInt(json['sender_id']),
+      id: ChatHelpers.parseToInt(json['id']),
+      conversationId: ChatHelpers.parseToInt(
+        json['conversation_id'] ?? json['conv_id'],
+      ),
+      senderId: ChatHelpers.parseToInt(json['sender_id']),
       senderName: json['sender_name']?.toString(),
       senderProfilePic:
           json['sender_profile_pic']?.toString() ??
@@ -117,21 +119,6 @@ class MessageModel {
       localMediaPath: json['local_media_path']?.toString(),
     );
   }
-
-  static int _parseToInt(dynamic value) {
-    if (value == null) return 0;
-    if (value is int) return value;
-    if (value is String) return int.tryParse(value) ?? 0;
-    return 0;
-  }
-
-  // static BigInt _parseToBigInt(dynamic value) {
-  //   if (value == null) return BigInt.zero;
-  //   if (value is BigInt) return value;
-  //   if (value is int) return BigInt.from(value);
-  //   if (value is String) return BigInt.tryParse(value) ?? BigInt.zero;
-  //   return BigInt.zero;
-  // }
 
   Map<String, dynamic> toJson() {
     return {
@@ -233,22 +220,21 @@ class ConversationHistoryResponse {
 
   factory ConversationHistoryResponse.fromJson(Map<String, dynamic> json) {
     // Handle the nested structure: data.data.messages and data.data.pagination
-    final outerData = json['data'] ?? json;
-    final innerData = outerData['data'] ?? outerData;
-    final messagesData = innerData['messages'] ?? [];
-    final pagination = innerData['pagination'] ?? {};
-    final membersData = innerData['members'] ?? [];
+    final data = json;
+    final messagesData = data['messages'] ?? [];
+    final pagination = data['pagination'] ?? {};
+    final membersData = data['members'] ?? [];
 
     return ConversationHistoryResponse(
-      messages: (messagesData as List)
-          .map(
-            (messageJson) =>
-                MessageModel.fromJson(messageJson as Map<String, dynamic>),
-          )
-          .toList(),
-      totalCount: _parseToInt(pagination['totalCount']),
-      currentPage: _parseToInt(pagination['currentPage']),
-      totalPages: _parseToInt(pagination['totalPages']),
+      messages: (messagesData as List).map((messageJson) {
+        final message = MessageModel.fromJson(
+          messageJson as Map<String, dynamic>,
+        );
+        return message;
+      }).toList(),
+      totalCount: ChatHelpers.parseToInt(pagination['totalCount']),
+      currentPage: ChatHelpers.parseToInt(pagination['currentPage']),
+      totalPages: ChatHelpers.parseToInt(pagination['totalPages']),
       hasNextPage:
           pagination['hasNextPage'] == true ||
           pagination['hasNextPage'] == 'true',
@@ -257,12 +243,5 @@ class ConversationHistoryResponse {
           pagination['hasPreviousPage'] == 'true',
       members: (membersData as List).cast<Map<String, dynamic>>(),
     );
-  }
-
-  static int _parseToInt(dynamic value) {
-    if (value == null) return 0;
-    if (value is int) return value;
-    if (value is String) return int.tryParse(value) ?? 0;
-    return 0;
   }
 }

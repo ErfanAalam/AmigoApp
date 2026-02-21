@@ -7,6 +7,7 @@ import 'package:path/path.dart' as path;
 import '../../env.dart';
 import '../../services/auth/auth.service.dart';
 import '../../services/cookies.service.dart';
+import '../../utils/serialization.utils.dart';
 import 'api_result.dart';
 
 /// Base API client with common functionality
@@ -41,11 +42,13 @@ abstract class BaseApiClient {
           parsed = decoded;
         } else {
           // If decoded data is not a Map (e.g., List, primitive), wrap it
+          // Convert string IDs to int before wrapping
+          final convertedData = convertStringIdsToInt(decoded);
           return {
             'success': true,
             'code': 200,
             'message': 'Success',
-            'data': decoded,
+            'data': convertedData,
           };
         }
       } catch (_) {
@@ -62,21 +65,31 @@ abstract class BaseApiClient {
     } else {
       // If data is not a Map (e.g., List, primitive), wrap it in ResultType format
       // This preserves the actual data structure instead of discarding it
-      return {'success': true, 'code': 200, 'message': 'Success', 'data': data};
+      // Convert string IDs to int before wrapping
+      final convertedData = convertStringIdsToInt(data);
+      return {
+        'success': true,
+        'code': 200,
+        'message': 'Success',
+        'data': convertedData,
+      };
     }
 
     // Ensure it has the ResultType structure
     if (!parsed.containsKey('success')) {
       // If backend didn't return ResultType format, wrap it
-      return {
+      final wrapped = {
         'success': true,
         'code': 200,
         'message': parsed['message'] ?? 'Success',
         'data': parsed,
       };
+      // Convert string IDs to int before returning
+      return convertStringIdsToInt(wrapped);
     }
 
-    return parsed;
+    // Convert string IDs (from BigInt) to int before returning
+    return convertStringIdsToInt(parsed);
   }
 
   /// Handle DioException and convert to ApiResult.error
@@ -88,14 +101,17 @@ abstract class BaseApiClient {
     // Check if backend returned ResultType format
     if (e.response?.data is Map<String, dynamic>) {
       final responseData = e.response!.data as Map<String, dynamic>;
-      if (responseData.containsKey('success') &&
-          responseData.containsKey('message')) {
+      // Convert string IDs to int before processing
+      final convertedData = convertStringIdsToInt(responseData);
+
+      if (convertedData.containsKey('success') &&
+          convertedData.containsKey('message')) {
         // Backend already returned ResultType format
-        return ApiResult<T>.fromMap(responseData);
+        return ApiResult<T>.fromMap(convertedData);
       }
       // Extract message from response if available
-      message = responseData['message'] ?? message;
-      error = responseData['error'] ?? e.message;
+      message = convertedData['message'] ?? message;
+      error = convertedData['error'] ?? e.message;
     } else {
       error = e.message;
     }
@@ -157,21 +173,14 @@ abstract class BaseApiClient {
   }) async {
     try {
       await cookieService.hasAuthCookies();
+
       final response = await _dio.get(
         '$baseUrl$path',
         queryParameters: queryParameters,
         options: options,
       );
-      print("-----------------------------------------------------------");
-      print("response : ${response}");
-      print("-----------------------------------------------------------");
-
-      print(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
 
       final parsedData = _parseResponseData(response.data);
-      print("-----------------------------------------------------------");
-      print("parsedData : ${parsedData}");
-      print("-----------------------------------------------------------");
       return ApiResult<dynamic>.fromMap(parsedData);
     } on DioException catch (e) {
       return _handleDioException<dynamic>(e);

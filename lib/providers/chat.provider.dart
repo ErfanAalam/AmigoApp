@@ -5,6 +5,7 @@ import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/chat.types.dart';
+import 'package:amigo/utils/chat/chat-helpers.utils.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/api_service.dart';
@@ -251,189 +252,147 @@ class ChatNotifier extends Notifier<ChatState> {
       state = state.copyWith(isLoading: true);
     }
 
-    final response = await apiService.user.getChatList('dm');
-    if (response.isSuccess) {
-      final List<dynamic> conversationsList =
-          response.data as List<dynamic> ?? [];
+    // Load groups
+    try {
+      debugPrint('🔄 Loading DMs from server...');
+      final response = await apiService.user.getChatList('dm');
+      if (response.isSuccess) {
+        final List<dynamic> conversationsList = response.data as List<dynamic>;
 
-      if (conversationsList.isNotEmpty) {
-        // Fetch all existing IDs from DB first
-        final existingConvIds = await _conversationsRepo.getAllConversationIds(
-          type: ChatType.dm,
-        );
-        final existingConvIdsSet = existingConvIds.toSet();
-        debugPrint('Existing conversation IDs: ${existingConvIdsSet.length}');
+        if (conversationsList.isNotEmpty) {
+          // Fetch all existing IDs from DB first
+          final existingConvIds = await _conversationsRepo
+              .getAllConversationIds(type: ChatType.dm);
+          final existingConvIdsSet = existingConvIds.toSet();
+          // debugPrint('Existing conversation IDs: ${existingConvIdsSet.length}');
 
-        // Get all existing conversation members (conversationId, userId pairs)
-        final existingMembers = await _conversationsMemberRepo
-            .getAllConversationMembers();
-        final existingMemberPairs = existingMembers
-            .map((m) => '${m.conversationId}_${m.userId}')
-            .toSet();
-        debugPrint('Existing member pairs: ${existingMemberPairs.length}');
+          // Get all existing conversation members (conversationId, userId pairs)
+          final existingMembers = await _conversationsMemberRepo
+              .getAllConversationMembers();
+          final existingMemberPairs = existingMembers
+              .map((m) => '${m.conversationId}_${m.userId}')
+              .toSet();
+          // debugPrint('Existing member pairs: ${existingMemberPairs.length}');
 
-        // Get all existing user IDs
-        final existingUsers = await _userRepo.getAllUsers();
-        final existingUserIds = existingUsers.map((u) => u.id).toSet();
-        debugPrint('Existing user IDs: ${existingUserIds.length}');
+          // Get all existing user IDs
+          final existingUsers = await _userRepo.getAllUsers();
+          final existingUserIds = existingUsers.map((u) => u.id).toSet();
+          // debugPrint('Existing user IDs: ${existingUserIds.length}');
 
-        final dmList = await _convertToDmListTypeAsync(conversationsList);
-        final convList = await _convertToConversationsTypeAsync(
-          conversationsList,
-        );
+          final dmList = await _convertToDmListTypeAsync(conversationsList);
+          final convList = await _convertToConversationsTypeAsync(
+            conversationsList,
+          );
 
-        // Filter conversations to only include new ones
-        final newConvs = convList
-            .where((conv) => !existingConvIdsSet.contains(conv.id))
-            .toList();
-        debugPrint(
-          'New conversations to insert: ${newConvs.length} out of ${convList.length}',
-        );
+          // Filter conversations to only include new ones
+          final newConvs = convList
+              .where((conv) => !existingConvIdsSet.contains(conv.id))
+              .toList();
+          debugPrint(
+            'New conversations to insert: ${newConvs.length} out of ${convList.length}',
+          );
 
-        // Store only new conversations in local DB
-        try {
-          if (newConvs.isNotEmpty) {
-            await _conversationsRepo.insertConversations(newConvs);
+          // Store only new conversations in local DB
+          try {
+            if (newConvs.isNotEmpty) {
+              await _conversationsRepo.insertConversations(newConvs);
+            }
+          } catch (e) {
+            debugPrint('❌ Error inserting DM conversations to DB: $e');
+            // Continue even if DB insert fails
           }
-        } catch (e) {
-          debugPrint('❌ Error inserting DM conversations to DB: $e');
-          // Continue even if DB insert fails
-        }
 
-        // Store conversation members in local DB - filter to only new ones
-        final convMembers = dmList
-            .map(
-              (dm) => ConversationMemberModel(
-                conversationId: dm.conversationId,
-                userId: dm.recipientId,
-                role: 'member',
-                unreadCount: dm.unreadCount ?? 0,
-                joinedAt: dm.createdAt,
-              ),
-            )
-            .toList();
+          // Store conversation members in local DB - filter to only new ones
+          final convMembers = dmList
+              .map(
+                (dm) => ConversationMemberModel(
+                  conversationId: dm.conversationId,
+                  userId: dm.recipientId,
+                  role: 'member',
+                  unreadCount: dm.unreadCount ?? 0,
+                  joinedAt: dm.createdAt,
+                ),
+              )
+              .toList();
 
-        // Filter to only new member pairs
-        final newMembers = convMembers
-            .where(
-              (member) => !existingMemberPairs.contains(
-                '${member.conversationId}_${member.userId}',
-              ),
-            )
-            .toList();
-        debugPrint(
-          'New members to insert: ${newMembers.length} out of ${convMembers.length}',
-        );
+          // Filter to only new member pairs
+          final newMembers = convMembers
+              .where(
+                (member) => !existingMemberPairs.contains(
+                  '${member.conversationId}_${member.userId}',
+                ),
+              )
+              .toList();
+          // debugPrint(
+          //   'New members to insert: ${newMembers.length} out of ${convMembers.length}',
+          // );
 
-        try {
-          if (newMembers.isNotEmpty) {
-            await _conversationsMemberRepo.insertConversationMembersOnly(
-              newMembers,
-            );
+          try {
+            if (newMembers.isNotEmpty) {
+              await _conversationsMemberRepo.insertConversationMembersOnly(
+                newMembers,
+              );
+            }
+          } catch (e) {
+            debugPrint('❌ Error inserting conversation members to DB: $e');
+            // Continue even if DB insert fails
           }
-        } catch (e) {
-          debugPrint('❌ Error inserting conversation members to DB: $e');
-          // Continue even if DB insert fails
-        }
 
-        // Store user (recipient) in local DB - filter to only new ones
-        final users = dmList
-            .map(
-              (dm) => UserModel(
-                id: dm.recipientId,
-                name: dm.recipientName,
-                phone: dm.recipientPhone,
-                profilePic: dm.recipientProfilePic,
-                isOnline: dm.isRecipientOnline,
-              ),
-            )
-            .toList();
+          // Store user (recipient) in local DB - filter to only new ones
+          final users = dmList
+              .map(
+                (dm) => UserModel(
+                  id: dm.recipientId,
+                  name: dm.recipientName,
+                  phone: dm.recipientPhone,
+                  profilePic: dm.recipientProfilePic,
+                  isOnline: dm.isRecipientOnline,
+                ),
+              )
+              .toList();
 
-        // Filter to only new users
-        final newUsers = users
-            .where((user) => !existingUserIds.contains(user.id))
-            .toList();
-        debugPrint(
-          'New users to insert: ${newUsers.length} out of ${users.length}',
-        );
+          // Filter to only new users
+          final newUsers = users
+              .where((user) => !existingUserIds.contains(user.id))
+              .toList();
+          debugPrint(
+            'New users to insert: ${newUsers.length} out of ${users.length}',
+          );
 
-        try {
-          if (newUsers.isNotEmpty) {
-            await _userRepo.insertUsersOnly(newUsers);
+          try {
+            if (newUsers.isNotEmpty) {
+              await _userRepo.insertUsersOnly(newUsers);
+            }
+          } catch (e) {
+            debugPrint('❌ Error inserting users to DB: $e');
+            // Continue even if DB insert fails
           }
-        } catch (e) {
-          debugPrint('❌ Error inserting users to DB: $e');
-          // Continue even if DB insert fails
+
+          // Load pin/mute/favorite status from local DB (these are local-only, not from server)
+          // Query all DM conversations from DB to get their local pin/mute/favorite status
+          final localConvs = await _conversationsRepo.getConversationsByType(
+            ChatType.dm,
+          );
+          final convStatusMap = <int, ConversationModel>{};
+          for (final conv in localConvs) {
+            convStatusMap[conv.id] = conv;
+          }
+
+          // Enrich DMs with local user display names (includes username from contacts)
+          final enrichedDmList = await UserUtils().enrichDmsWithDisplayNames(
+            dmList,
+          );
+
+          // Update Provider state
+          final sortedDms = await filterAndSortConversations(enrichedDmList);
+          debugPrint('✅ Processed ${sortedDms.length} DMs');
+          state = state.copyWith(dmList: sortedDms, isLoading: false);
+          debugPrint('✅ DMs state updated successfully');
         }
-
-        // Load pin/mute/favorite status from local DB (these are local-only, not from server)
-        // Query all DM conversations from DB to get their local pin/mute/favorite status
-        final localConvs = await _conversationsRepo.getConversationsByType(
-          ChatType.dm,
-        );
-        final convStatusMap = <int, ConversationModel>{};
-        for (final conv in localConvs) {
-          convStatusMap[conv.id] = conv;
-        }
-
-        // Merge with existing Sets to preserve group status
-        // final currentPinnedChats = Set<int>.from(state.pinnedChats);
-        // final currentMutedChats = Set<int>.from(state.mutedChats);
-        // final currentFavoriteChats = Set<int>.from(state.favoriteChats);
-        // final currentDeletedChats = Set<int>.from(state.deletedChats);
-
-        // Populate Sets from local DB status for DMs
-        // for (final dm in dmList) {
-        //   final conv = convStatusMap[dm.conversationId];
-        //   if (conv != null) {
-        //     if (conv.isPinned == true) {
-        //       currentPinnedChats.add(dm.conversationId);
-        //     } else {
-        //       currentPinnedChats.remove(dm.conversationId);
-        //     }
-        //     if (conv.isMuted == true) {
-        //       currentMutedChats.add(dm.conversationId);
-        //     } else {
-        //       currentMutedChats.remove(dm.conversationId);
-        //     }
-        //     if (conv.isFavorite == true) {
-        //       currentFavoriteChats.add(dm.conversationId);
-        //     } else {
-        //       currentFavoriteChats.remove(dm.conversationId);
-        //     }
-        //     if (conv.isDeleted == true) {
-        //       currentDeletedChats.add(dm.conversationId);
-        //     } else {
-        //       currentDeletedChats.remove(dm.conversationId);
-        //     }
-        //   } else {
-        //     // If conversation not found in DB, ensure it's not in Sets
-        //     currentPinnedChats.remove(dm.conversationId);
-        //     currentMutedChats.remove(dm.conversationId);
-        //     currentFavoriteChats.remove(dm.conversationId);
-        //     currentDeletedChats.remove(dm.conversationId);
-        //   }
-        // }
-
-        // Enrich DMs with local user display names (includes username from contacts)
-        final enrichedDmList = await UserUtils().enrichDmsWithDisplayNames(
-          dmList,
-        );
-
-        // Update Provider state
-        final sortedDms = await filterAndSortConversations(enrichedDmList);
-        state = state.copyWith(
-          dmList: sortedDms,
-          isLoading: false,
-          // pinnedChats: currentPinnedChats,
-          // mutedChats: currentMutedChats,
-          // favoriteChats: currentFavoriteChats,
-          // deletedChats: currentDeletedChats,
-        );
       }
-      // else {
-      //   state = state.copyWith(dmList: [], isLoading: false);
-      // }
+    } catch (e) {
+      debugPrint('❌ Error loading DMs from server: $e');
+      state = state.copyWith(isLoading: false);
     }
 
     // Load groups
@@ -442,11 +401,8 @@ class ChatNotifier extends Notifier<ChatState> {
       final groupResponse = await apiService.user.getChatList('group');
 
       if (groupResponse.isSuccess) {
-        debugPrint('📦 Group response success: ${groupResponse.isSuccess}');
         final List<dynamic> groupsList =
             groupResponse.data as List<dynamic> ?? [];
-
-        debugPrint('📊 Groups list length: ${groupsList.length}');
 
         List<GroupModel> groups = [];
         List<ConversationModel> convs = [];
@@ -509,17 +465,11 @@ class ChatNotifier extends Notifier<ChatState> {
         final existingGroupConvIds = await _conversationsRepo
             .getAllConversationIds(type: ChatType.group);
         final existingGroupConvIdsSet = existingGroupConvIds.toSet();
-        debugPrint(
-          'Existing group conversation IDs: ${existingGroupConvIdsSet.length}',
-        );
 
         // Filter group conversations to only include new ones
         final newGroupConvs = convs
             .where((conv) => !existingGroupConvIdsSet.contains(conv.id))
             .toList();
-        debugPrint(
-          'New group conversations to insert: ${newGroupConvs.length} out of ${convs.length}',
-        );
 
         // Store only new group conversations in local DB
         try {
@@ -553,49 +503,10 @@ class ChatNotifier extends Notifier<ChatState> {
           return group;
         }).toList();
 
-        // Update pinned/muted/favorite Sets with group status
-        // final currentPinnedChats = Set<int>.from(state.pinnedChats);
-        // final currentMutedChats = Set<int>.from(state.mutedChats);
-        // final currentFavoriteChats = Set<int>.from(state.favoriteChats);
-        // final currentDeletedChats = Set<int>.from(state.deletedChats);
-
-        // for (final group in groups) {
-        //   final conv = groupConvStatusMap[group.conversationId];
-        //   if (conv != null) {
-        //     if (conv.isPinned == true) {
-        //       currentPinnedChats.add(group.conversationId);
-        //     } else {
-        //       currentPinnedChats.remove(group.conversationId);
-        //     }
-        //     if (conv.isMuted == true) {
-        //       currentMutedChats.add(group.conversationId);
-        //     } else {
-        //       currentMutedChats.remove(group.conversationId);
-        //     }
-        //     if (conv.isFavorite == true) {
-        //       currentFavoriteChats.add(group.conversationId);
-        //     } else {
-        //       currentFavoriteChats.remove(group.conversationId);
-        //     }
-        //     if (conv.isDeleted == true) {
-        //       currentDeletedChats.add(group.conversationId);
-        //     } else {
-        //       currentDeletedChats.remove(group.conversationId);
-        //     }
-        //   } else {
-        //     // If conversation not found in DB, ensure it's not in Sets
-        //     currentPinnedChats.remove(group.conversationId);
-        //     currentMutedChats.remove(group.conversationId);
-        //     currentFavoriteChats.remove(group.conversationId);
-        //     currentDeletedChats.remove(group.conversationId);
-        //   }
-        // }
-
         // Storing group members and metadata can be added here if needed
         // Sort groups
-        debugPrint('✅ Processed ${groups.length} groups, sorting...');
         final sortedGroups = await filterAndSortGroupConversations(groups);
-        debugPrint('✅ Sorted ${sortedGroups.length} groups, updating state...');
+        debugPrint('✅ Processed ${groups.length} groups');
         state = state.copyWith(
           groupList: sortedGroups,
           isLoading: false,
@@ -610,9 +521,8 @@ class ChatNotifier extends Notifier<ChatState> {
         debugPrint('❌ Failed to load groups: ${groupResponse.message}');
         state = state.copyWith(isLoading: false);
       }
-    } catch (e, stackTrace) {
+    } catch (e) {
       debugPrint('❌ Error loading groups from server: $e');
-      debugPrint('❌ Stack trace: $stackTrace');
       state = state.copyWith(isLoading: false);
     }
   }
@@ -668,8 +578,10 @@ class ChatNotifier extends Notifier<ChatState> {
                   recipientName: json['userName'],
                   recipientPhone: json['userPhone'],
                   recipientProfilePic: json['userProfilePic'],
-                  pinnedMessageId: json['pinnedMessageId'],
-                  lastMessageId: json['lastMessageId'],
+                  pinnedMessageId: ChatHelpers.parseToInt(
+                    json['pinnedMessageId'],
+                  ),
+                  lastMessageId: ChatHelpers.parseToInt(json['lastMessageId']),
                   lastMessageType: json['lastMessageType'],
                   lastMessageBody: json['lastMessageBody'],
                   lastMessageAt: json['lastMessageAt'],
@@ -680,7 +592,7 @@ class ChatNotifier extends Notifier<ChatState> {
               }
               return null;
             } catch (e) {
-              debugPrint('❌ Error processing conversation: $e');
+              debugPrint('❌ Error processing convertToDmListTypeAsync: $e');
               return null;
             }
           })
@@ -739,8 +651,10 @@ class ChatNotifier extends Notifier<ChatState> {
                   title: json['title'],
                   createrId: json['createrId'],
                   unreadCount: json['unreadCount'],
-                  lastMessageId: json['lastMessageId'],
-                  pinnedMessageId: json['pinnedMessageId'],
+                  lastMessageId: ChatHelpers.parseToInt(json['lastMessageId']),
+                  pinnedMessageId: ChatHelpers.parseToInt(
+                    json['pinnedMessageId'],
+                  ),
                   isDeleted: json['isDeleted'],
                   isPinned: json['isPinned'],
                   isFavorite: json['isFavorite'],
@@ -750,7 +664,9 @@ class ChatNotifier extends Notifier<ChatState> {
               }
               return null;
             } catch (e) {
-              debugPrint('❌ Error processing conversation: $e');
+              debugPrint(
+                '❌ Error processing convertToConversationsTypeAsync: $e',
+              );
               return null;
             }
           })
@@ -1546,12 +1462,7 @@ class ChatNotifier extends Notifier<ChatState> {
     MessageModel lastMessage,
   ) async {
     try {
-      // Ensure we have a valid message ID (use optimistic ID if canonical is not available yet)
       final messageId = lastMessage.id;
-
-      if (messageId == null) {
-        return;
-      }
 
       // Update database with the message ID
       await _conversationsRepo.updateLastMessage(conversationId, messageId);

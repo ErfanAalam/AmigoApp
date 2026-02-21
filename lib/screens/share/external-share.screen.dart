@@ -17,7 +17,7 @@ import '../../db/repositories/message-status.repo.dart';
 import '../../models/group.model.dart';
 import '../../models/user.model.dart';
 import '../../providers/chat.provider.dart';
-import '../../services/socket/websocket.service.dart';
+import '../../services/socket/transport.manager.dart';
 import '../../types/socket.types.dart';
 import '../../ui/snackbar.dart';
 
@@ -111,7 +111,7 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
 
   // Services
   final apiService = ApiService();
-  final WebSocketService _webSocket = WebSocketService();
+  final TransportManager _transportManager = TransportManager();
 
   // Repositories
   final MessageRepository _messageRepo = MessageRepository();
@@ -364,7 +364,7 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
                 wsTimestamp: DateTime.now(),
               ).toJson();
 
-              await _webSocket.sendMessage(wsmsg).catchError((e) async {
+              await _transportManager.sendMessage(wsmsg).catchError((e) async {
                 debugPrint('Error sending message: $e');
                 // Mark message as failed in DB and UI
               });

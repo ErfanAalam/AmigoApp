@@ -26,7 +26,7 @@ import '../../../config/app-colors.config.dart';
 import '../../../services/draft-message.service.dart';
 import '../../../services/media-cache.service.dart';
 import '../../../services/notification.service.dart';
-import '../../../services/socket/websocket.service.dart';
+import '../../../services/socket/transport.manager.dart';
 import '../../../services/socket/ws-message.handler.dart';
 import '../../../services/user-status.service.dart';
 import '../../../types/socket.types.dart';
@@ -73,7 +73,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _messageController = TextEditingController();
   final FocusNode _messageFocusNode = FocusNode();
-  final WebSocketService _webSocket = WebSocketService();
+  final TransportManager _transportManager = TransportManager();
   final WebSocketMessageHandler _wsMessageHandler = WebSocketMessageHandler();
   final ImagePicker _imagePicker = ImagePicker();
   final MediaCacheService _mediaCacheService = MediaCacheService();
@@ -102,9 +102,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   int _syncedMessageCount = 0;
   int _totalMessageCount = 0;
 
-  // Automatic resend state variable - initialized to true to disable manual resend until initialization completes
-  // bool _isResendingFailedMessages = true;
-
   // Typing animation controllers
   late AnimationController _typingAnimationController;
   late List<Animation<double>> _typingDotAnimations;
@@ -124,30 +121,15 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // Draft save debounce timer
   Timer? _draftSaveTimer;
 
-  // bool _isLoadingMore = false;
-  // bool _hasMoreMessages = true;
-  // int _currentPage = 1;
-  // String? _errorMessage;
-  // bool _isInitialized = false;
-  // bool _hasCallAccess = false;
-  // ConversationMeta? _conversationMeta;
-  // bool _isLoadingFromCache = false;
-  // bool _hasCheckedCache = false; // Track if we've checked cache
-  // bool _isCheckingCache = true; // Show brief cache check state
   bool _isTyping = false;
   bool _isSendingMessage = false;
   // bool isloadingMediamessage = false;
   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
-  // Map<int, int?> userLastReadMessageIds = {}; // userId -> lastReadMessageId
 
   // Scroll to bottom button state
   bool _isAtBottom = true;
-  // int _unreadCountWhileScrolled = 0;
   double _lastScrollPosition = 0.0;
-  // int _previousMessageCount = 0;
 
-  // int _optimisticMessageId = -1; // Negative IDs for optimistic messages
-  // final Set<int> _optimisticMessageIds = {}; // Track optimistic messages
   bool _isDisposed = false; // Track if the page is being disposed
 
   bool get _canSetState => mounted && !_isDisposed;
@@ -157,13 +139,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       setState(fn);
     }
   }
-
-  // User info cache for sender names and profile pics
-  // final Map<int, Map<String, String?>> _userInfoCache = {};
-
-  // Track if other users are active in the conversation
-  // final Map<int, bool> _activeUsers = {};
-  // List<int> _onlineUsers = [];
 
   // Message selection and actions
   final Set<int> _selectedMessages = {};
@@ -459,14 +434,14 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         );
 
     // Listen to message delete events for this conversation
-    // _messageDeleteSubscription = _wsMessageHandler
-    //     .messageDeletesForConversation(convId)
-    //     .listen(
-    //       (payload) => _handleMessageDelete(payload),
-    //       onError: (error) {
-    //         debugPrint('❌ Message delete stream error: $error');
-    //       },
-    //     );
+    _messageDeleteSubscription = _wsMessageHandler
+        .messageDeletesForConversation(convId)
+        .listen(
+          (payload) => _handleMessageDelete(payload),
+          onError: (error) {
+            debugPrint('❌ Message delete stream error: $error');
+          },
+        );
     _joinConvSubscription = _wsMessageHandler
         .joinConversation(convId)
         .listen(
@@ -576,7 +551,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       wsTimestamp: DateTime.now(),
     ).toJson();
 
-    await _webSocket.sendMessage(wsmsg);
+    await _transportManager.sendMessage(wsmsg);
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
     // start silent message sync (from server to local DB)
@@ -703,9 +678,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         page: 1,
         limit: 100,
       );
-      print("-----------------------------------------------------------");
-      print("firstPageResponse : ${firstPageResponse}");
-      print("-----------------------------------------------------------");
 
       final firstPageHistory = ConversationHistoryResponse.fromJson(
         firstPageResponse.data as Map<String, dynamic>,
@@ -771,6 +743,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         page: page,
         limit: limit,
       )).toMap();
+      print("-----------------------------------------------------------");
+      print("firstPageResponse : ${firstPageResponse}");
+      print("-----------------------------------------------------------");
 
       if (firstPageResponse['success'] != true ||
           firstPageResponse['data'] == null) {
@@ -1054,18 +1029,27 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   /// Handle message delete event from WebSocket
-  // void _handleMessageDelete(DeleteMessagePayload payload) async {
-  //   await handleMessageDelete(
-  //     HandleMessageDeleteConfig(
-  //       message: payload,
-  //       mounted: () => mounted,
-  //       setState: setState,
-  //       messages: _messages,
-  //       conversationId: widget.dm.id,
-  //       messagesRepo: _messagesRepo,
-  //     ),
-  //   );
-  // }
+  void _handleMessageDelete(DeleteMessagePayload payload) async {
+    // Find all message indices to remove
+    final indicesToRemove = <int>[];
+    for (final msgId in payload.messageIds) {
+      final messageIndex = _messages.indexWhere((msg) => msg.id == msgId);
+      if (messageIndex != -1) {
+        indicesToRemove.add(messageIndex);
+      }
+    }
+    
+    // Remove messages in reverse order to avoid index shifting issues
+    if (indicesToRemove.isNotEmpty) {
+      indicesToRemove.sort((a, b) => b.compareTo(a)); // Sort descending
+      if (!_canSetState) return;
+      _safeSetState(() {
+        for (final index in indicesToRemove) {
+          _messages.removeAt(index);
+        }
+      });
+    }
+  }
 
   /// Build message status ticks (single/double) based on delivery and read status
   Widget _buildMessageStatusTicks(MessageModel message) {
@@ -1313,7 +1297,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      await _webSocket.sendMessage(wsmsg).catchError((e) {
+      await _transportManager.sendMessage(wsmsg).catchError((e) {
         debugPrint('Error sending conversation:leave in deactivate');
       });
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -1496,7 +1480,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      await _webSocket.sendMessage(wsmsg).catchError((e) async {
+      await _transportManager.sendMessage(wsmsg).catchError((e) async {
         debugPrint('Error sending message: $e');
         // Mark message as failed in DB and UI
         await _markMessageAsFailed(newMsg.id);
@@ -3748,7 +3732,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             wsTimestamp: DateTime.now(),
           ).toJson();
 
-          _webSocket.sendMessage(wsmsg).catchError((e) {
+          _transportManager.sendMessage(wsmsg).catchError((e) {
             debugPrint('❌ Error sending message delete: $e');
           });
         } else {
@@ -4056,7 +4040,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       wsTimestamp: DateTime.now(),
     ).toJson();
 
-    _webSocket.sendMessage(wsmsg).catchError((e) {
+    _transportManager.sendMessage(wsmsg).catchError((e) {
       debugPrint('❌ Error sending conversation:leave in deactivate: $e');
     });
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -4121,7 +4105,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       wsTimestamp: DateTime.now(),
     ).toJson();
 
-    _webSocket.sendMessage(wsmsg).catchError((e) {
+    _transportManager.sendMessage(wsmsg).catchError((e) {
       debugPrint('❌ Error sending conversation:leave in deactivate: $e');
     });
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>

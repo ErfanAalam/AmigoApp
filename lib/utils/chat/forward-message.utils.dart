@@ -1,7 +1,7 @@
 import 'package:amigo/types/socket.types.dart';
 import 'package:flutter/material.dart';
 
-import '../../services/socket/websocket.service.dart';
+import '../../services/socket/transport.manager.dart';
 import '../../ui/snackbar.dart';
 
 /// Configuration for handling forward to conversations
@@ -31,7 +31,7 @@ class HandleForwardToConversationsConfig {
   });
 }
 
-final WebSocketService websocketService = WebSocketService();
+final TransportManager transportManager = TransportManager();
 
 /// Handle forwarding messages to selected conversations
 Future<void> handleForwardToConversations(
@@ -56,7 +56,7 @@ Future<void> handleForwardToConversations(
       wsTimestamp: DateTime.now(),
     ).toJson();
 
-    websocketService.sendMessage(wsmsg).catchError((e) {
+    transportManager.sendMessage(wsmsg).catchError((e) {
       debugPrint('❌ Error sending message forward');
     });
 

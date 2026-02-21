@@ -2,6 +2,7 @@ import 'dart:io';
 
 import '../core/api_result.dart';
 import '../core/base_api_client.dart';
+import '../../utils/serialization.utils.dart';
 
 /// Chat API client
 class ChatClient extends BaseApiClient {
@@ -43,10 +44,7 @@ class ChatClient extends BaseApiClient {
     File file, {
     Function(int sent, int total)? onSendProgress,
   }) async {
-    return uploadMedia(
-      file: file,
-      onSendProgress: onSendProgress,
-    );
+    return uploadMedia(file: file, onSendProgress: onSendProgress);
   }
 
   /// Delete messages
@@ -58,7 +56,8 @@ class ChatClient extends BaseApiClient {
     if (isAdminOrStaff != null) {
       body['is_admin_or_staff'] = isAdminOrStaff;
     }
-    return delete('/message/soft-delete', data: body);
+    final idsWithString = convertBigIntIdsToString(body);
+    return delete('/message/soft-delete', data: idsWithString);
   }
 
   /// Delete message for me
@@ -68,10 +67,7 @@ class ChatClient extends BaseApiClient {
   }) async {
     return delete(
       '/message/delete-for-me',
-      data: {
-        'message_ids': messageIds,
-        'conversation_id': conversationId,
-      },
+      data: {'message_ids': messageIds, 'conversation_id': conversationId},
     );
   }
 
@@ -81,9 +77,7 @@ class ChatClient extends BaseApiClient {
   }
 
   /// Revive chat
-  Future<ApiResult<dynamic>> reviveChat(
-    int conversationId,
-  ) async {
+  Future<ApiResult<dynamic>> reviveChat(int conversationId) async {
     return post('/chat/revive-chat/$conversationId');
   }
 
@@ -94,10 +88,7 @@ class ChatClient extends BaseApiClient {
   }) async {
     return post(
       '/message/delivered',
-      data: {
-        'message_id': messageId,
-        'conversation_id': conversationId,
-      },
+      data: {'message_id': messageId, 'conversation_id': conversationId},
     );
   }
 

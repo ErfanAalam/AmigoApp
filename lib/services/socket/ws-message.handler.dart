@@ -4,7 +4,7 @@ import '../../types/socket.types.dart';
 import '../../utils/navigation-helper.util.dart';
 import '../user-status.service.dart';
 import '../auth/auth.service.dart';
-import 'websocket.service.dart';
+import 'transport.manager.dart';
 
 /// Centralized WebSocket message handler that processes all messages once
 /// and distributes them via filtered streams for widgets to consume
@@ -14,9 +14,9 @@ class WebSocketMessageHandler {
   factory WebSocketMessageHandler() => _instance;
   WebSocketMessageHandler._internal();
 
-  final WebSocketService _websocketService = WebSocketService();
+  final TransportManager _transportManager = TransportManager();
   final UserStatusService _userStatusService = UserStatusService();
-  StreamSubscription<WSMessage>? _messageSubscription;
+  StreamSubscription<Map<String, dynamic>>? _messageSubscription;
 
   // Stream controllers for different message types
   final StreamController<ConnectionStatus> _onlineStatusController =
@@ -168,8 +168,17 @@ class WebSocketMessageHandler {
       return;
     }
 
-    _messageSubscription = _websocketService.messageStream.listen(
-      _handleMessage,
+    _messageSubscription = _transportManager.messageStream.listen(
+      (jsonMap) {
+        try {
+          // Parse the JSON map into WSMessage
+          final message = WSMessage.fromJson(jsonMap);
+          _handleMessage(message);
+        } catch (e, stackTrace) {
+          debugPrint('❌ Error parsing message: $e');
+          debugPrint('❌ Stack trace: $stackTrace');
+        }
+      },
       onError: (error) {
         debugPrint('❌ WebSocketMessageHandler stream error: $error');
       },
@@ -178,96 +187,9 @@ class WebSocketMessageHandler {
     _isInitialized = true;
   }
 
-  /// Helper to convert payload to CallPayload
-  // CallPayload? _payloadToCallPayload(dynamic payload, WSMessage message) {
-  //   if (payload == null) return null;
-  //
-  //   Map<String, dynamic>? payloadMap;
-  //   if (payload is Map<String, dynamic>) {
-  //     payloadMap = payload;
-  //   } else if (payload is Map) {
-  //     payloadMap = Map<String, dynamic>.from(payload);
-  //   } else if (payload is CallPayload) {
-  //     return payload;
-  //   } else {
-  //     try {
-  //       payloadMap = payload.toJson() as Map<String, dynamic>?;
-  //     } catch (e) {
-  //       return null;
-  //     }
-  //   }
-  //
-  //   if (payloadMap == null) return null;
-  //
-  //   // Try to extract call information from the payload
-  //   // Different call message types have different structures
-  //   try {
-  //     // Extract common fields
-  //     final callId = payloadMap['callId'] ??
-  //                    payloadMap['call_id'] ??
-  //                    payloadMap['data']?['callId'] ??
-  //                    payloadMap['data']?['call_id'];
-  //
-  //     final callerId = payloadMap['callerId'] ??
-  //                      payloadMap['caller_id'] ??
-  //                      payloadMap['from'] ??
-  //                      payloadMap['from_id'] ??
-  //                      payloadMap['sender_id'];
-  //
-  //     final calleeId = payloadMap['calleeId'] ??
-  //                      payloadMap['callee_id'] ??
-  //                      payloadMap['to'] ??
-  //                      payloadMap['to_id'];
-  //
-  //     // If we don't have basic info, return null
-  //     if (callerId == null && calleeId == null) {
-  //       return null;
-  //     }
-  //
-  //     // Parse IDs with proper null handling
-  //     int? parsedCallerId;
-  //     if (callerId is int) {
-  //       parsedCallerId = callerId;
-  //     } else if (callerId is String) {
-  //       parsedCallerId = int.tryParse(callerId);
-  //     }
-  //
-  //     int? parsedCalleeId;
-  //     if (calleeId is int) {
-  //       parsedCalleeId = calleeId;
-  //     } else if (calleeId is String) {
-  //       parsedCalleeId = int.tryParse(calleeId);
-  //     }
-  //
-  //     // At least one ID must be present
-  //     if (parsedCallerId == null && parsedCalleeId == null) {
-  //       return null;
-  //     }
-  //
-  //     return CallPayload(
-  //       callId: callId is int ? callId : (callId is String ? int.tryParse(callId) : null),
-  //       callerId: parsedCallerId ?? 0,
-  //       callerName: payloadMap['callerName'] ?? payloadMap['caller_name'],
-  //       callerPfp: payloadMap['callerProfilePic'] ?? payloadMap['caller_pfp'] ?? payloadMap['caller_profile_pic'],
-  //       calleeId: parsedCalleeId ?? 0,
-  //       calleeName: payloadMap['calleeName'] ?? payloadMap['callee_name'],
-  //       calleePfp: payloadMap['calleeProfilePic'] ?? payloadMap['callee_pfp'] ?? payloadMap['callee_profile_pic'],
-  //       data: payloadMap,
-  //       error: payloadMap['error'],
-  //       timestamp: message.wsTimestamp ?? DateTime.now(),
-  //     );
-  //   } catch (e) {
-  //     debugPrint('⚠️ Error converting payload to CallPayload: $e');
-  //     return null;
-  //   }
-  // }
-
   /// Handle incoming WebSocket messages and route them to appropriate streams
   void _handleMessage(WSMessage message) async {
     try {
-      print("-----------------------------------------------------------");
-      print("message : ${message.type.toString()}");
-      print("-----------------------------------------------------------");
       // Route messages to appropriate streams based on type
       switch (message.type) {
         // ---------------------------------------------------
@@ -316,9 +238,6 @@ class WebSocketMessageHandler {
 
         case WSMessageType.messageNew:
           final payload = message.chatMessagePayload;
-          print("-----------------------------------------------------------");
-          print("payload : ${payload.toString()}");
-          print("-----------------------------------------------------------");
 
           if (payload != null) {
             _messageNewController.add(payload);

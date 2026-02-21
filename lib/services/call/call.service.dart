@@ -23,7 +23,8 @@ import '../../utils/navigation-helper.util.dart';
 import '../../utils/ringtone.util.dart';
 import '../../utils/call.utils.dart';
 import '../../ui/snackbar.dart';
-import '../socket/websocket.service.dart';
+import '../socket/transport.manager.dart';
+import '../cookies.service.dart';
 import '../socket/ws-message.handler.dart';
 import 'call-foreground.service.dart';
 
@@ -53,7 +54,8 @@ class CallService {
   Timer? _statusPollingTimer;
   int? _pollingCallId;
 
-  final WebSocketService _webSocketService = WebSocketService();
+  final TransportManager _transportManager = TransportManager();
+  final CookieService _cookieService = CookieService();
   
   // Method channel for lock screen flags
   static const MethodChannel _lockScreenChannel = MethodChannel('com.aiexch.amigo/lock_screen');
@@ -240,15 +242,18 @@ class CallService {
       }
 
       // Check if WebSocket is connected
-      if (!_webSocketService.isConnected) {
+      if (!_transportManager.isConnected) {
         debugPrint('[CALL] WebSocket not connected, connecting...');
-        await _webSocketService.connect();
+        final accessToken = await _cookieService.getAccessToken();
+        if (accessToken != null) {
+          await _transportManager.connect(accessToken);
+        }
         // Wait for connection to stabilize
         await Future.delayed(const Duration(milliseconds: 200));
       }
 
       // Verify WebSocket is still connected
-      if (!_webSocketService.isConnected) {
+      if (!_transportManager.isConnected) {
         debugPrint('[CALL] WebSocket connection failed');
         throw Exception('WebSocket not connected');
       }
@@ -290,7 +295,7 @@ class CallService {
 
       // Send message and handle errors
       try {
-        await _webSocketService.sendMessage(wsmsg);
+        await _transportManager.sendMessage(wsmsg);
         debugPrint('[CALL] Call init message sent successfully');
       } catch (e) {
         debugPrint('❌ Error sending call:init: $e');
@@ -422,7 +427,7 @@ class CallService {
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      _webSocketService.sendMessage(wsmsg).catchError((e) {
+      _transportManager.sendMessage(wsmsg).catchError((e) {
         debugPrint('❌ Error sending call:accept: $e');
       });
 
@@ -569,7 +574,7 @@ class CallService {
 
       // Send decline message and wait for it
       try {
-        await _webSocketService.sendMessage(wsmsg);
+        await _transportManager.sendMessage(wsmsg);
         debugPrint('[CALL] Decline message sent successfully');
       } catch (e) {
         debugPrint('❌ Error sending call:decline: $e');
@@ -631,7 +636,7 @@ class CallService {
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      _webSocketService.sendMessage(wsmsg).catchError((e) {
+      _transportManager.sendMessage(wsmsg).catchError((e) {
         debugPrint('❌ Error sending call:end: $e');
       });
 
@@ -781,7 +786,7 @@ class CallService {
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      _webSocketService.sendMessage(wsmsg).catchError((e) {
+      _transportManager.sendMessage(wsmsg).catchError((e) {
         debugPrint('❌ Error sending call:offer: $e');
       });
     } catch (e) {
@@ -824,7 +829,7 @@ class CallService {
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      _webSocketService.sendMessage(wsmsg).catchError((e) {
+      _transportManager.sendMessage(wsmsg).catchError((e) {
         debugPrint('❌ Error sending call:answer: $e');
       });
     } catch (e) {
@@ -885,7 +890,7 @@ class CallService {
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      _webSocketService.sendMessage(wsmsg).catchError((e) {
+      _transportManager.sendMessage(wsmsg).catchError((e) {
         debugPrint('❌ Error sending call:ice: $e');
       });
     } catch (e) {

@@ -106,13 +106,13 @@ class CallsPageState extends ConsumerState<CallsPage>
 
     // Step 2: Fetch from server in background and update
     try {
-      final response = (await apiService.user.getCallHistory(50)).toMap();
-      final data = response['data'];
+      final response = await apiService.user.getCallHistory(50);
 
-      if (data['success'] == true && data['data'] != null) {
-        final List<dynamic> callsData = data['data'];
+      if (response.isSuccess && response.hasData) {
+        final List<dynamic> callsData = response.data;
+        final currentUserId = currentUser?.id ?? 0;
         final List<CallModel> calls = callsData
-            .map((c) => CallModel.fromJson(c))
+            .map((c) => CallModel.fromJson(c, currentUserId: currentUserId))
             .toList();
 
         // Save to local DB
@@ -121,7 +121,7 @@ class CallsPageState extends ConsumerState<CallsPage>
         // Enrich calls with local user display names (includes username from contacts)
         final enrichedCalls = await UserUtils().enrichCallsWithDisplayNames(
           calls,
-          currentUser?.id ?? 0,
+          currentUserId,
         );
 
         // Update UI with fresh data from server, preserving duration if it exists
@@ -152,7 +152,9 @@ class CallsPageState extends ConsumerState<CallsPage>
       } else {
         if (mounted && _callHistory.isEmpty) {
           setState(() {
-            _error = data['message'] ?? 'Failed to load call history';
+            _error = response.message.isNotEmpty 
+                ? response.message 
+                : 'Failed to load call history';
             _isLoading = false;
           });
         } else if (mounted && _isLoading) {

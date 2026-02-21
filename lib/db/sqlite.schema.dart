@@ -37,9 +37,12 @@ class Calls extends Table {
   IntColumn get callerId => integer()();
   IntColumn get calleeId => integer()();
   TextColumn get startedAt => text()();
+  TextColumn get answeredAt => text().nullable()();
   TextColumn get endedAt => text().nullable()();
+  IntColumn get durationSeconds => integer().withDefault(const Constant(0))();
   TextColumn get status => text()();
-  TextColumn get callType => text()();
+  TextColumn get reason => text().nullable()();
+  TextColumn get createdAt => text()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -127,7 +130,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration {
@@ -140,6 +143,7 @@ class AppDatabase extends _$AppDatabase {
         );
       },
       onUpgrade: (Migrator m, int from, int to) async {
+        // Migration from version 1 to 2
         if (from < 2) {
           // Clean up any duplicate entries before adding the unique constraint
           // Keep the row with the highest id (most recent) for each (messageId, userId) pair
@@ -153,6 +157,167 @@ class AppDatabase extends _$AppDatabase {
           ''');
 
           // Create unique index on messageId and userId
+          await m.database.customStatement(
+            'CREATE UNIQUE INDEX IF NOT EXISTS unique_user_message ON message_status_model(message_id, user_id)',
+          );
+        }
+
+        // Migration from version 2 to 3
+        if (from < 3) {
+          // 1. Users table: Add username column
+          await m.database.customStatement('''
+            ALTER TABLE users ADD COLUMN username TEXT;
+          ''');
+
+          // 2. Calls table: Migrate to new schema
+          // Add new columns first
+          await m.database.customStatement('''
+            ALTER TABLE calls ADD COLUMN answered_at TEXT;
+            ALTER TABLE calls ADD COLUMN duration_seconds INTEGER DEFAULT 0;
+            ALTER TABLE calls ADD COLUMN reason TEXT;
+            ALTER TABLE calls ADD COLUMN created_at TEXT;
+          ''');
+
+          // Set created_at to started_at for existing records
+          await m.database.customStatement('''
+            UPDATE calls SET created_at = started_at WHERE created_at IS NULL;
+          ''');
+
+          // Remove callType column by recreating table
+          // SQLite doesn't support DROP COLUMN directly in older versions
+          await m.database.customStatement('''
+            CREATE TABLE calls_new (
+              id INTEGER NOT NULL PRIMARY KEY,
+              caller_id INTEGER NOT NULL,
+              callee_id INTEGER NOT NULL,
+              started_at TEXT NOT NULL,
+              answered_at TEXT,
+              ended_at TEXT,
+              duration_seconds INTEGER NOT NULL DEFAULT 0,
+              status TEXT NOT NULL,
+              reason TEXT,
+              created_at TEXT NOT NULL
+            );
+          ''');
+
+          // Copy data from old table to new table (excluding callType)
+          await m.database.customStatement('''
+            INSERT INTO calls_new (id, caller_id, callee_id, started_at, ended_at, duration_seconds, status, reason, created_at)
+            SELECT 
+              id, 
+              caller_id, 
+              callee_id, 
+              started_at, 
+              ended_at, 
+              COALESCE(duration_seconds, 0) as duration_seconds,
+              status,
+              reason,
+              COALESCE(created_at, started_at, datetime('now')) as created_at
+            FROM calls;
+          ''');
+
+          // Drop old table and rename new one
+          await m.database.customStatement('DROP TABLE calls;');
+          await m.database.customStatement('ALTER TABLE calls_new RENAME TO calls;');
+
+          // 3. Conversations table: Change lastMessageId and pinnedMessageId from INTEGER to INTEGER (BIGINT/INT64)
+          // SQLite stores integers as 64-bit, but we need to ensure the column type is correct
+          // Recreate table to change column types
+          await m.database.customStatement('''
+            CREATE TABLE conversations_new (
+              id INTEGER NOT NULL PRIMARY KEY,
+              type TEXT NOT NULL,
+              title TEXT,
+              creater_id INTEGER NOT NULL,
+              unread_count INTEGER DEFAULT 0,
+              last_message_id INTEGER,
+              pinned_message_id INTEGER,
+              is_deleted INTEGER NOT NULL DEFAULT 0,
+              is_pinned INTEGER NOT NULL DEFAULT 0,
+              is_favorite INTEGER NOT NULL DEFAULT 0,
+              is_muted INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT,
+              updated_at TEXT,
+              need_sync INTEGER NOT NULL DEFAULT 1
+            );
+          ''');
+
+          // Copy data explicitly listing all columns (SQLite will handle integer conversion automatically)
+          await m.database.customStatement('''
+            INSERT INTO conversations_new (
+              id, type, title, creater_id, unread_count, last_message_id, 
+              pinned_message_id, is_deleted, is_pinned, is_favorite, is_muted, 
+              created_at, updated_at, need_sync
+            )
+            SELECT 
+              id, type, title, creater_id, unread_count, last_message_id, 
+              pinned_message_id, is_deleted, is_pinned, is_favorite, is_muted, 
+              created_at, updated_at, need_sync
+            FROM conversations;
+          ''');
+
+          await m.database.customStatement('DROP TABLE conversations;');
+          await m.database.customStatement('ALTER TABLE conversations_new RENAME TO conversations;');
+
+          // 4. ConversationMembers table: Change lastReadMessageId and lastDeliveredMessageId to INT64
+          await m.database.customStatement('''
+            CREATE TABLE conversation_members_new (
+              id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+              conversation_id INTEGER NOT NULL,
+              user_id INTEGER NOT NULL,
+              role TEXT NOT NULL,
+              unread_count INTEGER NOT NULL DEFAULT 0,
+              joined_at TEXT,
+              removed_at TEXT,
+              last_read_message_id INTEGER,
+              last_delivered_message_id INTEGER
+            );
+          ''');
+
+          await m.database.customStatement('''
+            INSERT INTO conversation_members_new (
+              id, conversation_id, user_id, role, unread_count, 
+              joined_at, removed_at, last_read_message_id, last_delivered_message_id
+            )
+            SELECT 
+              id, conversation_id, user_id, role, unread_count, 
+              joined_at, removed_at, last_read_message_id, last_delivered_message_id
+            FROM conversation_members;
+          ''');
+
+          await m.database.customStatement('DROP TABLE conversation_members;');
+          await m.database.customStatement('ALTER TABLE conversation_members_new RENAME TO conversation_members;');
+
+          // 5. Messages table: Add isFailed column
+          await m.database.customStatement('''
+            ALTER TABLE messages ADD COLUMN is_failed INTEGER NOT NULL DEFAULT 1;
+          ''');
+
+          // 6. MessageStatusModel table: Change messageId from INTEGER to INT64
+          await m.database.customStatement('''
+            CREATE TABLE message_status_model_new (
+              id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+              conversation_id INTEGER NOT NULL,
+              message_id INTEGER NOT NULL,
+              user_id INTEGER NOT NULL,
+              delivered_at TEXT,
+              read_at TEXT
+            );
+          ''');
+
+          await m.database.customStatement('''
+            INSERT INTO message_status_model_new (
+              id, conversation_id, message_id, user_id, delivered_at, read_at
+            )
+            SELECT 
+              id, conversation_id, message_id, user_id, delivered_at, read_at
+            FROM message_status_model;
+          ''');
+
+          await m.database.customStatement('DROP TABLE message_status_model;');
+          await m.database.customStatement('ALTER TABLE message_status_model_new RENAME TO message_status_model;');
+
+          // Recreate the unique index after table recreation
           await m.database.customStatement(
             'CREATE UNIQUE INDEX IF NOT EXISTS unique_user_message ON message_status_model(message_id, user_id)',
           );

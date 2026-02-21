@@ -1,11 +1,31 @@
+import 'package:amigo/utils/chat/chat-helpers.utils.dart';
 import 'package:drift/drift.dart';
+import 'package:drift/native.dart';
+import 'package:drift/remote.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../models/message-status.model.dart';
 import '../sqlite.db.dart';
 import '../sqlite.schema.dart' hide MessageStatusModel;
+import '../../types/sqlite.types.dart';
 
 class MessageStatusRepository {
   final sqliteDatabase = SqliteDatabase.instance;
+
+  /// Helper method to extract SQLite error code from exception
+  int? _extractSqliteErrorCode(dynamic e) {
+    try {
+      if (e is DriftRemoteException) {
+        final remoteCause = e.remoteCause;
+        if (remoteCause is SqliteException) {
+          return remoteCause.extendedResultCode;
+        }
+      }
+    } catch (_) {
+      // Ignore errors during error extraction
+    }
+    return null;
+  }
 
   /// Helper method to convert MessageStatusModelData row to MessageStatusType model
   MessageStatusModel _statusToModel(MessageStatusModelData status) {
@@ -20,32 +40,40 @@ class MessageStatusRepository {
   }
 
   /// Insert a single message status
-  Future<void> insertMessageStatus({
+  /// Removed existence check - uses insertOnConflictUpdate to handle duplicates
+  Future<SqliteResult<void>> insertMessageStatus({
     required int conversationId,
     required int messageId,
     required int userId,
     String? deliveredAt,
     String? readAt,
   }) async {
-    final db = sqliteDatabase.database;
+    try {
+      final db = sqliteDatabase.database;
 
-    // Check if status already exists to preserve existing values
-    final existingStatus = await getMessageStatusByMessageAndUser(
-      messageId,
-      userId,
-    );
-
-    final companion = MessageStatusModelCompanion.insert(
-      conversationId: conversationId,
-      messageId: BigInt.from(messageId),
-      userId: userId,
-      deliveredAt: Value(deliveredAt ?? existingStatus?.deliveredAt),
-      readAt: Value(readAt ?? existingStatus?.readAt),
-    );
-    await db.into(db.messageStatusModel).insertOnConflictUpdate(companion);
+      final companion = MessageStatusModelCompanion.insert(
+        conversationId: conversationId,
+        messageId: BigInt.from(messageId),
+        userId: userId,
+        deliveredAt: Value(deliveredAt),
+        readAt: Value(readAt),
+      );
+      await db.into(db.messageStatusModel).insertOnConflictUpdate(companion);
+      return SqliteResult.success(message: 'Message status inserted');
+    } catch (e) {
+      final errorCode = _extractSqliteErrorCode(e);
+      debugPrint("Error inserting message status: $e");
+      return SqliteResult.error(
+        message: 'Failed to insert message status',
+        errorCode: errorCode,
+      );
+    }
   }
 
   /// Insert multiple message statuses (bulk insert)
+  /// Uses raw SQL with ON CONFLICT to handle unique constraint on (message_id, user_id)
+  /// This is much more efficient than checking existence first - single DB call per status
+  /// No existence check needed - ON CONFLICT handles duplicates automatically
   Future<void> insertMessageStatuses(
     List<Map<String, dynamic>> statuses,
   ) async {
@@ -53,33 +81,50 @@ class MessageStatusRepository {
 
     final db = sqliteDatabase.database;
     await db.transaction(() async {
+      // Use raw SQL with ON CONFLICT targeting the unique index (message_id, user_id)
+      // This avoids the need to check existence first, reducing DB calls significantly
+      // COALESCE preserves existing values if new ones are null
       for (final status in statuses) {
-        final messageId = status['messageId'] as int;
-        final userId = status['userId'] as int;
+        try {
+          final messageId = ChatHelpers.parseToInt(status['messageId']);
+          final userId = status['userId'] as int;
+          final conversationId = status['conversationId'] as int;
+          final deliveredAt = status['deliveredAt'] as String?;
+          final readAt = status['readAt'] as String?;
 
-        // Check if status already exists to preserve existing values
-        final existingStatus = await getMessageStatusByMessageAndUser(
-          messageId,
-          userId,
-        );
+          // Escape SQL strings properly - values are already validated from status map
+          final deliveredAtValue = deliveredAt != null
+              ? "'${deliveredAt.replaceAll("'", "''")}'"
+              : 'NULL';
+          final readAtValue = readAt != null
+              ? "'${readAt.replaceAll("'", "''")}'"
+              : 'NULL';
 
-        final companion = MessageStatusModelCompanion.insert(
-          conversationId: status['conversationId'] as int,
-          messageId: BigInt.from(messageId),
-          userId: userId,
-          deliveredAt: Value(
-            (status['deliveredAt'] as String?) ?? existingStatus?.deliveredAt,
-          ),
-          readAt: Value(
-            (status['readAt'] as String?) ?? existingStatus?.readAt,
-          ),
-        );
-        await db.into(db.messageStatusModel).insertOnConflictUpdate(companion);
+          await db.customStatement('''
+            INSERT INTO message_status_model (
+              conversation_id, message_id, user_id, delivered_at, read_at
+            ) VALUES ($conversationId, ${BigInt.from(messageId)}, $userId, $deliveredAtValue, $readAtValue)
+            ON CONFLICT(message_id, user_id) DO UPDATE SET
+              conversation_id = excluded.conversation_id,
+              delivered_at = COALESCE(excluded.delivered_at, message_status_model.delivered_at),
+              read_at = COALESCE(excluded.read_at, message_status_model.read_at)
+            ''');
+        } catch (e) {
+          final errorCode = _extractSqliteErrorCode(e);
+          // Only log non-duplicate errors (duplicates are expected and handled by ON CONFLICT)
+          if (errorCode != 1555 && errorCode != 2067) {
+            debugPrint(
+              "Error inserting message status: $e (errorCode: $errorCode)",
+            );
+          }
+          // Continue with next status instead of failing the whole batch
+        }
       }
     });
   }
 
   // Insert messagestatus with multiple userids for a message
+  /// Continues inserting even if some statuses fail (e.g., duplicates)
   Future<void> insertMessageStatusesWithMultipleUserIds({
     required int messageId,
     required int conversationId,
@@ -90,13 +135,24 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     await db.transaction(() async {
       for (final userId in userIds) {
-        await insertMessageStatus(
-          conversationId: conversationId,
-          messageId: messageId,
-          userId: userId,
-          deliveredAt: null,
-          readAt: null,
-        );
+        try {
+          await insertMessageStatus(
+            conversationId: conversationId,
+            messageId: messageId,
+            userId: userId,
+            deliveredAt: deliveredAt,
+            readAt: readAt,
+          );
+        } catch (e) {
+          final errorCode = _extractSqliteErrorCode(e);
+          // Only log non-duplicate errors (duplicates are expected)
+          if (errorCode != 1555) {
+            debugPrint(
+              "Error inserting message status for userId $userId: $e (errorCode: $errorCode)",
+            );
+          }
+          // Continue with next user instead of failing the whole batch
+        }
       }
     });
   }
@@ -159,7 +215,9 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final rows =
         await (db.select(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(BigInt.from(messageId)) & t.readAt.isNotNull(),
+              (t) =>
+                  t.messageId.equals(BigInt.from(messageId)) &
+                  t.readAt.isNotNull(),
             ))
             .get();
     return rows;
@@ -171,7 +229,9 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final rows =
         await (db.select(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(BigInt.from(messageId)) & t.deliveredAt.isNotNull(),
+              (t) =>
+                  t.messageId.equals(BigInt.from(messageId)) &
+                  t.deliveredAt.isNotNull(),
             ))
             .get();
     return rows;
@@ -196,7 +256,9 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final statuses =
         await (db.select(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
+              (t) =>
+                  t.messageId.equals(BigInt.from(messageId)) &
+                  t.userId.equals(userId),
             ))
             .get();
 
@@ -229,7 +291,9 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final statuses =
         await (db.select(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(BigInt.from(messageId)) & t.readAt.isNotNull(),
+              (t) =>
+                  t.messageId.equals(BigInt.from(messageId)) &
+                  t.readAt.isNotNull(),
             ))
             .get();
     return statuses.map((status) => _statusToModel(status)).toList();
@@ -242,94 +306,101 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final statuses =
         await (db.select(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(BigInt.from(messageId)) & t.deliveredAt.isNotNull(),
+              (t) =>
+                  t.messageId.equals(BigInt.from(messageId)) &
+                  t.deliveredAt.isNotNull(),
             ))
             .get();
     return statuses.map((status) => _statusToModel(status)).toList();
   }
 
   /// Mark message as delivered for a user
-  Future<void> markAsDelivered({
+  /// Removed existence check - uses insertOnConflictUpdate to handle duplicates
+  Future<SqliteResult<void>> markAsDelivered({
     required int messageId,
     required int userId,
     String? deliveredAt,
   }) async {
-    final db = sqliteDatabase.database;
-    final timestamp = deliveredAt ?? DateTime.now().toIso8601String();
+    try {
+      final db = sqliteDatabase.database;
+      final timestamp = deliveredAt ?? DateTime.now().toIso8601String();
 
-    // Check if status already exists
-    final existing = await getMessageStatusByMessageAndUser(messageId, userId);
-
-    if (existing != null) {
-      // Update existing status
-      await (db.update(db.messageStatusModel)..where(
-            (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
-          ))
-          .write(MessageStatusModelCompanion(deliveredAt: Value(timestamp)));
-    } else {
       // Get conversationId from message
       final message = await (db.select(
         db.messages,
       )..where((t) => t.id.equals(BigInt.from(messageId)))).getSingleOrNull();
 
       if (message != null) {
-        // Insert new status
-        await insertMessageStatus(
+        // Use insertOnConflictUpdate to handle both insert and update
+        final companion = MessageStatusModelCompanion.insert(
           conversationId: message.conversationId,
-          messageId: messageId,
+          messageId: BigInt.from(messageId),
           userId: userId,
-          deliveredAt: timestamp,
+          deliveredAt: Value(timestamp),
         );
+        await db.into(db.messageStatusModel).insertOnConflictUpdate(companion);
+        return SqliteResult.success(message: 'Message marked as delivered');
+      } else {
+        return SqliteResult.error(message: 'Message not found');
       }
+    } catch (e) {
+      final errorCode = _extractSqliteErrorCode(e);
+      debugPrint("Error marking message as delivered: $e");
+      return SqliteResult.error(
+        message: 'Failed to mark message as delivered',
+        errorCode: errorCode,
+      );
     }
   }
 
   /// Mark message as read for a user
-  Future<void> markAsRead({
+  /// Removed existence check - uses insertOnConflictUpdate to handle duplicates
+  Future<SqliteResult<void>> markAsRead({
     required int messageId,
     required int userId,
     String? readAt,
   }) async {
-    final db = sqliteDatabase.database;
-    final timestamp = readAt ?? DateTime.now().toIso8601String();
+    try {
+      final db = sqliteDatabase.database;
+      final timestamp = readAt ?? DateTime.now().toIso8601String();
 
-    // Check if status already exists
-    final existing = await getMessageStatusByMessageAndUser(messageId, userId);
-
-    if (existing != null) {
-      // Update existing status
-      await (db.update(db.messageStatusModel)..where(
-            (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
-          ))
-          .write(
-            MessageStatusModelCompanion(
-              readAt: Value(timestamp),
-              // Also ensure deliveredAt is set if not already set
-              deliveredAt: existing.deliveredAt == null
-                  ? Value(timestamp)
-                  : const Value.absent(),
-            ),
-          );
-    } else {
       // Get conversationId from message
       final message = await (db.select(
         db.messages,
       )..where((t) => t.id.equals(BigInt.from(messageId)))).getSingleOrNull();
 
       if (message != null) {
-        // Insert new status with both delivered and read timestamps
-        await insertMessageStatus(
-          conversationId: message.conversationId,
-          messageId: messageId,
-          userId: userId,
-          deliveredAt: timestamp,
-          readAt: timestamp,
+        // Get existing status to preserve deliveredAt if already set
+        final existing = await getMessageStatusByMessageAndUser(
+          messageId,
+          userId,
         );
+
+        // Use insertOnConflictUpdate to handle both insert and update
+        final companion = MessageStatusModelCompanion.insert(
+          conversationId: message.conversationId,
+          messageId: BigInt.from(messageId),
+          userId: userId,
+          deliveredAt: Value(existing?.deliveredAt ?? timestamp),
+          readAt: Value(timestamp),
+        );
+        await db.into(db.messageStatusModel).insertOnConflictUpdate(companion);
+        return SqliteResult.success(message: 'Message marked as read');
+      } else {
+        return SqliteResult.error(message: 'Message not found');
       }
+    } catch (e) {
+      final errorCode = _extractSqliteErrorCode(e);
+      debugPrint("Error marking message as read: $e");
+      return SqliteResult.error(
+        message: 'Failed to mark message as read',
+        errorCode: errorCode,
+      );
     }
   }
 
   /// Mark multiple messages as delivered for a user
+  /// Continues processing even if some operations fail
   Future<void> markMultipleAsDelivered({
     required List<int> messageIds,
     required int userId,
@@ -342,38 +413,40 @@ class MessageStatusRepository {
 
     await db.transaction(() async {
       for (final messageId in messageIds) {
-        final existing = await getMessageStatusByMessageAndUser(
-          messageId,
-          userId,
-        );
-
-        if (existing != null) {
-          await (db.update(db.messageStatusModel)..where(
-                (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
-              ))
-              .write(
-                MessageStatusModelCompanion(deliveredAt: Value(timestamp)),
-              );
-        } else {
+        try {
           final message =
               await (db.select(db.messages)
                     ..where((t) => t.id.equals(BigInt.from(messageId))))
                   .getSingleOrNull();
 
           if (message != null) {
-            await insertMessageStatus(
+            // Use insertOnConflictUpdate to handle both insert and update
+            final companion = MessageStatusModelCompanion.insert(
               conversationId: message.conversationId,
-              messageId: messageId,
+              messageId: BigInt.from(messageId),
               userId: userId,
-              deliveredAt: timestamp,
+              deliveredAt: Value(timestamp),
+            );
+            await db
+                .into(db.messageStatusModel)
+                .insertOnConflictUpdate(companion);
+          }
+        } catch (e) {
+          final errorCode = _extractSqliteErrorCode(e);
+          // Only log non-duplicate errors (duplicates are expected)
+          if (errorCode != 1555) {
+            debugPrint(
+              "Error marking message $messageId as delivered: $e (errorCode: $errorCode)",
             );
           }
+          // Continue with next message instead of failing the whole batch
         }
       }
     });
   }
 
   /// Mark multiple messages as read for a user
+  /// Continues processing even if some operations fail
   Future<void> markMultipleAsRead({
     required List<int> messageIds,
     required int userId,
@@ -386,38 +459,40 @@ class MessageStatusRepository {
 
     await db.transaction(() async {
       for (final messageId in messageIds) {
-        final existing = await getMessageStatusByMessageAndUser(
-          messageId,
-          userId,
-        );
-
-        if (existing != null) {
-          await (db.update(db.messageStatusModel)..where(
-                (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
-              ))
-              .write(
-                MessageStatusModelCompanion(
-                  readAt: Value(timestamp),
-                  deliveredAt: existing.deliveredAt == null
-                      ? Value(timestamp)
-                      : const Value.absent(),
-                ),
-              );
-        } else {
+        try {
           final message =
               await (db.select(db.messages)
                     ..where((t) => t.id.equals(BigInt.from(messageId))))
                   .getSingleOrNull();
 
           if (message != null) {
-            await insertMessageStatus(
+            // Get existing status to preserve deliveredAt if already set
+            final existing = await getMessageStatusByMessageAndUser(
+              messageId,
+              userId,
+            );
+
+            // Use insertOnConflictUpdate to handle both insert and update
+            final companion = MessageStatusModelCompanion.insert(
               conversationId: message.conversationId,
-              messageId: messageId,
+              messageId: BigInt.from(messageId),
               userId: userId,
-              deliveredAt: timestamp,
-              readAt: timestamp,
+              deliveredAt: Value(existing?.deliveredAt ?? timestamp),
+              readAt: Value(timestamp),
+            );
+            await db
+                .into(db.messageStatusModel)
+                .insertOnConflictUpdate(companion);
+          }
+        } catch (e) {
+          final errorCode = _extractSqliteErrorCode(e);
+          // Only log non-duplicate errors (duplicates are expected)
+          if (errorCode != 1555) {
+            debugPrint(
+              "Error marking message $messageId as read: $e (errorCode: $errorCode)",
             );
           }
+          // Continue with next message instead of failing the whole batch
         }
       }
     });
@@ -435,7 +510,8 @@ class MessageStatusRepository {
   }
 
   // update deliveredAt timestamp for a specific user with message id
-  Future<void> updateDeliveredAtForUser({
+  /// Removed existence check - uses insertOnConflictUpdate to handle duplicates
+  Future<SqliteResult<void>> updateDeliveredAtForUser({
     required int messageId,
     required int userId,
     required int conversationId,
@@ -443,38 +519,30 @@ class MessageStatusRepository {
   }) async {
     try {
       final db = sqliteDatabase.database;
-      // Check if status already exists
-      final existing = await getMessageStatusByMessageAndUser(
-        messageId,
-        userId,
+      // Use insertOnConflictUpdate to handle both insert and update
+      final companion = MessageStatusModelCompanion.insert(
+        conversationId: conversationId,
+        messageId: BigInt.from(messageId),
+        userId: userId,
+        deliveredAt: Value(deliveredAt),
       );
-
-      if (existing != null) {
-        // Update existing status
-        await (db.update(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
-            ))
-            .write(
-              MessageStatusModelCompanion(deliveredAt: Value(deliveredAt)),
-            );
-      } else {
-        // Insert new status if it doesn't exist
-        await insertMessageStatus(
-          conversationId: conversationId,
-          messageId: messageId,
-          userId: userId,
-          deliveredAt: deliveredAt,
-        );
-      }
+      await db.into(db.messageStatusModel).insertOnConflictUpdate(companion);
+      return SqliteResult.success(message: 'DeliveredAt updated');
     } catch (e) {
+      final errorCode = _extractSqliteErrorCode(e);
       debugPrint(
         'Error updating deliveredAt for messageId $messageId and userId $userId: $e',
+      );
+      return SqliteResult.error(
+        message: 'Failed to update deliveredAt',
+        errorCode: errorCode,
       );
     }
   }
 
   // update readAt timestamp for a specific user with message id
-  Future<void> updateReadAtForUser({
+  /// Removed existence check - uses insertOnConflictUpdate to handle duplicates
+  Future<SqliteResult<void>> updateReadAtForUser({
     required int messageId,
     required int userId,
     required int conversationId,
@@ -482,30 +550,23 @@ class MessageStatusRepository {
   }) async {
     try {
       final db = sqliteDatabase.database;
-      // Check if status already exists
-      final existing = await getMessageStatusByMessageAndUser(
-        messageId,
-        userId,
+      // Use insertOnConflictUpdate to handle both insert and update
+      final companion = MessageStatusModelCompanion.insert(
+        conversationId: conversationId,
+        messageId: BigInt.from(messageId),
+        userId: userId,
+        readAt: Value(readAt),
       );
-
-      if (existing != null) {
-        // Update existing status
-        await (db.update(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
-            ))
-            .write(MessageStatusModelCompanion(readAt: Value(readAt)));
-      } else {
-        // Insert new status if it doesn't exist
-        await insertMessageStatus(
-          conversationId: conversationId,
-          messageId: messageId,
-          userId: userId,
-          readAt: readAt,
-        );
-      }
+      await db.into(db.messageStatusModel).insertOnConflictUpdate(companion);
+      return SqliteResult.success(message: 'ReadAt updated');
     } catch (e) {
+      final errorCode = _extractSqliteErrorCode(e);
       debugPrint(
         'Error updating readAt for messageId $messageId and userId $userId: $e',
+      );
+      return SqliteResult.error(
+        message: 'Failed to update readAt',
+        errorCode: errorCode,
       );
     }
   }
@@ -543,7 +604,9 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final deleted =
         await (db.delete(db.messageStatusModel)..where(
-              (t) => t.messageId.equals(BigInt.from(messageId)) & t.userId.equals(userId),
+              (t) =>
+                  t.messageId.equals(BigInt.from(messageId)) &
+                  t.userId.equals(userId),
             ))
             .go();
     return deleted > 0;
@@ -589,7 +652,9 @@ class MessageStatusRepository {
     final totalCount =
         await (db.selectOnly(db.messageStatusModel)
               ..addColumns([db.messageStatusModel.id.count()])
-              ..where(db.messageStatusModel.messageId.equals(BigInt.from(messageId))))
+              ..where(
+                db.messageStatusModel.messageId.equals(BigInt.from(messageId)),
+              ))
             .getSingle();
     final readCount = await getReadCountByMessageId(messageId);
     return (totalCount.read(db.messageStatusModel.id.count()) ?? 0) - readCount;
@@ -601,7 +666,9 @@ class MessageStatusRepository {
     final totalCount =
         await (db.selectOnly(db.messageStatusModel)
               ..addColumns([db.messageStatusModel.id.count()])
-              ..where(db.messageStatusModel.messageId.equals(BigInt.from(messageId))))
+              ..where(
+                db.messageStatusModel.messageId.equals(BigInt.from(messageId)),
+              ))
             .getSingle();
     final deliveredCount = await getDeliveredCountByMessageId(messageId);
     return (totalCount.read(db.messageStatusModel.id.count()) ?? 0) -
@@ -621,59 +688,75 @@ class MessageStatusRepository {
   }
 
   // update the message id in the message status table
-  Future<void> updateMessageId(int optimisticId, int canonicalId) async {
-    final db = sqliteDatabase.database;
-    await (db.update(db.messageStatusModel)
-          ..where((t) => t.messageId.equals(BigInt.from(optimisticId))))
-        .write(MessageStatusModelCompanion(messageId: Value(BigInt.from(canonicalId))));
+  Future<SqliteResult<void>> updateMessageId(
+    int optimisticId,
+    int canonicalId,
+  ) async {
+    try {
+      final db = sqliteDatabase.database;
+      await (db.update(
+        db.messageStatusModel,
+      )..where((t) => t.messageId.equals(BigInt.from(optimisticId)))).write(
+        MessageStatusModelCompanion(messageId: Value(BigInt.from(canonicalId))),
+      );
+      return SqliteResult.success(message: 'Message ID updated');
+    } catch (e) {
+      final errorCode = _extractSqliteErrorCode(e);
+      debugPrint("Error updating message ID: $e");
+      return SqliteResult.error(
+        message: 'Failed to update message ID',
+        errorCode: errorCode,
+      );
+    }
   }
 
   /// Mark all messages in a conversation as read for a user where readAt is null
-  Future<void> markAllAsReadByConversationAndUser({
+  Future<SqliteResult<void>> markAllAsReadByConversationAndUser({
     required int conversationId,
     required int userId,
     String? readAt,
   }) async {
-    final db = sqliteDatabase.database;
-    final timestamp = readAt ?? DateTime.now().toIso8601String();
-
     try {
+      final db = sqliteDatabase.database;
+      final timestamp = readAt ?? DateTime.now().toIso8601String();
+
       // Bulk update all undelivered statuses in a single query
       await (db.update(db.messageStatusModel)
             ..where((t) => t.userId.equals(userId) & t.readAt.isNull()))
           .write(MessageStatusModelCompanion(readAt: Value(timestamp)));
+      return SqliteResult.success(message: 'All messages marked as read');
     } catch (e) {
+      final errorCode = _extractSqliteErrorCode(e);
       debugPrint(
         'Error marking all as read for conversation $conversationId and user $userId: $e',
+      );
+      return SqliteResult.error(
+        message: 'Failed to mark all messages as read',
+        errorCode: errorCode,
       );
     }
   }
 
   /// mark all undelivered message_status as delivered for a user
-  Future<void> markAllAsDeliveredForUser({
+  Future<SqliteResult<void>> markAllAsDeliveredForUser({
     required int userId,
     String? deliveredAt,
   }) async {
-    final db = sqliteDatabase.database;
-    final timestamp = deliveredAt ?? DateTime.now().toIso8601String();
     try {
+      final db = sqliteDatabase.database;
+      final timestamp = deliveredAt ?? DateTime.now().toIso8601String();
       // Bulk update all undelivered statuses in a single query
       await (db.update(db.messageStatusModel)
             ..where((t) => t.userId.equals(userId) & t.deliveredAt.isNull()))
           .write(MessageStatusModelCompanion(deliveredAt: Value(timestamp)));
-      // final undeliveredStatuses = await (db.select(
-      //   db.messageStatusModel,
-      // )..where((t) => t.userId.equals(userId) & t.deliveredAt.isNull())).get();
-      // if (undeliveredStatuses.isEmpty) return;
-      // await db.transaction(() async {
-      //   for (final status in undeliveredStatuses) {
-      //     await (db.update(db.messageStatusModel)
-      //           ..where((t) => t.id.equals(status.id)))
-      //         .write(MessageStatusModelCompanion(deliveredAt: Value(timestamp)));
-      //   }
-      // });
+      return SqliteResult.success(message: 'All messages marked as delivered');
     } catch (e) {
+      final errorCode = _extractSqliteErrorCode(e);
       debugPrint('Error marking all as delivered for user $userId: $e');
+      return SqliteResult.error(
+        message: 'Failed to mark all messages as delivered',
+        errorCode: errorCode,
+      );
     }
   }
 }

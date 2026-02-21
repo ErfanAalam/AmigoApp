@@ -39,7 +39,7 @@ class CallModel {
     return 0;
   }
 
-  factory CallModel.fromJson(Map<String, dynamic> json) {
+  factory CallModel.fromJson(Map<String, dynamic> json, {int? currentUserId}) {
     DateTime? tryParseDate(dynamic value) {
       if (value == null) return null;
       final s = value.toString();
@@ -51,14 +51,29 @@ class CallModel {
       }
     }
 
-    final String callTypeStr =
-        (json['call_type'] ?? json['callType'] ?? 'outgoing').toString();
+    final callerId = _parseInt(json['caller_id']);
+    final calleeId = _parseInt(json['callee_id']);
+    
+    // Determine call_type from caller_id/callee_id if currentUserId is provided
+    // Otherwise, try to get it from JSON (for backward compatibility)
+    CallType callType;
+    if (currentUserId != null) {
+      callType = calleeId == currentUserId ? CallType.incoming : CallType.outgoing;
+    } else {
+      final String callTypeStr =
+          (json['call_type'] ?? json['callType'] ?? 'outgoing').toString();
+      callType = callTypeStr == 'incoming' ? CallType.incoming : CallType.outgoing;
+    }
+    
+    // Determine contact info - if not provided in JSON, use the other user's ID
+    final contactId = _parseInt(json['contact_id']);
+    final otherUserId = contactId > 0 ? contactId : (callerId == currentUserId ? calleeId : callerId);
 
     return CallModel(
       id: _parseInt(json['id']),
-      callerId: _parseInt(json['caller_id']),
-      calleeId: _parseInt(json['callee_id']),
-      contactId: _parseInt(json['contact_id']),
+      callerId: callerId,
+      calleeId: calleeId,
+      contactId: contactId > 0 ? contactId : otherUserId,
       contactName: json['contact_name']?.toString() ?? 'Unknown',
       contactProfilePic: json['contact_profile_pic']?.toString(),
       startedAt: tryParseDate(json['started_at']) ?? DateTime.now(),
@@ -67,9 +82,7 @@ class CallModel {
       durationSeconds: _parseInt(json['duration_seconds']),
       status: CallStatus.fromString(json['status']?.toString()),
       reason: json['reason']?.toString(),
-      callType: callTypeStr == 'incoming'
-          ? CallType.incoming
-          : CallType.outgoing,
+      callType: callType,
       createdAt:
           tryParseDate(json['created_at']) ??
           tryParseDate(json['started_at']) ??

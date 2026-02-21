@@ -7,7 +7,8 @@ import '../../models/country.model.dart' as country_model;
 import '../../models/user.model.dart';
 import '../../providers/theme-color.provider.dart';
 import '../../services/auth/auth.service.dart';
-import '../../services/socket/websocket.service.dart';
+import '../../services/socket/transport.manager.dart';
+import '../../services/cookies.service.dart';
 import '../../ui/country-selector.modal.dart';
 import '../../ui/snackbar.dart';
 import '../home.layout.dart';
@@ -32,7 +33,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   final ApiService apiService = ApiService();
   final AuthService authService = AuthService();
-  final WebSocketService wsService = WebSocketService();
+  final TransportManager transportManager = TransportManager();
+  final CookieService cookieService = CookieService();
 
   @override
   void dispose() {
@@ -180,7 +182,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         }
 
         // connect to websocket after successful login
-        await wsService.connect();
+        final accessToken = await cookieService.getAccessToken();
+        if (accessToken != null) {
+          await transportManager.connect(accessToken);
+        }
       } else {
         // if (mounted) {
         //   material.ScaffoldMessenger.of(context).showSnackBar(
