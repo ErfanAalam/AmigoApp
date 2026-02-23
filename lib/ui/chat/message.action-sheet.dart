@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/socket.types.dart';
 import 'package:flutter/material.dart';
@@ -302,32 +303,45 @@ class MessageActionSheet extends StatelessWidget {
   void _showDeleteOptionsDialog(BuildContext context) {
     showDialog(
       context: context,
+      barrierColor: Colors.black.withOpacity(0.3),
       builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          title: const Text('Delete Message'),
-          content: const Text('How would you like to delete this message?'),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-                onDeleteForMe?.call();
-              },
-              child: const Text('Delete for me'),
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: AlertDialog(
+            backgroundColor: Colors.white.withOpacity(0.85),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
             ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-                onDeleteForEveryone?.call();
-              },
-              child: const Text('Delete for everyone'),
+            title: const Text(
+              'Delete Message',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+              ),
             ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-              },
-              child: const Text('Cancel'),
-            ),
-          ],
+            content: const Text('How would you like to delete this message?'),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  onDeleteForMe?.call();
+                },
+                child: const Text('Delete for me'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  onDeleteForEveryone?.call();
+                },
+                child: const Text('Delete for everyone'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                },
+                child: const Text('Cancel'),
+              ),
+            ],
+          ),
         );
       },
     );

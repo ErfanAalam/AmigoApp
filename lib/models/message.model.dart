@@ -1,5 +1,4 @@
 import 'package:amigo/utils/chat/chat-helpers.utils.dart';
-import 'package:flutter/foundation.dart';
 import 'package:amigo/types/socket.types.dart';
 
 class MessageModel {
@@ -95,6 +94,12 @@ class MessageModel {
         json['deleted'] == 'true' ||
         json['is_deleted'] == true ||
         json['is_deleted'] == 'true';
+    final isFailed =
+        json['is_failed'] == true ||
+        json['is_failed'] == 'true' ||
+        json['failed'] == true ||
+        json['failed'] == 'true' ||
+        metadata?['is_failed'] == true;
 
     return MessageModel(
       id: ChatHelpers.parseToInt(json['id']),
@@ -111,6 +116,7 @@ class MessageModel {
       status: messageStatus,
       attachments: json['attachments'] as Map<String, dynamic>?,
       metadata: metadata,
+      isFailed: isFailed ? true : null,
       isStarred: isStarred ? true : null,
       isReplied: isReplied ? true : null,
       isForwarded: isForwarded ? true : null,
@@ -133,11 +139,13 @@ class MessageModel {
       'status': status.value,
       if (attachments != null) 'attachments': attachments,
       if (metadata != null) 'metadata': metadata,
+      if (isFailed == true) 'is_failed': isFailed,
       if (isStarred == true) 'is_starred': isStarred,
       if (isReplied == true) 'is_replied': isReplied,
       if (isForwarded == true) 'is_forwarded': isForwarded,
       if (isDeleted == true) 'deleted': isDeleted,
       if (isDeleted == true) 'is_deleted': isDeleted,
+      if (localMediaPath != null) 'local_media_path': localMediaPath,
       'sent_at': sentAt,
       'created_at': sentAt, // For backward compatibility
     };
@@ -168,7 +176,6 @@ class MessageModel {
     Map<String, dynamic>? metadata,
     Map<String, dynamic>? attachments,
     bool? isFailed,
-    bool? isPinned,
     bool? isStarred,
     bool? isReplied,
     bool? isForwarded,

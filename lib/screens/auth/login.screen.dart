@@ -12,6 +12,7 @@ import '../../services/cookies.service.dart';
 import '../../ui/country-selector.modal.dart';
 import '../../ui/snackbar.dart';
 import '../home.layout.dart';
+import '../../main.dart' as main;
 import 'signup.screen.dart';
 import 'signup-status.screen.dart';
 
@@ -171,6 +172,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
         // Send FCM token to backend after successful login
         await authService.sendFCMTokenToBackend(3);
+        
+        // Initialize authenticated user (this runs all the main.dart authenticated logic)
+        final appState = main.MyApp.appStateKey.currentState;
+        if (appState != null && appState is main.AppStateInterface) {
+          await (appState as main.AppStateInterface).initializeAuthenticatedUser();
+        }
+        
         // navigate to the main screen
         if (mounted) {
           material.Navigator.pushReplacement(
@@ -179,12 +187,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               builder: (context) => const MainScreen(),
             ),
           );
-        }
-
-        // connect to websocket after successful login
-        final accessToken = await cookieService.getAccessToken();
-        if (accessToken != null) {
-          await transportManager.connect(accessToken);
         }
       } else {
         // if (mounted) {

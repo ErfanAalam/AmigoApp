@@ -2892,7 +2892,7 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     defaultConstraints: GeneratedColumn.constraintIsAlways(
       'CHECK ("is_failed" IN (0, 1))',
     ),
-    defaultValue: const Constant(true),
+    defaultValue: const Constant(false),
   );
   static const VerificationMeta _isPinnedMeta = const VerificationMeta(
     'isPinned',

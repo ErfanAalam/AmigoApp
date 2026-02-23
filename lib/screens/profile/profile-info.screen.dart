@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
+import 'dart:ui';
 import 'package:drift_db_viewer/drift_db_viewer.dart';
 import '../../api/api_service.dart';
 import '../../config/app-colors.config.dart';
@@ -859,22 +860,141 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                     // Show confirmation dialog
                     final shouldLogout = await showDialog<bool>(
                       context: context,
-                      builder: (context) => AlertDialog(
-                        title: Text('Sign Out'),
-                        content: Text('Are you sure you want to sign out?'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context, false),
-                            child: Text('CANCEL'),
-                          ),
-                          TextButton(
-                            onPressed: () => Navigator.pop(context, true),
-                            child: Text(
-                              'SIGN OUT',
-                              style: TextStyle(color: Colors.red),
+                      barrierColor: Colors.black.withAlpha(60),
+                      builder: (context) => Dialog(
+                        backgroundColor: Colors.transparent,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+                            child: Container(
+                              constraints: const BoxConstraints(maxWidth: 320),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Colors.white.withOpacity(0.2),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // Title
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      24,
+                                      24,
+                                      24,
+                                      16,
+                                    ),
+                                    child: Text(
+                                      'Logout',
+                                      style: TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.red[700],
+                                      ),
+                                    ),
+                                  ),
+                                  // Content
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      24,
+                                      0,
+                                      24,
+                                      24,
+                                    ),
+                                    child: Text(
+                                      'Are you sure you want to logout?',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        color: Colors.black87,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                  // Divider
+                                  Divider(height: 1, thickness: 1),
+                                  // Buttons
+                                  IntrinsicHeight(
+                                    child: Row(
+                                      children: [
+                                        // Cancel button
+                                        Expanded(
+                                          child: TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(context, false),
+                                            style: TextButton.styleFrom(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    vertical: 16,
+                                                  ),
+                                              shape:
+                                                  const RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.only(
+                                                          bottomLeft:
+                                                              Radius.circular(
+                                                                12,
+                                                              ),
+                                                        ),
+                                                  ),
+                                            ),
+                                            child: Text(
+                                              'Cancel',
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w500,
+                                                color: Colors.grey[700],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        // Vertical divider
+                                        Container(
+                                          width: 1,
+                                          color: Colors.grey[300],
+                                        ),
+                                        // Confirm button
+                                        Expanded(
+                                          child: TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(context, true),
+                                            style: TextButton.styleFrom(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    vertical: 16,
+                                                  ),
+                                              shape:
+                                                  const RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.only(
+                                                          bottomRight:
+                                                              Radius.circular(
+                                                                12,
+                                                              ),
+                                                        ),
+                                                  ),
+                                            ),
+                                            child: Text(
+                                              'Confirm',
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w500,
+                                                color: Colors.purple[700],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                        ],
+                        ),
                       ),
                     );
 

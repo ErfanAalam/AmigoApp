@@ -74,7 +74,16 @@ void main() async {
   // await TestBGService().initializeService();
 
   // Run the app (with Riverpod)
-  material.runApp(const ProviderScope(child: MyApp()));
+  material.runApp(
+    ProviderScope(
+      child: MyApp(key: MyApp.appStateKey),
+    ),
+  );
+}
+
+/// Public interface for app state methods that can be called from other files
+abstract class AppStateInterface {
+  Future<void> initializeAuthenticatedUser();
 }
 
 class MyApp extends material.StatefulWidget {
@@ -82,10 +91,14 @@ class MyApp extends material.StatefulWidget {
 
   @override
   material.State<MyApp> createState() => _MyAppState();
+  
+  // Global key to access app state from anywhere
+  static final GlobalKey<material.State<MyApp>> appStateKey = GlobalKey<material.State<MyApp>>();
 }
 
 class _MyAppState extends material.State<MyApp>
-    with material.WidgetsBindingObserver {
+    with material.WidgetsBindingObserver
+    implements AppStateInterface {
   final AuthService _authService = AuthService();
   final TransportManager _transportManager = TransportManager();
   final UserStatusService _userStatusService = UserStatusService();
@@ -114,6 +127,108 @@ class _MyAppState extends material.State<MyApp>
     material.WidgetsBinding.instance.addPostFrameCallback((_) {
       _processInitialNotification();
     });
+  }
+  
+  /// Initialize authenticated user - can be called from anywhere after login/signup
+  /// This method contains all the logic that should run when a user is authenticated
+  Future<void> initializeAuthenticatedUser() async {
+    // Update authentication state
+    final isAuthenticated = await _authService.isAuthenticated();
+    if (mounted) {
+      setState(() {
+        _isAuthenticated = isAuthenticated;
+        _isLoading = false;
+      });
+    }
+
+    if (!isAuthenticated) {
+      return;
+    }
+
+    try {
+      // Connect to WebSocket and wait for connection
+      final cookieService = CookieService();
+      final accessToken = await cookieService.getAccessToken();
+      if (accessToken != null) {
+        await _transportManager.connect(accessToken);
+      }
+
+      // Initialize centralized WebSocket message handler (only once)
+      WebSocketMessageHandler().initialize();
+
+      final appVersion = await UserUtils().getAppVersion();
+      final updateResult = await _apiService.user.updateUser({
+        'app_version': appVersion,
+      });
+      if (!updateResult.isSuccess) {
+        debugPrint(
+          '⚠️ Failed to update app version: ${updateResult.message}',
+        );
+      }
+
+      // await _apiService.updateUserLocationAndIp();
+      // Wait a bit for WebSocket to establish connection
+      await Future.delayed(const Duration(milliseconds: 500));
+      await _requestPermissions();
+
+      final callUtils = CallUtils();
+      final callDetails = await callUtils.getCallDetails();
+      final callStatus = callDetails?.callStatus;
+      final callId = callDetails?.callId;
+      final callerId = callDetails?.callerId;
+
+      if (callId != null) {
+        // Get caller information from storage
+        final callerName = callDetails?.callerName ?? 'Unknown';
+        final callerProfilePic = callDetails?.callerProfilePic;
+
+        switch (callStatus) {
+          case 'answered':
+            // Call was answered, proceed to accept
+            await CallService().initialize();
+            await CallService().acceptCall(
+              callId: callId,
+              callerId: callerId,
+              callerName: callerName,
+              callerProfilePic: callerProfilePic,
+            );
+
+            // // Dispose all notifications from flutter_callkit_incoming
+            // await FlutterCallkitIncoming.setCallConnected(callId);
+            break;
+
+          case 'declined':
+            // Call was rejected, clean up
+            await CallService().initialize();
+            await CallService().declineCall(
+              reason: 'declined',
+              callId: callId,
+            );
+            return;
+
+          case 'ended':
+            // Call already ended, clean up
+            break;
+
+          case 'missed':
+            // Call was missed, clean up
+            await CallService().initialize();
+            await CallService().declineCall(
+              reason: 'timeout',
+              callId: callId,
+            );
+            break;
+
+          default:
+            // No action needed
+            break;
+        }
+      }
+
+      await _apiService.auth.updateUserLocationAndIp();
+    } catch (e) {
+      debugPrint('❌ Failed to establish WebSocket connection: $e');
+    }
   }
 
   @override
@@ -211,92 +326,9 @@ class _MyAppState extends material.State<MyApp>
       _isLoading = false;
     });
 
-    // Connect to WebSocket if user is authenticated
+    // Initialize authenticated user if already logged in
     if (isAuthenticated) {
-      try {
-        // Initialize centralized WebSocket message handler (only once)
-        WebSocketMessageHandler().initialize();
-
-        // Connect to WebSocket and wait for connection
-        final cookieService = CookieService();
-        final accessToken = await cookieService.getAccessToken();
-        if (accessToken != null) {
-          await _transportManager.connect(accessToken);
-        }
-
-        final appVersion = await UserUtils().getAppVersion();
-        final updateResult = await _apiService.user.updateUser({
-          'app_version': appVersion,
-        });
-        if (!updateResult.isSuccess) {
-          debugPrint(
-            '⚠️ Failed to update app version: ${updateResult.message}',
-          );
-        }
-
-        // await _apiService.updateUserLocationAndIp();
-        // Wait a bit for WebSocket to establish connection
-        await Future.delayed(const Duration(milliseconds: 500));
-        await _requestPermissions();
-
-        final callUtils = CallUtils();
-        final callDetails = await callUtils.getCallDetails();
-        final callStatus = callDetails?.callStatus;
-        final callId = callDetails?.callId;
-        final callerId = callDetails?.callerId;
-
-        if (callId != null) {
-          // Get caller information from storage
-          final callerName = callDetails?.callerName ?? 'Unknown';
-          final callerProfilePic = callDetails?.callerProfilePic;
-
-          switch (callStatus) {
-            case 'answered':
-              // Call was answered, proceed to accept
-              await CallService().initialize();
-              await CallService().acceptCall(
-                callId: callId,
-                callerId: callerId,
-                callerName: callerName,
-                callerProfilePic: callerProfilePic,
-              );
-
-              // // Dispose all notifications from flutter_callkit_incoming
-              // await FlutterCallkitIncoming.setCallConnected(callId);
-              break;
-
-            case 'declined':
-              // Call was rejected, clean up
-              await CallService().initialize();
-              await CallService().declineCall(
-                reason: 'declined',
-                callId: callId,
-              );
-              return;
-
-            case 'ended':
-              // Call already ended, clean up
-              break;
-
-            case 'missed':
-              // Call was missed, clean up
-              await CallService().initialize();
-              await CallService().declineCall(
-                reason: 'timeout',
-                callId: callId,
-              );
-              break;
-
-            default:
-              // No action needed
-              break;
-          }
-        }
-
-        await _apiService.auth.updateUserLocationAndIp();
-      } catch (e) {
-        debugPrint('❌ Failed to establish WebSocket connection in main.dart');
-      }
+      await initializeAuthenticatedUser();
     }
   }
 

@@ -1,8 +1,8 @@
 import 'dart:io';
+import 'dart:ui';
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/socket.types.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../config/app-colors.config.dart';
 import '../../db/repositories/message.repo.dart';
@@ -40,6 +40,10 @@ class MessageBubbleConfig {
   final Widget Function(MessageModel message)? buildMessageStatusTicks;
   final void Function(MessageModel message)?
   onRetryFailedMessage; // Retry callback for failed messages
+  final bool
+  isResendingMessage; // Whether this message is currently being resent
+  final void Function(int messageId)? onResendFailedMessage;
+  final void Function(int messageId)? onDeleteFailedMessage;
 
   // Configuration flags
   final bool isGroupChat; // true for group, false for DM
@@ -69,6 +73,9 @@ class MessageBubbleConfig {
     required this.isMediaMessage,
     this.buildMessageStatusTicks,
     this.onRetryFailedMessage,
+    this.isResendingMessage = false,
+    this.onResendFailedMessage,
+    this.onDeleteFailedMessage,
     required this.isGroupChat,
     required this.nonMyMessageBackgroundColor,
     required this.useIntrinsicWidth,
@@ -81,6 +88,57 @@ class MessageBubbleConfig {
   });
 }
 
+/// Show failed message options dialog
+void _showFailedMessageDialog(
+  BuildContext context, {
+  required void Function()? onResend,
+  required void Function()? onDelete,
+}) {
+  showDialog(
+    context: context,
+    barrierColor: Colors.black.withOpacity(0.3),
+    builder: (BuildContext dialogContext) {
+      return BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: AlertDialog(
+          backgroundColor: Colors.white.withOpacity(0.85),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: const Text(
+            'Message Failed',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          content: const Text('What would you like to do?'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                onResend?.call();
+              },
+              child: const Text('Resend'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                onDelete?.call();
+              },
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Delete'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
 /// Shared MessageBubble widget for both DM and group chats
 class MessageBubble extends ConsumerWidget {
   final MessageBubbleConfig config;
@@ -90,15 +148,10 @@ class MessageBubble extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeColor = ref.watch(themeColorProvider);
-    final isFailed = config.message.status == MessageStatusType.failed;
-    final isUploading = config.message.metadata?['is_uploading'] == true;
-    final showRetry = isFailed &&
-        config.isMyMessage &&
-        config.onRetryFailedMessage != null;
 
     Widget messageContent = RepaintBoundary(
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: 3),
         child: Row(
           mainAxisAlignment: config.isMyMessage
               ? MainAxisAlignment.end
@@ -112,11 +165,11 @@ class MessageBubble extends ConsumerWidget {
                   maxWidth: MediaQuery.of(context).size.width * 0.75,
                 ),
                 margin: EdgeInsets.only(
-                  left: config.isMyMessage ? 40 : 8,
-                  right: config.isMyMessage ? 8 : 40,
+                  left: config.isMyMessage ? 40 : 0,
+                  right: config.isMyMessage ? 0 : 40,
                 ),
                 padding: config.isHighlighted
-                    ? const EdgeInsets.all(10)
+                    ? const EdgeInsets.all(5)
                     : EdgeInsets.zero,
                 decoration: BoxDecoration(
                   color: config.isHighlighted
@@ -134,36 +187,6 @@ class MessageBubble extends ConsumerWidget {
                     : _buildColumnContainer(themeColor),
               ),
             ),
-            // Retry button on outer right side (like WhatsApp) - only for text messages
-            if ((showRetry || (isUploading && config.isMyMessage)) &&
-                !config.isMediaMessage(config.message)) ...[
-              const SizedBox(width: 8),
-              if (isUploading)
-                _RotatingRefreshIcon(
-                  size: 20,
-                  color: config.isMyMessage
-                      ? themeColor.primary
-                      : Colors.grey[600] ?? Colors.grey,
-                )
-              else if (showRetry && config.onRetryFailedMessage != null)
-                GestureDetector(
-                  onTap: () => config.onRetryFailedMessage!(config.message),
-                  child: Icon(
-                    Icons.refresh,
-                    size: 20,
-                    color: config.isMyMessage
-                        ? themeColor.primary
-                        : Colors.grey[600] ?? Colors.grey,
-                  ),
-                )
-              else if (showRetry)
-                // Show disabled retry icon when automatic resend is in progress
-                Icon(
-                  Icons.refresh,
-                  size: 20,
-                  color: Colors.grey[400] ?? Colors.grey,
-                ),
-            ],
           ],
         ),
       ),
@@ -437,8 +460,8 @@ class MessageBubble extends ConsumerWidget {
   /// Build children for time and status row
   List<Widget> _buildTimeAndStatusRowChildren() {
     final isFailed = config.message.status == MessageStatusType.failed;
-    // For text messages, retry button is shown outside the container
-    // For media messages, they handle their own retry buttons
+    // || (config.message.metadata?['upload_failed'] == true);
+    final isMyMessage = config.isMyMessage;
 
     return [
       if (config.isStarred) ...[
@@ -449,21 +472,42 @@ class MessageBubble extends ConsumerWidget {
         ),
         const SizedBox(width: 4),
       ],
-      Text(
-        config.messageTime,
-        style: TextStyle(
-          color: config.isMyMessage ? Colors.white70 : Colors.grey[600],
-          fontSize: 11,
-          fontWeight: FontWeight.w400,
+      if (isFailed && isMyMessage)
+        Builder(
+          builder: (context) => GestureDetector(
+            onTap: () {
+              _showFailedMessageDialog(
+                context,
+                onResend: config.onResendFailedMessage != null
+                    ? () => config.onResendFailedMessage!(config.message.id)
+                    : null,
+                onDelete: config.onDeleteFailedMessage != null
+                    ? () => config.onDeleteFailedMessage!(config.message.id)
+                    : null,
+              );
+            },
+            child: Icon(
+              Icons.info_outline_rounded,
+              size: 16,
+              color: Colors.red,
+            ),
+          ),
+        )
+      else ...[
+        Text(
+          config.messageTime,
+          style: TextStyle(
+            color: config.isMyMessage ? Colors.white70 : Colors.grey[600],
+            fontSize: 11,
+            fontWeight: FontWeight.w400,
+          ),
         ),
-      ),
-      // Show delivery/read status ticks for own messages (DM only)
-      // Don't show status ticks for failed messages
-      if (config.isMyMessage &&
-          !isFailed &&
-          config.buildMessageStatusTicks != null) ...[
-        const SizedBox(width: 4),
-        config.buildMessageStatusTicks!(config.message),
+        // Show delivery/read status ticks for own messages (DM only)
+        // Don't show status ticks for failed messages
+        if (config.isMyMessage && config.buildMessageStatusTicks != null) ...[
+          const SizedBox(width: 4),
+          config.buildMessageStatusTicks!(config.message),
+        ],
       ],
     ];
   }
@@ -781,13 +825,13 @@ class _VideoThumbnailWidgetState extends ConsumerState<VideoThumbnailWidget> {
     try {
       // Use persistent cache service
       final thumbnailPath = await _thumbnailCache.getThumbnail(widget.videoUrl);
-      
+
       if (mounted) {
         setState(() {
           _thumbnailPath = thumbnailPath;
           _isLoading = false;
         });
-        
+
         // Update the old cache for backwards compatibility
         widget.thumbnailCache[widget.videoUrl] = thumbnailPath;
         widget.onThumbnailGenerated();
@@ -812,11 +856,7 @@ class _VideoThumbnailWidgetState extends ConsumerState<VideoThumbnailWidget> {
         errorBuilder: (context, error, stackTrace) {
           return Container(
             color: Colors.black87,
-            child: const Icon(
-              Icons.videocam,
-              color: Colors.white70,
-              size: 32,
-            ),
+            child: const Icon(Icons.videocam, color: Colors.white70, size: 32),
           );
         },
       );
@@ -839,11 +879,7 @@ class _VideoThumbnailWidgetState extends ConsumerState<VideoThumbnailWidget> {
     // Show placeholder if thumbnail generation failed
     return Container(
       color: Colors.black87,
-      child: const Icon(
-        Icons.videocam,
-        color: Colors.white70,
-        size: 32,
-      ),
+      child: const Icon(Icons.videocam, color: Colors.white70, size: 32),
     );
   }
 }

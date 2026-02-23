@@ -65,6 +65,7 @@ enum MessageStatusType {
   unsent('unsent'),
   sent('sent'),
   delivered('delivered'),
+  uploading('uploading'),
   read('read'),
   failed('failed');
 
@@ -287,12 +288,12 @@ class ChatMessagePayload {
     // Handle both string and int IDs (server sends bigint as string in JSON)
     final idValue = json['id'];
     final id = idValue is String ? int.parse(idValue) : (idValue as int);
-    
+
     final replyToMessageIdValue = json['reply_to_message_id'];
     final replyToMessageId = replyToMessageIdValue != null
-        ? (replyToMessageIdValue is String 
-            ? int.parse(replyToMessageIdValue) 
-            : (replyToMessageIdValue as int?))
+        ? (replyToMessageIdValue is String
+              ? int.parse(replyToMessageIdValue)
+              : (replyToMessageIdValue as int?))
         : null;
 
     return ChatMessagePayload(
@@ -315,7 +316,8 @@ class ChatMessagePayload {
 
   Map<String, dynamic> toJson() {
     return {
-      'id': id.toString(), // Convert bigint to string for WebSocket transmission
+      'id': id
+          .toString(), // Convert bigint to string for WebSocket transmission
       'sender_id': senderId,
       if (senderName != null) 'sender_name': senderName,
       'conv_id': convId,
@@ -324,7 +326,9 @@ class ChatMessagePayload {
       if (body != null) 'body': body,
       if (attachments != null) 'attachments': attachments,
       if (metadata != null) 'metadata': metadata,
-      if (replyToMessageId != null) 'reply_to_message_id': replyToMessageId.toString(), // Convert bigint to string
+      if (replyToMessageId != null)
+        'reply_to_message_id': replyToMessageId
+            .toString(), // Convert bigint to string
       'sent_at': sentAt.toIso8601String(),
     };
   }
@@ -375,12 +379,10 @@ class ChatMessageAckPayload {
     // Handle both string and int IDs (server sends bigint as string in JSON)
     final idValue = json['id'];
     final id = idValue is String ? int.parse(idValue) : (idValue as int);
-    
+
     final newIdValue = json['new_id'];
     final newId = newIdValue != null
-        ? (newIdValue is String 
-            ? int.parse(newIdValue) 
-            : (newIdValue as int?))
+        ? (newIdValue is String ? int.parse(newIdValue) : (newIdValue as int?))
         : null;
 
     return ChatMessageAckPayload(
@@ -409,7 +411,8 @@ class ChatMessageAckPayload {
 
   Map<String, dynamic> toJson() {
     return {
-      'id': id.toString(), // Convert bigint to string for WebSocket transmission
+      'id': id
+          .toString(), // Convert bigint to string for WebSocket transmission
       if (newId != null) 'new_id': newId.toString(), // Convert bigint to string
       'conv_id': convId,
       'sender_id': senderId,
@@ -479,7 +482,7 @@ class DeleteMessagePayload {
     final messageIds = (json['message_ids'] as List<dynamic>)
         .map((e) => e is String ? int.parse(e) : (e as int))
         .toList();
-    
+
     return DeleteMessagePayload(
       convId: json['conv_id'] as int,
       senderId: json['sender_id'] as int,
@@ -491,7 +494,9 @@ class DeleteMessagePayload {
     return {
       'conv_id': convId,
       'sender_id': senderId,
-      'message_ids': messageIds.map((id) => id.toString()).toList(), // Convert bigint IDs to strings
+      'message_ids': messageIds
+          .map((id) => id.toString())
+          .toList(), // Convert bigint IDs to strings
     };
   }
 }
@@ -748,10 +753,10 @@ class MessagePinPayload {
   factory MessagePinPayload.fromJson(Map<String, dynamic> json) {
     // Handle both string and int IDs (server sends bigint as string in JSON)
     final messageIdValue = json['message_id'];
-    final messageId = messageIdValue is String 
-        ? int.parse(messageIdValue) 
+    final messageId = messageIdValue is String
+        ? int.parse(messageIdValue)
         : (messageIdValue as int);
-    
+
     return MessagePinPayload(
       convId: json['conv_id'] as int,
       messageId: messageId,
@@ -768,7 +773,8 @@ class MessagePinPayload {
   Map<String, dynamic> toJson() {
     return {
       'conv_id': convId,
-      'message_id': messageId.toString(), // Convert bigint to string for WebSocket transmission
+      'message_id': messageId
+          .toString(), // Convert bigint to string for WebSocket transmission
       'message_type': messageType.value,
       'sender_id': senderId,
       if (senderName != null) 'sender_name': senderName,
@@ -799,7 +805,7 @@ class MessageForwardPayload {
     final forwardedMessageIds = (json['forwarded_message_ids'] as List<dynamic>)
         .map((e) => e is String ? int.parse(e) : (e as int))
         .toList();
-    
+
     return MessageForwardPayload(
       sourceConvId: json['source_conv_id'] as int,
       forwarderId: json['forwarder_id'] as int,
@@ -816,7 +822,9 @@ class MessageForwardPayload {
       'source_conv_id': sourceConvId,
       'forwarder_id': forwarderId,
       if (forwarderName != null) 'forwarder_name': forwarderName,
-      'forwarded_message_ids': forwardedMessageIds.map((id) => id.toString()).toList(), // Convert bigint IDs to strings
+      'forwarded_message_ids': forwardedMessageIds
+          .map((id) => id.toString())
+          .toList(), // Convert bigint IDs to strings
       'target_conv_ids': targetConvIds,
     };
   }
@@ -996,10 +1004,10 @@ class MessageDeliveredPayload {
 
     // Handle both string and int IDs (server sends bigint as string in JSON)
     final messageIdValue = json['message_id'];
-    final messageId = messageIdValue is String 
-        ? int.parse(messageIdValue) 
+    final messageId = messageIdValue is String
+        ? int.parse(messageIdValue)
         : (messageIdValue as int);
-    
+
     return MessageDeliveredPayload(
       messageId: messageId,
       convId: json['conv_id'] as int,
@@ -1011,7 +1019,8 @@ class MessageDeliveredPayload {
 
   Map<String, dynamic> toJson() {
     return {
-      'message_id': messageId.toString(), // Convert bigint to string for WebSocket transmission
+      'message_id': messageId
+          .toString(), // Convert bigint to string for WebSocket transmission
       'conv_id': convId,
       'sender_id': senderId,
       'recipient_id': recipientId,

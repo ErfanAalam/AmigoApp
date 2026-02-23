@@ -27,6 +27,7 @@ import '../../../services/draft-message.service.dart';
 import '../../../services/media-cache.service.dart';
 import '../../../services/notification.service.dart';
 import '../../../services/socket/transport.manager.dart';
+import '../../../services/socket/transport.service.dart';
 import '../../../services/socket/ws-message.handler.dart';
 import '../../../services/user-status.service.dart';
 import '../../../types/socket.types.dart';
@@ -81,6 +82,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   // stream subscriptions
   StreamSubscription<ConnectionStatus>? _onlineStatusSubscription;
+  StreamSubscription<TransportConnectionState>?
+  _transportConnectionSubscription;
   StreamSubscription<TypingPayload>? _typingSubscription;
   StreamSubscription<ChatMessagePayload>? _messageSubscription;
   StreamSubscription<ChatMessageAckPayload>? _messageAckSubscription;
@@ -121,7 +124,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // Draft save debounce timer
   Timer? _draftSaveTimer;
 
-  bool _isTyping = false;
+  // bool _isTyping = false;
   bool _isSendingMessage = false;
   // bool isloadingMediamessage = false;
   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
@@ -148,6 +151,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // Forward message state
   final Set<int> _messagesToForward = {};
   final bool _isLoadingConversations = false;
+
+  // Resending failed messages state
+  final Map<int, bool> _resendingFailedMessages = {};
 
   // Reply message state
   MessageModel? _replyToMessageData;
@@ -192,6 +198,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   final ValueNotifier<bool> _showStickyDate = ValueNotifier<bool>(false);
 
   Timer? _typingTimeout;
+  DateTime? _lastTypingMessageSent; // Track when last typing message was sent
 
   // Scroll debounce timer
   Timer? _scrollDebounceTimer;
@@ -450,6 +457,17 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             debugPrint('❌ Conversation join/leave stream error: $error');
           },
         );
+
+    // Listen to transport connection state changes for auto-resending failed messages
+    _transportConnectionSubscription = _transportManager.connectionStateStream
+        .listen((state) {
+          if (state == TransportConnectionState.connected) {
+            debugPrint(
+              '[DM] 🎐🎐🎐 Transport reconnected, auto-resending failed messages',
+            );
+            _resendAllFailedMessages();
+          }
+        });
   }
 
   Future<void> _initializeChat() async {
@@ -1038,7 +1056,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         indicesToRemove.add(messageIndex);
       }
     }
-    
+
     // Remove messages in reverse order to avoid index shifting issues
     if (indicesToRemove.isNotEmpty) {
       indicesToRemove.sort((a, b) => b.compareTo(a)); // Sort descending
@@ -1053,14 +1071,31 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   /// Build message status ticks (single/double) based on delivery and read status
   Widget _buildMessageStatusTicks(MessageModel message) {
-    if (((message.status == MessageStatusType.read) && message.id > 0)) {
-      // Message is already marked as read - always show blue tick
-      return Icon(Icons.done_all, size: 16, color: Colors.blue);
-    } else if (message.status == MessageStatusType.delivered) {
-      // User is active - show blue tick for delivered messages
-      return Icon(Icons.done_all, size: 16, color: Colors.grey[600]);
-    } else {
-      return Icon(Icons.done, size: 16, color: Colors.grey[600]);
+    // if (message.isFailed != null && message.isFailed == true) {
+    //   return Icon(Icons.error_outline_rounded, size: 16, color: Colors.red);
+    // }
+
+    switch (message.status) {
+      case MessageStatusType.read:
+        return Icon(Icons.done_all_rounded, size: 16, color: Colors.blue);
+      case MessageStatusType.delivered:
+        return Icon(Icons.done_all_rounded, size: 16, color: Colors.grey[500]);
+      case MessageStatusType.sent:
+        return Icon(Icons.done_rounded, size: 16, color: Colors.grey[500]);
+      case MessageStatusType.unsent:
+        return Icon(
+          Icons.access_time_rounded,
+          size: 16,
+          color: Colors.grey[500],
+        );
+      case MessageStatusType.uploading:
+        return Icon(
+          Icons.cloud_upload_outlined,
+          size: 16,
+          color: Colors.greenAccent,
+        );
+      case MessageStatusType.failed:
+        return Icon(Icons.error_outline_rounded, size: 16, color: Colors.red);
     }
   }
 
@@ -1161,7 +1196,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       // updating message status
       final recipientId = widget.dm.recipientId;
 
-      MessageStatusType status = MessageStatusType.delivered;
+      MessageStatusType status = MessageStatusType.sent;
       if (payload.readBy != null && payload.readBy!.isNotEmpty) {
         if (payload.readBy!.contains(recipientId)) {
           status = MessageStatusType.read;
@@ -1253,8 +1288,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     if (isTyping) {
       _typingAnimationController.repeat(reverse: true);
 
-      // Set a safety timeout to hide typing indicator after 2 seconds
-      _typingTimeout = Timer(const Duration(seconds: 2), () {
+      // Set a safety timeout to hide typing indicator after x seconds
+      _typingTimeout = Timer(const Duration(seconds: 3), () {
         if (_isDisposed) {
           return;
         }
@@ -1276,31 +1311,45 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     if (!_canSetState) {
       return;
     }
-    _safeSetState(() {
-      _isTyping = isTyping;
-    });
+    // _safeSetState(() {
+    //   _isTyping = isTyping;
+    // });
 
     if (isTyping) {
-      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-      // Send inactive message when user navigates away from the page
-      final typingPayload = TypingPayload(
-        convId: widget.dm.conversationId,
-        isTyping: true,
-        senderId: _currentUserDetails!.id,
-        senderName: _currentUserDetails!.name,
-        senderPfp: _currentUserDetails!.profilePic,
-      ).toJson();
+      final now = DateTime.now();
 
-      final wsmsg = WSMessage(
-        type: WSMessageType.conversationTyping,
-        payload: typingPayload,
-        wsTimestamp: DateTime.now(),
-      ).toJson();
+      // Send immediately on first keystroke, or if x seconds have passed since last message
+      final shouldSend =
+          _lastTypingMessageSent == null ||
+          now.difference(_lastTypingMessageSent!).inSeconds >= 2;
 
-      await _transportManager.sendMessage(wsmsg).catchError((e) {
-        debugPrint('Error sending conversation:leave in deactivate');
-      });
-      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      if (shouldSend) {
+        // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        final typingPayload = TypingPayload(
+          convId: widget.dm.conversationId,
+          isTyping: true,
+          senderId: _currentUserDetails!.id,
+          senderName: _currentUserDetails!.name,
+          senderPfp: _currentUserDetails!.profilePic,
+        ).toJson();
+
+        final wsmsg = WSMessage(
+          type: WSMessageType.conversationTyping,
+          payload: typingPayload,
+          wsTimestamp: now,
+        ).toJson();
+
+        await _transportManager.sendMessage(wsmsg).catchError((e) {
+          debugPrint('Error sending conversation:typing message');
+        });
+
+        // Update last sent time
+        _lastTypingMessageSent = now;
+        // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      }
+    } else {
+      // Reset timestamp when user stops typing so next typing session sends immediately
+      _lastTypingMessageSent = null;
     }
   }
 
@@ -1361,27 +1410,36 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     MediaResponse? mediaResponse,
     int? messageId,
     int? retryCount = 0,
+    String? body,
   }) async {
     if (mounted) {
       setState(() {
         _isSendingMessage = true;
       });
     }
+    // grab the text from the text input controller or use provided body
     String messageText = '';
     if (messageType == MessageType.text) {
-      messageText = _messageController.text.trim();
+      messageText = body ?? _messageController.text.trim();
       if (messageText.isEmpty) return;
     }
 
+    // Check if this is a resend (body is provided)
+    final isResend = body != null;
+
+    // Clear draft when message is grabbed out of the text input for sending
+    // Skip if resending (body is provided)
+    if (!isResend) {
+      final draftNotifier = ref.read(draftMessagesProvider.notifier);
+      await draftNotifier.removeDraft(widget.dm.conversationId);
+    }
+
+    // generate the snowflake ID (universal id across the entirety of stack)
     final id =
         messageId ??
         await Snowflake.generateMessageId(widget.dm.conversationId);
 
-    // Clear draft when message is sent
-    final draftNotifier = ref.read(draftMessagesProvider.notifier);
-    await draftNotifier.removeDraft(widget.dm.conversationId);
-
-    // Create optimistic message for immediate display with current UTC time
+    // Create message for immediate display with current UTC time
     final nowUTC = DateTime.now().toUtc();
 
     // Structure metadata properly for reply messages and contact messages
@@ -1396,8 +1454,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       };
     }
 
-    // Merge contact metadata if present
-    if (_pendingContactMetadata != null) {
+    // Merge contact metadata if present (only for new messages, not resends)
+    if (!isResend && _pendingContactMetadata != null) {
       combinedMetadata ??= {};
       combinedMetadata.addAll(_pendingContactMetadata!);
     }
@@ -1408,58 +1466,73 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       senderId: _currentUserDetails!.id,
       senderName: _currentUserDetails!.name,
       senderProfilePic: _currentUserDetails!.profilePic,
-      metadata: combinedMetadata,
-      attachments: mediaResponse?.toJson(),
       type: messageType,
       body: messageText,
+      status: MessageStatusType.unsent,
+      attachments: mediaResponse?.toJson(),
+      metadata: combinedMetadata,
       isReplied: _replyToMessageData != null,
-      status: MessageStatusType.sent,
       sentAt: nowUTC.toIso8601String(),
+      // isFailed: true,
     );
 
-    // storing the message into the local database
-    final result = await _messagesRepo.insertMessage(newMsg);
-    if (result["success"] == false && result["errorCode"] == 1555) {
-      debugPrint("result : $result");
-      if (retryCount! > 5) return;
-      _sendMessage(
-        messageType,
-        mediaResponse: mediaResponse,
-        retryCount: retryCount + 1,
+    if (messageId == null && mediaResponse == null) {
+      // storing the message into the local database
+      final result = await _messagesRepo.insertMessage(newMsg);
+      // retry logic for handling unique constraint violation on message ID (snowflake collision)
+      if (result["success"] == false && result["errorCode"] == 1555) {
+        debugPrint("result : $result");
+        if (retryCount! > 5) return;
+        _sendMessage(
+          messageType,
+          mediaResponse: mediaResponse,
+          retryCount: retryCount + 1,
+        );
+        return;
+      }
+    } else if (messageId != null && mediaResponse != null) {
+      // This is a media message, so we need to insert it into the DB with the generated ID
+      final result = await _messagesRepo.updateMessageFields(
+        id,
+        attachments: mediaResponse.toJson(),
+        metadata: combinedMetadata,
+        status: MessageStatusType.unsent,
       );
-      return;
+      if (result.isError) {
+        debugPrint(
+          "Failed to insert media message into local DB errorCode: ${result.errorCode}",
+        );
+        return;
+      }
     }
 
     // Clear input and reply state immediately for better UX
-    _messageController.clear();
-    // Clear pending contact metadata after using it
-    _pendingContactMetadata = null;
+    // Skip if resending (body is provided)
+    if (!isResend) {
+      _messageController.clear();
+      // Clear pending contact metadata after using it
+      _pendingContactMetadata = null;
+    }
 
-    // return;
     // Add message to UI immediately with animation
     if (_canSetState) {
       _safeSetState(() {
-        // If optimisticId is provided, replace the existing optimistic message
-        // if (id != null) {
         final index = _messages.indexWhere((msg) => msg.id == id);
         if (index != -1) {
           _messages[index] = newMsg;
         } else {
           _messages.add(newMsg);
         }
-        // } else {
-        //   _messages.add(newMsg);
-        // }
         _sortMessagesBySentAt();
       });
 
       _animateNewMessage(newMsg.id);
+      // scroll to bottom when a new message is sent
       _scrollToBottom();
     }
 
     try {
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
       final messagePayload = ChatMessagePayload(
         id: id,
         convId: widget.dm.conversationId,
@@ -1480,12 +1553,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      await _transportManager.sendMessage(wsmsg).catchError((e) async {
-        debugPrint('Error sending message: $e');
-        // Mark message as failed in DB and UI
-        await _markMessageAsFailed(newMsg.id);
-      });
-
+      final sendResult = await _transportManager.sendMessage(wsmsg);
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
       // updating the last message on sending own message
@@ -1497,12 +1565,20 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           );
 
       // store that message in the message status table
-      await _messageStatusRepo.insertMessageStatusesWithMultipleUserIds(
-        messageId: newMsg.id,
-        conversationId: widget.dm.conversationId,
-        userIds: [widget.dm.recipientId],
-      );
+      // only store when is sent to server fr
+      if (sendResult == true) {
+        await _messageStatusRepo.insertMessageStatusesWithMultipleUserIds(
+          messageId: newMsg.id,
+          conversationId: widget.dm.conversationId,
+          userIds: [widget.dm.recipientId],
+        );
+      } else {
+        debugPrint("marking message as failed");
+        // Mark message as failed in DB and UI
+        await _markMessageAsFailed(newMsg.id);
+      }
 
+      // remove the reply container if any
       _cancelReply();
     } catch (e) {
       debugPrint('Error sending message: $e');
@@ -2777,9 +2853,25 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         buildMessageContent: _buildMessageContent,
         isMediaMessage: _isMediaMessage,
         buildMessageStatusTicks: _buildMessageStatusTicks,
-        // onRetryFailedMessage: _isResendingFailedMessages
-        //     ? null
-        //     : _resendFailedMessage,
+        onRetryFailedMessage: (message) {
+          if (!_isResendingFailedMessage(message.id)) {
+            resendFailedMessage(message.id);
+          }
+        },
+        isResendingMessage: _isResendingFailedMessage(message.id),
+        onResendFailedMessage: (messageId) {
+          resendFailedMessage(messageId);
+        },
+        onDeleteFailedMessage: (messageId) async {
+          // Remove from UI immediately
+          if (_canSetState) {
+            _safeSetState(() {
+              _messages.removeWhere((message) => message.id == messageId);
+            });
+          }
+          // Delete from local DB
+          await _messagesRepo.permanentlyDeleteMessage(messageId);
+        },
         isGroupChat: false,
         nonMyMessageBackgroundColor: Colors.white,
         useIntrinsicWidth: true,
@@ -2940,6 +3032,19 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           MessageType.audio,
         );
         // }
+      },
+      onResendFailedMessage: (messageId) {
+        resendFailedMessage(messageId);
+      },
+      onDeleteFailedMessage: (messageId) async {
+        // Remove from UI immediately
+        if (_canSetState) {
+          _safeSetState(() {
+            _messages.removeWhere((message) => message.id == messageId);
+          });
+        }
+        // Delete from local DB
+        await _messagesRepo.permanentlyDeleteMessage(messageId);
       },
     );
   }
@@ -3223,11 +3328,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   Future<void> _sendMediaMessageToServer(
     File mediaFile,
-    MessageType messageType,
-  ) async {
-    final messageId = await Snowflake.generateMessageId(
-      widget.dm.conversationId,
-    );
+    MessageType messageType, {
+    int? existingMessageId,
+  }) async {
+    final messageId =
+        existingMessageId ??
+        await Snowflake.generateMessageId(widget.dm.conversationId);
     final nowUTC = DateTime.now().toUtc();
 
     // Structure metadata properly for reply messages and upload status
@@ -3259,20 +3365,36 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       metadata: metadata,
       attachments: attachments,
       type: messageType,
-      body: '',
       isReplied: _replyToMessageData != null,
-      status: MessageStatusType.sent,
+      status: MessageStatusType.uploading,
       sentAt: nowUTC.toIso8601String(),
     );
 
     if (_canSetState) {
-      _safeSetState(() {
-        _messages.add(newMsg);
-        _sortMessagesBySentAt();
-      });
+      // If resending, update existing message; otherwise add new one
+      if (existingMessageId != null) {
+        final index = _messages.indexWhere((msg) => msg.id == messageId);
+        if (index != -1) {
+          _safeSetState(() {
+            _messages[index] = newMsg;
+            _sortMessagesBySentAt();
+          });
+          _animateNewMessage(newMsg.id);
+          _scrollToBottom();
+        }
+        // Also update in DB
+      } else {
+        _safeSetState(() {
+          _messages.add(newMsg);
+          _sortMessagesBySentAt();
+        });
 
-      _animateNewMessage(newMsg.id);
-      _scrollToBottom();
+        _animateNewMessage(newMsg.id);
+        _scrollToBottom();
+
+        // immediately insert message in the localDB for future reference
+        await _messagesRepo.insertMessage(newMsg);
+      }
     }
 
     int? lastProgressUpdate = -1;
@@ -3324,7 +3446,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           updatedMetadata.remove('is_uploading');
           updatedMetadata.remove('upload_progress');
 
-          final updatedMessage = currentMsg.copyWith(metadata: updatedMetadata);
+          final updatedMessage = currentMsg.copyWith(
+            metadata: updatedMetadata,
+            status: MessageStatusType.unsent,
+          );
 
           _safeSetState(() {
             _messages[index] = updatedMessage;
@@ -3370,10 +3495,140 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     });
 
     // Save to DB with failed status
-    await _messagesRepo.insertMessage(updatedMessage);
+    await _messagesRepo.updateMessageFields(
+      messageId,
+      status: MessageStatusType.failed,
+      metadata: updatedMetadata,
+    );
+
+    // print("🎐 🎐 🎐  set states to failed in UI state and DB");
+  }
+
+  /// Check if a specific message is currently being resent
+  bool _isResendingFailedMessage(int messageId) {
+    return _resendingFailedMessages[messageId] == true;
   }
 
   /// Resend a failed message
+  Future<void> resendFailedMessage(int messageId) async {
+    // Skip if already resending this message
+    if (_isResendingFailedMessage(messageId)) return;
+
+    try {
+      // Mark as resending in the map and update UI
+      _safeSetState(() {
+        _resendingFailedMessages[messageId] = true;
+      });
+
+      // Fetch the message from local DB
+      final message = await _messagesRepo.getMessageById(messageId);
+
+      if (message == null) {
+        debugPrint('Message not found: $messageId');
+        return;
+      }
+
+      // Check if message status is failed
+      if (message.status != MessageStatusType.failed) {
+        debugPrint('Message is not in failed status: ${message.status}');
+        return;
+      }
+
+      // Preserve reply metadata if the failed message was a reply
+      MessageModel? originalReplyToMessageData = _replyToMessageData;
+      final replyMetadata =
+          message.metadata?['reply_to'] as Map<String, dynamic>?;
+      if (replyMetadata != null) {
+        final replyToMessageId = replyMetadata['message_id'] as int?;
+        if (replyToMessageId != null) {
+          final replyToMessage = await _messagesRepo.getMessageById(
+            replyToMessageId,
+          );
+          if (replyToMessage != null) {
+            _replyToMessageData = replyToMessage;
+          }
+        }
+      }
+
+      try {
+        // Check if it's a media message (image, video, audio, document)
+        final isMediaMessage =
+            message.type == MessageType.image ||
+            message.type == MessageType.video ||
+            message.type == MessageType.audio ||
+            message.type == MessageType.document;
+
+        if (isMediaMessage) {
+          // Check if attachments contain local_path
+          final localPath = message.attachments?['local_path'] as String?;
+
+          if (localPath == null || localPath.isEmpty) {
+            debugPrint(
+              'No local_path found in attachments for failed media message',
+            );
+            return;
+          }
+
+          // Check if file exists
+          final mediaFile = File(localPath);
+          if (!mediaFile.existsSync()) {
+            debugPrint('Media file not found at path: $localPath');
+            return;
+          }
+
+          // Resend via _sendMediaMessageToServer with existing messageId
+          await _sendMediaMessageToServer(
+            mediaFile,
+            message.type,
+            existingMessageId: messageId,
+          );
+        } else {
+          // For text and other non-media messages, resend directly via _sendMessage
+          _sendMessage(message.type, messageId: messageId, body: message.body);
+        }
+      } finally {
+        // Restore original reply message data
+        _replyToMessageData = originalReplyToMessageData;
+      }
+    } catch (e) {
+      debugPrint('Error resending failed message: $e');
+    } finally {
+      // Clear resending state for this message
+      if (_canSetState) {
+        _safeSetState(() {
+          _resendingFailedMessages.remove(messageId);
+        });
+      } else {
+        _resendingFailedMessages.remove(messageId);
+      }
+    }
+  }
+
+  /// Auto-resend all failed messages in this conversation (called on reconnection)
+  Future<void> _resendAllFailedMessages() async {
+    // Collect failed messages from the in-memory list (already loaded)
+    final failedMessages = _messages
+        .where(
+          (msg) =>
+              msg.status == MessageStatusType.failed &&
+              msg.senderId == _currentUserDetails?.id &&
+              !_isResendingFailedMessage(msg.id),
+        )
+        .toList();
+
+    if (failedMessages.isEmpty) return;
+
+    debugPrint(
+      '[RESEND] Auto-resending ${failedMessages.length} failed messages',
+    );
+
+    // Resend sequentially to avoid overwhelming the server
+    for (final msg in failedMessages) {
+      if (!mounted) break;
+      await resendFailedMessage(msg.id);
+    }
+  }
+
   // Future<void> _resendFailedMessage(MessageModel failedMessage) async {
   //   // Find the message index in the UI
   //   final index = _messages.indexWhere(
@@ -4062,6 +4317,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     _messagePinSubscription?.cancel();
     // _messageReplySubscription?.cancel();
     _onlineStatusSubscription?.cancel();
+    _transportConnectionSubscription?.cancel();
     _messageDeleteSubscription?.cancel();
     _joinConvSubscription?.cancel();
     _typingAnimationController.dispose();

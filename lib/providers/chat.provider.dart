@@ -28,12 +28,8 @@ class ChatState {
   final bool isLoading;
   final int? activeConvId;
   final ChatType? activeConvType;
-  final Map<int, Set<TypingUser>>
-  typingConvUsers; // conversationId -> userIds[]
-  // final Set<int> pinnedChats;
-  // final Set<int> mutedChats;
-  // final Set<int> favoriteChats;
-  // final Set<int> deletedChats;
+  final Map<int, Set<TypingUser>> typingConvUsers; // convId -> userIds[]
+  final Map<int, int>? mediaUploadProgress; // messageId -> upload progress %
   final String searchQuery;
 
   ChatState({
@@ -44,17 +40,10 @@ class ChatState {
     this.isLoading = true,
     this.activeConvId,
     this.activeConvType,
-    Map<int, Set<TypingUser>>? typingConvUsers,
-    // Set<int>? pinnedChats,
-    // Set<int>? mutedChats,
-    // Set<int>? favoriteChats,
-    // Set<int>? deletedChats,
+    this.typingConvUsers = const {},
+    this.mediaUploadProgress,
     this.searchQuery = '',
-  }) : typingConvUsers = typingConvUsers ?? {};
-  // pinnedChats = pinnedChats ?? {},
-  // mutedChats = mutedChats ?? {},
-  // favoriteChats = favoriteChats ?? {},
-  // deletedChats = deletedChats ?? {};
+  });
 
   ChatState copyWith({
     List<DmModel>? dmList,
@@ -65,10 +54,7 @@ class ChatState {
     int? activeConvId,
     ChatType? activeConvType,
     Map<int, Set<TypingUser>>? typingConvUsers,
-    // Set<int>? pinnedChats,
-    // Set<int>? mutedChats,
-    // Set<int>? favoriteChats,
-    // Set<int>? deletedChats,
+    Map<int, int>? mediaUploadProgress,
     String? searchQuery,
     bool clearActiveConversation = false,
     bool clearTypingConvs = false,
@@ -88,10 +74,7 @@ class ChatState {
       typingConvUsers: clearTypingConvs
           ? {}
           : (typingConvUsers ?? this.typingConvUsers),
-      // pinnedChats: pinnedChats ?? this.pinnedChats,
-      // mutedChats: mutedChats ?? this.mutedChats,
-      // favoriteChats: favoriteChats ?? this.favoriteChats,
-      // deletedChats: deletedChats ?? this.deletedChats,
+      mediaUploadProgress: mediaUploadProgress ?? this.mediaUploadProgress,
       searchQuery: searchQuery ?? this.searchQuery,
     );
   }
@@ -211,29 +194,9 @@ class ChatNotifier extends Notifier<ChatState> {
       //   ChatType.communityGroup,
       // );
 
-      // Initialize Sets from loaded conversations
-      // final pinnedChats = <int>{};
-      // final mutedChats = <int>{};
-      // final favoriteChats = <int>{};
-      // final deletedChats = <int>{};
-      //
-      // for (final dm in localDMs) {
-      //   if (dm.isPinned == true) pinnedChats.add(dm.conversationId);
-      //   if (dm.isMuted == true) mutedChats.add(dm.conversationId);
-      //   if (dm.isFavorite == true) favoriteChats.add(dm.conversationId);
-      //   if (dm.isDeleted == true) deletedChats.add(dm.conversationId);
-      // }
-
       if (localDMs.isNotEmpty) {
         final sortedDms = await filterAndSortConversations(localDMs);
-        state = state.copyWith(
-          dmList: sortedDms,
-          isLoading: false,
-          // pinnedChats: pinnedChats,
-          // mutedChats: mutedChats,
-          // favoriteChats: favoriteChats,
-          // deletedChats: deletedChats,
-        );
+        state = state.copyWith(dmList: sortedDms, isLoading: false);
       }
 
       if (localGroups.isNotEmpty) {
@@ -1204,7 +1167,7 @@ class ChatNotifier extends Notifier<ChatState> {
         state = state.copyWith(typingConvUsers: typingUsers);
 
         // Set timer to remove user after 2 seconds of inactivity
-        _typingTimers[conversationId] = Timer(const Duration(seconds: 2), () {
+        _typingTimers[conversationId] = Timer(const Duration(seconds: 3), () {
           final updatedTypingUsers = Map<int, Set<TypingUser>>.from(
             state.typingConvUsers,
           );
@@ -1837,6 +1800,32 @@ class ChatNotifier extends Notifier<ChatState> {
 
       if (deletedMessageIds.isEmpty) return;
 
+      // Get current user ID to check which messages were unread
+      final currentUser = await UserUtils().getUserDetails();
+      if (currentUser == null) return;
+      final currentUserId = currentUser.id;
+
+      // Get messages before deletion to check if they were unread
+      final messagesToDelete = await _messageRepo.getMessagesByIds(
+        deletedMessageIds,
+      );
+
+      // Count unread messages (messages not sent by current user and not read by current user)
+      int unreadCountToDecrement = 0;
+      for (final message in messagesToDelete) {
+        // Only count messages sent by others (not by current user)
+        if (message.senderId != currentUserId) {
+          // Check if message was unread
+          final isRead = await _messageStatusRepo.isReadByUser(
+            message.id,
+            currentUserId,
+          );
+          if (!isRead) {
+            unreadCountToDecrement++;
+          }
+        }
+      }
+
       // remove messages from local DB
       await _messageRepo.permanentlyDeleteMessages(deletedMessageIds);
 
@@ -1864,17 +1853,31 @@ class ChatNotifier extends Notifier<ChatState> {
         final conversation = state.dmList[convIndex];
 
         final lastMessage = await _messageRepo.getLastMessage(conversationId);
+
+        // Decrement unread count if unread messages were deleted
+        final currentUnreadCount = conversation.unreadCount ?? 0;
+        final newUnreadCount = currentUnreadCount > unreadCountToDecrement
+            ? currentUnreadCount - unreadCountToDecrement
+            : 0;
+
         final updatedConversation = conversation.copyWith(
           lastMessageId: lastMessage?.id,
           lastMessageType: lastMessage?.type.value,
           lastMessageBody: lastMessage?.body,
           lastMessageAt: lastMessage?.sentAt,
+          unreadCount: newUnreadCount,
         );
 
         final updatedConversations = List<DmModel>.from(state.dmList);
         updatedConversations[convIndex] = updatedConversation;
 
         state = state.copyWith(dmList: updatedConversations);
+
+        // Update unread count in database
+        await _conversationsRepo.updateUnreadCount(
+          conversationId,
+          newUnreadCount,
+        );
       }
       // Update for group conversations can be added here in future
       else if (convType == ChatType.group) {
@@ -1885,17 +1888,31 @@ class ChatNotifier extends Notifier<ChatState> {
         final conversation = state.groupList[convIndex];
 
         final lastMessage = await _messageRepo.getLastMessage(conversationId);
+
+        // Decrement unread count if unread messages were deleted
+        final currentUnreadCount = conversation.unreadCount;
+        final newUnreadCount = currentUnreadCount > unreadCountToDecrement
+            ? currentUnreadCount - unreadCountToDecrement
+            : 0;
+
         final updatedConversation = conversation.copyWith(
           lastMessageId: lastMessage?.id,
           lastMessageType: lastMessage?.type.value,
           lastMessageBody: lastMessage?.body,
           lastMessageAt: lastMessage?.sentAt,
+          unreadCount: newUnreadCount,
         );
 
         final updatedConversations = List<GroupModel>.from(state.groupList);
         updatedConversations[convIndex] = updatedConversation;
 
         state = state.copyWith(groupList: updatedConversations);
+
+        // Update unread count in database
+        await _conversationsRepo.updateUnreadCount(
+          conversationId,
+          newUnreadCount,
+        );
       }
     } catch (e) {
       debugPrint('❌ Error handling message delete: $e');
@@ -2037,6 +2054,7 @@ class ChatNotifier extends Notifier<ChatState> {
       clearActiveConversation: true,
       clearTypingConvs: true,
       searchQuery: '',
+      mediaUploadProgress: {},
     );
   }
 

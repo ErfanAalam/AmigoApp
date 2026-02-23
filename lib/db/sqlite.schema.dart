@@ -94,7 +94,7 @@ class Messages extends Table {
   TextColumn get attachments =>
       text().nullable().map(const JsonMapConverter())();
   TextColumn get metadata => text().nullable().map(const JsonMapConverter())();
-  BoolColumn get isFailed => boolean().withDefault(const Constant(true))();
+  BoolColumn get isFailed => boolean().withDefault(const Constant(false))();
   BoolColumn get isPinned => boolean().withDefault(const Constant(false))();
   BoolColumn get isStarred => boolean().withDefault(const Constant(false))();
   BoolColumn get isReplied => boolean().withDefault(const Constant(false))();
@@ -130,7 +130,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration {
@@ -218,7 +218,9 @@ class AppDatabase extends _$AppDatabase {
 
           // Drop old table and rename new one
           await m.database.customStatement('DROP TABLE calls;');
-          await m.database.customStatement('ALTER TABLE calls_new RENAME TO calls;');
+          await m.database.customStatement(
+            'ALTER TABLE calls_new RENAME TO calls;',
+          );
 
           // 3. Conversations table: Change lastMessageId and pinnedMessageId from INTEGER to INTEGER (BIGINT/INT64)
           // SQLite stores integers as 64-bit, but we need to ensure the column type is correct
@@ -257,7 +259,9 @@ class AppDatabase extends _$AppDatabase {
           ''');
 
           await m.database.customStatement('DROP TABLE conversations;');
-          await m.database.customStatement('ALTER TABLE conversations_new RENAME TO conversations;');
+          await m.database.customStatement(
+            'ALTER TABLE conversations_new RENAME TO conversations;',
+          );
 
           // 4. ConversationMembers table: Change lastReadMessageId and lastDeliveredMessageId to INT64
           await m.database.customStatement('''
@@ -286,7 +290,9 @@ class AppDatabase extends _$AppDatabase {
           ''');
 
           await m.database.customStatement('DROP TABLE conversation_members;');
-          await m.database.customStatement('ALTER TABLE conversation_members_new RENAME TO conversation_members;');
+          await m.database.customStatement(
+            'ALTER TABLE conversation_members_new RENAME TO conversation_members;',
+          );
 
           // 5. Messages table: Add isFailed column
           await m.database.customStatement('''
@@ -315,11 +321,59 @@ class AppDatabase extends _$AppDatabase {
           ''');
 
           await m.database.customStatement('DROP TABLE message_status_model;');
-          await m.database.customStatement('ALTER TABLE message_status_model_new RENAME TO message_status_model;');
+          await m.database.customStatement(
+            'ALTER TABLE message_status_model_new RENAME TO message_status_model;',
+          );
 
           // Recreate the unique index after table recreation
           await m.database.customStatement(
             'CREATE UNIQUE INDEX IF NOT EXISTS unique_user_message ON message_status_model(message_id, user_id)',
+          );
+        }
+
+        // Migration from version 3 to 4
+        if (from < 4) {
+          // Messages table: Change isFailed default from true (1) to false (0)
+          // SQLite doesn't support changing column defaults, so we recreate the table
+          await m.database.customStatement('''
+            CREATE TABLE messages_new (
+              id INTEGER NOT NULL PRIMARY KEY,
+              conversation_id INTEGER NOT NULL,
+              sender_id INTEGER NOT NULL,
+              type TEXT NOT NULL,
+              body TEXT,
+              status TEXT NOT NULL,
+              attachments TEXT,
+              metadata TEXT,
+              is_failed INTEGER NOT NULL DEFAULT 0,
+              is_pinned INTEGER NOT NULL DEFAULT 0,
+              is_starred INTEGER NOT NULL DEFAULT 0,
+              is_replied INTEGER NOT NULL DEFAULT 0,
+              is_forwarded INTEGER NOT NULL DEFAULT 0,
+              is_deleted INTEGER NOT NULL DEFAULT 0,
+              sent_at TEXT NOT NULL
+            );
+          ''');
+
+          // Copy data from old table to new table
+          // Preserve existing is_failed values (only new records will get the new default of 0)
+          await m.database.customStatement('''
+            INSERT INTO messages_new (
+              id, conversation_id, sender_id, type, body, status, 
+              attachments, metadata, is_failed, is_pinned, is_starred, 
+              is_replied, is_forwarded, is_deleted, sent_at
+            )
+            SELECT 
+              id, conversation_id, sender_id, type, body, status,
+              attachments, metadata, is_failed,
+              is_pinned, is_starred, is_replied, is_forwarded, is_deleted, sent_at
+            FROM messages;
+          ''');
+
+          // Drop old table and rename new one
+          await m.database.customStatement('DROP TABLE messages;');
+          await m.database.customStatement(
+            'ALTER TABLE messages_new RENAME TO messages;',
           );
         }
       },

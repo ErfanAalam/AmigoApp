@@ -13,6 +13,7 @@ import '../../ui/country-selector.modal.dart';
 import '../../ui/setup-loading.popup.dart';
 import '../../ui/snackbar.dart';
 import '../../utils/user.utils.dart';
+import '../../main.dart' as main;
 import '../home.layout.dart';
 import 'signup-status.screen.dart';
 
@@ -189,10 +190,10 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       // // Send FCM token to backend after successful signup
       await authService.sendFCMTokenToBackend(3);
 
-      // connect to websocket after successful login
-      final accessToken = await cookieService.getAccessToken();
-      if (accessToken != null) {
-        await transportManager.connect(accessToken);
+      // Initialize authenticated user (this runs all the main.dart authenticated logic)
+      final appState = main.MyApp.appStateKey.currentState;
+      if (appState != null && appState is main.AppStateInterface) {
+        await (appState as main.AppStateInterface).initializeAuthenticatedUser();
       }
     } else {
       if (mounted) {

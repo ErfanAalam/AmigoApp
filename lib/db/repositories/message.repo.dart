@@ -39,6 +39,13 @@ class MessageRepository {
     final messageStatus =
         MessageStatusType.fromString(message.status) ?? MessageStatusType.sent;
 
+    // Extract localMediaPath from metadata if present
+    String? localMediaPath;
+    if (message.metadata != null &&
+        message.metadata!.containsKey('localMediaPath')) {
+      localMediaPath = message.metadata!['localMediaPath']?.toString();
+    }
+
     return MessageModel(
       id: message.id.toInt(),
       conversationId: message.conversationId,
@@ -50,11 +57,13 @@ class MessageRepository {
       status: messageStatus,
       attachments: message.attachments,
       metadata: message.metadata,
+      isFailed: message.isFailed ? true : null,
       isStarred: message.isStarred ? true : null,
       isReplied: message.isReplied ? true : null,
       isForwarded: message.isForwarded ? true : null,
       isDeleted: message.isDeleted ? true : null,
       sentAt: message.sentAt,
+      localMediaPath: localMediaPath,
     );
   }
 
@@ -62,6 +71,13 @@ class MessageRepository {
   MessagesCompanion _modelToCompanion(MessageModel message) {
     // Use canonicalId if available, otherwise optimisticId
     final messageId = message.id;
+
+    // Prepare metadata with localMediaPath if present
+    Map<String, dynamic>? metadata = message.metadata;
+    if (message.localMediaPath != null) {
+      metadata = Map<String, dynamic>.from(metadata ?? {});
+      metadata['localMediaPath'] = message.localMediaPath;
+    }
 
     return MessagesCompanion.insert(
       id: Value(BigInt.from(messageId)),
@@ -71,7 +87,8 @@ class MessageRepository {
       body: Value(message.body),
       status: message.status.value,
       attachments: Value(message.attachments),
-      metadata: Value(message.metadata),
+      metadata: Value(metadata),
+      isFailed: Value(message.isFailed ?? false),
       isStarred: Value(message.isStarred ?? false),
       isReplied: Value(message.isReplied ?? false),
       isForwarded: Value(message.isForwarded ?? false),
@@ -422,13 +439,14 @@ class MessageRepository {
   ///     status: MessageStatusType.delivered,
   ///     metadata: updatedMetadata,
   ///   );
-  Future<void> updateMessageFields(
+  Future<SqliteResult> updateMessageFields(
     int messageId, {
     MessageStatusType? status,
     int? newId,
     Map<String, dynamic>? metadata,
     Map<String, dynamic>? attachments,
     String? body,
+    bool? isFailed,
     bool? isStarred,
     bool? isReplied,
     bool? isForwarded,
@@ -439,12 +457,13 @@ class MessageRepository {
         metadata == null &&
         attachments == null &&
         body == null &&
+        isFailed == null &&
         isStarred == null &&
         isReplied == null &&
         isForwarded == null &&
         newId == null &&
         isDeleted == null) {
-      return;
+      return SqliteResult.error(message: 'No fields provided to update');
     }
 
     try {
@@ -459,6 +478,7 @@ class MessageRepository {
             ? Value(attachments)
             : const Value.absent(),
         body: body != null ? Value(body) : const Value.absent(),
+        isFailed: isFailed != null ? Value(isFailed) : const Value.absent(),
         isStarred: isStarred != null ? Value(isStarred) : const Value.absent(),
         isReplied: isReplied != null ? Value(isReplied) : const Value.absent(),
         isForwarded: isForwarded != null
@@ -470,9 +490,15 @@ class MessageRepository {
       await (db.update(
         db.messages,
       )..where((t) => t.id.equals(BigInt.from(messageId)))).write(companion);
+
+      return SqliteResult.success(message: 'Message fields updated');
     } catch (e) {
       final errorCode = _extractSqliteErrorCode(e);
       debugPrint("Error updating message fields: $e (errorCode: $errorCode)");
+      return SqliteResult.error(
+        message: 'Failed to update message fields',
+        errorCode: errorCode,
+      );
       // Don't throw - allow operation to continue
     }
   }
@@ -588,6 +614,13 @@ class MessageRepository {
       return _messageToModel(existingCanonical);
     }
 
+    // Prepare metadata with localMediaPath if present
+    Map<String, dynamic>? metadata = updatedMessage.metadata;
+    if (updatedMessage.localMediaPath != null) {
+      metadata = Map<String, dynamic>.from(metadata ?? {});
+      metadata['localMediaPath'] = updatedMessage.localMediaPath;
+    }
+
     // Update optimistic message with canonical data
     final companion = MessagesCompanion(
       id: Value(BigInt.from(canonicalId)),
@@ -597,7 +630,8 @@ class MessageRepository {
       body: Value(updatedMessage.body),
       status: Value(updatedMessage.status.value),
       attachments: Value(updatedMessage.attachments),
-      metadata: Value(updatedMessage.metadata),
+      metadata: Value(metadata),
+      isFailed: Value(updatedMessage.isFailed ?? false),
       isStarred: Value(updatedMessage.isStarred ?? false),
       isReplied: Value(updatedMessage.isReplied ?? false),
       isForwarded: Value(updatedMessage.isForwarded ?? false),

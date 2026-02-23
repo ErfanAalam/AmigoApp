@@ -29,6 +29,7 @@ import '../../../services/draft-message.service.dart';
 import '../../../services/media-cache.service.dart';
 import '../../../services/notification.service.dart';
 import '../../../services/socket/transport.manager.dart';
+import '../../../services/socket/transport.service.dart';
 import '../../../services/socket/ws-message.handler.dart';
 import '../../../types/socket.types.dart';
 import '../../../ui/chat/attachment.action-sheet.dart';
@@ -110,6 +111,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   // Automatic resend state variable - initialized to true to disable manual resend until initialization completes
   bool _isResendingFailedMessages = true;
+  final Map<int, bool> _resendingFailedMessages = {};
 
   List<UserModel> _conversationMembers = [];
 
@@ -137,6 +139,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   // For optimistic message handling - using filtered streams per conversation
   // StreamSubscription<OnlineStatusPayload>? _onlineStatusSubscription;
+  StreamSubscription<TransportConnectionState>?
+  _transportConnectionSubscription;
   StreamSubscription<TypingPayload>? _typingSubscription;
   StreamSubscription<ChatMessagePayload>? _messageSubscription;
   StreamSubscription<ChatMessageAckPayload>? _messageAckSubscription;
@@ -274,6 +278,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   late AnimationController _typingAnimationController;
   late List<Animation<double>> _typingDotAnimations;
   Timer? _typingTimeout;
+  DateTime? _lastTypingMessageSent; // Track when last typing message was sent
 
   // Scroll debounce timer
   Timer? _scrollDebounceTimer;
@@ -350,8 +355,6 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
-
-    debugPrint('-------initializing the group-------');
 
     // Clear notifications for this conversation when opened
     NotificationService().clearConversationNotifications(
@@ -1567,6 +1570,17 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             debugPrint('❌ Message delete stream error: $error');
           },
         );
+
+    // Listen to transport connection state changes for auto-resending failed messages
+    _transportConnectionSubscription = _transportManager.connectionStateStream
+        .listen((state) {
+          if (state == TransportConnectionState.connected) {
+            debugPrint(
+              '[GROUP] 🎐🎐🎐 Transport reconnected, auto-resending failed messages',
+            );
+            _resendAllFailedMessages();
+          }
+        });
   }
 
   /// Handle incoming message from WebSocket
@@ -1749,8 +1763,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     if (isTyping) {
       _typingAnimationController.repeat(reverse: true);
 
-      // Set a safety timeout to hide typing indicator after 2 seconds
-      _typingTimeout = Timer(const Duration(seconds: 2), () {
+      // Set a safety timeout to hide typing indicator after x seconds
+      _typingTimeout = Timer(const Duration(seconds: 3), () {
         if (mounted) {
           _isOtherTypingNotifier.value = false;
           _typingAnimationController.stop();
@@ -1915,11 +1929,12 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   Future<void> _sendMediaMessageToServer(
     File mediaFile,
-    MessageType messageType,
-  ) async {
-    final messageId = await Snowflake.generateMessageId(
-      widget.group.conversationId,
-    );
+    MessageType messageType, {
+    int? existingMessageId,
+  }) async {
+    final messageId =
+        existingMessageId ??
+        await Snowflake.generateMessageId(widget.group.conversationId);
 
     final nowUTC = DateTime.now().toUtc();
 
@@ -1952,21 +1967,35 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       metadata: metadata,
       attachments: attachments,
       type: messageType,
-      body: '',
       isReplied: _replyToMessageData != null,
-      status: MessageStatusType.sent,
+      status: MessageStatusType.uploading,
       sentAt: nowUTC.toIso8601String(),
     );
 
     if (mounted) {
-      setState(() {
-        // New message - add at end (newest messages are at end in reverse list)
-        _messages.add(newMsg);
-        // No need to sort - new message is already at the correct end position
-      });
+      if (existingMessageId != null) {
+        final index = _messages.indexWhere((msg) => msg.id == messageId);
+        if (index != -1) {
+          setState(() {
+            _messages[index] = newMsg;
+            _sortMessagesBySentAt();
+          });
+          _animateNewMessage(newMsg.id);
+          _scrollToBottom();
+        }
+        // Also update in DB
+      } else {
+        setState(() {
+          _messages.add(newMsg);
+          _sortMessagesBySentAt();
+        });
 
-      _animateNewMessage(newMsg.id);
-      _scrollToBottom();
+        _animateNewMessage(newMsg.id);
+        _scrollToBottom();
+
+        // immediately insert message in the localDB for future reference
+        await _messagesRepo.insertMessage(newMsg);
+      }
     }
 
     int? lastProgressUpdate = -1;
@@ -2071,6 +2100,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       status: MessageStatusType.failed,
       metadata: updatedMetadata,
     );
+
+    // print("🎐 🎐 🎐  set states to failed in UI state and DB");
   }
 
   /// Resend a failed message
@@ -2305,12 +2336,145 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   //   }
   // }
 
+  /// Check if a specific message is currently being resent
+  bool _isResendingFailedMessage(int messageId) {
+    return _resendingFailedMessages[messageId] == true;
+  }
+
+  /// Resend all failed messages when connection is restored
+  Future<void> _resendAllFailedMessages() async {
+    print("-----------------------------------------------------------");
+    print("resendAllFailedMessages called");
+    print("-----------------------------------------------------------");
+    // Collect failed messages from the in-memory list (already loaded)
+    final failedMessages = _messages
+        .where(
+          (msg) =>
+              msg.status == MessageStatusType.failed &&
+              msg.senderId == _currentUserDetails?.id &&
+              !_isResendingFailedMessage(msg.id),
+        )
+        .toList();
+
+    print("-----------------------------------------------------------");
+    print("failedMessages : ${failedMessages}");
+    print("-----------------------------------------------------------");
+
+    if (failedMessages.isEmpty) return;
+
+    debugPrint(
+      '[RESEND] Auto-resending ${failedMessages.length} failed messages',
+    );
+
+    // Resend sequentially to avoid overwhelming the server
+    for (final msg in failedMessages) {
+      if (!mounted) break;
+      await resendFailedMessage(msg.id);
+    }
+  }
+
+  /// Resend a failed message
+  Future<void> resendFailedMessage(int messageId) async {
+    // Skip if already resending this message
+    if (_isResendingFailedMessage(messageId)) return;
+
+    try {
+      // Mark as resending in the map and update UI
+      setState(() {
+        _resendingFailedMessages[messageId] = true;
+      });
+
+      // Fetch the message from local DB
+      final message = await _messagesRepo.getMessageById(messageId);
+
+      if (message == null) {
+        debugPrint('Message not found: $messageId');
+        return;
+      }
+
+      // Check if message status is failed
+      if (message.status != MessageStatusType.failed) {
+        debugPrint('Message is not in failed status: ${message.status}');
+        return;
+      }
+
+      // Preserve reply metadata if the failed message was a reply
+      MessageModel? originalReplyToMessageData = _replyToMessageData;
+      final replyMetadata =
+          message.metadata?['reply_to'] as Map<String, dynamic>?;
+      if (replyMetadata != null) {
+        final replyToMessageId = replyMetadata['message_id'] as int?;
+        if (replyToMessageId != null) {
+          final replyToMessage = await _messagesRepo.getMessageById(
+            replyToMessageId,
+          );
+          if (replyToMessage != null) {
+            _replyToMessageData = replyToMessage;
+          }
+        }
+      }
+
+      try {
+        // Check if it's a media message (image, video, audio, document)
+        final isMediaMessage =
+            message.type == MessageType.image ||
+            message.type == MessageType.video ||
+            message.type == MessageType.audio ||
+            message.type == MessageType.document;
+
+        if (isMediaMessage) {
+          // Check if attachments contain local_path
+          final localPath = message.attachments?['local_path'] as String?;
+
+          if (localPath == null || localPath.isEmpty) {
+            debugPrint(
+              'No local_path found in attachments for failed media message',
+            );
+            return;
+          }
+
+          // Check if file exists
+          final mediaFile = File(localPath);
+          if (!mediaFile.existsSync()) {
+            debugPrint('Media file not found at path: $localPath');
+            return;
+          }
+
+          // Resend via _sendMediaMessageToServer with existing messageId
+          await _sendMediaMessageToServer(
+            mediaFile,
+            message.type,
+            existingMessageId: messageId,
+          );
+        } else {
+          // For text and other non-media messages, resend directly via _sendMessage
+          _sendMessage(message.type, messageId: messageId, body: message.body);
+        }
+      } finally {
+        // Restore original reply message data
+        _replyToMessageData = originalReplyToMessageData;
+      }
+    } catch (e) {
+      debugPrint('Error resending failed message: $e');
+    } finally {
+      // Clear resending state for this message
+      if (mounted) {
+        setState(() {
+          _resendingFailedMessages.remove(messageId);
+        });
+      } else {
+        _resendingFailedMessages.remove(messageId);
+      }
+    }
+  }
+
   /// Send message with immediate display (optimistic UI)
   void _sendMessage(
     MessageType messageType, {
     MediaResponse? mediaResponse,
     int? messageId,
     int? retryCount = 0,
+    String? body,
   }) async {
     if (mounted) {
       setState(() {
@@ -2319,17 +2483,23 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
     String messageText = '';
     if (messageType == MessageType.text) {
-      messageText = _messageController.text.trim();
+      messageText = body ?? _messageController.text.trim();
       if (messageText.isEmpty) return;
+    }
+
+    // Check if this is a resend (body is provided)
+    final isResend = body != null;
+
+    // Clear draft when message is grabbed out of the text input for sending
+    // Skip if resending (body is provided)
+    if (!isResend) {
+      final draftNotifier = ref.read(draftMessagesProvider.notifier);
+      await draftNotifier.removeDraft(widget.group.conversationId);
     }
 
     final id =
         messageId ??
         await Snowflake.generateMessageId(widget.group.conversationId);
-
-    // Clear draft when message is sent
-    final draftNotifier = ref.read(draftMessagesProvider.notifier);
-    await draftNotifier.removeDraft(widget.group.conversationId);
 
     // Create optimistic message for immediate display with current UTC time
     final nowUTC = DateTime.now().toUtc();
@@ -2348,7 +2518,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
 
     // Merge contact metadata if present
-    if (_pendingContactMetadata != null) {
+    if (!isResend && _pendingContactMetadata != null) {
       combinedMetadata ??= {};
       combinedMetadata.addAll(_pendingContactMetadata!);
     }
@@ -2364,28 +2534,47 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       type: messageType,
       body: messageText,
       isReplied: _replyToMessageData != null,
-      status: MessageStatusType.sent,
+      status: MessageStatusType.unsent,
       sentAt: nowUTC.toIso8601String(),
     );
 
-    // storing the message into the local database
-    final result = await _messagesRepo.insertMessage(newMsg);
-    if (result["success"] == false && result["errorCode"] == 1555) {
-      debugPrint("result : $result");
-      if (retryCount! > 5) return;
-      _sendMessage(
-        messageType,
-        mediaResponse: mediaResponse,
-        retryCount: retryCount + 1,
+    if (messageId == null && mediaResponse == null) {
+      // storing the message into the local database
+      final result = await _messagesRepo.insertMessage(newMsg);
+      // retry logic for handling unique constraint violation on message ID (snowflake collision)
+      if (result["success"] == false && result["errorCode"] == 1555) {
+        debugPrint("result : $result");
+        if (retryCount! > 5) return;
+        _sendMessage(
+          messageType,
+          mediaResponse: mediaResponse,
+          retryCount: retryCount + 1,
+        );
+        return;
+      }
+    } else if (messageId != null && mediaResponse != null) {
+      // This is a media message, so we need to insert it into the DB with the generated ID
+      final result = await _messagesRepo.updateMessageFields(
+        id,
+        attachments: mediaResponse.toJson(),
+        metadata: combinedMetadata,
+        status: MessageStatusType.unsent,
       );
-      return;
+      if (result.isError) {
+        debugPrint(
+          "Failed to insert media message into local DB errorCode: ${result.errorCode}",
+        );
+        return;
+      }
     }
 
     // Clear input and reply state immediately for better UX
-    _messageController.clear();
-
-    // Clear pending contact metadata after using it
-    _pendingContactMetadata = null;
+    // Skip if resending (body is provided)
+    if (!isResend) {
+      _messageController.clear();
+      // Clear pending contact metadata after using it
+      _pendingContactMetadata = null;
+    }
 
     // Add message to UI immediately with animation
     if (mounted) {
@@ -2436,14 +2625,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         wsTimestamp: DateTime.now(),
       ).toJson();
 
-      await _transportManager.sendMessage(wsmsg).catchError((e) async {
-        debugPrint('Error sending message: $e');
-        // Mark mes!= null ? json["is_failed"] as bool : null,sage as failed in DB and UI
-        await _markMessageAsFailed(newMsg.id);
-      });
-
+      final sendResult = await _transportManager.sendMessage(wsmsg);
+      print("-----------------------------------------------------------");
+      print("sendResult : ${sendResult}");
+      print("-----------------------------------------------------------");
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
+      // updating the last message on sending own message
       ref
           .read(chatProvider.notifier)
           .updateLastMessageOnSendingOwnMessage(
@@ -2451,12 +2639,22 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             newMsg,
           );
 
-      // store that message in the message status table
-      await _messageStatusRepo.insertMessageStatusesWithMultipleUserIds(
-        messageId: newMsg.id,
-        conversationId: widget.group.conversationId,
-        userIds: _conversationMembers.map((member) => member.id).toList(),
-      );
+      // Check if message was sent successfully
+      if (sendResult == true) {
+        // Message sent successfully - store message statuses for group members
+        await _messageStatusRepo.insertMessageStatusesWithMultipleUserIds(
+          messageId: newMsg.id,
+          conversationId: widget.group.conversationId,
+          userIds: _conversationMembers
+              .where((member) => member.id != _currentUserDetails?.id)
+              .map((member) => member.id)
+              .toList(),
+        );
+      } else {
+        debugPrint('Failed to send message (offline or error)');
+        // Mark message as failed in DB and UI
+        await _markMessageAsFailed(newMsg.id);
+      }
       _cancelReply();
     } catch (e) {
       debugPrint('Error sending message: $e');
@@ -2582,28 +2780,41 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       _isTyping = isTyping;
     });
 
-    // Only send websocket message if typing state changed
     if (isTyping) {
-      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-      // Send inactive message when user navigates away from the page
-      final typingPayload = TypingPayload(
-        convId: widget.group.conversationId,
-        isTyping: true,
-        senderId: _currentUserDetails!.id,
-        senderName: _currentUserDetails!.name,
-        senderPfp: _currentUserDetails!.profilePic,
-      ).toJson();
+      final now = DateTime.now();
 
-      final wsmsg = WSMessage(
-        type: WSMessageType.conversationTyping,
-        payload: typingPayload,
-        wsTimestamp: DateTime.now(),
-      ).toJson();
+      // Send immediately on first keystroke, or if 2 seconds have passed since last message
+      final shouldSend =
+          _lastTypingMessageSent == null ||
+          now.difference(_lastTypingMessageSent!).inSeconds >= 2;
 
-      await _transportManager.sendMessage(wsmsg).catchError((e) {
-        debugPrint('Error sending typing indicator');
-      });
-      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      if (shouldSend) {
+        // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        final typingPayload = TypingPayload(
+          convId: widget.group.conversationId,
+          isTyping: true,
+          senderId: _currentUserDetails!.id,
+          senderName: _currentUserDetails!.name,
+          senderPfp: _currentUserDetails!.profilePic,
+        ).toJson();
+
+        final wsmsg = WSMessage(
+          type: WSMessageType.conversationTyping,
+          payload: typingPayload,
+          wsTimestamp: now,
+        ).toJson();
+
+        await _transportManager.sendMessage(wsmsg).catchError((e) {
+          debugPrint('Error sending conversation:typing message');
+        });
+
+        // Update last sent time
+        _lastTypingMessageSent = now;
+        // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      }
+    } else {
+      // Reset timestamp when user stops typing so next typing session sends immediately
+      _lastTypingMessageSent = null;
     }
   }
 
@@ -3593,9 +3804,22 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         context: context,
         buildMessageContent: _buildMessageContent,
         isMediaMessage: _isMediaMessage,
-        // onRetryFailedMessage: _isResendingFailedMessages
-        //     ? null
-        //     : _resendFailedMessage,
+        buildMessageStatusTicks: _buildMessageStatusTicks,
+        onResendFailedMessage: (messageId) {
+          if (!_isResendingFailedMessage(messageId)) {
+            resendFailedMessage(messageId);
+          }
+        },
+        onDeleteFailedMessage: (messageId) async {
+          // Remove from UI immediately
+          if (mounted) {
+            setState(() {
+              _messages.removeWhere((message) => message.id == messageId);
+            });
+          }
+          // Delete from local database
+          await _messagesRepo.permanentlyDeleteMessage(messageId);
+        },
         isGroupChat: true,
         nonMyMessageBackgroundColor: Colors.grey[100]!,
         useIntrinsicWidth: false,
@@ -3945,16 +4169,75 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     );
   }
 
-  // Widget _buildMessageStatusTicks(MessageModel message) {
-  //   // For group chats, show delivery status based on isDelivered
-  //   if (message.isDelivered) {
-  //     // Double tick - message is delivered
-  //     return Icon(Icons.done_all, size: 16, color: Colors.white70);
-  //   } else {
-  //     // Single tick - message is sent but not delivered
-  //     return Icon(Icons.done, size: 16, color: Colors.white70);
-  //   }
-  // }
+  /// Build message status ticks for group messages
+  /// Shows different icons based on message status and read/delivered status
+  Widget _buildMessageStatusTicks(MessageModel message) {
+    // For failed messages, don't show ticks (red info icon is shown separately)
+    if (message.status == MessageStatusType.failed) {
+      return Icon(Icons.error_outline_rounded, size: 16, color: Colors.red);
+    }
+
+    // For unsent messages, show clock icon
+    if (message.status == MessageStatusType.unsent) {
+      return Icon(Icons.access_time_rounded, size: 16, color: Colors.grey[500]);
+    }
+
+    // For uploading messages, show cloud icon
+    if (message.status == MessageStatusType.uploading) {
+      return Icon(
+        Icons.cloud_upload_outlined,
+        size: 16,
+        color: Colors.greenAccent,
+      );
+    }
+
+    // For sent/delivered/read messages, use FutureBuilder to check read/delivered status
+    return FutureBuilder<Widget>(
+      future: _getStatusTickIcon(message),
+      builder: (context, snapshot) {
+        if (snapshot.hasData) {
+          return snapshot.data!;
+        }
+        // Default to single tick while loading
+        return Icon(Icons.done_rounded, size: 16, color: Colors.grey[500]);
+      },
+    );
+  }
+
+  /// Get the appropriate status tick icon based on read/delivered status
+  Future<Widget> _getStatusTickIcon(MessageModel message) async {
+    // Get total members excluding sender
+    final totalMembers = _conversationMembers
+        .where((member) => member.id != message.senderId)
+        .length;
+
+    if (totalMembers == 0) {
+      // No other members, just show sent status
+      return Icon(Icons.done_rounded, size: 16, color: Colors.grey[500]);
+    }
+
+    // Get read and delivered counts
+    final readCount = await _messageStatusRepo.getReadCountByMessageId(
+      message.id,
+    );
+    final deliveredCount = await _messageStatusRepo
+        .getDeliveredCountByMessageId(message.id);
+
+    // Check if all members have read the message
+    if (readCount >= totalMembers) {
+      // All members have read - double blue tick
+      return Icon(Icons.done_all_rounded, size: 16, color: Colors.blue);
+    }
+
+    // Check if all members have delivered the message
+    if (deliveredCount >= totalMembers) {
+      // All members have delivered - double gray tick
+      return Icon(Icons.done_all_rounded, size: 16, color: Colors.grey[500]);
+    }
+
+    // Message is sent but not all have delivered - single gray tick
+    return Icon(Icons.done_rounded, size: 16, color: Colors.grey[500]);
+  }
 
   MediaMessageConfig _buildMediaMessageConfig(
     MessageModel message,
@@ -3967,6 +4250,22 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       mounted: () => mounted,
       setState: () => setState(() {}),
       showErrorDialog: _showErrorDialog,
+      buildMessageStatusTicks: _buildMessageStatusTicks,
+      onResendFailedMessage: (messageId) {
+        if (!_isResendingFailedMessage(messageId)) {
+          resendFailedMessage(messageId);
+        }
+      },
+      onDeleteFailedMessage: (messageId) async {
+        // Remove from UI immediately
+        if (mounted) {
+          setState(() {
+            _messages.removeWhere((message) => message.id == messageId);
+          });
+        }
+        // Delete from local database
+        await _messagesRepo.permanentlyDeleteMessage(messageId);
+      },
       onImagePreview: (url, caption) => _openImagePreview(url, caption),
       onRetryImage: (file, source, {MessageModel? failedMessage}) {
         // if (failedMessage != null) {
@@ -4474,10 +4773,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           debugPrint('❌ Error deleting messages: $e');
         });
 
-    final deleteResult = await apiService.chat.deleteMessage(
-      [messageId],
-      isAdminOrStaff: _isAdminOrStaff,
-    );
+    final deleteResult = await apiService.chat.deleteMessage([
+      messageId,
+    ], isAdminOrStaff: _isAdminOrStaff);
 
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     final deleteMessagePayload = DeleteMessagePayload(
@@ -4783,6 +5081,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     _searchController.dispose();
     _isOtherTypingNotifier.dispose();
     _searchDebounceTimer?.cancel();
+    _transportConnectionSubscription?.cancel();
     _messageAckSubscription?.cancel();
     _messageSubscription?.cancel();
     _typingSubscription?.cancel();

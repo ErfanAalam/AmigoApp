@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'dart:ui';
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/socket.types.dart';
 import 'package:amigo/utils/chat/chat-helpers.utils.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/theme-color.provider.dart';
@@ -11,6 +13,57 @@ import '../../utils/chat/audio-playback.utils.dart';
 import 'chached-image.widget.dart';
 import 'message.widget.dart';
 import 'voice-recording.widget.dart';
+
+/// Show failed message options dialog
+void _showFailedMessageDialog(
+  BuildContext context, {
+  required void Function()? onResend,
+  required void Function()? onDelete,
+}) {
+  showDialog(
+    context: context,
+    barrierColor: Colors.black.withOpacity(0.3),
+    builder: (BuildContext dialogContext) {
+      return BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: AlertDialog(
+          backgroundColor: Colors.white.withOpacity(0.85),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: const Text(
+            'Message Failed',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          content: const Text('What would you like to do?'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                onResend?.call();
+              },
+              child: const Text('Resend'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                onDelete?.call();
+              },
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Delete'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
 
 /// Configuration class for media message widgets
 class MediaMessageConfig {
@@ -42,6 +95,10 @@ class MediaMessageConfig {
   final AudioPlaybackManager audioPlaybackManager;
   final void Function({MessageModel? failedMessage}) onRetryAudio;
 
+  // Common callbacks for failed messages
+  final void Function(int messageId)? onResendFailedMessage;
+  final void Function(int messageId)? onDeleteFailedMessage;
+
   MediaMessageConfig({
     required this.message,
     required this.isMyMessage,
@@ -61,6 +118,8 @@ class MediaMessageConfig {
     required this.onRetryDocument,
     required this.audioPlaybackManager,
     required this.onRetryAudio,
+    this.onResendFailedMessage,
+    this.onDeleteFailedMessage,
   });
 }
 
@@ -84,9 +143,11 @@ Widget buildImageMessage(MediaMessageConfig config, WidgetRef ref) {
 
   // Check upload status from metadata
   final metadata = config.message.metadata ?? {};
-  final isUploading = metadata['is_uploading'] == true;
-  final isFailed = metadata['upload_failed'] == true;
-  final uploadProgress = metadata['upload_progress'] as int?;
+  final isUploading =
+      config.message.status == MessageStatusType.uploading ||
+      metadata['is_uploading'] == true;
+  final isFailed = config.message.status == MessageStatusType.failed;
+  // || metadata['upload_failed'] == true;
 
   // Use local path if available (for uploading/failed messages)
   final displayImagePath = localPath ?? imageUrl;
@@ -207,50 +268,49 @@ Widget buildImageMessage(MediaMessageConfig config, WidgetRef ref) {
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
+                spacing: 5,
                 children: [
                   if (isUploading)
                     Row(
                       mainAxisSize: MainAxisSize.min,
+                      spacing: 5,
                       children: [
-                        SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            value: uploadProgress != null ? uploadProgress / 100.0 : null,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        Text(
+                          "Uploading",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
-                        if (uploadProgress != null) ...[
-                          const SizedBox(width: 4),
-                          Text(
-                            '$uploadProgress%',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
+                        config.buildMessageStatusTicks?.call(config.message) ??
+                            const SizedBox.shrink(),
                       ],
                     )
                   else if (isFailed && config.isMyMessage)
-                    GestureDetector(
-                      onTap: () {
-                        final localFilePath = localPath ?? imageUrl;
-                        if (localFilePath != null) {
-                          config.onRetryImage(
-                            File(localFilePath),
-                            'image',
-                            failedMessage: config.message,
+                    Builder(
+                      builder: (context) => GestureDetector(
+                        onTap: () {
+                          _showFailedMessageDialog(
+                            context,
+                            onResend: config.onResendFailedMessage != null
+                                ? () => config.onResendFailedMessage!(
+                                    config.message.id,
+                                  )
+                                : null,
+                            onDelete: config.onDeleteFailedMessage != null
+                                ? () => config.onDeleteFailedMessage!(
+                                    config.message.id,
+                                  )
+                                : null,
                           );
-                        } else {
-                          config.showErrorDialog(
-                            'Original file not found. Please select the image again.',
-                          );
-                        }
-                      },
-                      child: Icon(Icons.refresh, size: 16, color: Colors.white),
+                        },
+                        child: Icon(
+                          Icons.info_outline_rounded,
+                          size: 16,
+                          color: Colors.red,
+                        ),
+                      ),
                     )
                   else ...[
                     Text(
@@ -262,7 +322,7 @@ Widget buildImageMessage(MediaMessageConfig config, WidgetRef ref) {
                       ),
                     ),
                     if (config.isMyMessage) ...[
-                      const SizedBox(width: 4),
+                      // const SizedBox(width: 4),
                       config.buildMessageStatusTicks?.call(config.message) ??
                           const SizedBox.shrink(),
                     ],
@@ -313,9 +373,11 @@ Widget buildVideoMessage(MediaMessageConfig config, WidgetRef ref) {
 
   // Check upload status from metadata
   final metadata = config.message.metadata ?? {};
-  final isUploading = metadata['is_uploading'] == true;
-  final isFailed = metadata['upload_failed'] == true;
-  final uploadProgress = metadata['upload_progress'] as int?;
+  final isUploading =
+      config.message.status == MessageStatusType.uploading ||
+      metadata['is_uploading'] == true;
+  final isFailed = config.message.status == MessageStatusType.failed;
+  // metadata['upload_failed'] == true;
 
   // Use local path if available (for uploading/failed messages)
   final displayVideoPath = localPath ?? videoUrl;
@@ -416,35 +478,38 @@ Widget buildVideoMessage(MediaMessageConfig config, WidgetRef ref) {
                                   ),
                                 ),
                               ),
-                              child: Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        value: uploadProgress != null ? uploadProgress / 100.0 : null,
-                                        valueColor: AlwaysStoppedAnimation<Color>(
-                                          Colors.white,
-                                        ),
-                                      ),
-                                    ),
-                                    if (uploadProgress != null) ...[
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '$uploadProgress%',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
+                              // child: Center(
+                              //   child: Column(
+                              //     mainAxisSize: MainAxisSize.min,
+                              //     children: [
+                              //       SizedBox(
+                              //         width: 20,
+                              //         height: 20,
+                              //         child: CircularProgressIndicator(
+                              //           strokeWidth: 2,
+                              //           value: uploadProgress != null
+                              //               ? uploadProgress / 100.0
+                              //               : null,
+                              //           valueColor:
+                              //               AlwaysStoppedAnimation<Color>(
+                              //                 Colors.white,
+                              //               ),
+                              //         ),
+                              //       ),
+                              //       if (uploadProgress != null) ...[
+                              //         const SizedBox(height: 4),
+                              //         Text(
+                              //           '$uploadProgress%',
+                              //           style: const TextStyle(
+                              //             color: Colors.white,
+                              //             fontSize: 12,
+                              //             fontWeight: FontWeight.w500,
+                              //           ),
+                              //         ),
+                              //       ],
+                              //     ],
+                              //   ),
+                              // ),
                             ),
                           ),
                         // Play button overlay (only if not uploading)
@@ -501,35 +566,43 @@ Widget buildVideoMessage(MediaMessageConfig config, WidgetRef ref) {
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
+                spacing: 5,
                 children: [
-                  if (isUploading)
-                    SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  if (isUploading) ...[
+                    Text(
+                      "Uploading",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
                       ),
-                    )
-                  else if (isFailed && config.isMyMessage)
-                    GestureDetector(
-                      onTap: () {
-                        final localFilePath =
-                            videoData['local_path'] as String?;
-                        if (localFilePath != null &&
-                            File(localFilePath).existsSync()) {
-                          config.onRetryVideo(
-                            File(localFilePath),
-                            'video',
-                            failedMessage: config.message,
+                    ),
+                    config.buildMessageStatusTicks?.call(config.message) ??
+                        const SizedBox.shrink(),
+                  ] else if (isFailed && config.isMyMessage)
+                    Builder(
+                      builder: (context) => GestureDetector(
+                        onTap: () {
+                          _showFailedMessageDialog(
+                            context,
+                            onResend: config.onResendFailedMessage != null
+                                ? () => config.onResendFailedMessage!(
+                                    config.message.id,
+                                  )
+                                : null,
+                            onDelete: config.onDeleteFailedMessage != null
+                                ? () => config.onDeleteFailedMessage!(
+                                    config.message.id,
+                                  )
+                                : null,
                           );
-                        } else {
-                          config.showErrorDialog(
-                            'Original file not found. Please select the video again.',
-                          );
-                        }
-                      },
-                      child: Icon(Icons.refresh, size: 16, color: Colors.white),
+                        },
+                        child: Icon(
+                          Icons.info_outline_rounded,
+                          size: 16,
+                          color: Colors.red,
+                        ),
+                      ),
                     )
                   else ...[
                     Text(
@@ -541,7 +614,7 @@ Widget buildVideoMessage(MediaMessageConfig config, WidgetRef ref) {
                       ),
                     ),
                     if (config.isMyMessage) ...[
-                      const SizedBox(width: 4),
+                      // const SizedBox(width: 4),
                       config.buildMessageStatusTicks?.call(config.message) ??
                           const SizedBox.shrink(),
                     ],
@@ -595,9 +668,11 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
 
   // Check upload status from metadata
   final metadata = config.message.metadata ?? {};
-  final isUploading = metadata['is_uploading'] == true;
-  final isFailed = metadata['upload_failed'] == true;
-  final uploadProgress = metadata['upload_progress'] as int?;
+  final isUploading =
+      config.message.status == MessageStatusType.uploading ||
+      metadata['is_uploading'] == true;
+  final isFailed = config.message.status == MessageStatusType.failed;
+  // metadata['upload_failed'] == true;
 
   // Use local path if available (for uploading/failed messages)
   final displayDocumentPath = localPath ?? documentUrl;
@@ -771,32 +846,35 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (isUploading)
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  value: uploadProgress != null ? uploadProgress / 100.0 : null,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                    Colors.white,
-                                  ),
-                                ),
+                          Icon(
+                            Icons.cloud_upload_outlined,
+                            size: 16,
+                            color: Colors.white,
+                          )
+                        else if (isFailedStatus && config.isMyMessage)
+                          Builder(
+                            builder: (context) => GestureDetector(
+                              onTap: () {
+                                _showFailedMessageDialog(
+                                  context,
+                                  onResend: config.onResendFailedMessage != null
+                                      ? () => config.onResendFailedMessage!(
+                                          config.message.id,
+                                        )
+                                      : null,
+                                  onDelete: config.onDeleteFailedMessage != null
+                                      ? () => config.onDeleteFailedMessage!(
+                                          config.message.id,
+                                        )
+                                      : null,
+                                );
+                              },
+                              child: Icon(
+                                Icons.info_outline_rounded,
+                                size: 16,
+                                color: Colors.red,
                               ),
-                              if (uploadProgress != null) ...[
-                                const SizedBox(width: 4),
-                                Text(
-                                  '$uploadProgress%',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ],
+                            ),
                           )
                         else ...[
                           Text(
@@ -847,45 +925,28 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
               ],
             ),
           ),
-          // Retry button on outer right side (like WhatsApp)
+          // Failed message indicator
           if (isFailedStatus && config.isMyMessage) ...[
             const SizedBox(width: 8),
-            GestureDetector(
-              onTap: () {
-                final localFilePath = documentData['local_path'] as String?;
-                final fileName = documentData['file_name'] as String?;
-                final extension = documentData['file_extension'] as String?;
-
-                if (localFilePath != null &&
-                    File(localFilePath).existsSync() &&
-                    fileName != null &&
-                    extension != null) {
-                  config.onRetryDocument(
-                    File(localFilePath),
-                    fileName,
-                    extension,
-                    failedMessage: config.message,
+            Builder(
+              builder: (context) => GestureDetector(
+                onTap: () {
+                  _showFailedMessageDialog(
+                    context,
+                    onResend: config.onResendFailedMessage != null
+                        ? () => config.onResendFailedMessage!(config.message.id)
+                        : null,
+                    onDelete: config.onDeleteFailedMessage != null
+                        ? () => config.onDeleteFailedMessage!(config.message.id)
+                        : null,
                   );
-                } else {
-                  config.showErrorDialog(
-                    'Original file not found. Please select the document again.',
-                  );
-                }
-              },
-              child: isUploading
-                  ? _RotatingRefreshIcon(
-                      size: 20,
-                      color: config.isMyMessage
-                          ? themeColor.primary
-                          : Colors.grey[600] ?? Colors.grey,
-                    )
-                  : Icon(
-                      Icons.refresh,
-                      size: 20,
-                      color: config.isMyMessage
-                          ? themeColor.primary
-                          : Colors.grey[600] ?? Colors.grey,
-                    ),
+                },
+                child: Icon(
+                  Icons.info_outline_rounded,
+                  size: 20,
+                  color: Colors.red,
+                ),
+              ),
             ),
           ],
         ],
@@ -926,9 +987,11 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
 
   // Check upload status from metadata
   final metadata = config.message.metadata ?? {};
-  final isUploading = metadata['is_uploading'] == true;
-  final isFailed = metadata['upload_failed'] == true;
-  final uploadProgress = metadata['upload_progress'] as int?;
+  final isUploading =
+      config.message.status == MessageStatusType.uploading ||
+      metadata['is_uploading'] == true;
+  final isFailed = config.message.status == MessageStatusType.failed;
+  // || metadata['upload_failed'] == true;
 
   // Use local path if available (for uploading/failed messages)
   final displayAudioPath = localPath ?? audioUrl;
@@ -961,9 +1024,7 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
 
   // Get animation for this audio (create if needed)
   var animation = config.audioPlaybackManager.getAnimation(audioKey);
-  if (animation == null) {
-    animation = const AlwaysStoppedAnimation<double>(1.0);
-  }
+  animation ??= const AlwaysStoppedAnimation<double>(1.0);
 
   // If we don't have duration yet, schedule it to be estimated after build
   if (duration == Duration.zero && !isPlaying) {
@@ -1106,47 +1167,59 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
                           ),
                           const SizedBox(height: 4),
                           Row(
+                            spacing: 5,
                             children: [
-                              const SizedBox(width: 8),
                               if (config.isStarred)
                                 Icon(
                                   Icons.star,
                                   size: 14,
                                   color: Colors.yellow,
                                 ),
-                              if (isUploading)
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    SizedBox(
-                                      width: 12,
-                                      height: 12,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        value: uploadProgress != null ? uploadProgress / 100.0 : null,
-                                        valueColor: AlwaysStoppedAnimation<Color>(
-                                          config.isMyMessage
-                                              ? Colors.white70
-                                              : themeColor.primary,
-                                        ),
-                                      ),
+                              if (isUploading) ...[
+                                Spacer(),
+                                Text(
+                                  "Uploading",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                config.buildMessageStatusTicks?.call(
+                                      config.message,
+                                    ) ??
+                                    const SizedBox.shrink(),
+                              ] else if (isFailed && config.isMyMessage) ...[
+                                Spacer(),
+                                Builder(
+                                  builder: (context) => GestureDetector(
+                                    onTap: () {
+                                      _showFailedMessageDialog(
+                                        context,
+                                        onResend:
+                                            config.onResendFailedMessage != null
+                                            ? () =>
+                                                  config.onResendFailedMessage!(
+                                                    config.message.id,
+                                                  )
+                                            : null,
+                                        onDelete:
+                                            config.onDeleteFailedMessage != null
+                                            ? () =>
+                                                  config.onDeleteFailedMessage!(
+                                                    config.message.id,
+                                                  )
+                                            : null,
+                                      );
+                                    },
+                                    child: Icon(
+                                      Icons.info_outline_rounded,
+                                      size: 16,
+                                      color: Colors.red,
                                     ),
-                                    if (uploadProgress != null) ...[
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        '$uploadProgress%',
-                                        style: TextStyle(
-                                          color: config.isMyMessage
-                                              ? Colors.white70
-                                              : themeColor.primary,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                )
-                              else ...[
+                                  ),
+                                ),
+                              ] else ...[
                                 Text(
                                   AudioPlaybackManager.formatDuration(
                                     isPlaying ? position : duration,
@@ -1158,22 +1231,19 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
                                     fontSize: 12,
                                   ),
                                 ),
-                              ],
-                              const Spacer(),
-                              if (!isUploading && !isFailedStatus) ...[
+                                Spacer(),
                                 Text(
                                   ChatHelpers.formatMessageTime(
                                     config.message.sentAt,
                                   ),
                                   style: TextStyle(
-                                    color: config.isMyMessage
-                                        ? Colors.white70
-                                        : Colors.grey[600],
-                                    fontSize: 12,
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w400,
                                   ),
                                 ),
                                 if (config.isMyMessage) ...[
-                                  const SizedBox(width: 4),
+                                  // const SizedBox(width: 4),
                                   config.buildMessageStatusTicks?.call(
                                         config.message,
                                       ) ??
@@ -1188,38 +1258,34 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
                   ],
                 ),
               ),
-              // Retry button on outer right side (like WhatsApp)
-              if (isFailedStatus && config.isMyMessage) ...[
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: () {
-                    final localFilePath = audioData['local_path'] as String?;
-
-                    if (localFilePath != null &&
-                        File(localFilePath).existsSync()) {
-                      config.onRetryAudio(failedMessage: config.message);
-                    } else {
-                      config.showErrorDialog(
-                        'Original file not found. Please record again.',
-                      );
-                    }
-                  },
-                  child: isUploading
-                      ? _RotatingRefreshIcon(
-                          size: 20,
-                          color: config.isMyMessage
-                              ? themeColor.primary
-                              : Colors.grey[600] ?? Colors.grey,
-                        )
-                      : Icon(
-                          Icons.refresh,
-                          size: 20,
-                          color: config.isMyMessage
-                              ? themeColor.primary
-                              : Colors.grey[600] ?? Colors.grey,
-                        ),
-                ),
-              ],
+              // // Failed message indicator
+              // if (isFailedStatus && config.isMyMessage) ...[
+              //   const SizedBox(width: 8),
+              //   Builder(
+              //     builder: (context) => GestureDetector(
+              //       onTap: () {
+              //         _showFailedMessageDialog(
+              //           context,
+              //           onResend: config.onResendFailedMessage != null
+              //               ? () => config.onResendFailedMessage!(
+              //                   config.message.id,
+              //                 )
+              //               : null,
+              //           onDelete: config.onDeleteFailedMessage != null
+              //               ? () => config.onDeleteFailedMessage!(
+              //                   config.message.id,
+              //                 )
+              //               : null,
+              //         );
+              //       },
+              //       child: Icon(
+              //         Icons.info_outline_rounded,
+              //         size: 20,
+              //         color: Colors.red,
+              //       ),
+              //     ),
+              //   ),
+              // ],
             ],
           ),
           if (config.message.body != null &&
@@ -1302,8 +1368,10 @@ class _LocalVideoThumbnailState extends State<_LocalVideoThumbnail> {
 
   Future<void> _loadThumbnail() async {
     try {
-      final thumbnailPath = await _thumbnailCache.getThumbnail(widget.videoPath);
-      
+      final thumbnailPath = await _thumbnailCache.getThumbnail(
+        widget.videoPath,
+      );
+
       if (mounted) {
         setState(() {
           _thumbnailPath = thumbnailPath;
@@ -1342,11 +1410,7 @@ class _LocalVideoThumbnailState extends State<_LocalVideoThumbnail> {
                 valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
               ),
             )
-          : Icon(
-              Icons.videocam,
-              size: 50,
-              color: Colors.grey[400],
-            ),
+          : Icon(Icons.videocam, size: 50, color: Colors.grey[400]),
     );
   }
 }

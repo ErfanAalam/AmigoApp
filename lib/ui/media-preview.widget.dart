@@ -1227,8 +1227,7 @@ class UnifiedMediaPreviewScreen extends StatefulWidget {
       _UnifiedMediaPreviewScreenState();
 }
 
-class _UnifiedMediaPreviewScreenState
-    extends State<UnifiedMediaPreviewScreen> {
+class _UnifiedMediaPreviewScreenState extends State<UnifiedMediaPreviewScreen> {
   late PageController _pageController;
   late int _currentIndex;
   final Map<int, VideoPlayerController> _videoControllers = {};
@@ -1250,7 +1249,8 @@ class _UnifiedMediaPreviewScreenState
     if (index < 0 || index >= widget.messages.length) return;
 
     final message = widget.messages[index];
-    final isVideo = message.type.value.toLowerCase() == 'video' ||
+    final isVideo =
+        message.type.value.toLowerCase() == 'video' ||
         (message.attachments != null &&
             (message.attachments as Map<String, dynamic>)['category']
                     ?.toString()
@@ -1267,8 +1267,8 @@ class _UnifiedMediaPreviewScreenState
       final message = widget.messages[index];
       final attachments = message.attachments as Map<String, dynamic>?;
       final videoUrl = attachments?['url'] as String?;
-      final localPath = widget.localPaths != null &&
-              index < widget.localPaths!.length
+      final localPath =
+          widget.localPaths != null && index < widget.localPaths!.length
           ? widget.localPaths![index]
           : attachments?['local_path'] as String?;
 
@@ -1379,7 +1379,8 @@ class _UnifiedMediaPreviewScreenState
   }
 
   Widget _buildMediaItem(MessageModel message, int index) {
-    final isVideo = message.type.value.toLowerCase() == 'video' ||
+    final isVideo =
+        message.type.value.toLowerCase() == 'video' ||
         (message.attachments != null &&
             (message.attachments as Map<String, dynamic>)['category']
                     ?.toString()
@@ -1388,7 +1389,8 @@ class _UnifiedMediaPreviewScreenState
 
     final attachments = message.attachments as Map<String, dynamic>?;
     final mediaUrl = attachments?['url'] as String?;
-    final localPath = widget.localPaths != null && index < widget.localPaths!.length
+    final localPath =
+        widget.localPaths != null && index < widget.localPaths!.length
         ? widget.localPaths![index]
         : attachments?['local_path'] as String?;
 
@@ -1399,7 +1401,11 @@ class _UnifiedMediaPreviewScreenState
     }
   }
 
-  Widget _buildImageItem(String? imageUrl, String? localPath, MessageModel message) {
+  Widget _buildImageItem(
+    String? imageUrl,
+    String? localPath,
+    MessageModel message,
+  ) {
     ImageProvider imageProvider;
     if (localPath != null && File(localPath).existsSync()) {
       imageProvider = FileImage(File(localPath));
@@ -1426,7 +1432,11 @@ class _UnifiedMediaPreviewScreenState
             return Container(
               color: Colors.black,
               child: const Center(
-                child: Icon(Icons.broken_image, size: 64, color: Colors.white54),
+                child: Icon(
+                  Icons.broken_image,
+                  size: 64,
+                  color: Colors.white54,
+                ),
               ),
             );
           },
@@ -1476,9 +1486,11 @@ class _UnifiedMediaPreviewScreenState
   ) {
     // Check upload status from metadata
     final metadata = message.metadata ?? {};
-    final isUploading = metadata['is_uploading'] == true;
-    final isFailed = metadata['upload_failed'] == true || 
-        message.status == MessageStatusType.failed;
+    final isUploading =
+        message.status == MessageStatusType.uploading ||
+        metadata['is_uploading'] == true;
+    final isFailed = message.status == MessageStatusType.failed;
+    // metadata['upload_failed'] == true
     final isStarred = widget.starredMessages?.contains(message.id) ?? false;
     final messageTime = ChatHelpers.formatMessageTime(message.sentAt);
 
@@ -1519,34 +1531,36 @@ class _UnifiedMediaPreviewScreenState
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                      if (isUploading)
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                value: (metadata['upload_progress'] as int?) != null
-                                    ? (metadata['upload_progress'] as int) / 100.0
-                                    : null,
-                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                              ),
-                            ),
-                            if ((metadata['upload_progress'] as int?) != null) ...[
-                              const SizedBox(width: 4),
-                              Text(
-                                '${metadata['upload_progress']}%',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ],
-                        )
+                if (isUploading)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          value: (metadata['upload_progress'] as int?) != null
+                              ? (metadata['upload_progress'] as int) / 100.0
+                              : null,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
+                        ),
+                      ),
+                      if ((metadata['upload_progress'] as int?) != null) ...[
+                        const SizedBox(width: 4),
+                        Text(
+                          '${metadata['upload_progress']}%',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ],
+                  )
                 else if (isFailed && widget.isMyMessage)
                   GestureDetector(
                     onTap: () {
@@ -1578,7 +1592,11 @@ class _UnifiedMediaPreviewScreenState
                         );
                       }
                     },
-                    child: const Icon(Icons.refresh, size: 18, color: Colors.white),
+                    child: const Icon(
+                      Icons.refresh,
+                      size: 18,
+                      color: Colors.white,
+                    ),
                   )
                 else ...[
                   Text(
@@ -1589,7 +1607,9 @@ class _UnifiedMediaPreviewScreenState
                       fontWeight: FontWeight.w400,
                     ),
                   ),
-                  if (widget.isMyMessage && !isFailed && widget.buildMessageStatusTicks != null) ...[
+                  if (widget.isMyMessage &&
+                      !isFailed &&
+                      widget.buildMessageStatusTicks != null) ...[
                     const SizedBox(width: 6),
                     SizedBox(
                       width: 16,
@@ -1627,7 +1647,8 @@ class _UnifiedMediaPreviewScreenState
     final message = widget.messages[_currentIndex];
     final attachments = message.attachments as Map<String, dynamic>?;
     final mediaUrl = attachments?['url'] as String?;
-    final isVideo = message.type.value.toLowerCase() == 'video' ||
+    final isVideo =
+        message.type.value.toLowerCase() == 'video' ||
         (message.attachments != null &&
             (message.attachments as Map<String, dynamic>)['category']
                     ?.toString()
@@ -1683,7 +1704,8 @@ class _UnifiedMediaPreviewScreenState
     final message = widget.messages[_currentIndex];
     final attachments = message.attachments as Map<String, dynamic>?;
     final mediaUrl = attachments?['url'] as String?;
-    final isVideo = message.type.value.toLowerCase() == 'video' ||
+    final isVideo =
+        message.type.value.toLowerCase() == 'video' ||
         (message.attachments != null &&
             (message.attachments as Map<String, dynamic>)['category']
                     ?.toString()
@@ -1729,3 +1751,4 @@ class _UnifiedMediaPreviewScreenState
     }
   }
 }
+
