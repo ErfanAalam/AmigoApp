@@ -329,7 +329,7 @@ class ChatMessagePayload {
       if (replyToMessageId != null)
         'reply_to_message_id': replyToMessageId
             .toString(), // Convert bigint to string
-      'sent_at': sentAt.toIso8601String(),
+      'sent_at': sentAt.toUtc().toIso8601String(),
     };
   }
 }
@@ -418,7 +418,7 @@ class ChatMessageAckPayload {
       'sender_id': senderId,
       'error_code': errorCode,
       'is_failed': isFailed,
-      'delivered_at': deliveredAt.toIso8601String(),
+      'delivered_at': deliveredAt.toUtc().toIso8601String(),
       if (deliveredTo != null) 'delivered_to': deliveredTo,
       if (readBy != null) 'read_by': readBy,
       if (offlineUsers != null) 'offline_users': offlineUsers,
@@ -549,7 +549,7 @@ class MembersType {
       'user_name': userName,
       if (userPfp != null) 'user_pfp': userPfp,
       'role': role.value,
-      'joined_at': joinedAt.toIso8601String(),
+      'joined_at': joinedAt.toUtc().toIso8601String(),
     };
   }
 }
@@ -625,7 +625,7 @@ class ConversationActionPayload {
       if (actorName != null) 'actor_name': actorName,
       if (actorPfp != null) 'actor_pfp': actorPfp,
       'message': message,
-      'action_at': actionAt.toIso8601String(),
+      'action_at': actionAt.toUtc().toIso8601String(),
     };
   }
 }
@@ -697,7 +697,7 @@ class NewConversationPayload {
       'creater_phone': createrPhone,
       if (createrPfp != null) 'creater_pfp': createrPfp,
       if (members != null) 'members': members!.map((e) => e.toJson()).toList(),
-      'joined_at': joinedAt.toIso8601String(),
+      'joined_at': joinedAt.toUtc().toIso8601String(),
     };
   }
 }
@@ -920,8 +920,8 @@ class MessageForwardPayload {
 //       if (body != null) 'body': body,
 //       if (attachments != null) 'attachments': attachments,
 //       if (metadata != null) 'metadata': metadata,
-//       'sent_at': sentAt.toIso8601String(),
-//       'created_at': createdAt.toIso8601String(),
+//       'sent_at': sentAt.toUtc().toIso8601String(),
+//       'created_at': createdAt.toUtc().toIso8601String(),
 //     };
 //   }
 // }
@@ -965,7 +965,7 @@ class SyncMessagesPayload {
   Map<String, dynamic> toJson() {
     return {
       'messages': messages.map((e) => e.toJson()).toList(),
-      'sync_timestamp': syncTimestamp.toIso8601String(),
+      'sync_timestamp': syncTimestamp.toUtc().toIso8601String(),
       'total_count': totalCount,
     };
   }
@@ -1024,7 +1024,7 @@ class MessageDeliveredPayload {
       'conv_id': convId,
       'sender_id': senderId,
       'recipient_id': recipientId,
-      'delivered_at': deliveredAt.toIso8601String(),
+      'delivered_at': deliveredAt.toUtc().toIso8601String(),
     };
   }
 }
@@ -1095,7 +1095,7 @@ class CallPayload {
       if (calleePfp != null) 'callee_pfp': calleePfp,
       if (data != null) 'data': data,
       if (error != null) 'error': error,
-      if (timestamp != null) 'timestamp': timestamp!.toIso8601String(),
+      if (timestamp != null) 'timestamp': timestamp!.toUtc().toIso8601String(),
     };
   }
 }
@@ -1247,7 +1247,7 @@ class WSMessage {
     return {
       'type': type.value,
       if (payload != null) 'payload': _payloadToJson(payload),
-      if (wsTimestamp != null) 'ws_timestamp': wsTimestamp!.toIso8601String(),
+      if (wsTimestamp != null) 'ws_timestamp': wsTimestamp!.toUtc().toIso8601String(),
     };
   }
 

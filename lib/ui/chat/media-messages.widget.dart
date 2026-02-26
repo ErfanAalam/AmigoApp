@@ -4,7 +4,6 @@ import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/socket.types.dart';
 import 'package:amigo/utils/chat/chat-helpers.utils.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/theme-color.provider.dart';
@@ -839,7 +838,7 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
                     decoration: BoxDecoration(
                       color: config.isMyMessage
                           ? Colors.black.withOpacity(0.3)
-                          : Colors.black.withOpacity(0.6),
+                          : Colors.black.withOpacity(0.3),
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Row(

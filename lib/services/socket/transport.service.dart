@@ -5,6 +5,7 @@ import 'package:amigo/api/api_service.dart';
 import 'package:amigo/api/clients/chat_client.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:dio/dio.dart';
 
 import '../../env.dart';
 
@@ -72,8 +73,8 @@ class WebSocketTransport implements TransportService {
   // Heartbeat
   Timer? _pingTimer;
   int _missedPongs = 0;
-  static const Duration _pingInterval = Duration(seconds: 30);
-  static const int _maxMissedPongs = 10;
+  static const Duration _pingInterval = Duration(seconds: 10);
+  static const int _maxMissedPongs = 5;
 
   @override
   TransportType get transportType => TransportType.websocket;
@@ -243,7 +244,7 @@ class WebSocketTransport implements TransportService {
       _socket!.add(
         json.encode({
           'type': 'socket:ping',
-          'ws_timestamp': DateTime.now().toIso8601String(),
+          'ws_timestamp': DateTime.now().toUtc().toIso8601String(),
         }),
       );
       _missedPongs++;
@@ -258,7 +259,7 @@ class WebSocketTransport implements TransportService {
       _socket!.add(
         json.encode({
           'type': 'socket:pong',
-          'ws_timestamp': DateTime.now().toIso8601String(),
+          'ws_timestamp': DateTime.now().toUtc().toIso8601String(),
         }),
       );
     } catch (e) {
@@ -468,27 +469,40 @@ class LongPollingTransport implements TransportService {
     if (_token == null) return false;
 
     try {
-      final pollUrl =
-          '${Environment.baseUrl}?token=${Uri.encodeComponent(_token!)}';
-      final response = await http.post(
-        Uri.parse(pollUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode(message),
+      // Use Dio from ApiService to ensure proper cookie handling
+      final dio = ApiService().client.dio;
+      final pollUrl = '${Environment.baseUrl}/chat/poll/send-message';
+
+      final response = await dio.post(
+        pollUrl,
+        data: message,
+        options: Options(
+          headers: {'Content-Type': 'application/json'},
+          validateStatus: (status) => status != null && status < 500,
+        ),
       );
 
       if (response.statusCode == 200) {
         // Check if there's a response message (like ack)
         try {
-          final responseData =
-              json.decode(response.body) as Map<String, dynamic>;
-          if (responseData['type'] != null) {
+          final responseData = response.data['data'];
+          if (responseData is Map<String, dynamic> &&
+              responseData['type'] != null) {
             _messageController.add(responseData);
           }
         } catch (_) {
           // Ignore parse errors for simple success responses
         }
         return true;
+      } else if (response.statusCode == 401) {
+        debugPrint('[POLLING-TRANSPORT] Authentication error detected (401)');
+        _updateConnectionState(TransportConnectionState.error);
+        _errorController.add('AUTH_ERROR:401');
+        return false;
       }
+      debugPrint(
+        '[POLLING-TRANSPORT] Send message failed with status: ${response.statusCode}',
+      );
       return false;
     } catch (e) {
       debugPrint('[POLLING-TRANSPORT] Error sending message: $e');

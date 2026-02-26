@@ -1,4 +1,6 @@
 import 'package:amigo/utils/user.utils.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../env.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -43,6 +45,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     _otpController.dispose();
     super.dispose();
   }
+
+  bool get _isGuestNumber => _phoneController.text.startsWith('100100100');
 
   void _updateCompletePhoneNumber() {
     setState(() {
@@ -204,6 +208,84 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       //     material.SnackBar(content: material.Text('Error: ${e.toString()}')),
       //   );
       // }
+      Snack.error('Error: ${e.toString()}');
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  void handleGuestLogin() async {
+    if (_phoneController.text.isEmpty || _phoneController.text.length < 8) {
+      Snack.error('Please enter a valid phone number.');
+      return;
+    }
+
+    // Route all traffic to the v2.0 guest backend before any API call
+    Environment.setGuestMode(true);
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final response = await apiService.auth.verifyLoginOtp(
+        phoneNumber: _completePhoneNumber,
+        otp: 0,
+      );
+
+      if (response.isSuccess) {
+        // Persist guest mode so it survives app restarts
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('is_guest_mode', true);
+
+        Snack.success('Logged in as guest');
+
+        final appVersion = await UserUtils().getAppVersion();
+        await apiService.user.updateUser({'app_version': appVersion});
+
+        if (response.data != null) {
+          final userDetail = {
+            'id': response.data!['id'],
+            'name': response.data!['name'],
+            'phone': response.data!['phone'],
+            'role': response.data!['role'],
+            'profile_pic': response.data!['profile_pic'],
+            'created_at': response.data!['created_at'],
+            'call_access': response.data!['call_access'],
+          };
+
+          await UserUtils().saveUserDetails(UserModel.fromJson(userDetail));
+        } else {
+          Snack.warning(
+            'Unable to fetch user details. Please update your profile after login.',
+          );
+        }
+
+        await authService.sendFCMTokenToBackend(3);
+
+        final appState = main.MyApp.appStateKey.currentState;
+        if (appState != null && appState is main.AppStateInterface) {
+          await (appState as main.AppStateInterface).initializeAuthenticatedUser();
+        }
+
+        if (mounted) {
+          material.Navigator.pushReplacement(
+            context,
+            material.MaterialPageRoute(
+              builder: (context) => const MainScreen(),
+            ),
+          );
+        }
+      } else {
+        // Rollback to production URLs if guest login failed
+        Environment.setGuestMode(false);
+        Snack.error('Guest login failed');
+      }
+    } catch (e) {
+      // Rollback to production URLs on error
+      Environment.setGuestMode(false);
       Snack.error('Error: ${e.toString()}');
     } finally {
       setState(() {
@@ -700,9 +782,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                         onTap: _isLoading
                                             ? null
                                             : () {
-                                                !_isPhoneSubmitted
-                                                    ? handlePhoneSubmit()
-                                                    : handleOtpSubmit();
+                                                if (_isGuestNumber) {
+                                                  handleGuestLogin();
+                                                } else if (!_isPhoneSubmitted) {
+                                                  handlePhoneSubmit();
+                                                } else {
+                                                  handleOtpSubmit();
+                                                }
                                               },
                                         borderRadius:
                                             material.BorderRadius.circular(16),
@@ -730,9 +816,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                                 )
                                               else ...[
                                                 material.Text(
-                                                  !_isPhoneSubmitted
-                                                      ? 'Send OTP'
-                                                      : 'Verify & Continue',
+                                                  _isGuestNumber
+                                                      ? 'Guest Login'
+                                                      : !_isPhoneSubmitted
+                                                          ? 'Send OTP'
+                                                          : 'Verify & Continue',
                                                   style:
                                                       const material.TextStyle(
                                                         fontSize: 16,

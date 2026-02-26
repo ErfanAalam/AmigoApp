@@ -17,6 +17,7 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
   late AnimationController _animationController;
   late Animation<double> _pulseAnimation;
   bool _hasWaitedForState = false;
+  bool _hasNavigated = false;
 
   @override
   void initState() {
@@ -45,6 +46,15 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
   void dispose() {
     _animationController.dispose();
     super.dispose();
+  }
+
+  /// Navigate away from the incoming call screen.
+  /// Guarded so it only runs once per screen lifecycle.
+  void _navigateAway() {
+    if (_hasNavigated || !mounted) return;
+    _hasNavigated = true;
+    debugPrint('[IncomingCallScreen] Navigating away from incoming call screen');
+    Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   @override
@@ -155,11 +165,12 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
       }
 
       // Navigate back to main screen (which will show chats page by default)
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) {
-          Navigator.of(context).popUntil((route) => route.isFirst);
-        }
-      });
+      // Guarded to prevent multiple navigation attempts
+      if (!_hasNavigated) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _navigateAway();
+        });
+      }
 
       // Return a loading screen while navigating
       return Scaffold(
@@ -189,11 +200,11 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
     if (currentCall == null) {
       if (_hasWaitedForState) {
         print('[IncomingCallScreen] ⚠️ Still no activeCall after waiting - closing screen');
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (context.mounted) {
-            Navigator.of(context).popUntil((route) => route.isFirst);
-          }
-        });
+        if (!_hasNavigated) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _navigateAway();
+          });
+        }
       }
       return const Scaffold(
         backgroundColor: Colors.black,
@@ -206,11 +217,11 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
         currentCall.status != CallStatus.ringing) {
       print('[IncomingCallScreen] ❌ Invalid call state for incoming screen');
 
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) {
-          Navigator.of(context).popUntil((route) => route.isFirst);
-        }
-      });
+      if (!_hasNavigated) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _navigateAway();
+        });
+      }
 
       return const Scaffold(
         backgroundColor: Colors.black,
@@ -410,14 +421,12 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
   ) async {
     try {
       await callServiceNotifier.declineCall();
-      if (context.mounted) {
-        Navigator.of(context).pop();
-      }
+      // Navigate away using the guarded method
+      _navigateAway();
     } catch (e) {
-      // Show error and still close
-      if (context.mounted) {
-        Navigator.of(context).pop();
-      }
+      debugPrint('[IncomingCallScreen] Error declining call: $e');
+      // Still navigate away on error
+      _navigateAway();
     }
   }
 }

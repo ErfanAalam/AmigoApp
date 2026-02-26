@@ -5,8 +5,8 @@ import '../../api/api_service.dart';
 import '../../models/country.model.dart' as country_model;
 import '../../models/user.model.dart';
 import '../../providers/theme-color.provider.dart';
-import '../../services/notification.service.dart';
 import '../../services/auth/auth.service.dart';
+import '../../services/fcm/fcm-init.service.dart';
 import '../../services/socket/transport.manager.dart';
 import '../../services/cookies.service.dart';
 import '../../ui/country-selector.modal.dart';
@@ -182,7 +182,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
         'role': response['data']['role'],
         'profile_pic': null,
         'created_at': DateTime.now().toIso8601String(),
-        'call_access': false,
+        'call_access': response['data']['call_access'] ?? true,
       };
 
       await UserUtils().saveUserDetails(UserModel.fromJson(userDetail));
@@ -193,7 +193,8 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       // Initialize authenticated user (this runs all the main.dart authenticated logic)
       final appState = main.MyApp.appStateKey.currentState;
       if (appState != null && appState is main.AppStateInterface) {
-        await (appState as main.AppStateInterface).initializeAuthenticatedUser();
+        await (appState as main.AppStateInterface)
+            .initializeAuthenticatedUser();
       }
     } else {
       if (mounted) {

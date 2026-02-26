@@ -42,7 +42,7 @@ class NetworkConnectivityUtil {
   // Configuration
   static const Duration _pingTimeout = Duration(seconds: 5);
   static const Duration _wsTestTimeout = Duration(seconds: 10);
-  static const Duration _periodicCheckInterval = Duration(seconds: 30);
+  static const Duration _periodicCheckInterval = Duration(seconds: 5);
   static const int _pingRetries = 2;
   // static const int _wsTestRetries = 1;
   // static const int _pollingTestRetries = 1;

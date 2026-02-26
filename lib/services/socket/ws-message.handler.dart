@@ -171,6 +171,7 @@ class WebSocketMessageHandler {
     _messageSubscription = _transportManager.messageStream.listen(
       (jsonMap) {
         try {
+          print("passing through ws message handler: ${jsonMap['type']}");
           // Parse the JSON map into WSMessage
           final message = WSMessage.fromJson(jsonMap);
           _handleMessage(message);

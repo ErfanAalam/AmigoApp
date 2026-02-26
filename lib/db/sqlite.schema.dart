@@ -14,7 +14,8 @@ class Users extends Table {
   TextColumn get role => text().nullable()();
   BoolColumn get isOnline => boolean()();
   TextColumn get profilePic => text().nullable()();
-  BoolColumn get callAccess => boolean().nullable()();
+  BoolColumn get callAccess =>
+      boolean().withDefault(const Constant(true)).nullable()();
 
   @override
   Set<Column> get primaryKey => {id};

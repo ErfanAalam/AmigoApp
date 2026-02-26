@@ -47,7 +47,7 @@ class UserModel {
       phone: json['phone']?.toString() ?? '',
       profilePic: json['profile_pic']?.toString(),
       isOnline: json['is_online'] ?? false,
-      callAccess: json['call_access'] ?? false,
+      callAccess: json['call_access'] ?? true,
       updatedAt: json['updated_at'] is int
           ? json['updated_at']
           : (json['updated_at'] is String

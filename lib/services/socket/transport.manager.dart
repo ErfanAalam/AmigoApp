@@ -1,12 +1,14 @@
 import 'dart:async';
-import 'dart:math';
+import 'dart:ui';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 
 import '../../utils/network.utils.dart';
 import '../../types/network.types.dart';
 import '../../api/api_service.dart';
 import '../../services/cookies.service.dart';
+import '../../utils/navigation-helper.util.dart';
 import 'transport.service.dart';
 
 /// Transport manager that handles fallback logic between transports.
@@ -50,14 +52,17 @@ class TransportManager {
 
   // Background WebSocket reconnection when in polling mode
   Timer? _wsReconnectTimer;
-  static const Duration _wsReconnectInterval = Duration(seconds: 10);
+  static const Duration _wsReconnectInterval = Duration(seconds: 3);
 
   // Reconnection with exponential backoff
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
   static const int _maxReconnectAttempts = 50;
-  static const Duration _baseReconnectDelay = Duration(seconds: 2);
+  static const Duration _baseReconnectDelay = Duration(seconds: 1);
   static const Duration _maxReconnectDelay = Duration(seconds: 60);
+
+  // Track if disconnectivity popup is shown
+  bool _isDisconnectivityPopupShown = false;
 
   // Stream controllers
   final StreamController<TransportConnectionState> _connectionStateController =
@@ -148,8 +153,12 @@ class TransportManager {
     }
 
     // Fallback to polling if WebSocket failed or not preferred
-    if (!connected && networkState.isPollingAvailable) {
-      debugPrint('[TRANSPORT-MGR] Attempting Long Polling connection');
+    // Try polling if server is reachable (internet available), even if network check says polling unavailable
+    // This ensures fallback works when WebSocket is blocked but HTTP works
+    if (!connected && networkState.isServerReachable) {
+      debugPrint(
+        '[TRANSPORT-MGR] Attempting Long Polling connection (fallback from WebSocket)',
+      );
       connected = await _tryTransport(
         _pollingTransport,
         TransportType.longPolling,
@@ -207,6 +216,8 @@ class TransportManager {
         _currentTransportType = type;
         _reconnectAttempts = 0;
         _authErrorCount = 0; // Reset auth error count on successful connection
+        _isDisconnectivityPopupShown =
+            false; // Reset popup flag on successful connection
 
         // Subscribe to transport events
         _subscribeToTransport(transport);
@@ -385,17 +396,23 @@ class TransportManager {
     if (_reconnectAttempts >= _maxReconnectAttempts) {
       debugPrint('[TRANSPORT-MGR] Max reconnect attempts reached');
       _errorController.add('Maximum reconnection attempts reached');
+
+      // Show disconnectivity popup if not already shown
+      if (!_isDisconnectivityPopupShown) {
+        _showDisconnectivityPopup();
+      }
       return;
     }
 
     // Calculate delay with exponential backoff + jitter
-    final baseDelay =
-        _baseReconnectDelay.inMilliseconds *
-        (1 << min(_reconnectAttempts, 5)); // Cap exponential at 2^5
-    final jitter = Random().nextInt(1000); // Add up to 1 second jitter
-    final delay = Duration(
-      milliseconds: min(baseDelay + jitter, _maxReconnectDelay.inMilliseconds),
-    );
+    // final baseDelay =
+    //     _baseReconnectDelay.inMilliseconds *
+    //     (1 << min(_reconnectAttempts, 5)); // Cap exponential at 2^5
+    // final jitter = Random().nextInt(1000); // Add up to 1 second jitter
+    // final delay = Duration(
+    //   milliseconds: min(baseDelay + jitter, _maxReconnectDelay.inMilliseconds),
+    // );
+    final delay = Duration(seconds: 2);
 
     _reconnectAttempts++;
     debugPrint(
@@ -408,6 +425,65 @@ class TransportManager {
       if (_allowReconnect && _authToken != null) {
         connect(_authToken!);
       }
+    });
+  }
+
+  /// Restart reconnect cycle after popup is closed
+  void _restartReconnectCycle() {
+    debugPrint('[TRANSPORT-MGR] Restarting reconnect cycle after popup closed');
+    _isDisconnectivityPopupShown = false;
+    _reconnectAttempts = 0; // Reset attempts to allow new cycle
+
+    // Start reconnecting again
+    if (_allowReconnect && _authToken != null) {
+      connect(_authToken!);
+    }
+  }
+
+  /// Show internet disconnectivity popup
+  void _showDisconnectivityPopup() {
+    final navigator = NavigationHelper.navigator;
+    final context = navigator?.context;
+    if (context == null) {
+      debugPrint('[TRANSPORT-MGR] Navigator not available, cannot show popup');
+      return;
+    }
+
+    _isDisconnectivityPopupShown = true;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withOpacity(0.3),
+      builder: (BuildContext dialogContext) {
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: AlertDialog(
+            backgroundColor: Colors.white.withOpacity(0.85),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: const Text(
+              'No Internet Connection',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            content: const Text(
+              'Unable to connect to the server. Please check your internet connection and try again.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                },
+                child: const Text('Reconnect'),
+              ),
+            ],
+          ),
+        );
+      },
+    ).then((_) {
+      // This callback is called when dialog is closed (via back button or button press)
+      _restartReconnectCycle();
     });
   }
 
@@ -558,6 +634,7 @@ class TransportManager {
     _authToken = null;
     _wsFailures = 0;
     _reconnectAttempts = 0;
+    _isDisconnectivityPopupShown = false;
     debugPrint('[TRANSPORT-MGR] Shutdown complete');
   }
 
@@ -567,6 +644,7 @@ class TransportManager {
     _allowReconnect = true;
     _wsFailures = 0;
     _reconnectAttempts = 0;
+    _isDisconnectivityPopupShown = false; // Reset popup flag
 
     await _cleanupCurrentTransport();
 

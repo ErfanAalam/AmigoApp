@@ -8,10 +8,13 @@ import 'package:flutter/material.dart' as material;
 import 'package:flutter/material.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart'
+    show Permission, PermissionActions;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'api/api_service.dart';
+import 'env.dart';
 import 'package:dio/dio.dart';
 import 'models/group.model.dart';
 import 'screens/auth/login.screen.dart';
@@ -25,7 +28,7 @@ import 'services/auth/auth.service.dart';
 import 'services/call/call-foreground.service.dart';
 import 'services/call/call.service.dart';
 import 'services/cookies.service.dart';
-import 'services/notification.service.dart';
+import 'services/fcm/fcm-init.service.dart';
 import 'services/socket/transport.manager.dart';
 import 'services/socket/transport.service.dart';
 import 'services/socket/ws-message.handler.dart';
@@ -39,6 +42,11 @@ void main() async {
   debugPrint("🚀 Starting Amigo Chat App...");
   debugPrint("---------------------------------------------------------------");
   material.WidgetsFlutterBinding.ensureInitialized();
+
+  // Restore guest mode environment before any API calls
+  final prefs = await SharedPreferences.getInstance();
+  final isGuestMode = prefs.getBool('is_guest_mode') ?? false;
+  Environment.setGuestMode(isGuestMode);
 
   // Initialize services
   final cookieService = CookieService();
@@ -68,17 +76,10 @@ void main() async {
   // Initialize Foreground Service for keeping microphone active during calls
   await CallForegroundService.initialize();
 
-  // Initialize RingtoneManager for call audio
-  await RingtoneManager.init();
-
   // await TestBGService().initializeService();
 
   // Run the app (with Riverpod)
-  material.runApp(
-    ProviderScope(
-      child: MyApp(key: MyApp.appStateKey),
-    ),
-  );
+  material.runApp(ProviderScope(child: MyApp(key: MyApp.appStateKey)));
 }
 
 /// Public interface for app state methods that can be called from other files
@@ -91,9 +92,10 @@ class MyApp extends material.StatefulWidget {
 
   @override
   material.State<MyApp> createState() => _MyAppState();
-  
+
   // Global key to access app state from anywhere
-  static final GlobalKey<material.State<MyApp>> appStateKey = GlobalKey<material.State<MyApp>>();
+  static final GlobalKey<material.State<MyApp>> appStateKey =
+      GlobalKey<material.State<MyApp>>();
 }
 
 class _MyAppState extends material.State<MyApp>
@@ -108,6 +110,7 @@ class _MyAppState extends material.State<MyApp>
   bool _isAuthenticated = false;
   StreamSubscription? _intentDataStreamSubscription;
   int _notificationRetryCount = 0;
+  List<SharedMediaFile>? _pendingSharedFiles;
   // String appVersion = '';
 
   @override
@@ -115,7 +118,6 @@ class _MyAppState extends material.State<MyApp>
     super.initState();
     // Add lifecycle observer to handle app state changes
     material.WidgetsBinding.instance.addObserver(this);
-    _requestPermissions();
     _checkAuthentication();
     _setupWebSocketListeners();
     _initializeSharing();
@@ -128,7 +130,7 @@ class _MyAppState extends material.State<MyApp>
       _processInitialNotification();
     });
   }
-  
+
   /// Initialize authenticated user - can be called from anywhere after login/signup
   /// This method contains all the logic that should run when a user is authenticated
   Future<void> initializeAuthenticatedUser() async {
@@ -161,15 +163,16 @@ class _MyAppState extends material.State<MyApp>
         'app_version': appVersion,
       });
       if (!updateResult.isSuccess) {
-        debugPrint(
-          '⚠️ Failed to update app version: ${updateResult.message}',
-        );
+        debugPrint('⚠️ Failed to update app version: ${updateResult.message}');
       }
 
       // await _apiService.updateUserLocationAndIp();
       // Wait a bit for WebSocket to establish connection
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 300));
       await _requestPermissions();
+
+      // Initialize RingtoneManager for call audio
+      await RingtoneManager.init();
 
       final callUtils = CallUtils();
       final callDetails = await callUtils.getCallDetails();
@@ -200,10 +203,7 @@ class _MyAppState extends material.State<MyApp>
           case 'declined':
             // Call was rejected, clean up
             await CallService().initialize();
-            await CallService().declineCall(
-              reason: 'declined',
-              callId: callId,
-            );
+            await CallService().declineCall(reason: 'declined', callId: callId);
             return;
 
           case 'ended':
@@ -213,10 +213,7 @@ class _MyAppState extends material.State<MyApp>
           case 'missed':
             // Call was missed, clean up
             await CallService().initialize();
-            await CallService().declineCall(
-              reason: 'timeout',
-              callId: callId,
-            );
+            await CallService().declineCall(reason: 'timeout', callId: callId);
             break;
 
           default:
@@ -320,16 +317,35 @@ class _MyAppState extends material.State<MyApp>
   }
 
   Future<void> _checkAuthentication() async {
-    final isAuthenticated = await _authService.isAuthenticated();
+    // Fast local check — reads secure storage only, no network call (~20ms).
+    // This makes the app (and any pending share screen) visible immediately.
+    final isLocallyAuthenticated =
+        await _authService.isAuthenticatedLocally();
     setState(() {
-      _isAuthenticated = isAuthenticated;
+      _isAuthenticated = isLocallyAuthenticated;
       _isLoading = false;
     });
 
-    // Initialize authenticated user if already logged in
-    if (isAuthenticated) {
-      await initializeAuthenticatedUser();
+    if (isLocallyAuthenticated) {
+      // Navigate to any pending share screen on the very next frame,
+      // before the heavyweight init or server validation begins.
+      _tryHandlePendingSharedFiles();
+      // Server validation + full init run in the background.
+      _runBackgroundInit();
     }
+  }
+
+  /// Validates the session with the server and runs full initialization.
+  /// Called in the background after the fast local auth check passes.
+  Future<void> _runBackgroundInit() async {
+    // isAuthenticated() makes the server call and calls logout() internally
+    // if the token was revoked (e.g. logged in from another device).
+    final isServerAuthenticated = await _authService.isAuthenticated();
+    if (!isServerAuthenticated) {
+      if (mounted) setState(() => _isAuthenticated = false);
+      return;
+    }
+    await initializeAuthenticatedUser();
   }
 
   void _setupWebSocketListeners() {
@@ -351,12 +367,22 @@ class _MyAppState extends material.State<MyApp>
 
     // Listen to notification streams
     _notificationService.messageNotificationStream.listen((data) {
-      // Handle message notification - could navigate to specific chat
       _handleNotificationNavigation(data);
     });
+
+    // Check for any pending notification payload that was buffered
+    // before this listener was attached (e.g., from background tap)
+    final pendingPayload =
+        _notificationService.consumePendingNavigationPayload();
+    if (pendingPayload != null) {
+      debugPrint('📨 Found pending notification payload, navigating...');
+      _handleNotificationNavigation(pendingPayload);
+    }
   }
 
   Future<void> _requestPermissions() async {
+    // Request notification permission
+    await Permission.notification.request();
     // Request notification permission for callkit incoming
     await FlutterCallkitIncoming.requestNotificationPermission({
       "title": "Notification permission",
@@ -372,33 +398,45 @@ class _MyAppState extends material.State<MyApp>
   }
 
   /// Handle navigation from notification tap
-  void _handleNotificationNavigation(Map<String, dynamic> data) {
-    // Add a delay to ensure navigator is ready and app is fully initialized
-    Future.delayed(const Duration(milliseconds: 150), () async {
-      try {
-        final convId = data['conv_id'] as int?;
-        final convType = data['conv_type'];
-        if (convId == null || convType == null) {
-          debugPrint(
-            '❌ Either ConversationId Or ConversationType is null in notification data',
-          );
-          return;
-        }
+  void _handleNotificationNavigation(ChatMessagePayload data) async {
+    debugPrint(
+      '📨 Handling notification navigation: convId=${data.convId}, type=${data.convType}',
+    );
 
-        // Try to fetch the conversation from local DB with retry
-        await _fetchAndNavigateToConversationWithRetry(convId, convType);
-      } catch (e) {
-        debugPrint('❌ Error navigating to conversation from notification: $e');
+    // Ensure user is authenticated before navigating
+    if (!_isAuthenticated) {
+      debugPrint('⏳ User not authenticated yet, waiting...');
+      // Wait for authentication with timeout
+      for (int i = 0; i < 10; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (_isAuthenticated) break;
       }
-    });
+      if (!_isAuthenticated) {
+        debugPrint('❌ User not authenticated, cannot navigate');
+        return;
+      }
+    }
+
+    // Add a small delay to ensure navigator is ready
+    await Future.delayed(const Duration(milliseconds: 200));
+
+    try {
+      // Try to fetch the conversation from local DB with retry
+      await _fetchAndNavigateToConversationWithRetry(
+        data.convId,
+        data.convType,
+      );
+    } catch (e) {
+      debugPrint('❌ Error navigating to conversation from notification: $e');
+    }
   }
 
   /// Fetch conversation details and navigate to appropriate page with retry
   Future<void> _fetchAndNavigateToConversationWithRetry(
     int conversationId,
     ChatType convType, {
-    int maxRetries = 5,
-    Duration retryDelay = const Duration(milliseconds: 100),
+    int maxRetries = 10,
+    Duration retryDelay = const Duration(milliseconds: 300),
   }) async {
     for (int attempt = 0; attempt < maxRetries; attempt++) {
       try {
@@ -411,9 +449,9 @@ class _MyAppState extends material.State<MyApp>
           continue;
         }
 
-        // First, try to get it as a DM conversation
         final conversationsRepo = ConversationRepository();
 
+        // Handle DM conversations
         if (convType == ChatType.dm) {
           final dm = await conversationsRepo.getDmByConversationId(
             conversationId,
@@ -421,7 +459,6 @@ class _MyAppState extends material.State<MyApp>
           if (dm != null) {
             debugPrint('✅ Found DM conversation, navigating...');
             _navigateToDM(dm);
-
             return;
           } else {
             debugPrint(
@@ -430,7 +467,10 @@ class _MyAppState extends material.State<MyApp>
             await Future.delayed(retryDelay);
             continue;
           }
-        } else if (convType == ChatType.group) {
+        }
+        // Handle group and community_group conversations
+        else if (convType == ChatType.group ||
+            convType == ChatType.communityGroup) {
           final group = await conversationsRepo.getGroupWithMembersByConvId(
             conversationId,
           );
@@ -445,6 +485,11 @@ class _MyAppState extends material.State<MyApp>
             await Future.delayed(retryDelay);
             continue;
           }
+        } else {
+          debugPrint(
+            '❌ Unknown conversation type: $convType for conversation $conversationId',
+          );
+          return;
         }
       } catch (e) {
         debugPrint(
@@ -457,12 +502,14 @@ class _MyAppState extends material.State<MyApp>
     }
 
     debugPrint(
-      '❌ Failed to navigate to conversation after $maxRetries attempts',
+      '❌ Failed to navigate to conversation $conversationId after $maxRetries attempts',
     );
   }
 
   /// Navigate to DM conversation
   void _navigateToDM(DmModel dm) {
+    debugPrint('🚀 Navigating to DM conversation: ${dm.conversationId}');
+    
     // Use NavigationHelper's pushRouteWithRetry for more reliable navigation
     NavigationHelper.pushRouteWithRetry(
       InnerChatPage(dm: dm),
@@ -473,6 +520,8 @@ class _MyAppState extends material.State<MyApp>
 
   /// Navigate to group conversation
   void _navigateToGroup(GroupModel group) {
+    debugPrint('🚀 Navigating to group conversation: ${group.conversationId}');
+    
     // Use NavigationHelper's pushRouteWithRetry for more reliable navigation
     NavigationHelper.pushRouteWithRetry(
       InnerGroupChatPage(group: group),
@@ -483,7 +532,7 @@ class _MyAppState extends material.State<MyApp>
 
   /// Initialize sharing intent listeners
   void _initializeSharing() {
-    // Listen for shared media while the app is running
+    // Listen for shared media while the app is running (app was in background)
     _intentDataStreamSubscription = ReceiveSharingIntent.instance
         .getMediaStream()
         .listen(
@@ -497,37 +546,60 @@ class _MyAppState extends material.State<MyApp>
           },
         );
 
-    // Handle shared media when app is opened from the share sheet (app was closed)
+    // Handle shared media when app is cold-started via the share sheet.
+    // Store the files and process them once authentication is confirmed,
+    // so we never reset() the intent before navigation actually happens.
     ReceiveSharingIntent.instance.getInitialMedia().then((
       List<SharedMediaFile> value,
     ) {
       if (value.isNotEmpty) {
-        // Wait for authentication to complete and navigator to be ready
-        Future.delayed(const Duration(milliseconds: 500), () {
-          _handleSharedMedia(value);
-          ReceiveSharingIntent.instance.reset();
-        });
+        _pendingSharedFiles = value;
+        _tryHandlePendingSharedFiles();
       }
     });
   }
 
-  /// Handle shared media files
-  void _handleSharedMedia(List<SharedMediaFile> files) {
-    // Only handle if user is authenticated
+  /// Process pending shared files from a cold-start intent.
+  /// Safe to call multiple times — exits early if not yet ready.
+  void _tryHandlePendingSharedFiles() {
+    if (_pendingSharedFiles == null || _pendingSharedFiles!.isEmpty) return;
+    if (!_isAuthenticated) return; // Will be retried once auth completes
+
+    final files = _pendingSharedFiles!;
+    _pendingSharedFiles = null;
+
+    // addPostFrameCallback fires after the very next render frame (~16ms),
+    // guaranteeing MainScreen (and therefore the navigator) is already built.
+    material.WidgetsBinding.instance.addPostFrameCallback((_) {
+      _handleSharedMedia(files, onNavigated: () {
+        ReceiveSharingIntent.instance.reset();
+      });
+    });
+  }
+
+  /// Handle shared media files.
+  /// [onNavigated] is called only after the screen is actually pushed.
+  void _handleSharedMedia(
+    List<SharedMediaFile> files, {
+    VoidCallback? onNavigated,
+    int retryCount = 0,
+  }) {
     if (!_isAuthenticated) return;
 
-    // Navigate to ShareHandlerScreen with files
     if (NavigationHelper.navigatorKey.currentContext != null) {
       material.Navigator.of(NavigationHelper.navigatorKey.currentContext!).push(
         material.MaterialPageRoute(
           builder: (_) => ShareHandlerScreen(initialFiles: files),
         ),
       );
-    } else {
-      // If navigator is not ready, wait and try again
-      Future.delayed(const Duration(milliseconds: 500), () {
-        _handleSharedMedia(files);
+      onNavigated?.call();
+    } else if (retryCount < 10) {
+      // Navigator not ready yet — retry with a bounded retry count
+      Future.delayed(const Duration(milliseconds: 300), () {
+        _handleSharedMedia(files, onNavigated: onNavigated, retryCount: retryCount + 1);
       });
+    } else {
+      debugPrint("❌ Could not navigate to ShareHandlerScreen after retries");
     }
   }
 

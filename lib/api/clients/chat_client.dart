@@ -88,7 +88,10 @@ class ChatClient extends BaseApiClient {
   }) async {
     return post(
       '/message/delivered',
-      data: {'message_id': messageId, 'conversation_id': conversationId},
+      data: {
+        'message_id': messageId.toString(),
+        'conversation_id': conversationId,
+      },
     );
   }
 

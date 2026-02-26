@@ -31,6 +31,9 @@ class MessageInputContainer extends ConsumerWidget {
   final DmModel? dm;
   final GroupModel? group;
 
+  // Message recommendations widget (shown between typing indicator and message input)
+  final Widget? recommendations;
+
   const MessageInputContainer({
     super.key,
     required this.messageController,
@@ -51,6 +54,7 @@ class MessageInputContainer extends ConsumerWidget {
     this.communityGroupMetadata,
     this.dm,
     this.group,
+    this.recommendations,
   });
 
   @override
@@ -77,6 +81,9 @@ class MessageInputContainer extends ConsumerWidget {
               return const SizedBox.shrink();
             },
           ),
+
+          // Message Recommendations (shown between typing indicator and message input)
+          if (recommendations != null) recommendations!,
 
           // Reply container
           if (isReplying && replyToMessageData != null)

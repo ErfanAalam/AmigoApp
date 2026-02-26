@@ -49,6 +49,7 @@ class CallService {
   ActiveCallState? _activeCall;
   bool _isInitialized = false;
   bool get isInitialized => _isInitialized;
+  bool _isTerminating = false; // Guard against concurrent cleanup from CallKit/endCall
   Timer? _callDurationTimer;
   Timer? _callStartedTimer;
   Timer? _statusPollingTimer;
@@ -186,9 +187,12 @@ class CallService {
             break;
 
           case Event.actionCallEnded:
-            endCall();
-            // FlutterCallkitIncoming.endCall(callId.toString());
-            FlutterCallkitIncoming.endAllCalls();
+            // Only call endCall if not already being terminated by _handleCallTerminate
+            if (!_isTerminating) {
+              endCall();
+            } else {
+              debugPrint('[CALL] CallKit actionCallEnded ignored - already terminating');
+            }
             break;
 
           default:
@@ -614,6 +618,11 @@ class CallService {
     try {
       if (_activeCall == null) return;
       if (_currentUser == null) return;
+      // Don't send another terminate if _handleCallTerminate is already running
+      if (_isTerminating) {
+        debugPrint('[CALL] endCall skipped - _handleCallTerminate already in progress');
+        return;
+      }
 
       // Determine caller/callee based on call type
       final isOutgoing = _activeCall!.callType == CallType.outgoing;
@@ -947,16 +956,6 @@ class CallService {
     }
   }
 
-  /// Helper to create message map for methods that expect it
-  Map<String, dynamic> _createMessageMap(CallPayload payload) {
-    final payloadMap = _payloadDataToMap(payload);
-    return {
-      'callId': payload.callId,
-      'payload': payloadMap ?? {},
-      if (payloadMap != null) ...payloadMap,
-    };
-  }
-
   /// Handle call init message
   void _handleCallInit(CallPayload payload) async {
     final payloadMap = _payloadDataToMap(payload);
@@ -1115,6 +1114,13 @@ class CallService {
       return;
     }
 
+    // Prevent concurrent termination from CallKit/endCall racing with this handler
+    if (_isTerminating) {
+      debugPrint('[CALL] Ignoring call:terminate for callId=${payload.callId} - already terminating');
+      return;
+    }
+    _isTerminating = true;
+
     final isOutgoingCall = _activeCall!.callType == CallType.outgoing;
     final callIdMatches = payload.callId == null || 
                          _activeCall!.callId == payload.callId || 
@@ -1122,6 +1128,7 @@ class CallService {
 
     if (!callIdMatches && !isOutgoingCall) {
       debugPrint('[CALL] Ignoring call:terminate for callId=${payload.callId} - callId mismatch. Active: ${_activeCall!.callId}');
+      _isTerminating = false;
       return;
     }
 
@@ -1147,31 +1154,38 @@ class CallService {
     // Stop status polling
     _stopStatusPolling();
     
-    // Route to appropriate handler based on reason
-    final messageMap = _createMessageMap(payload);
-    
-    if (reason == 'user_declined' || reason == 'caller_cancelled' || reason == 'declined_via_polling') {
-      // IMPORTANT: Update status to declined BEFORE cleanup so UI can show it
-      // This is especially important for outgoing calls where the caller needs to see "declined"
+    // Set the appropriate terminal status so the UI can show it
+    if (reason == 'declined' || reason == 'user_declined' || reason == 'caller_cancelled' || reason == 'declined_via_polling') {
       _activeCall = _activeCall!.copyWith(status: CallStatus.declined);
       debugPrint('[CALL] Call status updated to declined for callId=${_activeCall!.callId}');
-      
-      // Wait a bit to allow UI to update before cleanup
-      await Future.delayed(const Duration(milliseconds: 500));
-      
-      _handleCallDeclinedInternal(messageMap);
-    } else if (reason == 'user_hangup' || reason == 'ended_via_polling' || reason == null) {
-      // Default to ended if no specific reason or if it's a hangup
-      _handleCallEndedInternal(messageMap);
-    } else if (reason == 'missed' || reason == 'missed_via_polling') {
-      _handleCallMissedInternal(messageMap);
+    } else if (reason == 'timeout' || reason == 'missed' || reason == 'missed_via_polling') {
+      _activeCall = _activeCall!.copyWith(status: CallStatus.missed);
+      debugPrint('[CALL] Call status updated to missed for callId=${_activeCall!.callId}');
     } else {
-      // Default to ended for unknown reasons
-      _handleCallEndedInternal(messageMap);
+      // Covers: 'caller_hungup', 'callee_hungup', 'user_hangup', 'abandoned',
+      // 'network_error', 'busy', 'ended_via_polling', null, and any unknown reason
+      _activeCall = _activeCall!.copyWith(status: CallStatus.ended);
+      debugPrint('[CALL] Call status updated to ended for callId=${_activeCall!.callId}, reason=$reason');
     }
-    
+
+    // Stop ringtone
+    try {
+      await RingtoneManager.stopRingtone();
+    } catch (e) {
+      await RingtoneManager.dispose();
+      debugPrint('[CALL] Error stopping ringtone in terminate');
+    }
+
+    // End CallKit calls BEFORE cleanup (so CallKit actionCallEnded won't
+    // race with us — the _isTerminating flag guards against that)
     await FlutterCallkitIncoming.endAllCalls();
     FlutterRingtonePlayer().stop();
+
+    // Cleanup all call resources
+    await _cleanup();
+    
+    debugPrint('[CALL] Call terminate handled and cleanup completed. _activeCall: ${_activeCall == null ? "null" : "NOT null (ERROR!)"}');
+    _isTerminating = false;
   }
 
   /// Handle call error message
@@ -1459,23 +1473,13 @@ class CallService {
     _cleanup();
   }
 
-  /// Handle call missed (internal helper)
-  void _handleCallMissedInternal(Map<String, dynamic> message) {
-    final messageCallId = message['callId'];
-    // Only cleanup if this matches the active call
-    if (_activeCall == null || _activeCall!.callId != messageCallId) {
-      debugPrint('[CALL] Ignoring call missed internal - callId mismatch or no active call. MessageCallId: $messageCallId, ActiveCallId: ${_activeCall?.callId}');
-      return;
-    }
-
-    debugPrint('[CALL] Processing call missed internal for callId=$messageCallId');
-    _cleanup();
-  }
-
   /// Cleanup call resources
   Future<void> _cleanup() async {
     try {
       debugPrint('[CALL] Starting cleanup...');
+
+      // Reset termination guard
+      _isTerminating = false;
 
       FlutterRingtonePlayer().stop();
       await RingtoneManager.stopRingtone();

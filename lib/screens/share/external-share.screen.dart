@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
@@ -86,8 +85,6 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
   // List to store shared media files
   List<SharedMediaFile> _sharedFiles = [];
 
-  // Subscriptions for receiving shared intents
-  StreamSubscription? _intentDataStreamSubscription;
 
   // Conversations lists - separate for DMs and Groups
   List<ShareableConversation> _availableDms = [];
@@ -129,42 +126,15 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
     _searchController.addListener(_onSearchChanged);
   }
 
-  /// Initialize sharing intent listeners
+  /// Initialize shared files from the intent data passed by main.dart.
+  /// main.dart owns the ReceiveSharingIntent streams; this screen only
+  /// consumes the files it is given via [widget.initialFiles].
   void _initializeSharing() {
-    // If files were passed from main.dart, use them
     if (widget.initialFiles != null && widget.initialFiles!.isNotEmpty) {
       setState(() {
         _sharedFiles = widget.initialFiles!;
       });
-      return;
     }
-
-    // Otherwise, try to get them from the intent (for when app is running)
-    _intentDataStreamSubscription = ReceiveSharingIntent.instance
-        .getMediaStream()
-        .listen(
-          (List<SharedMediaFile> value) {
-            if (value.isNotEmpty) {
-              setState(() {
-                _sharedFiles = value;
-              });
-            }
-          },
-          onError: (err) {
-            debugPrint("Error receiving shared files: $err");
-          },
-        );
-
-    // For sharing when the app is opened from the share sheet (app was closed)
-    ReceiveSharingIntent.instance.getInitialMedia().then((
-      List<SharedMediaFile> value,
-    ) {
-      if (value.isNotEmpty) {
-        setState(() {
-          _sharedFiles = value;
-        });
-      }
-    });
   }
 
   /// Load available conversations (both DMs and groups)
@@ -312,13 +282,20 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
             fileToUpload,
           );
 
-          final messageId = await Snowflake.generateMessageId();
-
           if (uploadResult.isSuccess && uploadResult.data != null) {
             final mediaData = uploadResult.data!;
 
             // Send to each selected conversation via WebSocket
             for (final conversationId in _selectedConversations) {
+              // Each conversation gets its own unique message ID to avoid
+              // primary key conflicts in the local database
+              final messageId = await Snowflake.generateMessageId();
+
+              // Determine conversation type by looking up in the loaded lists
+              final isGroupConv = _availableGroups.any(
+                (g) => g.id == conversationId,
+              );
+
               final newMsg = MessageModel(
                 id: messageId,
                 conversationId: conversationId,
@@ -347,9 +324,7 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
                 senderId: _currentUserDetails!.id,
                 senderName: _currentUserDetails!.name,
                 attachments: mediaData,
-                convType: conversationId is GroupModel
-                    ? ChatType.group
-                    : ChatType.dm,
+                convType: isGroupConv ? ChatType.group : ChatType.dm,
                 msgType: file.type == SharedMediaType.image
                     ? MessageType.image
                     : MessageType.video,
@@ -438,7 +413,6 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
 
   @override
   void dispose() {
-    _intentDataStreamSubscription?.cancel();
     _searchController.dispose();
     _tabController.dispose();
     super.dispose();

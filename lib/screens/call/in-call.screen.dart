@@ -11,6 +11,17 @@ class InCallScreen extends ConsumerStatefulWidget {
 }
 
 class _InCallScreenState extends ConsumerState<InCallScreen> {
+  bool _hasNavigated = false;
+
+  /// Pop the in-call screen and return to the main screen.
+  /// Guarded so it only runs once per screen lifecycle.
+  void _navigateAway() {
+    if (_hasNavigated || !mounted) return;
+    _hasNavigated = true;
+    debugPrint('[IN_CALL] Navigating away from in-call screen');
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
   @override
   Widget build(BuildContext context) {
     final callServiceState = ref.watch(callServiceProvider);
@@ -22,15 +33,14 @@ class _InCallScreenState extends ConsumerState<InCallScreen> {
         activeCall.status == CallStatus.ended ||
         activeCall.status == CallStatus.declined ||
         activeCall.status == CallStatus.missed) {
-      // If no active call or call ended, navigate back to previous screen
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) {
-          // Pop all call-related screens and return to main chat
-          Navigator.of(context).popUntil((route) => route.isFirst);
-        }
-      });
+      // Schedule navigation exactly once via postFrameCallback
+      if (!_hasNavigated) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _navigateAway();
+        });
+      }
 
-      // Show a loading indicator with status message
+      // Show a brief status message while navigating
       String statusMessage = 'Closing call...';
       if (activeCall != null) {
         switch (activeCall.status) {
@@ -406,9 +416,7 @@ class _InCallScreenState extends ConsumerState<InCallScreen> {
     } catch (e) {
       debugPrint('[IN_CALL] Error ending call: $e');
       // Still try to clean up the call state
-      if (context.mounted) {
-        Navigator.of(context).popUntil((route) => route.isFirst);
-      }
+      _navigateAway();
     }
   }
 
@@ -422,9 +430,7 @@ class _InCallScreenState extends ConsumerState<InCallScreen> {
     } catch (e) {
       debugPrint('[IN_CALL] Error cancelling call: $e');
       // Still try to clean up the call state
-      if (context.mounted) {
-        Navigator.of(context).popUntil((route) => route.isFirst);
-      }
+      _navigateAway();
     }
   }
 }

@@ -106,7 +106,7 @@ class CallsPageState extends ConsumerState<CallsPage>
 
     // Step 2: Fetch from server in background and update
     try {
-      final response = await apiService.user.getCallHistory(50);
+      final response = await apiService.user.getCallHistory(100);
 
       if (response.isSuccess && response.hasData) {
         final List<dynamic> callsData = response.data;
@@ -152,8 +152,8 @@ class CallsPageState extends ConsumerState<CallsPage>
       } else {
         if (mounted && _callHistory.isEmpty) {
           setState(() {
-            _error = response.message.isNotEmpty 
-                ? response.message 
+            _error = response.message.isNotEmpty
+                ? response.message
                 : 'Failed to load call history';
             _isLoading = false;
           });
@@ -332,37 +332,12 @@ class CallsPageState extends ConsumerState<CallsPage>
       );
     }
 
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
-            const SizedBox(height: 16),
-            Text(
-              'Failed to load call history, please try again later',
-              style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _loadCallHistory,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: themeColor.primary,
-              ),
-              child: const Text('Retry', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        ),
-      );
-    }
-
     if (_callHistory.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.call_outlined, size: 64, color: Colors.grey[400]),
+            Icon(Icons.call_end_rounded, size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
             Text(
               'No call history',
@@ -377,6 +352,37 @@ class CallsPageState extends ConsumerState<CallsPage>
               'Your call history will appear here',
               style: TextStyle(fontSize: 14, color: Colors.grey[500]),
             ),
+          ],
+        ),
+      );
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.call_end_rounded, size: 64, color: Colors.grey[400]),
+            const SizedBox(height: 16),
+            Text(
+              'No call history found',
+              style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            if (_isLoadingInProgress)
+              CircularProgressIndicator(color: themeColor.primary),
+            if (!_isLoadingInProgress)
+              ElevatedButton(
+                onPressed: _loadCallHistory,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: themeColor.primary,
+                ),
+                child: const Text(
+                  'Retry',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
           ],
         ),
       );

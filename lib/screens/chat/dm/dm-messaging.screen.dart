@@ -24,8 +24,8 @@ import '../../../providers/draft.provider.dart';
 import '../../../providers/theme-color.provider.dart';
 import '../../../config/app-colors.config.dart';
 import '../../../services/draft-message.service.dart';
+import '../../../services/fcm/fcm-init.service.dart';
 import '../../../services/media-cache.service.dart';
-import '../../../services/notification.service.dart';
 import '../../../services/socket/transport.manager.dart';
 import '../../../services/socket/transport.service.dart';
 import '../../../services/socket/ws-message.handler.dart';
@@ -1275,7 +1275,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       return;
     }
 
-    _messagesRepo.deleteAllMessagesLessThanOrEqualTo0();
+    // _messagesRepo.deleteAllMessagesLessThanOrEqualTo0();
     final isTyping = payload.isTyping;
 
     // Cancel any existing timeout
@@ -2211,24 +2211,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                 // Messages List
                 Expanded(child: _buildMessagesList()),
 
-                // Message Recommendations (shown when text is empty or matches a recommendation)
-                ValueListenableBuilder<TextEditingValue>(
-                  valueListenable: _messageController,
-                  builder: (context, value, child) {
-                    final text = value.text.trim();
-                    // Show recommendations if text is empty OR if it matches one of the recommendations
-                    if (text.isEmpty ||
-                        _messageRecommendations.contains(text)) {
-                      return MessageRecommendations(
-                        recommendations: _messageRecommendations,
-                        onRecommendationTap: _onRecommendationTap,
-                      );
-                    }
-                    return const SizedBox.shrink();
-                  },
-                ),
-
-                // Message Input
+                // Message Input (includes typing indicator, recommendations, and input field)
                 _buildMessageInput(),
               ],
             ),
@@ -4080,6 +4063,20 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         });
       },
       dm: widget.dm,
+      recommendations: ValueListenableBuilder<TextEditingValue>(
+        valueListenable: _messageController,
+        builder: (context, value, child) {
+          final text = value.text.trim();
+          // Show recommendations if text is empty OR if it matches one of the recommendations
+          if (text.isEmpty || _messageRecommendations.contains(text)) {
+            return MessageRecommendations(
+              recommendations: _messageRecommendations,
+              onRecommendationTap: _onRecommendationTap,
+            );
+          }
+          return const SizedBox.shrink();
+        },
+      ),
     );
   }
 

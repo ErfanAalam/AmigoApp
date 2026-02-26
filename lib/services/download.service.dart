@@ -163,26 +163,13 @@ class DownloadService {
             }
             return {'granted': false, 'message': 'Storage permissions denied'};
           }
-        } else if (sdkInt >= 30) {
-          // Android 11-12 (API 30-32) - use manage external storage
-          debugPrint('Requesting manage external storage for Android 11-12');
-
-          PermissionStatus status = await Permission.manageExternalStorage
-              .request();
-          debugPrint('Manage external storage status: $status');
-
-          if (status == PermissionStatus.granted) {
-            return {'granted': true, 'message': 'Storage permission granted'};
-          } else if (status == PermissionStatus.permanentlyDenied) {
-            return {
-              'granted': false,
-              'message':
-                  'Storage permission is permanently denied. Please enable it in app settings.',
-            };
-          }
-          return {'granted': false, 'message': 'Storage permission denied'};
+        } else if (sdkInt >= 29) {
+          // Android 10-12 (API 29-32): app-specific external storage needs no
+          // special permission — files go to Android/data/<package>/files/
+          debugPrint('Android 10-12: no special storage permission required');
+          return {'granted': true, 'message': 'No special permission required'};
         } else {
-          // For older Android versions (API < 30), use storage permission
+          // For older Android versions (API < 29), use storage permission
           debugPrint(
             'Requesting storage permission for older Android versions',
           );
@@ -234,7 +221,8 @@ class DownloadService {
           // Try multiple storage strategies in order of preference
           List<Directory> candidateDirectories = [];
 
-          // Strategy 1: Try to use external storage directory (app-specific)
+          // Strategy 1: App-specific external storage (Android/data/<pkg>/files/)
+          // No special permission required on Android 10+
           try {
             final externalDir = await getExternalStorageDirectory();
             if (externalDir != null) {
@@ -243,32 +231,20 @@ class DownloadService {
                   candidateDirectories.add(
                     Directory(path.join(externalDir.path, 'Pictures', 'Amigo')),
                   );
-                  candidateDirectories.add(
-                    Directory('/storage/emulated/0/Pictures/Amigo'),
-                  );
                   break;
                 case 'video':
                   candidateDirectories.add(
                     Directory(path.join(externalDir.path, 'Movies', 'Amigo')),
-                  );
-                  candidateDirectories.add(
-                    Directory('/storage/emulated/0/Movies/Amigo'),
                   );
                   break;
                 case 'document':
                   candidateDirectories.add(
                     Directory(path.join(externalDir.path, 'Download', 'Amigo')),
                   );
-                  candidateDirectories.add(
-                    Directory('/storage/emulated/0/Download/Amigo'),
-                  );
                   break;
                 default:
                   candidateDirectories.add(
                     Directory(path.join(externalDir.path, 'Download', 'Amigo')),
-                  );
-                  candidateDirectories.add(
-                    Directory('/storage/emulated/0/Download/Amigo'),
                   );
               }
             }
@@ -276,34 +252,7 @@ class DownloadService {
             debugPrint('Error getting external storage directory: $e');
           }
 
-          // Strategy 2: Try Downloads folder directly (works on most Android versions)
-          try {
-            switch (fileType) {
-              case 'image':
-                candidateDirectories.add(
-                  Directory('/storage/emulated/0/Download/Amigo/Images'),
-                );
-                break;
-              case 'video':
-                candidateDirectories.add(
-                  Directory('/storage/emulated/0/Download/Amigo/Videos'),
-                );
-                break;
-              case 'document':
-                candidateDirectories.add(
-                  Directory('/storage/emulated/0/Download/Amigo/Documents'),
-                );
-                break;
-              default:
-                candidateDirectories.add(
-                  Directory('/storage/emulated/0/Download/Amigo'),
-                );
-            }
-          } catch (e) {
-            debugPrint('Error creating Downloads directory path: $e');
-          }
-
-          // Strategy 3: Fallback to app documents directory (always works)
+          // Strategy 2: Fallback to app documents directory (always works)
           try {
             Directory appDocDir = await getApplicationDocumentsDirectory();
             switch (fileType) {
@@ -480,11 +429,7 @@ class DownloadService {
   /// Opens app settings for permission management
   Future<void> openAppSettingsForPermissions() async {
     try {
-      await Permission.manageExternalStorage.request();
-      // If still denied, guide user to settings
-      if (await Permission.manageExternalStorage.isDenied) {
-        await Permission.storage.request();
-      }
+      await Permission.storage.request();
     } catch (e) {
       debugPrint('Error opening app settings: $e');
     }
@@ -508,9 +453,9 @@ class DownloadService {
           return statuses.values.any(
             (status) => status == PermissionStatus.granted,
           );
-        } else if (sdkInt >= 30) {
-          // Check manage external storage for Android 11-12
-          return await Permission.manageExternalStorage.isGranted;
+        } else if (sdkInt >= 29) {
+          // Android 10-12: app-specific external storage needs no permission
+          return true;
         } else {
           // Check storage permission for older versions
           return await Permission.storage.isGranted;
@@ -603,27 +548,24 @@ class DownloadService {
 
       if (Platform.isAndroid) {
         try {
-          // Try to get system Downloads directory
-          downloadsDir = Directory('/storage/emulated/0/Download');
+          // Use app-specific external storage — no special permission required
+          final externalDir = await getExternalStorageDirectory();
+          final baseDir = externalDir != null
+              ? path.join(externalDir.path, 'Amigo')
+              : (await getApplicationDocumentsDirectory()).path;
 
-          // Create Amigo subfolder
-          downloadsDir = Directory(path.join(downloadsDir.path, 'Amigo'));
-
-          // Create subfolder based on file type
           switch (fileType) {
             case 'image':
-              downloadsDir = Directory(path.join(downloadsDir.path, 'Images'));
+              downloadsDir = Directory(path.join(baseDir, 'Images'));
               break;
             case 'video':
-              downloadsDir = Directory(path.join(downloadsDir.path, 'Videos'));
+              downloadsDir = Directory(path.join(baseDir, 'Videos'));
               break;
             case 'document':
-              downloadsDir = Directory(
-                path.join(downloadsDir.path, 'Documents'),
-              );
+              downloadsDir = Directory(path.join(baseDir, 'Documents'));
               break;
             default:
-              downloadsDir = Directory(path.join(downloadsDir.path, 'Files'));
+              downloadsDir = Directory(path.join(baseDir, 'Files'));
           }
 
           debugPrint('Using Downloads directory: ${downloadsDir.path}');

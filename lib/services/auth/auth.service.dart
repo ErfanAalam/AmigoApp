@@ -1,6 +1,5 @@
 import 'package:amigo/db/sqlite.db.dart';
-import 'package:amigo/types/network.types.dart';
-import 'package:amigo/utils/network.utils.dart';
+import 'package:amigo/env.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,8 +13,8 @@ import '../../screens/auth/login.screen.dart';
 import '../../utils/navigation-helper.util.dart';
 import '../contact.service.dart';
 import '../cookies.service.dart';
+import '../fcm/fcm-init.service.dart';
 import '../media-cache.service.dart';
-import '../notification.service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -115,6 +114,35 @@ class AuthService {
     }
   }
 
+  /// Fast local-only auth check — reads from secure storage/prefs only,
+  /// no network call. Used to make the app respond immediately on startup.
+  /// The server-side token validation is still done in the background.
+  Future<bool> isAuthenticatedLocally() async {
+    try {
+      final hasAuthCookies = await _cookieService.hasAuthCookies();
+      if (!hasAuthCookies) return false;
+
+      final authStatus = await _secureStorage.read(key: _authStatusKey);
+      if (authStatus != 'authenticated') return false;
+
+      final prefs = await SharedPreferences.getInstance();
+      final lastLoginTime = prefs.getInt(_lastLoginTimeKey);
+      if (lastLoginTime == null) return false;
+
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final thirtyDaysInMillis = 30 * 24 * 60 * 60 * 1000;
+      if (now - lastLoginTime > thirtyDaysInMillis) {
+        await logout();
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      debugPrint('❌ Error checking local authentication: $e');
+      return false;
+    }
+  }
+
   // Set user as authenticated after successful login
   Future<void> setAuthenticated() async {
     try {
@@ -186,6 +214,9 @@ class AuthService {
       await prefs.remove(_lastLoginTimeKey);
       await prefs.remove('fcm_token');
       await prefs.clear();
+
+      // Reset guest mode environment so regular users aren't routed to the guest backend
+      Environment.setGuestMode(false);
 
       // 4. Clear cookies using the cookie service
       await _cookieService.clearAllCookies();
