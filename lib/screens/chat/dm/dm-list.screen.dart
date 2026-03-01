@@ -1,4 +1,5 @@
 import 'package:amigo/models/conversations.model.dart';
+import 'package:amigo/providers/message.provider.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -121,9 +122,12 @@ class ChatsPageState extends ConsumerState<ChatsPage>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
 
-    // When app comes back to foreground, clear active conversation
     if (state == AppLifecycleState.resumed) {
       ref.read(chatProvider.notifier).setActiveConversation(null, null);
+      // Pull any messages missed while in background and refresh WS if needed
+      ref.read(chatProvider.notifier).syncOnResume();
+    } else if (state == AppLifecycleState.paused) {
+      ref.read(chatProvider.notifier).onAppBackground();
     }
   }
 
@@ -325,24 +329,37 @@ class ChatsPageState extends ConsumerState<ChatsPage>
 
   Widget _buildChatsContent() {
     final chatState = ref.watch(chatProvider);
+    final dmListAsync = ref.watch(dmListStreamProvider);
 
-    // Show loading skeleton while loading
-    if (chatState.isLoading) {
-      return _buildSkeletonLoader();
-    }
+    return dmListAsync.when(
+      loading: () => _buildSkeletonLoader(),
+      error: (_, __) {
+        // Fallback to provider list on stream error
+        final conversationsToShow = chatState.filteredDmList;
+        if (conversationsToShow.isEmpty) return _buildEmptyState();
+        return _buildChatsList(conversationsToShow);
+      },
+      data: (allDms) {
+        // Apply search filter from provider state
+        List<DmModel> conversationsToShow = allDms;
+        if (chatState.searchQuery.isNotEmpty) {
+          final query = chatState.searchQuery.toLowerCase();
+          conversationsToShow = allDms.where((dm) {
+            return dm.recipientName.toLowerCase().contains(query) ||
+                (dm.lastMessageBody?.toLowerCase().contains(query) ?? false) ||
+                dm.recipientPhone.toLowerCase().contains(query);
+          }).toList();
+        }
 
-    // Get filtered conversations from provider
-    final conversationsToShow = chatState.filteredDmList;
+        if (conversationsToShow.isEmpty) {
+          return chatState.searchQuery.isNotEmpty
+              ? _buildSearchEmptyState()
+              : _buildEmptyState();
+        }
 
-    // Show empty state if no conversations
-    if (conversationsToShow.isEmpty) {
-      return chatState.searchQuery.isNotEmpty
-          ? _buildSearchEmptyState()
-          : _buildEmptyState();
-    }
-
-    // Show the conversations list
-    return _buildChatsList(conversationsToShow);
+        return _buildChatsList(conversationsToShow);
+      },
+    );
   }
 
   Widget _buildChatsList(List<DmModel> conversations) {

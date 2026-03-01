@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:ui';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 
@@ -225,6 +224,17 @@ class TransportManager {
         _connectionStateController.add(TransportConnectionState.connected);
         _transportTypeController.add(type);
 
+        // Gap-fill: immediately poll for any messages missed during the gap.
+        // Pass _messageController.add so synced messages are routed through
+        // the manager's stream regardless of which transport is now active.
+        debugPrint(
+          '[TRANSPORT-MGR] Performing gap-fill poll after successful connection',
+        );
+        _pollingTransport.syncMissedWsEventsOnReconnect(
+          onMessage: _messageController.add,
+        );
+        debugPrint('[TRANSPORT-MGR] Performed Gap-fill poll re-connection');
+
         _logConnectionSuccess(type, duration);
         return true;
       } else {
@@ -258,6 +268,14 @@ class TransportManager {
     if (stackTrace != null) {
       debugPrint('[TRANSPORT-MGR] Stack trace: $stackTrace');
     }
+  }
+
+  /// Trigger an immediate gap-fill poll on the current polling transport.
+  /// Safe to call even when using WebSocket (no-op if not in polling mode).
+  void pollNow() {
+    _pollingTransport.syncMissedWsEventsOnReconnect(
+      onMessage: _messageController.add,
+    );
   }
 
   void _subscribeToTransport(TransportService transport) {

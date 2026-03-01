@@ -138,6 +138,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   // int _previousMessageCount = 0;
 
   // For optimistic message handling - using filtered streams per conversation
+  StreamSubscription<List<MessageModel>>? _messagesStreamSub;
   // StreamSubscription<OnlineStatusPayload>? _onlineStatusSubscription;
   StreamSubscription<TransportConnectionState>?
   _transportConnectionSubscription;
@@ -587,18 +588,24 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         .read(chatProvider.notifier)
         .clearUnreadCount(widget.group.conversationId, ChatType.group);
 
-    // Load messages from local storage first
-    final messaagesFromLocal = await _messagesRepo.getMessagesByConversation(
-      widget.group.conversationId,
-      limit: 100,
-      offset: 0,
-    );
-
-    setState(() {
-      _messages = messaagesFromLocal;
-      _sortMessagesBySentAt();
-      _isLoading = false;
-    });
+    // Subscribe to the Drift reactive stream so the UI auto-updates whenever
+    // any write path (WS, polling, FCM background) inserts into SQLite.
+    _messagesStreamSub?.cancel();
+    _messagesStreamSub = _messagesRepo
+        .watchMessages(widget.group.conversationId)
+        .listen(
+          (msgs) {
+            if (!mounted) return;
+            setState(() {
+              _messages = msgs;
+              _sortMessagesBySentAt();
+              _isLoading = false;
+            });
+          },
+          onError: (e) {
+            debugPrint('❌ Group messages stream error: $e');
+          },
+        );
 
     // Load pinned message ID directly from database (not from widget.group which may be stale)
     final conversation = await _conversationRepo.getConversationById(
@@ -640,21 +647,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
 
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    // Send WebSocket messages in background (non-blocking, non-critical)
-    final joinConvPayload = JoinLeavePayload(
-      convId: widget.group.conversationId,
-      convType: ChatType.group,
-      userId: _currentUserDetails?.id ?? 0,
-      userName: _currentUserDetails?.name ?? '',
-    ).toJson();
-
-    final wsmsg = WSMessage(
-      type: WSMessageType.conversationJoin,
-      payload: joinConvPayload,
-      wsTimestamp: DateTime.now(),
-    ).toJson();
-
-    await _transportManager.sendMessage(wsmsg);
+    await _sendConversationJoin();
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
     // start silent message sync (from server to local DB)
@@ -1571,16 +1564,36 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           },
         );
 
-    // Listen to transport connection state changes for auto-resending failed messages
+    // Listen to transport connection state changes:
+    // 1. Re-send conversation:join so server knows we're still active
+    // 2. Auto-resend any failed messages
     _transportConnectionSubscription = _transportManager.connectionStateStream
         .listen((state) {
           if (state == TransportConnectionState.connected) {
             debugPrint(
-              '[GROUP] 🎐🎐🎐 Transport reconnected, auto-resending failed messages',
+              '[GROUP] 🎐🎐🎐 Transport reconnected, re-joining conversation and resending failed messages',
             );
+            _sendConversationJoin();
             _resendAllFailedMessages();
           }
         });
+  }
+
+  /// Send conversation:join to server (idempotent — safe to call multiple times).
+  Future<void> _sendConversationJoin() async {
+    if (_currentUserDetails == null) return;
+    final joinConvPayload = JoinLeavePayload(
+      convId: widget.group.conversationId,
+      convType: ChatType.group,
+      userId: _currentUserDetails!.id,
+      userName: _currentUserDetails!.name,
+    ).toJson();
+    final wsmsg = WSMessage(
+      type: WSMessageType.conversationJoin,
+      payload: joinConvPayload,
+      wsTimestamp: DateTime.now(),
+    ).toJson();
+    await _transportManager.sendMessage(wsmsg);
   }
 
   /// Handle incoming message from WebSocket
@@ -1708,14 +1721,27 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       updatedMetadata['is_uploading'] = false;
       updatedMetadata.remove('upload_failed');
 
-      // Update the message with canonicalId, status, and cleared uploading state
-      // Preserve optimisticId so insertMessage can find and delete the optimistic message
+      // Determine new status — never downgrade (sent < delivered < read)
+      final currentStatus = currentMessage.status;
+      MessageStatusType status = currentStatus;
+
+      if (payload.readBy != null && payload.readBy!.isNotEmpty) {
+        status = MessageStatusType.read;
+      } else if (payload.deliveredTo != null &&
+          payload.deliveredTo!.isNotEmpty) {
+        if (currentStatus != MessageStatusType.read) {
+          status = MessageStatusType.delivered;
+        }
+      } else if (currentStatus == MessageStatusType.unsent ||
+          currentStatus == MessageStatusType.uploading) {
+        // First ACK from server: message was accepted, at minimum it's "sent"
+        status = MessageStatusType.sent;
+      }
+      // Otherwise keep currentStatus (no downgrade)
+
       final updatedMessage = currentMessage.copyWith(
         id: payload.id,
-        // optimisticId: currentMessage
-        //     .optimisticId, // Preserve optimisticId for duplicate prevention
-        status: MessageStatusType
-            .delivered, // Update to delivered when acknowledged
+        status: status,
         metadata: updatedMetadata,
       );
 
@@ -1732,13 +1758,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           await _messagesRepo.updateMessageFields(
             payload.id,
             newId: payload.newId,
-            status: MessageStatusType.delivered,
+            status: status,
             metadata: updatedMetadata,
           );
         } else {
           await _messagesRepo.updateMessageFields(
             payload.id,
-            status: MessageStatusType.delivered,
+            status: status,
             metadata: updatedMetadata,
           );
         }
@@ -5072,6 +5098,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     _searchController.dispose();
     _isOtherTypingNotifier.dispose();
     _searchDebounceTimer?.cancel();
+    _messagesStreamSub?.cancel();
     _transportConnectionSubscription?.cancel();
     _messageAckSubscription?.cancel();
     _messageSubscription?.cancel();

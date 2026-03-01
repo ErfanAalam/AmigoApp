@@ -5,7 +5,10 @@ import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/message-status.repo.dart';
 import 'package:amigo/models/message.model.dart';
+import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio/dio.dart';
+import 'package:dio_cookie_manager/dio_cookie_manager.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
@@ -17,11 +20,13 @@ import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../api/api_service.dart';
+import '../../api/core/api_result.dart';
 import '../../services/auth/auth.service.dart';
 import '../../services/cookies.service.dart';
 import '../../models/call.model.dart';
 import '../../utils/call.utils.dart';
 import '../../types/socket.types.dart';
+import '../../utils/serialization.utils.dart';
 import '../../utils/user.utils.dart';
 
 import '../fcm/fcm-init.service.dart';
@@ -63,7 +68,8 @@ Future<void> fcmBackgroundHandler(RemoteMessage message) async {
         final callIdStr = event?.body['id']?.toString();
         final callerIdStr = event?.body['extra']?['callerId']?.toString();
         final callerNameStr = event?.body['extra']?['callerName']?.toString();
-        final callerPfpStr = event?.body['extra']?['callerProfilePic']?.toString();
+        final callerPfpStr = event?.body['extra']?['callerProfilePic']
+            ?.toString();
         final callDetails = CallDetails(
           callId: callIdStr != null ? int.tryParse(callIdStr) : null,
           callerId: callerIdStr != null ? int.tryParse(callerIdStr) : null,
@@ -102,9 +108,7 @@ Future<void> fcmBackgroundHandler(RemoteMessage message) async {
         if (callIdStr != null && callIdStr.isNotEmpty) {
           final dio = Dio();
           try {
-            await dio.post(
-              '${Environment.baseUrl}/call/decline/$callIdStr',
-            );
+            await dio.post('${Environment.baseUrl}/call/decline/$callIdStr');
             debugPrint('[FCM BACKGROUND] Call declined via API: $callIdStr');
           } catch (e) {
             debugPrint('[FCM BACKGROUND] Error declining call via API: $e');
@@ -148,11 +152,21 @@ Future<void> fcmBackgroundHandler(RemoteMessage message) async {
   final data = message.data;
   final notificationType = data['type'] as String?;
 
-  // Parse ws_message if present
-  WSMessage? wsMessage;
+  // Parse ws_messages (batched) or ws_message (single, used for calls)
+  List<WSMessage> wsMessages = [];
+  WSMessage? wsMessage; // kept for call notifications which still use single
   try {
+    final wsMessagesStr = data['ws_messages'];
     final wsMessageStr = data['ws_message'];
-    if (wsMessageStr != null) {
+
+    if (wsMessagesStr != null) {
+      // Batched path: array of ws_messages
+      final List<dynamic> arr = jsonDecode(wsMessagesStr as String);
+      for (final item in arr) {
+        wsMessages.add(WSMessage.fromJson(Map<String, dynamic>.from(item as Map)));
+      }
+    } else if (wsMessageStr != null) {
+      // Single path: still used for call notifications
       Map<String, dynamic> wsMessageJson;
       if (wsMessageStr is String) {
         wsMessageJson = jsonDecode(wsMessageStr);
@@ -162,22 +176,24 @@ Future<void> fcmBackgroundHandler(RemoteMessage message) async {
         throw FormatException('Invalid ws_message format');
       }
       wsMessage = WSMessage.fromJson(wsMessageJson);
+      wsMessages = [wsMessage];
     }
   } catch (e) {
-    debugPrint('[BACKGROUND] Error parsing ws_message: $e');
+    debugPrint('[BACKGROUND] Error parsing ws_message(s): $e');
   }
 
   // Handle different notification types
   switch (notificationType) {
     case 'call':
+      // Calls still use single ws_message
       await _handleCallNotification(data, wsMessage);
       break;
 
     case 'ws-message':
-      await _handleMessageNotificationBackground(
+      await _handleMessageNotificationBatchBackground(
         data,
         message.notification,
-        wsMessage,
+        wsMessages,
         notifcations,
       );
       break;
@@ -370,50 +386,63 @@ Future<void> _handleCallEnd(
   );
 }
 
-/// Handle message notifications in background
-Future<void> _handleMessageNotificationBackground(
+/// Handle a batch of ws-messages in background
+Future<void> _handleMessageNotificationBatchBackground(
   Map<String, dynamic> data,
   RemoteNotification? notification,
-  WSMessage? wsMessage,
+  List<WSMessage> wsMessages,
   NotificationService notificationService,
 ) async {
-  try {
-    if (wsMessage == null) return;
+  if (wsMessages.isEmpty) return;
 
-    // Handle different message types
-    switch (wsMessage.type) {
-      case WSMessageType.messageNew:
-        final chatPayload = wsMessage.chatMessagePayload;
-        if (chatPayload != null) {
-          final msgBody = chatPayload.body ??
-              ((chatPayload.msgType != MessageType.text)
-                  ? chatPayload.msgType.toString()
-                  : 'New message');
+  // Collect IDs for batch delivery receipt
+  final List<Map<String, dynamic>> deliveries = [];
 
-          // Show notification (MessagingStyle handled inside)
-          await notificationService.showMessageNotification(
-            title: chatPayload.senderName ?? 'New Message',
-            body: msgBody.trim(),
-            chatPayload: chatPayload,
-          );
+  for (final wsMessage in wsMessages) {
+    try {
+      switch (wsMessage.type) {
+        case WSMessageType.messageNew:
+          final chatPayload = wsMessage.chatMessagePayload;
+          if (chatPayload != null) {
+            final msgBody =
+                chatPayload.body ??
+                ((chatPayload.msgType != MessageType.text)
+                    ? chatPayload.msgType.toString()
+                    : 'New message');
 
-          // Store message in local DB
-          await _storeMessageFromPayloadBackground(chatPayload);
-        }
-        break;
+            await notificationService.showMessageNotification(
+              title: chatPayload.senderName ?? 'New Message',
+              body: msgBody.trim(),
+              chatPayload: chatPayload,
+            );
 
-      case WSMessageType.messageDelete:
-        final deletePayload = wsMessage.deleteMessagePayload;
-        if (deletePayload != null) {
-          await _handleMessageDeleteBackground(deletePayload);
-        }
-        break;
+            await _storeMessageFromPayloadBackground(chatPayload, sendReceipt: false);
 
-      default:
-        debugPrint('[BACKGROUND] Unhandled ws-message type: ${wsMessage.type}');
+            deliveries.add({
+              'message_id': chatPayload.id.toString(),
+              'conversation_id': chatPayload.convId,
+            });
+          }
+          break;
+
+        case WSMessageType.messageDelete:
+          final deletePayload = wsMessage.deleteMessagePayload;
+          if (deletePayload != null) {
+            await _handleMessageDeleteBackground(deletePayload);
+          }
+          break;
+
+        default:
+          debugPrint('[BACKGROUND] Unhandled ws-message type: ${wsMessage.type}');
+      }
+    } catch (e) {
+      debugPrint('[BACKGROUND] Error processing ws-message ${wsMessage.type}: $e');
     }
-  } catch (e) {
-    debugPrint('[BACKGROUND] Error handling message notification: $e');
+  }
+
+  // Send all delivery receipts in one batch request
+  if (deliveries.isNotEmpty) {
+    await sendDeliveryReceiptBatch(deliveries);
   }
 }
 
@@ -606,10 +635,12 @@ void _stopBackgroundStatusPolling() {
   }
 }
 
-/// Store message from ChatMessagePayload to local database (background handler)
+/// Store message from ChatMessagePayload to local database (background handler).
+/// Pass [sendReceipt: false] when receipts are sent in batch after the loop.
 Future<void> _storeMessageFromPayloadBackground(
-  ChatMessagePayload chatPayload,
-) async {
+  ChatMessagePayload chatPayload, {
+  bool sendReceipt = true,
+}) async {
   try {
     // Convert to MessageModel and store in local DB
     final messageModel = MessageModel(
@@ -668,8 +699,10 @@ Future<void> _storeMessageFromPayloadBackground(
       '✅ [BACKGROUND] Stored message from FCM notification: ${chatPayload.id}',
     );
 
-    // Send delivery receipt to backend
-    await sendDeliveryReceipt(chatPayload);
+    // Send delivery receipt (skip when caller handles batch receipts)
+    if (sendReceipt) {
+      await sendDeliveryReceipt(chatPayload);
+    }
   } catch (e) {
     debugPrint(
       '❌ [BACKGROUND] Error storing message from FCM notification: $e',
@@ -677,44 +710,138 @@ Future<void> _storeMessageFromPayloadBackground(
   }
 }
 
-/// Send delivery receipt to backend via API
-/// This notifies the sender that the message was delivered via FCM
-/// Uses API instead of WebSocket since app might be killed/not connected
-Future<void> sendDeliveryReceipt(ChatMessagePayload message) async {
-  try {
-    // Get current user ID
-    final currentUser = await UserUtils().getUserDetails();
-    if (currentUser == null) {
-      debugPrint(
-        '[BACKGROUND] ⚠️ Cannot send delivery receipt: no current user',
-      );
-      return;
-    }
+Map<String, dynamic> _parseResponseData(dynamic data) {
+  Map<String, dynamic> parsed;
 
-    // Try to get ApiService instance
-    ApiService? apiService;
+  if (data is String) {
     try {
-      apiService = ApiService();
-    } catch (e) {
-      debugPrint(
-        '[BACKGROUND] ⚠️ ApiService not initialized, skipping delivery receipt: $e',
-      );
-      return;
+      final decoded = jsonDecode(data);
+      if (decoded is Map<String, dynamic>) {
+        parsed = decoded;
+      } else {
+        // If decoded data is not a Map (e.g., List, primitive), wrap it
+        // Convert string IDs to int before wrapping
+        final convertedData = convertStringIdsToInt(decoded);
+        return {
+          'success': true,
+          'code': 200,
+          'message': 'Success',
+          'data': convertedData,
+        };
+      }
+    } catch (_) {
+      // If parsing fails, wrap in ResultType format
+      return {
+        'success': false,
+        'code': 500,
+        'message': 'Failed to parse response',
+        'error': data,
+      };
     }
+  } else if (data is Map<String, dynamic>) {
+    parsed = data;
+  } else {
+    // If data is not a Map (e.g., List, primitive), wrap it in ResultType format
+    // This preserves the actual data structure instead of discarding it
+    // Convert string IDs to int before wrapping
+    final convertedData = convertStringIdsToInt(data);
+    return {
+      'success': true,
+      'code': 200,
+      'message': 'Success',
+      'data': convertedData,
+    };
+  }
 
-    // Send delivery receipt via API
-    // The backend will handle WebSocket broadcast to the sender
-    await apiService.chat.markMessageDelivered(
-      messageId: message.id,
-      conversationId: message.convId,
+  // Ensure it has the ResultType structure
+  if (!parsed.containsKey('success')) {
+    // If backend didn't return ResultType format, wrap it
+    final wrapped = {
+      'success': true,
+      'code': 200,
+      'message': parsed['message'] ?? 'Success',
+      'data': parsed,
+    };
+    // Convert string IDs to int before returning
+    return convertStringIdsToInt(wrapped);
+  }
+
+  // Convert string IDs (from BigInt) to int before returning
+  return convertStringIdsToInt(parsed);
+}
+
+/// Send batch delivery receipts for multiple messages in one request.
+Future<bool> sendDeliveryReceiptBatch(
+  List<Map<String, dynamic>> messages,
+) async {
+  if (messages.isEmpty) return true;
+  try {
+    final cookieService = CookieService();
+    await cookieService.init();
+
+    final dio = Dio();
+    dio.options.validateStatus = (status) => status != null;
+    dio.interceptors.add(CookieManager(cookieService.cookieJar));
+
+    final response = await dio.post(
+      "${Environment.baseUrl}/message/delivered/batch",
+      data: {'messages': messages},
     );
+
+    final parsedData = _parseResponseData(response.data);
+    final res = ApiResult<dynamic>.fromMap(parsedData);
+    if (res.isSuccess) {
+      debugPrint(
+        '[BACKGROUND] 📬 Batch delivery receipt sent for ${messages.length} messages',
+      );
+      return true;
+    }
 
     debugPrint(
-      '[BACKGROUND] 📬 Sent delivery receipt for message ${message.id} to sender ${message.senderId}',
+      '[BACKGROUND] ⚠️ Batch delivery receipt failed (status ${response.statusCode})',
     );
+    return false;
+  } catch (e) {
+    debugPrint('[BACKGROUND] ⚠️ Error sending batch delivery receipt: $e');
+    return false;
+  }
+}
+
+/// Send delivery receipt to backend via API (background isolate version).
+/// Creates its own Dio instance with the cookie jar attached directly, so it
+/// works correctly regardless of whether ApiClient has already been initialized.
+Future<bool> sendDeliveryReceipt(ChatMessagePayload message) async {
+  try {
+    final cookieService = CookieService();
+    await cookieService.init();
+
+    final dio = Dio();
+    dio.options.validateStatus = (status) => status != null;
+    dio.interceptors.add(CookieManager(cookieService.cookieJar));
+
+    final response = await dio.post(
+      "${Environment.baseUrl}/message/delivered",
+      data: {
+        'message_id': message.id.toString(),
+        'conversation_id': message.convId,
+      },
+    );
+
+    final parsedData = _parseResponseData(response.data);
+    final res = ApiResult<dynamic>.fromMap(parsedData);
+    if (res.isSuccess) {
+      debugPrint(
+        '[BACKGROUND] 📬 Sent delivery receipt for message ${message.id}',
+      );
+      return true;
+    }
+
+    debugPrint(
+      '[BACKGROUND] ⚠️ Delivery receipt failed (status ${response.statusCode})',
+    );
+    return false;
   } catch (e) {
     debugPrint('[BACKGROUND] ⚠️ Error sending delivery receipt: $e');
-    // Don't throw - delivery receipt is best-effort
-    // The sync mechanism will handle it if API fails
+    return false;
   }
 }

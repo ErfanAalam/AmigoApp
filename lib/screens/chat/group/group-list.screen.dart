@@ -1,3 +1,4 @@
+import 'package:amigo/providers/message.provider.dart';
 import 'package:amigo/types/chat.types.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -182,22 +183,39 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
 
   Widget _buildContent() {
     final chatState = ref.watch(chatProvider);
+    final groupListAsync = ref.watch(groupListStreamProvider);
 
-    // Show loading skeleton while loading
-    if (chatState.isLoading) {
-      return _buildSkeletonLoader();
-    }
+    return groupListAsync.when(
+      loading: () => _buildSkeletonLoader(),
+      error: (_, __) {
+        // Fallback to provider list on stream error
+        final filteredItems = chatState.filteredGroupItems;
+        if (filteredItems.isEmpty) return _buildEmptyState();
+        return _buildItemsList(filteredItems);
+      },
+      data: (groups) {
+        // Merge with communities from chatState (not yet in Drift stream)
+        final communities = chatState.communities;
 
-    // Get filtered items from provider
-    final filteredItems = chatState.filteredGroupItems;
+        // Apply search filter
+        List<dynamic> filteredItems;
+        if (chatState.searchQuery.isNotEmpty) {
+          final query = chatState.searchQuery.toLowerCase();
+          final filteredGroups = groups
+              .where((g) => g.title.toLowerCase().contains(query))
+              .toList();
+          final filteredCommunities = communities
+              .where((c) => c.name.toLowerCase().contains(query))
+              .toList();
+          filteredItems = [...filteredGroups, ...filteredCommunities];
+        } else {
+          filteredItems = [...groups, ...communities];
+        }
 
-    // Show empty state if no items
-    if (filteredItems.isEmpty) {
-      return _buildEmptyState();
-    }
-
-    // Show the items list
-    return _buildItemsList(filteredItems);
+        if (filteredItems.isEmpty) return _buildEmptyState();
+        return _buildItemsList(filteredItems);
+      },
+    );
   }
 
   Widget _buildSkeletonLoader() {

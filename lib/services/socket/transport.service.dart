@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:amigo/api/api_service.dart';
 import 'package:amigo/api/clients/chat_client.dart';
+import 'package:amigo/services/socket/ws-message.handler.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:dio/dio.dart';
@@ -73,8 +74,8 @@ class WebSocketTransport implements TransportService {
   // Heartbeat
   Timer? _pingTimer;
   int _missedPongs = 0;
-  static const Duration _pingInterval = Duration(seconds: 10);
-  static const int _maxMissedPongs = 5;
+  static const Duration _pingInterval = Duration(seconds: 12);
+  static const int _maxMissedPongs = 2;
 
   @override
   TransportType get transportType => TransportType.websocket;
@@ -115,7 +116,17 @@ class WebSocketTransport implements TransportService {
           '${Environment.websocketUrl}?token=${Uri.encodeComponent(token)}';
       debugPrint('[WS-TRANSPORT] Connecting to: $wsUrl');
 
-      _socket = await WebSocket.connect(wsUrl);
+      _socket = await WebSocket.connect(
+        wsUrl,
+        compression: CompressionOptions(
+          enabled: true,
+          clientMaxWindowBits: 15,
+          serverMaxWindowBits: 15,
+          clientNoContextTakeover:
+              false, // keep context between messages (better compression)
+          serverNoContextTakeover: false,
+        ),
+      );
 
       // Set up a listener to catch auth errors immediately after connection
       _socket!.listen(
@@ -312,12 +323,13 @@ class WebSocketTransport implements TransportService {
 // =============================================================================
 
 class LongPollingTransport implements TransportService {
-  http.Client? _client;
+  // http.Client? _client;
   TransportConnectionState _connectionState =
       TransportConnectionState.disconnected;
   String? _token;
   String? _lastMessageId;
   bool _isPolling = false;
+  bool _isPollingInProgress = false;
   Timer? _pollTimer;
 
   final StreamController<TransportConnectionState> _connectionStateController =
@@ -365,7 +377,7 @@ class LongPollingTransport implements TransportService {
     try {
       _updateConnectionState(TransportConnectionState.connecting);
       _token = token;
-      _client = http.Client();
+      // _client = http.Client();
 
       debugPrint('[POLLING-TRANSPORT] Starting long polling');
 
@@ -453,13 +465,22 @@ class LongPollingTransport implements TransportService {
     }
   }
 
+  /// Trigger an immediate poll without waiting for the next scheduled interval.
+  /// Call this on reconnect to pull any messages missed during the gap.
+  void pollNow() {
+    if (!_isPolling) return;
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    _poll();
+  }
+
   @override
   Future<void> disconnect() async {
     _isPolling = false;
     _pollTimer?.cancel();
     _pollTimer = null;
-    _client?.close();
-    _client = null;
+    // _client?.close();
+    // _client = null;
     _lastMessageId = null;
     _updateConnectionState(TransportConnectionState.disconnected);
   }
@@ -510,11 +531,62 @@ class LongPollingTransport implements TransportService {
     }
   }
 
+  Future<void> syncMissedWsEventsOnReconnect({
+    void Function(Map<String, dynamic>)? onMessage,
+  }) async {
+    if (_isPollingInProgress) return;
+
+    try {
+      _isPollingInProgress = true;
+      // Use the new polling endpoint that fetches from cache
+      final result = await _chats.pollPendingMessages(
+        afterMessageId: _lastMessageId,
+        forSync: true,
+      );
+
+      if (result.isSuccess && result.data != null) {
+        final responseData = result.data!;
+        final messages = responseData['messages'] as List<dynamic>?;
+
+        if (messages != null && messages.isNotEmpty) {
+          debugPrint(
+            '[POLLING-TRANSPORT] Synced ${messages.length} missed vital message(s)',
+          );
+
+          // Process each cached message
+          for (final cachedMsg in messages) {
+            if (cachedMsg is Map<String, dynamic>) {
+              // Extract the ws_message from the cached message structure
+              final wsMessage =
+                  cachedMsg['ws_message'] as Map<String, dynamic>?;
+              if (wsMessage != null) {
+                debugPrint(
+                  '[POLLING-TRANSPORT] feeding missed WS message into stream: ${wsMessage['type']} (ID: ${wsMessage['message_id'] ?? 'N/A'})',
+                );
+                // Route through the provided sink if available (e.g. TransportManager's
+                // message controller), otherwise fall back to this transport's own stream.
+                if (onMessage != null) {
+                  onMessage(wsMessage);
+                } else {
+                  _messageController.add(wsMessage);
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[POLLING-TRANSPORT] Poll error: $e');
+    } finally {
+      _isPollingInProgress = false;
+    }
+  }
+
   @override
   void dispose() {
     _isPolling = false;
     _pollTimer?.cancel();
-    _client?.close();
+    // _client?.close();
     _connectionStateController.close();
     _messageController.close();
     _errorController.close();

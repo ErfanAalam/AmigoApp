@@ -424,6 +424,157 @@ class ConversationRepository {
     );
   }
 
+  /// Watch DM conversations as a reactive Drift stream ordered by last activity.
+  /// Emits whenever the conversations table changes (e.g. new message updates
+  /// lastMessageId). Joins users/members asynchronously per emission.
+  Stream<List<DmModel>> watchDmConversations() {
+    final db = sqliteDatabase.database;
+
+    return (db.select(db.conversations)
+          ..where((t) => t.type.equals('dm'))
+          ..orderBy([
+            (t) => OrderingTerm(
+              expression: t.updatedAt,
+              mode: OrderingMode.desc,
+            ),
+            (t) => OrderingTerm(
+              expression: t.createdAt,
+              mode: OrderingMode.desc,
+            ),
+          ]))
+        .watch()
+        .asyncMap((conversations) async {
+          final result = <DmModel>[];
+          for (final conv in conversations) {
+            final members = await (db.select(db.conversationMembers)
+                  ..where(
+                    (t) =>
+                        t.conversationId.equals(conv.id) &
+                        t.removedAt.isNull(),
+                  ))
+                .get();
+            if (members.isEmpty || members[0].userId == 0) continue;
+
+            final recipientUser = await (db.select(db.users)
+                  ..where((t) => t.id.equals(members[0].userId)))
+                .getSingleOrNull();
+            if (recipientUser == null) continue;
+
+            String? lastMessageType;
+            String? lastMessageBody;
+            String? lastMessageAt;
+            int? lastMessageId = conv.lastMessageId?.toInt();
+
+            if (conv.lastMessageId != null) {
+              final lastMessage = await (db.select(db.messages)
+                    ..where((t) => t.id.equals(conv.lastMessageId!)))
+                  .getSingleOrNull();
+              if (lastMessage != null) {
+                lastMessageType = lastMessage.type;
+                lastMessageBody = _getMessagePreviewText(
+                  lastMessage.type,
+                  lastMessage.body,
+                  lastMessage.attachments,
+                );
+                lastMessageAt = lastMessage.sentAt;
+                lastMessageId = lastMessage.id.toInt();
+              }
+            }
+
+            result.add(DmModel(
+              conversationId: conv.id,
+              recipientId: recipientUser.id,
+              recipientName: recipientUser.username ?? recipientUser.name,
+              recipientPhone: recipientUser.phone,
+              recipientProfilePic: recipientUser.profilePic,
+              pinnedMessageId: conv.pinnedMessageId?.toInt(),
+              lastMessageId: lastMessageId,
+              lastMessageType: lastMessageType,
+              lastMessageBody: lastMessageBody,
+              lastMessageAt: lastMessageAt,
+              unreadCount: conv.unreadCount,
+              isRecipientOnline: recipientUser.isOnline,
+              isDeleted: conv.isDeleted,
+              isPinned: conv.isPinned,
+              isMuted: conv.isMuted,
+              isFavorite: conv.isFavorite,
+              createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
+            ));
+          }
+          return result;
+        });
+  }
+
+  /// Watch group conversations as a reactive Drift stream ordered by last activity.
+  Stream<List<GroupModel>> watchGroupConversations() {
+    final db = sqliteDatabase.database;
+
+    return (db.select(db.conversations)
+          ..where((t) => t.type.equals('group'))
+          ..orderBy([
+            (t) => OrderingTerm(
+              expression: t.updatedAt,
+              mode: OrderingMode.desc,
+            ),
+            (t) => OrderingTerm(
+              expression: t.createdAt,
+              mode: OrderingMode.desc,
+            ),
+          ]))
+        .watch()
+        .asyncMap((conversations) async {
+          final currentUserInfo = await UserUtils().getUserDetails();
+          final result = <GroupModel>[];
+
+          for (final conv in conversations) {
+            String? lastMessageType;
+            String? lastMessageBody;
+            String? lastMessageAt;
+            int? lastMessageId = conv.lastMessageId?.toInt();
+
+            if (conv.lastMessageId != null) {
+              final lastMessage = await (db.select(db.messages)
+                    ..where((t) => t.id.equals(conv.lastMessageId!)))
+                  .getSingleOrNull();
+              if (lastMessage != null) {
+                lastMessageType = lastMessage.type;
+                lastMessageBody = _getMessagePreviewText(
+                  lastMessage.type,
+                  lastMessage.body,
+                  lastMessage.attachments,
+                );
+                lastMessageAt = lastMessage.sentAt;
+                lastMessageId = lastMessage.id.toInt();
+              }
+            }
+
+            ConversationMemberModel? currentUserMemberInfo;
+            if (currentUserInfo != null) {
+              currentUserMemberInfo = await ConversationMemberRepository()
+                  .getMemberByConversationAndUser(conv.id, currentUserInfo.id);
+            }
+
+            result.add(GroupModel(
+              conversationId: conv.id,
+              title: conv.title ?? 'Group Chat',
+              pinnedMessageId: conv.pinnedMessageId?.toInt(),
+              lastMessageId: lastMessageId,
+              lastMessageType: lastMessageType,
+              lastMessageBody: lastMessageBody,
+              lastMessageAt: lastMessageAt,
+              role: currentUserMemberInfo?.role,
+              unreadCount: currentUserMemberInfo?.unreadCount ?? 0,
+              isPinned: conv.isPinned,
+              isMuted: conv.isMuted,
+              isFavorite: conv.isFavorite,
+              joinedAt: currentUserMemberInfo?.joinedAt ??
+                  DateTime.now().toIso8601String(),
+            ));
+          }
+          return result;
+        });
+  }
+
   /// get need sync from conversation id
   Future<bool> getNeedSyncStatus(int conversationId) async {
     final db = sqliteDatabase.database;

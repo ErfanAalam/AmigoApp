@@ -207,6 +207,35 @@ class MessageRepository {
     }).toList();
   }
 
+  /// Watch messages for a conversation as a reactive Drift stream.
+  /// The stream emits a new list whenever any message in this conversation
+  /// is inserted, updated, or deleted in SQLite — including from FCM handlers.
+  Stream<List<MessageModel>> watchMessages(int conversationId) {
+    final db = sqliteDatabase.database;
+
+    final query = db.select(db.messages).join([
+      leftOuterJoin(db.users, db.users.id.equalsExp(db.messages.senderId)),
+    ])
+      ..where(
+        db.messages.conversationId.equals(conversationId) &
+            db.messages.isDeleted.equals(false),
+      )
+      ..orderBy([
+        OrderingTerm(expression: db.messages.sentAt, mode: OrderingMode.asc),
+      ]);
+
+    return query.watch().map((results) {
+      return results.map((row) {
+        final message = row.readTable(db.messages);
+        final user = row.readTableOrNull(db.users);
+        return _messageToModel(message).copyWith(
+          senderName: user?.name,
+          senderProfilePic: user?.profilePic,
+        );
+      }).toList();
+    });
+  }
+
   /// Get a single message by ID
   Future<MessageModel?> getMessageById(int messageId) async {
     final db = sqliteDatabase.database;
@@ -414,9 +443,27 @@ class MessageRepository {
   ) async {
     try {
       final db = sqliteDatabase.database;
-      await (db.update(db.messages)
-            ..where((t) => t.id.equals(BigInt.from(messageId))))
-          .write(MessagesCompanion(status: Value(status.value)));
+      // Priority order: read=3, delivered=2, sent=1, anything else=0
+      // Never downgrade: only write if new priority is strictly higher than current
+      final int newPriority = switch (status) {
+        MessageStatusType.read => 3,
+        MessageStatusType.delivered => 2,
+        MessageStatusType.sent => 1,
+        _ => 0,
+      };
+      if (newPriority == 0) {
+        return SqliteResult.success(message: 'No status update needed');
+      }
+      await db.customUpdate(
+        "UPDATE messages SET status = ? WHERE id = ? "
+        "AND CASE status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 ELSE 0 END < ?",
+        variables: [
+          Variable<String>(status.value),
+          Variable<BigInt>(BigInt.from(messageId)),
+          Variable<int>(newPriority),
+        ],
+        updates: {db.messages},
+      );
       return SqliteResult.success(message: 'Message status updated');
     } catch (e) {
       final errorCode = _extractSqliteErrorCode(e);

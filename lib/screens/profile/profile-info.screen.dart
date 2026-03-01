@@ -19,6 +19,10 @@ import '../../ui/snackbar.dart';
 import '../auth/login.screen.dart';
 import 'deleted-dms.screen.dart';
 import 'edit-profile.screen.dart';
+import '../../utils/network.utils.dart';
+import '../../types/network.types.dart';
+import '../../services/socket/transport.manager.dart';
+import '../../services/socket/transport.service.dart';
 
 class ProfilePage extends ConsumerStatefulWidget {
   const ProfilePage({super.key});
@@ -421,6 +425,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           if (trailing != null) trailing,
         ],
       ),
+    );
+  }
+
+  Future<void> _showNetworkDiagnosticsDialog() async {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (ctx) => const _NetworkDiagnosticsDialog(),
     );
   }
 
@@ -1044,6 +1056,13 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                           valueColor: Colors.grey[700],
                         ),
 
+                        ProfileOption(
+                          icon: Icons.network_check,
+                          title: 'Network Diagnostics',
+                          subtitle: 'Check connection health & latency',
+                          onTap: _showNetworkDiagnosticsDialog,
+                        ),
+
                         // ProfileOption(
                         //   icon: Icons.storage,
                         //   title: 'Database Viewer',
@@ -1122,6 +1141,327 @@ class ProfileOption extends ConsumerWidget {
         size: 16,
       ),
       onTap: onTap,
+    );
+  }
+}
+
+// =============================================================================
+// Network Diagnostics Dialog
+// =============================================================================
+
+class _NetworkDiagnosticsDialog extends StatefulWidget {
+  const _NetworkDiagnosticsDialog();
+
+  @override
+  State<_NetworkDiagnosticsDialog> createState() =>
+      _NetworkDiagnosticsDialogState();
+}
+
+class _NetworkDiagnosticsDialogState extends State<_NetworkDiagnosticsDialog> {
+  NetworkState? _networkState;
+  TransportType? _transportType;
+  TransportConnectionState? _transportConnectionState;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _runCheck();
+  }
+
+  Future<void> _runCheck() async {
+    setState(() => _isLoading = true);
+    final state = await NetworkConnectivityUtil().checkNetwork();
+    final manager = TransportManager();
+    if (mounted) {
+      setState(() {
+        _networkState = state;
+        _transportType = manager.currentTransportType;
+        _transportConnectionState = manager.connectionState;
+        _isLoading = false;
+      });
+    }
+  }
+
+  Color _qualityColor(NetworkQuality q) => switch (q) {
+        NetworkQuality.excellent => Colors.green,
+        NetworkQuality.good => Colors.lightGreen,
+        NetworkQuality.fair => Colors.amber,
+        NetworkQuality.poor => Colors.orange,
+        NetworkQuality.veryPoor || NetworkQuality.offline => Colors.red,
+        _ => Colors.grey,
+      };
+
+  IconData _connectionTypeIcon(NetworkConnectionType t) => switch (t) {
+        NetworkConnectionType.wifi => Icons.wifi,
+        NetworkConnectionType.mobile => Icons.signal_cellular_alt,
+        NetworkConnectionType.ethernet => Icons.cable,
+        NetworkConnectionType.vpn => Icons.vpn_lock,
+        _ => Icons.device_unknown,
+      };
+
+  String _transportLabel(TransportType? t) => switch (t) {
+        TransportType.websocket => 'WebSocket',
+        TransportType.longPolling => 'Long Polling',
+        null => 'None',
+        _ => 'Unknown',
+      };
+
+  String _connectionStateLabel(TransportConnectionState? s) => switch (s) {
+        TransportConnectionState.connected => 'Connected',
+        TransportConnectionState.connecting => 'Connecting',
+        TransportConnectionState.reconnecting => 'Reconnecting',
+        TransportConnectionState.disconnected => 'Disconnected',
+        TransportConnectionState.error => 'Error',
+        null => 'Unknown',
+        _ => 'Unknown',
+      };
+
+  Color _connectionStateColor(TransportConnectionState? s) => switch (s) {
+        TransportConnectionState.connected => Colors.green,
+        TransportConnectionState.connecting ||
+        TransportConnectionState.reconnecting =>
+          Colors.amber,
+        _ => Colors.red,
+      };
+
+  Widget _statRow({
+    required String label,
+    required Widget value,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 5,
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+            ),
+          ),
+          Expanded(flex: 5, child: value),
+        ],
+      ),
+    );
+  }
+
+  Widget _boolValue(bool v) => Row(
+        children: [
+          Icon(
+            v ? Icons.check_circle : Icons.cancel,
+            size: 16,
+            color: v ? Colors.green : Colors.red,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            v ? 'Yes' : 'No',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: v ? Colors.green : Colors.red,
+            ),
+          ),
+        ],
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final lastChecked = _networkState?.lastChecked;
+    final timeStr = lastChecked != null
+        ? '${lastChecked.hour.toString().padLeft(2, '0')}:'
+            '${lastChecked.minute.toString().padLeft(2, '0')}:'
+            '${lastChecked.second.toString().padLeft(2, '0')}'
+        : '—';
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 340),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.95),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.3),
+                width: 1,
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Header
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.network_check, size: 22),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Network Diagnostics',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 20),
+                        onPressed: () => Navigator.of(context).pop(),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const Divider(height: 16),
+
+                // Body
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: _isLoading
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 32),
+                          child: Center(child: CircularProgressIndicator()),
+                        )
+                      : Column(
+                          children: [
+                            _statRow(
+                              label: 'Connection Type',
+                              value: Row(
+                                children: [
+                                  Icon(
+                                    _connectionTypeIcon(
+                                      _networkState!.connectionType,
+                                    ),
+                                    size: 16,
+                                    color: Colors.black87,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _networkState!.connectionType.name
+                                        .toUpperCase(),
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            _statRow(
+                              label: 'Network Quality',
+                              value: Row(
+                                children: [
+                                  Container(
+                                    width: 10,
+                                    height: 10,
+                                    decoration: BoxDecoration(
+                                      color: _qualityColor(
+                                        _networkState!.quality,
+                                      ),
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${_networkState!.quality.name}'
+                                    '${_networkState!.pingLatencyMs != null ? ' (${_networkState!.pingLatencyMs}ms)' : ''}',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: _qualityColor(
+                                        _networkState!.quality,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            _statRow(
+                              label: 'Server Reachable',
+                              value: _boolValue(_networkState!.isServerReachable),
+                            ),
+                            _statRow(
+                              label: 'WebSocket',
+                              value: _boolValue(
+                                _networkState!.isWebSocketAvailable,
+                              ),
+                            ),
+                            _statRow(
+                              label: 'Long Polling',
+                              value: _boolValue(
+                                _networkState!.isPollingAvailable,
+                              ),
+                            ),
+                            _statRow(
+                              label: 'Active Transport',
+                              value: Text(
+                                _transportLabel(_transportType),
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            _statRow(
+                              label: 'Connection State',
+                              value: Text(
+                                _connectionStateLabel(_transportConnectionState),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: _connectionStateColor(
+                                    _transportConnectionState,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            _statRow(
+                              label: 'Last Checked',
+                              value: Text(
+                                timeStr,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+
+                const SizedBox(height: 8),
+                const Divider(height: 1),
+
+                // Run Again button
+                TextButton(
+                  onPressed: _isLoading ? null : _runCheck,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    minimumSize: const Size(double.infinity, 0),
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.only(
+                        bottomLeft: Radius.circular(20),
+                        bottomRight: Radius.circular(20),
+                      ),
+                    ),
+                  ),
+                  child: const Text(
+                    'Run Again',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -284,7 +284,7 @@ class NotificationService {
     debugPrint('ℹ️ No initial notification to process');
   }
 
-  /// Parse ws_message from notification data
+  /// Parse ws_message from notification data (single — used for calls)
   WSMessage? _parseWSMessage(Map<String, dynamic> data) {
     try {
       final wsMessageStr = data['ws_message'];
@@ -307,18 +307,36 @@ class NotificationService {
     }
   }
 
+  /// Parse ws_messages array from notification data (batched chat messages)
+  List<WSMessage> _parseWSMessages(Map<String, dynamic> data) {
+    try {
+      final wsMessagesStr = data['ws_messages'];
+      if (wsMessagesStr == null) {
+        // Fall back to single ws_message
+        final single = _parseWSMessage(data);
+        return single != null ? [single] : [];
+      }
+      final List<dynamic> arr = jsonDecode(wsMessagesStr as String);
+      return arr
+          .map((item) => WSMessage.fromJson(Map<String, dynamic>.from(item as Map)))
+          .toList();
+    } catch (e) {
+      debugPrint('❌ Error parsing ws_messages: $e');
+      return [];
+    }
+  }
+
   /// Handle foreground messages
   void _handleForegroundMessage(RemoteMessage message) async {
     final data = message.data;
     final notification = message.notification;
     final notificationType = data['type'] as String?;
 
-    // Parse ws_message if present
-    final wsMessage = _parseWSMessage(data);
-
     switch (notificationType) {
       case 'ws-message':
-        if (wsMessage != null) {
+        // Parse the batch of ws_messages
+        final wsMessages = _parseWSMessages(data);
+        for (final wsMessage in wsMessages) {
           if (wsMessage.type == WSMessageType.messageNew) {
             final chatPayload = wsMessage.chatMessagePayload;
             if (chatPayload != null) {

@@ -40,7 +40,6 @@ class MessageStatusRepository {
   }
 
   /// Insert a single message status
-  /// Removed existence check - uses insertOnConflictUpdate to handle duplicates
   Future<SqliteResult<void>> insertMessageStatus({
     required int conversationId,
     required int messageId,
@@ -50,15 +49,20 @@ class MessageStatusRepository {
   }) async {
     try {
       final db = sqliteDatabase.database;
-
-      final companion = MessageStatusModelCompanion.insert(
-        conversationId: conversationId,
-        messageId: BigInt.from(messageId),
-        userId: userId,
-        deliveredAt: Value(deliveredAt),
-        readAt: Value(readAt),
-      );
-      await db.into(db.messageStatusModel).insertOnConflictUpdate(companion);
+      final deliveredAtValue = deliveredAt != null
+          ? "'${deliveredAt.replaceAll("'", "''")}'"
+          : 'NULL';
+      final readAtValue = readAt != null
+          ? "'${readAt.replaceAll("'", "''")}'"
+          : 'NULL';
+      await db.customStatement('''
+        INSERT INTO message_status_model (conversation_id, message_id, user_id, delivered_at, read_at)
+        VALUES ($conversationId, ${BigInt.from(messageId)}, $userId, $deliveredAtValue, $readAtValue)
+        ON CONFLICT(message_id, user_id) DO UPDATE SET
+          conversation_id = excluded.conversation_id,
+          delivered_at = COALESCE(excluded.delivered_at, message_status_model.delivered_at),
+          read_at = COALESCE(excluded.read_at, message_status_model.read_at)
+      ''');
       return SqliteResult.success(message: 'Message status inserted');
     } catch (e) {
       final errorCode = _extractSqliteErrorCode(e);
@@ -315,7 +319,6 @@ class MessageStatusRepository {
   }
 
   /// Mark message as delivered for a user
-  /// Removed existence check - uses insertOnConflictUpdate to handle duplicates
   Future<SqliteResult<void>> markAsDelivered({
     required int messageId,
     required int userId,
@@ -325,20 +328,19 @@ class MessageStatusRepository {
       final db = sqliteDatabase.database;
       final timestamp = deliveredAt ?? DateTime.now().toIso8601String();
 
-      // Get conversationId from message
       final message = await (db.select(
         db.messages,
       )..where((t) => t.id.equals(BigInt.from(messageId)))).getSingleOrNull();
 
       if (message != null) {
-        // Use insertOnConflictUpdate to handle both insert and update
-        final companion = MessageStatusModelCompanion.insert(
-          conversationId: message.conversationId,
-          messageId: BigInt.from(messageId),
-          userId: userId,
-          deliveredAt: Value(timestamp),
-        );
-        await db.into(db.messageStatusModel).insertOnConflictUpdate(companion);
+        final deliveredAtSql = "'${timestamp.replaceAll("'", "''")}'" ;
+        await db.customStatement('''
+          INSERT INTO message_status_model (conversation_id, message_id, user_id, delivered_at)
+          VALUES (${message.conversationId}, ${BigInt.from(messageId)}, $userId, $deliveredAtSql)
+          ON CONFLICT(message_id, user_id) DO UPDATE SET
+            conversation_id = excluded.conversation_id,
+            delivered_at = excluded.delivered_at
+        ''');
         return SqliteResult.success(message: 'Message marked as delivered');
       } else {
         return SqliteResult.error(message: 'Message not found');
@@ -354,7 +356,6 @@ class MessageStatusRepository {
   }
 
   /// Mark message as read for a user
-  /// Removed existence check - uses insertOnConflictUpdate to handle duplicates
   Future<SqliteResult<void>> markAsRead({
     required int messageId,
     required int userId,
@@ -364,27 +365,20 @@ class MessageStatusRepository {
       final db = sqliteDatabase.database;
       final timestamp = readAt ?? DateTime.now().toIso8601String();
 
-      // Get conversationId from message
       final message = await (db.select(
         db.messages,
       )..where((t) => t.id.equals(BigInt.from(messageId)))).getSingleOrNull();
 
       if (message != null) {
-        // Get existing status to preserve deliveredAt if already set
-        final existing = await getMessageStatusByMessageAndUser(
-          messageId,
-          userId,
-        );
-
-        // Use insertOnConflictUpdate to handle both insert and update
-        final companion = MessageStatusModelCompanion.insert(
-          conversationId: message.conversationId,
-          messageId: BigInt.from(messageId),
-          userId: userId,
-          deliveredAt: Value(existing?.deliveredAt ?? timestamp),
-          readAt: Value(timestamp),
-        );
-        await db.into(db.messageStatusModel).insertOnConflictUpdate(companion);
+        final timestampSql = "'${timestamp.replaceAll("'", "''")}'";
+        await db.customStatement('''
+          INSERT INTO message_status_model (conversation_id, message_id, user_id, delivered_at, read_at)
+          VALUES (${message.conversationId}, ${BigInt.from(messageId)}, $userId, $timestampSql, $timestampSql)
+          ON CONFLICT(message_id, user_id) DO UPDATE SET
+            conversation_id = excluded.conversation_id,
+            delivered_at = COALESCE(message_status_model.delivered_at, excluded.delivered_at),
+            read_at = excluded.read_at
+        ''');
         return SqliteResult.success(message: 'Message marked as read');
       } else {
         return SqliteResult.error(message: 'Message not found');
@@ -420,25 +414,20 @@ class MessageStatusRepository {
                   .getSingleOrNull();
 
           if (message != null) {
-            // Use insertOnConflictUpdate to handle both insert and update
-            final companion = MessageStatusModelCompanion.insert(
-              conversationId: message.conversationId,
-              messageId: BigInt.from(messageId),
-              userId: userId,
-              deliveredAt: Value(timestamp),
-            );
-            await db
-                .into(db.messageStatusModel)
-                .insertOnConflictUpdate(companion);
+            final deliveredAtSql = "'${timestamp.replaceAll("'", "''")}'";
+            await db.customStatement('''
+              INSERT INTO message_status_model (conversation_id, message_id, user_id, delivered_at)
+              VALUES (${message.conversationId}, ${BigInt.from(messageId)}, $userId, $deliveredAtSql)
+              ON CONFLICT(message_id, user_id) DO UPDATE SET
+                conversation_id = excluded.conversation_id,
+                delivered_at = excluded.delivered_at
+            ''');
           }
         } catch (e) {
           final errorCode = _extractSqliteErrorCode(e);
-          // Only log non-duplicate errors (duplicates are expected)
-          if (errorCode != 1555) {
-            debugPrint(
-              "Error marking message $messageId as delivered: $e (errorCode: $errorCode)",
-            );
-          }
+          debugPrint(
+            "Error marking message $messageId as delivered: $e (errorCode: $errorCode)",
+          );
           // Continue with next message instead of failing the whole batch
         }
       }
@@ -466,32 +455,21 @@ class MessageStatusRepository {
                   .getSingleOrNull();
 
           if (message != null) {
-            // Get existing status to preserve deliveredAt if already set
-            final existing = await getMessageStatusByMessageAndUser(
-              messageId,
-              userId,
-            );
-
-            // Use insertOnConflictUpdate to handle both insert and update
-            final companion = MessageStatusModelCompanion.insert(
-              conversationId: message.conversationId,
-              messageId: BigInt.from(messageId),
-              userId: userId,
-              deliveredAt: Value(existing?.deliveredAt ?? timestamp),
-              readAt: Value(timestamp),
-            );
-            await db
-                .into(db.messageStatusModel)
-                .insertOnConflictUpdate(companion);
+            final timestampSql = "'${timestamp.replaceAll("'", "''")}'";
+            await db.customStatement('''
+              INSERT INTO message_status_model (conversation_id, message_id, user_id, delivered_at, read_at)
+              VALUES (${message.conversationId}, ${BigInt.from(messageId)}, $userId, $timestampSql, $timestampSql)
+              ON CONFLICT(message_id, user_id) DO UPDATE SET
+                conversation_id = excluded.conversation_id,
+                delivered_at = COALESCE(message_status_model.delivered_at, excluded.delivered_at),
+                read_at = excluded.read_at
+            ''');
           }
         } catch (e) {
           final errorCode = _extractSqliteErrorCode(e);
-          // Only log non-duplicate errors (duplicates are expected)
-          if (errorCode != 1555) {
-            debugPrint(
-              "Error marking message $messageId as read: $e (errorCode: $errorCode)",
-            );
-          }
+          debugPrint(
+            "Error marking message $messageId as read: $e (errorCode: $errorCode)",
+          );
           // Continue with next message instead of failing the whole batch
         }
       }
@@ -510,7 +488,6 @@ class MessageStatusRepository {
   }
 
   // update deliveredAt timestamp for a specific user with message id
-  /// Removed existence check - uses insertOnConflictUpdate to handle duplicates
   Future<SqliteResult<void>> updateDeliveredAtForUser({
     required int messageId,
     required int userId,
@@ -519,14 +496,16 @@ class MessageStatusRepository {
   }) async {
     try {
       final db = sqliteDatabase.database;
-      // Use insertOnConflictUpdate to handle both insert and update
-      final companion = MessageStatusModelCompanion.insert(
-        conversationId: conversationId,
-        messageId: BigInt.from(messageId),
-        userId: userId,
-        deliveredAt: Value(deliveredAt),
-      );
-      await db.into(db.messageStatusModel).insertOnConflictUpdate(companion);
+      final deliveredAtSql = deliveredAt != null
+          ? "'${deliveredAt.replaceAll("'", "''")}'"
+          : 'NULL';
+      await db.customStatement('''
+        INSERT INTO message_status_model (conversation_id, message_id, user_id, delivered_at)
+        VALUES ($conversationId, ${BigInt.from(messageId)}, $userId, $deliveredAtSql)
+        ON CONFLICT(message_id, user_id) DO UPDATE SET
+          conversation_id = excluded.conversation_id,
+          delivered_at = excluded.delivered_at
+      ''');
       return SqliteResult.success(message: 'DeliveredAt updated');
     } catch (e) {
       final errorCode = _extractSqliteErrorCode(e);
@@ -541,7 +520,6 @@ class MessageStatusRepository {
   }
 
   // update readAt timestamp for a specific user with message id
-  /// Removed existence check - uses insertOnConflictUpdate to handle duplicates
   Future<SqliteResult<void>> updateReadAtForUser({
     required int messageId,
     required int userId,
@@ -550,14 +528,16 @@ class MessageStatusRepository {
   }) async {
     try {
       final db = sqliteDatabase.database;
-      // Use insertOnConflictUpdate to handle both insert and update
-      final companion = MessageStatusModelCompanion.insert(
-        conversationId: conversationId,
-        messageId: BigInt.from(messageId),
-        userId: userId,
-        readAt: Value(readAt),
-      );
-      await db.into(db.messageStatusModel).insertOnConflictUpdate(companion);
+      final readAtSql = readAt != null
+          ? "'${readAt.replaceAll("'", "''")}'"
+          : 'NULL';
+      await db.customStatement('''
+        INSERT INTO message_status_model (conversation_id, message_id, user_id, read_at)
+        VALUES ($conversationId, ${BigInt.from(messageId)}, $userId, $readAtSql)
+        ON CONFLICT(message_id, user_id) DO UPDATE SET
+          conversation_id = excluded.conversation_id,
+          read_at = excluded.read_at
+      ''');
       return SqliteResult.success(message: 'ReadAt updated');
     } catch (e) {
       final errorCode = _extractSqliteErrorCode(e);

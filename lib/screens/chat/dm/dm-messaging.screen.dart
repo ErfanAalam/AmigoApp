@@ -81,6 +81,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   final UserUtils _userUtils = UserUtils();
 
   // stream subscriptions
+  StreamSubscription<List<MessageModel>>? _messagesStreamSub;
   StreamSubscription<ConnectionStatus>? _onlineStatusSubscription;
   StreamSubscription<TransportConnectionState>?
   _transportConnectionSubscription;
@@ -458,16 +459,37 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           },
         );
 
-    // Listen to transport connection state changes for auto-resending failed messages
+    // Listen to transport connection state changes:
+    // 1. Re-send conversation:join so server knows we're still active
+    // 2. Auto-resend any failed messages
     _transportConnectionSubscription = _transportManager.connectionStateStream
         .listen((state) {
           if (state == TransportConnectionState.connected) {
             debugPrint(
-              '[DM] 🎐🎐🎐 Transport reconnected, auto-resending failed messages',
+              '[DM] 🎐🎐🎐 Transport reconnected, re-joining conversation and resending failed messages',
             );
+            // Re-join conversation so server updates active_in_conv
+            _sendConversationJoin();
             _resendAllFailedMessages();
           }
         });
+  }
+
+  /// Send conversation:join to server (idempotent — safe to call multiple times).
+  Future<void> _sendConversationJoin() async {
+    if (_currentUserDetails == null) return;
+    final joinConvPayload = JoinLeavePayload(
+      convId: widget.dm.conversationId,
+      convType: ChatType.dm,
+      userId: _currentUserDetails!.id,
+      userName: _currentUserDetails!.name,
+    ).toJson();
+    final wsmsg = WSMessage(
+      type: WSMessageType.conversationJoin,
+      payload: joinConvPayload,
+      wsTimestamp: DateTime.now(),
+    ).toJson();
+    await _transportManager.sendMessage(wsmsg);
   }
 
   Future<void> _initializeChat() async {
@@ -493,20 +515,24 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         .read(chatProvider.notifier)
         .clearUnreadCount(widget.dm.conversationId, ChatType.dm);
 
-    final messagesFromLocal = await _messagesRepo.getMessagesByConversation(
-      widget.dm.conversationId,
-      limit: 100,
-      offset: 0,
-    );
-
-    if (!_canSetState) {
-      return;
-    }
-    _safeSetState(() {
-      _messages = messagesFromLocal;
-      _sortMessagesBySentAt();
-      _isLoading = false;
-    });
+    // Subscribe to the Drift reactive stream so the UI auto-updates whenever
+    // any write path (WS, polling, FCM background) inserts into SQLite.
+    _messagesStreamSub?.cancel();
+    _messagesStreamSub = _messagesRepo
+        .watchMessages(widget.dm.conversationId)
+        .listen(
+          (msgs) {
+            if (!_canSetState) return;
+            _safeSetState(() {
+              _messages = msgs;
+              _sortMessagesBySentAt();
+              _isLoading = false;
+            });
+          },
+          onError: (e) {
+            debugPrint('❌ Messages stream error: $e');
+          },
+        );
 
     // Load pinned message ID directly from database (not from widget.dm which may be stale)
     final conversation = await _conversationsRepo.getConversationById(
@@ -555,21 +581,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
 
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    // Send WebSocket messages in background (non-blocking, non-critical)
-    final joinConvPayload = JoinLeavePayload(
-      convId: widget.dm.conversationId,
-      convType: ChatType.dm,
-      userId: _currentUserDetails?.id ?? 0,
-      userName: _currentUserDetails?.name ?? '',
-    ).toJson();
-
-    final wsmsg = WSMessage(
-      type: WSMessageType.conversationJoin,
-      payload: joinConvPayload,
-      wsTimestamp: DateTime.now(),
-    ).toJson();
-
-    await _transportManager.sendMessage(wsmsg);
+    await _sendConversationJoin();
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
     // start silent message sync (from server to local DB)
@@ -1193,22 +1205,24 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       updatedMetadata['is_uploading'] = false;
       updatedMetadata.remove('upload_failed');
 
-      // updating message status
+      // updating message status — never downgrade (sent < delivered < read)
       final recipientId = widget.dm.recipientId;
+      final currentStatus = currentMessage.status;
+      MessageStatusType status = currentStatus;
 
-      MessageStatusType status = MessageStatusType.sent;
-      if (payload.readBy != null && payload.readBy!.isNotEmpty) {
-        if (payload.readBy!.contains(recipientId)) {
-          status = MessageStatusType.read;
-        }
+      if (payload.readBy != null && payload.readBy!.contains(recipientId)) {
+        status = MessageStatusType.read;
       } else if (payload.deliveredTo != null &&
-          payload.deliveredTo!.isNotEmpty) {
-        if (payload.deliveredTo!.contains(recipientId)) {
+          payload.deliveredTo!.contains(recipientId)) {
+        if (currentStatus != MessageStatusType.read) {
           status = MessageStatusType.delivered;
         }
-      } else {
+      } else if (currentStatus == MessageStatusType.unsent ||
+          currentStatus == MessageStatusType.uploading) {
+        // Server acknowledged the message (recipient is offline) — at minimum it's "sent"
         status = MessageStatusType.sent;
       }
+      // Otherwise keep currentStatus (never downgrade)
 
       // Update the message with canonicalId, status, and cleared uploading state
       // Preserve optimisticId so insertMessage can find and delete the optimistic message
@@ -4308,6 +4322,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     _scrollController.dispose();
     _messageController.dispose();
     _messageFocusNode.dispose();
+    _messagesStreamSub?.cancel();
     _messageSubscription?.cancel();
     _messageAckSubscription?.cancel();
     _typingSubscription?.cancel();

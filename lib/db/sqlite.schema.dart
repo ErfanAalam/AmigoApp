@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'package:amigo/db/type-converters.dart';
 import 'package:drift/drift.dart';
-import 'package:drift_flutter/drift_flutter.dart';
+import 'package:drift/native.dart';
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 part 'sqlite.schema.g.dart';
@@ -382,11 +384,13 @@ class AppDatabase extends _$AppDatabase {
   }
 
   static QueryExecutor _openConnection() {
-    return driftDatabase(
-      name: 'amigo_chats.db',
-      native: const DriftNativeOptions(
-        databaseDirectory: getApplicationSupportDirectory,
-      ),
-    );
+    return LazyDatabase(() async {
+      final dir = await getApplicationSupportDirectory();
+      final file = File(p.join(dir.path, 'amigo_chats.db'));
+      return NativeDatabase.createInBackground(file, setup: (db) {
+        db.execute('PRAGMA journal_mode=WAL');
+        db.execute('PRAGMA busy_timeout=5000');
+      });
+    });
   }
 }

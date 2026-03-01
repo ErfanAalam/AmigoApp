@@ -15,9 +15,13 @@ import '../models/community.model.dart';
 import '../models/group.model.dart';
 import '../models/user.model.dart';
 import '../services/socket/ws-message.handler.dart';
+import '../services/socket/transport.manager.dart';
 import '../services/user-status.service.dart';
 import '../types/socket.types.dart';
 import '../utils/user.utils.dart';
+
+/// Overall transport/connectivity status exposed to the UI.
+enum TransportStatus { connected, polling, disconnected }
 
 /// State class for DM list
 class ChatState {
@@ -31,6 +35,8 @@ class ChatState {
   final Map<int, Set<TypingUser>> typingConvUsers; // convId -> userIds[]
   final Map<int, int>? mediaUploadProgress; // messageId -> upload progress %
   final String searchQuery;
+  final TransportStatus transportStatus;
+  final DateTime? lastSyncedAt;
 
   ChatState({
     this.dmList = const [],
@@ -43,6 +49,8 @@ class ChatState {
     this.typingConvUsers = const {},
     this.mediaUploadProgress,
     this.searchQuery = '',
+    this.transportStatus = TransportStatus.disconnected,
+    this.lastSyncedAt,
   });
 
   ChatState copyWith({
@@ -56,6 +64,8 @@ class ChatState {
     Map<int, Set<TypingUser>>? typingConvUsers,
     Map<int, int>? mediaUploadProgress,
     String? searchQuery,
+    TransportStatus? transportStatus,
+    DateTime? lastSyncedAt,
     bool clearActiveConversation = false,
     bool clearTypingConvs = false,
   }) {
@@ -76,6 +86,8 @@ class ChatState {
           : (typingConvUsers ?? this.typingConvUsers),
       mediaUploadProgress: mediaUploadProgress ?? this.mediaUploadProgress,
       searchQuery: searchQuery ?? this.searchQuery,
+      transportStatus: transportStatus ?? this.transportStatus,
+      lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
     );
   }
 
@@ -148,6 +160,7 @@ class ChatNotifier extends Notifier<ChatState> {
   final WebSocketMessageHandler _messageHandler = WebSocketMessageHandler();
   final UserStatusService _userStatusService = UserStatusService();
   final MessageStatusRepository _messageStatusRepo = MessageStatusRepository();
+  final TransportManager _transportManager = TransportManager();
 
   StreamSubscription<ConnectionStatus>? _onlineStatusSubscription;
   StreamSubscription<TypingPayload>? _typingSubscription;
@@ -207,6 +220,29 @@ class ChatNotifier extends Notifier<ChatState> {
       debugPrint('❌ Error loading from local DB: $e');
       state = state.copyWith(isLoading: false);
     }
+  }
+
+  /// Called when the app comes back to the foreground.
+  /// Re-attempts WS connection and pulls any messages missed while in background.
+  Future<void> syncOnResume() async {
+    debugPrint('[CHAT-PROVIDER] App resumed — syncing missed messages');
+    state = state.copyWith(lastSyncedAt: DateTime.now());
+
+    // Attempt WS reconnect; poll immediately for gap-fill regardless
+    if (!_transportManager.isConnected) {
+      _transportManager.reconnect();
+    }
+    // pollNow triggers an immediate poll to pull missed messages
+    _transportManager.pollNow();
+
+    // Also refresh conversation list from server
+    // await loadConvsFromServer(silent: true);
+  }
+
+  /// Called when the app goes to background.
+  void onAppBackground() {
+    debugPrint('[CHAT-PROVIDER] App backgrounded');
+    state = state.copyWith(transportStatus: TransportStatus.disconnected);
   }
 
   /// Load conversations from server
@@ -1214,11 +1250,40 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   /// Handle new message
+  /// Send a real delivery receipt to the server when we receive a message from another user.
+  /// The server will forward a message:ack to the original sender so their UI can update.
+  void _sendDeliveryReceipt(ChatMessagePayload payload, int currentUserId) {
+    try {
+      final receipt = MessageDeliveredPayload(
+        messageId: payload.id,
+        convId: payload.convId,
+        senderId: payload.senderId,
+        recipientId: currentUserId,
+        deliveredAt: DateTime.now(),
+      );
+      final wsmsg = WSMessage(
+        type: WSMessageType.messageDelivered,
+        payload: receipt.toJson(),
+        wsTimestamp: DateTime.now(),
+      ).toJson();
+      _transportManager.sendMessage(wsmsg);
+    } catch (e) {
+      debugPrint('⚠️ Error sending delivery receipt: $e');
+    }
+  }
+
   Future<void> _handleNewMessage(ChatMessagePayload payload) async {
     debugPrint('✅ recieved new message at chat provider');
     try {
       final convId = payload.convId;
       final convType = payload.convType;
+
+      // Send real delivery receipt so sender's UI corrects the optimistic pre-fill
+      final currentUser = await UserUtils().getUserDetails();
+      if (currentUser != null && payload.senderId != currentUser.id) {
+        _sendDeliveryReceipt(payload, currentUser.id);
+      }
+
       // Insert message into local DB
       await _messageRepo.insertMessage(
         MessageModel(
@@ -1390,23 +1455,15 @@ class ChatNotifier extends Notifier<ChatState> {
         }
       }
 
-      // for chat type DM there will be only two users so we can directly set the status leaving us
-      MessageStatusType status = MessageStatusType.delivered;
+      // Determine status from readBy / deliveredTo arrays.
+      // updateMessageStatus has "never downgrade" logic so it's safe to call
+      // even when a later delivery-receipt ack races with an earlier read ack.
+      final MessageStatusType status;
       if (payload.readBy != null && payload.readBy!.isNotEmpty) {
-        if (payload.readBy!.contains(payload.senderId)) {
-          payload.readBy!.remove(payload.senderId);
-        }
-        if (payload.readBy!.length == 1) {
-          status = MessageStatusType.read;
-        }
+        status = MessageStatusType.read;
       } else if (payload.deliveredTo != null &&
           payload.deliveredTo!.isNotEmpty) {
-        if (payload.deliveredTo!.contains(payload.senderId)) {
-          payload.readBy!.remove(payload.senderId);
-        }
-        if (payload.readBy!.length == 1) {
-          status = MessageStatusType.delivered;
-        }
+        status = MessageStatusType.delivered;
       } else {
         status = MessageStatusType.sent;
       }

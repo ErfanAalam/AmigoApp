@@ -103,10 +103,14 @@ class ChatClient extends BaseApiClient {
   /// Poll pending messages
   Future<ApiResult<dynamic>> pollPendingMessages({
     String? afterMessageId,
+    bool? forSync,
   }) async {
     var path = '/chat/poll/poll-pending-messages';
     if (afterMessageId != null) {
       path += '?after_message_id=${Uri.encodeComponent(afterMessageId)}';
+    }
+    if (forSync != null && forSync) {
+      path += '?for_sync=true';
     }
     return get(path);
   }
