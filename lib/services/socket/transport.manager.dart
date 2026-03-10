@@ -8,6 +8,7 @@ import '../../types/network.types.dart';
 import '../../api/api_service.dart';
 import '../../services/cookies.service.dart';
 import '../../utils/navigation-helper.util.dart';
+import '../message/message_gc.service.dart';
 import 'transport.service.dart';
 
 /// Transport manager that handles fallback logic between transports.
@@ -234,6 +235,7 @@ class TransportManager {
           onMessage: _messageController.add,
         );
         debugPrint('[TRANSPORT-MGR] Performed Gap-fill poll re-connection');
+        Future.microtask(() => MessageGarbageCollector.instance.runGC());
 
         _logConnectionSuccess(type, duration);
         return true;

@@ -282,7 +282,8 @@ class ConversationRepository {
     )..where((t) => t.id.equals(conversationId))).write(
       ConversationsCompanion(
         unreadCount: Value(unreadCount),
-        updatedAt: Value(DateTime.now().toIso8601String()),
+        // Do NOT touch updatedAt here — marking as read must not change
+        // the list sort position. Only new-message writes should do that.
       ),
     );
   }
@@ -563,7 +564,7 @@ class ConversationRepository {
               lastMessageBody: lastMessageBody,
               lastMessageAt: lastMessageAt,
               role: currentUserMemberInfo?.role,
-              unreadCount: currentUserMemberInfo?.unreadCount ?? 0,
+              unreadCount: conv.unreadCount ?? 0,
               isPinned: conv.isPinned,
               isMuted: conv.isMuted,
               isFavorite: conv.isFavorite,
@@ -923,7 +924,7 @@ class ConversationRepository {
         lastMessageBody: lastMessageBody,
         lastMessageAt: lastMessageAt,
         role: currentUserMemberInfo?.role,
-        unreadCount: currentUserMemberInfo?.unreadCount ?? 0,
+        unreadCount: conv.unreadCount ?? 0,
         isPinned: conv.isPinned,
         isMuted: conv.isMuted,
         isFavorite: conv.isFavorite,
@@ -992,7 +993,7 @@ class ConversationRepository {
       lastMessageBody: lastMessageBody,
       lastMessageAt: lastMessageAt,
       role: currentUserMemberInfo?.role,
-      unreadCount: currentUserMemberInfo?.unreadCount ?? 0,
+      unreadCount: conv.unreadCount ?? 0,
       isPinned: conv.isPinned,
       isMuted: conv.isMuted,
       isFavorite: conv.isFavorite,
@@ -1089,7 +1090,7 @@ class ConversationRepository {
       lastMessageBody: lastMessageBody,
       lastMessageAt: lastMessageAt,
       role: currentUserMemberInfo?.role,
-      unreadCount: currentUserMemberInfo?.unreadCount ?? 0,
+      unreadCount: conv.unreadCount ?? 0,
       isPinned: conv.isPinned,
       isMuted: conv.isMuted,
       isFavorite: conv.isFavorite,

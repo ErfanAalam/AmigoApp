@@ -114,4 +114,15 @@ class ChatClient extends BaseApiClient {
     }
     return get(path);
   }
+
+  /// Verify which of the given message IDs the server has (GC reconciliation).
+  Future<ApiResult<dynamic>> verifyMessageIds({
+    required List<String> messageIds,
+    required int conversationId,
+  }) async {
+    return post('/message/verify-ids', data: {
+      'message_ids': messageIds,
+      'conversation_id': conversationId,
+    });
+  }
 }

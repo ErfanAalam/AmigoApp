@@ -101,10 +101,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   // Message sync state variables
   bool _isSyncingMessages = false;
-  double _syncProgress = 0.0;
-  String _syncStatus = '';
-  int _syncedMessageCount = 0;
-  int _totalMessageCount = 0;
+  bool _hasMoreOnServer =
+      true; // whether server has more pages beyond what's in local DB
+  bool _isLoadingMore = false; // guard against concurrent load-more calls
 
   // Typing animation controllers
   late AnimationController _typingAnimationController;
@@ -492,6 +491,13 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     await _transportManager.sendMessage(wsmsg);
   }
 
+  /// Returns true only if the pinned message is real and displayable.
+  bool _isValidPinnedMessage(MessageModel msg) {
+    if (msg.id == 0) return false;
+    return (msg.body != null && msg.body!.isNotEmpty) ||
+        msg.type != MessageType.text;
+  }
+
   Future<void> _initializeChat() async {
     // get the current user details
     final currentUser = await _userUtils.getUserDetails();
@@ -548,7 +554,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         return;
       }
 
-      if (pinnedMessage != null) {
+      if (pinnedMessage != null && _isValidPinnedMessage(pinnedMessage)) {
         _safeSetState(() {
           _pinnedMessage = pinnedMessage;
           // Ensure pinned message is in _messages list if not already present
@@ -561,7 +567,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           }
         });
       } else {
-        // Pinned message ID exists but message not found - clear it from DB
+        // Pinned message not found or invalid — clear stale ID from DB
         await _conversationsRepo.updatePinnedMessage(
           widget.dm.conversationId,
           null,
@@ -662,20 +668,44 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Future<void> _loadMoreMessages() async {
-    // Implement loading more messages from server to local DB
-    final moreMessages = await _messagesRepo.getMessagesByConversation(
-      widget.dm.conversationId,
-      limit: 100,
-      offset: _messages.length,
-    );
+    if (_isLoadingMore || !_hasMoreOnServer) return;
 
-    if (!_canSetState) {
-      return;
-    }
     _safeSetState(() {
-      _messages.addAll(moreMessages);
-      _sortMessagesBySentAt();
+      _isLoadingMore = true;
     });
+
+    try {
+      // Derive next page from how many messages are already in the DB.
+      // floor(N / 100) gives the number of complete pages fetched; +1 is the next.
+      final nextPage = (_messages.length / 100).floor() + 1;
+      final result = await apiService.chat.getConversationHistory(
+        conversationId: widget.dm.conversationId,
+        page: nextPage,
+        limit: 100,
+      );
+
+      if (result.data != null) {
+        final history = ConversationHistoryResponse.fromJson(
+          result.data as Map<String, dynamic>,
+        );
+        if (history.messages.isNotEmpty) {
+          await _messagesRepo.insertMessages(history.messages);
+          // Drift stream fires automatically — no setState for _messages needed
+          _hasMoreOnServer = history.hasNextPage;
+        } else {
+          _hasMoreOnServer = false;
+        }
+      } else {
+        _hasMoreOnServer = false;
+      }
+    } catch (e) {
+      debugPrint('[DM] Error loading more messages: $e');
+    } finally {
+      if (mounted)
+        _safeSetState(() {
+          _isLoadingMore = false;
+        });
+    }
   }
 
   /// Sync all messages from server to local DB
@@ -686,227 +716,84 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       widget.dm.conversationId,
     );
 
-    print("-----------------------------------------------------------");
-    print("needSync : ${needSync}");
-    print("-----------------------------------------------------------");
-    // ===========================================================================
-    // ===========================================================================
-    // TEMPORARY NEED SYNC LOGIC CHANGE
-    // ===========================================================================
-    // ===========================================================================
-
     if (needSync == false) {
-      if (_canSetState) {
-        _safeSetState(() {
-          _isSyncingMessages = false;
-          _syncProgress = 1.0;
-          _syncStatus = 'Sync complete';
-        });
-      }
+      // Subsequent open: gap-fill with page 1 only
       final firstPageResponse = await apiService.chat.getConversationHistory(
         conversationId: widget.dm.conversationId,
         page: 1,
         limit: 100,
       );
 
-      final firstPageHistory = ConversationHistoryResponse.fromJson(
-        firstPageResponse.data as Map<String, dynamic>,
-      );
-
-      // Process first page
-      if (firstPageHistory.messages.isNotEmpty) {
-        await _messagesRepo.insertMessages(firstPageHistory.messages);
+      if (firstPageResponse.data != null) {
+        final firstPageHistory = ConversationHistoryResponse.fromJson(
+          firstPageResponse.data as Map<String, dynamic>,
+        );
+        if (firstPageHistory.messages.isNotEmpty) {
+          await _messagesRepo.insertMessages(firstPageHistory.messages);
+        }
       }
 
-      // Sync message statuses
+      // Sync message statuses silently in background
       await _syncMessageStatuses();
 
-      // hasMorePages = firstPageHistory.hasNextPage;
-      // page++;
+      _hasMoreOnServer = true; // assume more exist on server
 
-      // Reload messages from local DB after sync
-      if (!_canSetState) {
-        return;
-      }
-      final syncedMessages = await _messagesRepo.getMessagesByConversation(
-        widget.dm.conversationId,
-        limit: 100,
-        offset: 0,
-      );
+      return;
+    }
 
-      if (!_canSetState) {
-        return;
-      }
+    // First open: fetch up to 3 pages of 100 = 300 messages
+    const int firstOpenMaxPages = 3;
+    const int limit = 100;
+    int page = 1;
+    bool hasMore = true;
+
+    if (_canSetState) {
       _safeSetState(() {
-        _messages = syncedMessages;
-        _sortMessagesBySentAt();
-        _isSyncingMessages = false;
-        _syncProgress = 1.0;
-        _syncStatus = 'Sync complete';
+        _isSyncingMessages = true;
       });
-
-      // return early since we don't need heavy sync
-      return;
     }
-
-    // Start syncing
-    if (!_canSetState) {
-      return;
-    }
-    _safeSetState(() {
-      _isSyncingMessages = true;
-      _syncProgress = 0.0;
-      _syncStatus = 'syncing messages';
-      _syncedMessageCount = 0;
-      _totalMessageCount = 0;
-    });
 
     try {
-      int page = 1;
-      const int limit = 200; // Fetch 100 messages per page
-      bool hasMorePages = true;
-      int totalSynced = 0;
-
-      // First, get the first page to know total count
-      final firstPageResponse = (await apiService.chat.getConversationHistory(
-        conversationId: widget.dm.conversationId,
-        page: page,
-        limit: limit,
-      )).toMap();
-      print("-----------------------------------------------------------");
-      print("firstPageResponse : ${firstPageResponse}");
-      print("-----------------------------------------------------------");
-
-      if (firstPageResponse['success'] != true ||
-          firstPageResponse['data'] == null) {
-        // Failed to fetch, stop syncing
-        if (_canSetState) {
-          _safeSetState(() {
-            _isSyncingMessages = false;
-            _syncStatus = 'Sync failed';
-          });
-        }
-        return;
-      }
-
-      final firstPageHistory = ConversationHistoryResponse.fromJson(
-        firstPageResponse['data'],
-      );
-      _totalMessageCount = firstPageHistory.totalCount;
-
-      if (_totalMessageCount == 0) {
-        // No messages to sync
-        if (_canSetState) {
-          _safeSetState(() {
-            _isSyncingMessages = false;
-            _syncStatus = '';
-          });
-        }
-        return;
-      }
-
-      // Process first page
-      if (firstPageHistory.messages.isNotEmpty) {
-        await _messagesRepo.insertMessages(firstPageHistory.messages);
-        totalSynced += firstPageHistory.messages.length;
-
-        if (_canSetState) {
-          _safeSetState(() {
-            _syncedMessageCount = totalSynced;
-            _syncProgress = totalSynced / _totalMessageCount;
-            _syncStatus =
-                'Syncing messages... ($totalSynced/$_totalMessageCount)';
-          });
-        }
-      }
-
-      hasMorePages = firstPageHistory.hasNextPage;
-      page++;
-
-      // Continue fetching remaining pages
-      while (hasMorePages && _canSetState) {
-        final response = (await apiService.chat.getConversationHistory(
+      while (page <= firstOpenMaxPages && hasMore && mounted && !_isDisposed) {
+        final result = await apiService.chat.getConversationHistory(
           conversationId: widget.dm.conversationId,
           page: page,
           limit: limit,
-        )).toMap();
-
-        if (response['success'] != true || response['data'] == null) {
-          break; // Stop on error
-        }
-
-        final historyResponse = ConversationHistoryResponse.fromJson(
-          response['data'],
         );
 
-        if (historyResponse.messages.isEmpty) {
-          break; // No more messages
-        }
+        if (result.data == null) break;
 
-        // Insert messages into local DB
-        await _messagesRepo.insertMessages(historyResponse.messages);
-        totalSynced += historyResponse.messages.length;
+        final history = ConversationHistoryResponse.fromJson(
+          result.data as Map<String, dynamic>,
+        );
 
-        // Update progress
-        if (_canSetState) {
-          _safeSetState(() {
-            _syncedMessageCount = totalSynced;
-            _syncProgress = totalSynced / _totalMessageCount;
-            _syncStatus =
-                'Syncing messages... ($totalSynced/$_totalMessageCount)';
-          });
-        }
+        await _messagesRepo.insertMessages(history.messages);
 
-        hasMorePages = historyResponse.hasNextPage;
+        hasMore = history.hasNextPage;
         page++;
-
-        // Small delay to avoid overwhelming the server
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future.delayed(const Duration(milliseconds: 30));
       }
 
-      // Sync message statuses after all messages are synced
+      _hasMoreOnServer = hasMore;
+
+      // Messages are in DB — hide spinner immediately, chat is usable
+      if (mounted)
+        _safeSetState(() {
+          _isSyncingMessages = false;
+        });
+
+      // Sync statuses and mark synced silently in background
       await _syncMessageStatuses();
-
-      // Reload messages from local DB after sync
-      if (!_canSetState) {
-        return;
-      }
-      final syncedMessages = await _messagesRepo.getMessagesByConversation(
-        widget.dm.conversationId,
-        limit: 100,
-        offset: 0,
-      );
-
-      if (!_canSetState) {
-        return;
-      }
-      _safeSetState(() {
-        _messages = syncedMessages;
-        _sortMessagesBySentAt();
-        _isSyncingMessages = false;
-        _syncProgress = 1.0;
-        _syncStatus = 'Sync complete';
-      });
-
-      // Mark sync as completed in conversations repo
       await _conversationsRepo.updateNeedSyncStatus(
         widget.dm.conversationId,
         false,
       );
-
-      // Clear sync status after a short delay
-      Future.delayed(const Duration(seconds: 1), () {
-        _safeSetState(() {
-          _syncStatus = '';
-          _syncProgress = 0.0;
-        });
-      });
     } catch (e) {
       debugPrint('❌ Error syncing messages: $e');
-      _safeSetState(() {
-        _isSyncingMessages = false;
-        _syncStatus = 'Sync failed';
-      });
+      if (mounted)
+        _safeSetState(() {
+          _isSyncingMessages = false;
+        });
     }
   }
 
@@ -1237,31 +1124,27 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       if (!_canSetState) {
         return;
       }
+      // If the backend assigned a new ID due to collision, use it; otherwise
+      // keep the original. This must be applied to both the in-memory list and
+      // the DB so they stay consistent.
+      final canonicalId = payload.newId ?? payload.id;
+
       _safeSetState(() {
         _messages[messageIndex] = _messages[messageIndex].copyWith(
-          id: payload.id,
-          status: status, // Update to delivered when acknowledged
+          id: canonicalId,
+          status: status,
           metadata: updatedMetadata,
         );
       });
 
-      // Save to DB - insertMessage will handle deleting the optimistic message
+      // Save to DB — pass newId whenever present so the repo renames the row.
       try {
-        // await _messagesRepo.insertMessage(updatedMessage);
-        if (payload.isFailed == true && payload.errorCode == 409) {
-          await _messagesRepo.updateMessageFields(
-            payload.id,
-            newId: payload.newId,
-            status: status,
-            metadata: updatedMetadata,
-          );
-        } else {
-          await _messagesRepo.updateMessageFields(
-            payload.id,
-            status: status,
-            metadata: updatedMetadata,
-          );
-        }
+        await _messagesRepo.updateMessageFields(
+          payload.id,
+          newId: payload.newId,
+          status: status,
+          metadata: updatedMetadata,
+        );
       } catch (e) {
         debugPrint('❌ Error updating message in DB: $e');
       }
@@ -2211,7 +2094,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             Column(
               children: [
                 // Pinned Message Section
-                if (_pinnedMessage != null)
+                if (_pinnedMessage != null && _pinnedMessage!.id != 0)
                   PinnedMessageSection(
                     pinnedMessage: _messages.firstWhere(
                       (message) => message.id == _pinnedMessage?.id,
@@ -2229,17 +2112,17 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                 _buildMessageInput(),
               ],
             ),
-            // Sync Progress Bar - Floating at the top
+            // Sync indicator pill - above date separator
             if (_isSyncingMessages)
               Positioned(
-                top: 0,
+                top: 10,
                 left: 0,
                 right: 0,
                 child: _buildSyncProgressBar(),
               ),
-            // Sticky Date Separator - Overlay on top
+            // Sticky Date Separator - shifts down when sync pill is visible
             Positioned(
-              top: _isSyncingMessages ? 60 : 10,
+              top: _isSyncingMessages ? 44 : 10,
               left: 0,
               right: 0,
               child: _buildStickyDateSeparator(),
@@ -2267,68 +2150,37 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     );
   }
 
-  /// Build floating sync progress bar widget
+  /// Build floating sync indicator — centered pill styled like the date chip
   Widget _buildSyncProgressBar() {
-    final themeColor = ref.watch(themeColorProvider);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: themeColor.primary,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-                  value: _syncProgress > 0 ? _syncProgress : null,
-                ),
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 11,
+              height: 11,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _syncStatus.isNotEmpty
-                          ? _syncStatus
-                          : 'Syncing messages...',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    if (_totalMessageCount > 0) ...[
-                      const SizedBox(height: 4),
-                      LinearProgressIndicator(
-                        value: _syncProgress,
-                        backgroundColor: Colors.white.withOpacity(0.3),
-                        valueColor: const AlwaysStoppedAnimation<Color>(
-                          Colors.white,
-                        ),
-                        minHeight: 2,
-                      ),
-                    ],
-                  ],
-                ),
+            ),
+            SizedBox(width: 7),
+            Text(
+              'Syncing...',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 11.5,
+                fontWeight: FontWeight.bold,
               ),
-            ],
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2369,7 +2221,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       controller: _scrollController,
       reverse: true, // Start from bottom (newest messages)
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: _messages.length,
+      itemCount: _messages.length + (_isLoadingMore ? 1 : 0),
       physics:
           const ClampingScrollPhysics(), // Better performance than bouncing
       cacheExtent: 500, // Reduce cache extent to save memory
@@ -2377,6 +2229,14 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       addRepaintBoundaries:
           true, // Add repaint boundaries for better performance
       itemBuilder: (context, index) {
+        // Show load-more spinner at the top (highest index in reversed list)
+        if (_isLoadingMore && index == _messages.length) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+        }
+
         // Calculate the actual message index, accounting for indicators
         int messageIndex = index;
         // Bounds check to prevent index out of bounds errors

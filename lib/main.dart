@@ -29,6 +29,7 @@ import 'services/call/call-foreground.service.dart';
 import 'services/call/call.service.dart';
 import 'services/cookies.service.dart';
 import 'services/fcm/fcm-init.service.dart';
+import 'services/message/message_gc.service.dart';
 import 'services/socket/transport.manager.dart';
 import 'services/socket/transport.service.dart';
 import 'services/socket/ws-message.handler.dart';
@@ -157,6 +158,7 @@ class _MyAppState extends material.State<MyApp>
 
       // Initialize centralized WebSocket message handler (only once)
       WebSocketMessageHandler().initialize();
+      MessageGarbageCollector.instance.init();
 
       final appVersion = await UserUtils().getAppVersion();
       final updateResult = await _apiService.user.updateUser({

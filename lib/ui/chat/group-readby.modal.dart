@@ -396,7 +396,7 @@ class _ReadByModalState extends ConsumerState<ReadByModal>
                           // Delivered members section
                           if (deliveredMembers.isNotEmpty) ...[
                             _buildSectionHeader(
-                              'Delivered (not read) ${deliveredMembers.length}',
+                              'Delivered to ${deliveredMembers.length}',
                               false,
                             ),
                             Flexible(

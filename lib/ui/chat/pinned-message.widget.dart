@@ -1,4 +1,5 @@
 import 'package:amigo/models/message.model.dart';
+import 'package:amigo/types/socket.types.dart';
 import 'package:flutter/material.dart';
 
 import '../../utils/chat/chat-helpers.utils.dart';
@@ -22,6 +23,21 @@ class PinnedMessageSection extends StatelessWidget {
   /// Determine if pinned message is from current user
   bool get _isMyMessage {
     return currentUserId != null && pinnedMessage?.senderId == currentUserId;
+  }
+
+  String _mediaPlaceholder(MessageType? type) {
+    switch (type) {
+      case MessageType.image:
+        return '📷 Photo';
+      case MessageType.video:
+        return '🎥 Video';
+      case MessageType.audio:
+        return '🎤 Voice message';
+      case MessageType.document:
+        return '📎 File';
+      default:
+        return '';
+    }
   }
 
   @override
@@ -85,7 +101,9 @@ class PinnedMessageSection extends StatelessWidget {
 
                   // Message text
                   Text(
-                    pinnedMessage?.body ?? '',
+                    pinnedMessage?.body?.isNotEmpty == true
+                        ? pinnedMessage!.body!
+                        : _mediaPlaceholder(pinnedMessage?.type),
                     style: TextStyle(
                       color: Colors.grey[800],
                       fontSize: 14,

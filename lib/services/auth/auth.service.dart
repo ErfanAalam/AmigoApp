@@ -8,6 +8,7 @@ import 'dart:io';
 import '../../api/api_service.dart';
 import '../../providers/chat.provider.dart';
 import '../../providers/draft.provider.dart';
+import '../../providers/message.provider.dart';
 import '../../providers/notification-badge.provider.dart';
 import '../../screens/auth/login.screen.dart';
 import '../../utils/navigation-helper.util.dart';
@@ -194,6 +195,7 @@ class AuthService {
   // Log out user
   Future<void> logout() async {
     try {
+      debugPrint('🚪 Logging out user...');
       // Ensure websocket is fully shut down and won't auto-reconnect
       try {
         await TransportManager().shutdown();
@@ -253,14 +255,16 @@ class AuthService {
       await prefs.remove('current_user_name');
 
       // 14. Clear all provider states
+      // Capture the container early so we can use it after DB operations too.
+      ProviderContainer? providerContainer;
       try {
         final context = NavigationHelper.navigatorKey.currentContext;
         if (context != null) {
-          final container = ProviderScope.containerOf(context);
+          providerContainer = ProviderScope.containerOf(context);
 
           // Clear chat provider - reset dmList and groupList
           try {
-            container.read(chatProvider.notifier).clearAllState();
+            providerContainer.read(chatProvider.notifier).clearAllState();
             debugPrint('✅ Cleared chat provider state');
           } catch (e) {
             debugPrint('⚠️ Error clearing chat provider: $e');
@@ -268,7 +272,9 @@ class AuthService {
 
           // Clear draft messages provider
           try {
-            container.read(draftMessagesProvider.notifier).clearAllDrafts();
+            providerContainer
+                .read(draftMessagesProvider.notifier)
+                .clearAllDrafts();
             debugPrint('✅ Cleared draft messages provider state');
           } catch (e) {
             debugPrint('⚠️ Error clearing draft messages provider: $e');
@@ -276,7 +282,9 @@ class AuthService {
 
           // Clear notification badge provider - reset to initial state
           try {
-            container.read(notificationBadgeProvider.notifier).clearAllCounts();
+            providerContainer
+                .read(notificationBadgeProvider.notifier)
+                .clearAllCounts();
             debugPrint('✅ Cleared notification badge provider state');
           } catch (e) {
             debugPrint('⚠️ Error clearing notification badge provider: $e');
@@ -313,6 +321,22 @@ class AuthService {
         } catch (_) {}
       }
 
+      // Invalidate Drift stream providers AFTER the DB file is deleted and
+      // _db is null. This forces them to re-subscribe to a brand-new
+      // AppDatabase() the next time any screen reads them, so the new
+      // account's data appears instead of stale streams from the old DB.
+      if (providerContainer != null) {
+        try {
+          providerContainer.invalidate(dmListStreamProvider);
+          providerContainer.invalidate(groupListStreamProvider);
+          providerContainer.invalidate(messageStreamProvider);
+          providerContainer.invalidate(userStatusStreamProvider);
+          debugPrint('✅ Invalidated Drift stream providers');
+        } catch (e) {
+          debugPrint('⚠️ Error invalidating stream providers: $e');
+        }
+      }
+
       // 16. Restart the app
       if (NavigationHelper.navigatorKey.currentContext != null) {
         Navigator.pushAndRemoveUntil(
@@ -321,6 +345,7 @@ class AuthService {
           (route) => false,
         );
       }
+      debugPrint('✅ Logout process completed successfully');
     } catch (e) {
       debugPrint('❌ Error during logout');
     }

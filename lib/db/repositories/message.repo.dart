@@ -111,8 +111,14 @@ class MessageRepository {
 
     try {
       final companion = _modelToCompanion(message);
-      final result = await db.into(db.messages).insert(companion);
-      return SqliteResult.success(data: result, message: 'Message inserted');
+      await db.into(db.messages).insert(
+        companion,
+        mode: InsertMode.insertOrIgnore,
+      );
+      return SqliteResult.success(
+        data: 0,
+        message: 'Message inserted or already exists',
+      );
     } catch (e) {
       final errorCode = _extractSqliteErrorCode(e);
       return SqliteResult.error(
@@ -123,7 +129,7 @@ class MessageRepository {
   }
 
   /// Insert multiple messages (bulk insert)
-  /// Continues inserting even if some messages fail (e.g., duplicates)
+  /// Uses INSERT OR IGNORE so duplicates are silently skipped.
   Future<void> insertMessages(List<MessageModel> messages) async {
     if (messages.isEmpty) return;
 
@@ -132,16 +138,14 @@ class MessageRepository {
       for (final message in messages) {
         try {
           final companion = _modelToCompanion(message);
-          await db.into(db.messages).insert(companion);
+          await db.into(db.messages).insert(
+            companion,
+            mode: InsertMode.insertOrIgnore,
+          );
         } catch (e) {
-          final errorCode = _extractSqliteErrorCode(e);
-          // Only log non-duplicate errors (duplicates are expected)
-          if (errorCode != 1555) {
-            debugPrint(
-              "Error inserting message with ID ${message.id}: $e (errorCode: $errorCode)",
-            );
-          }
-          // Continue with next message instead of failing the whole batch
+          debugPrint(
+            "Error inserting message with ID ${message.id}: $e",
+          );
         }
       }
     });
@@ -1133,6 +1137,33 @@ class MessageRepository {
   void _stopCleanupTimer() {
     _cleanupTimer?.cancel();
     _cleanupTimer = null;
+  }
+
+  /// Messages stuck as 'unsent' for longer than [unsentThreshold],
+  /// or any 'failed' message — for the given sender only.
+  Future<List<MessageModel>> getStalledMessages({
+    required int userId,
+    required Duration unsentThreshold,
+  }) async {
+    final db = sqliteDatabase.database;
+    final threshold = DateTime.now()
+        .toUtc()
+        .subtract(unsentThreshold)
+        .toIso8601String();
+
+    final query = db.select(db.messages)
+      ..where(
+        (t) =>
+            t.senderId.equals(userId) &
+            t.isDeleted.equals(false) &
+            (t.status.equals('failed') |
+                (t.status.equals('unsent') &
+                    t.sentAt.isSmallerThanValue(threshold))),
+      )
+      ..orderBy([(t) => OrderingTerm(expression: t.sentAt)]);
+
+    final rows = await query.get();
+    return rows.map(_messageToModel).toList();
   }
 
   /// Dispose resources and stop the cleanup timer

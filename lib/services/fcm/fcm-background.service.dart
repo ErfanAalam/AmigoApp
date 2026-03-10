@@ -397,6 +397,7 @@ Future<void> _handleMessageNotificationBatchBackground(
 
   // Collect IDs for batch delivery receipt
   final List<Map<String, dynamic>> deliveries = [];
+  final messageRepo = MessageRepository();
 
   for (final wsMessage in wsMessages) {
     try {
@@ -404,17 +405,21 @@ Future<void> _handleMessageNotificationBatchBackground(
         case WSMessageType.messageNew:
           final chatPayload = wsMessage.chatMessagePayload;
           if (chatPayload != null) {
-            final msgBody =
-                chatPayload.body ??
-                ((chatPayload.msgType != MessageType.text)
-                    ? chatPayload.msgType.toString()
-                    : 'New message');
+            final alreadyExists = await messageRepo.messageExists(chatPayload.id);
 
-            await notificationService.showMessageNotification(
-              title: chatPayload.senderName ?? 'New Message',
-              body: msgBody.trim(),
-              chatPayload: chatPayload,
-            );
+            if (!alreadyExists) {
+              final msgBody =
+                  chatPayload.body ??
+                  ((chatPayload.msgType != MessageType.text)
+                      ? chatPayload.msgType.toString()
+                      : 'New message');
+
+              await notificationService.showMessageNotification(
+                title: chatPayload.senderName ?? 'New Message',
+                body: msgBody.trim(),
+                chatPayload: chatPayload,
+              );
+            }
 
             await _storeMessageFromPayloadBackground(chatPayload, sendReceipt: false);
 

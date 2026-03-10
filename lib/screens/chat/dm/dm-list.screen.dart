@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../config/app-colors.config.dart';
 import '../../../providers/chat.provider.dart';
 import '../../../providers/draft.provider.dart';
+import '../../../providers/message.provider.dart';
 import '../../../providers/theme-color.provider.dart';
 import '../../../services/user-status.service.dart';
 import '../../../types/socket.types.dart';
@@ -330,6 +331,9 @@ class ChatsPageState extends ConsumerState<ChatsPage>
   Widget _buildChatsContent() {
     final chatState = ref.watch(chatProvider);
     final dmListAsync = ref.watch(dmListStreamProvider);
+    // Watch user status stream so this widget rebuilds when online status changes.
+    // The actual per-user value is read from UserStatusService in _buildChatsList.
+    ref.watch(userStatusStreamProvider);
 
     return dmListAsync.when(
       loading: () => _buildSkeletonLoader(),
@@ -396,7 +400,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
           return ChatListItem(
             conversation: conversation,
             isTyping: isTyping,
-            isOnline: conversation.isRecipientOnline,
+            isOnline: _userStatusService.isUserOnline(conversation.recipientId),
             isPinned: conversation.isPinned ?? false,
             isMuted: conversation.isMuted ?? false,
             isFavorite: conversation.isFavorite ?? false,

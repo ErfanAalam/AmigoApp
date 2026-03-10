@@ -14,6 +14,7 @@ import '../db/repositories/message-status.repo.dart';
 import '../models/community.model.dart';
 import '../models/group.model.dart';
 import '../models/user.model.dart';
+import '../services/message/message_gc.service.dart';
 import '../services/socket/ws-message.handler.dart';
 import '../services/socket/transport.manager.dart';
 import '../services/user-status.service.dart';
@@ -234,6 +235,9 @@ class ChatNotifier extends Notifier<ChatState> {
     }
     // pollNow triggers an immediate poll to pull missed messages
     _transportManager.pollNow();
+
+    // Run GC to reconcile any stalled outbound messages
+    Future.microtask(() => MessageGarbageCollector.instance.runGC());
 
     // Also refresh conversation list from server
     // await loadConvsFromServer(silent: true);
@@ -1319,6 +1323,8 @@ class ChatNotifier extends Notifier<ChatState> {
 
         newDmUnreadCount = state.activeConvId == convId
             ? 0
+            : payload.senderId == currentUser?.id
+            ? dm.unreadCount ?? 0
             : (dm.unreadCount ?? 0) + 1;
 
         final updatedConversation = dm.copyWith(
@@ -1352,7 +1358,9 @@ class ChatNotifier extends Notifier<ChatState> {
         // Update group's last message
         newGrpUnreadCount = state.activeConvId == convId
             ? 0
-            : group.unreadCount + 1;
+            : payload.senderId == currentUser?.id
+            ? group.unreadCount
+            : (group.unreadCount) + 1;
 
         final updatedGroup = group.copyWith(
           lastMessageId: payload.id,
@@ -1394,7 +1402,6 @@ class ChatNotifier extends Notifier<ChatState> {
   /// Handle ack message
   Future<void> _handleAckMessage(ChatMessageAckPayload payload) async {
     debugPrint('✅ recieved ack message at chat provider');
-    debugPrint('✅ payload: ${payload.toJson()}');
     if (payload.isFailed == true) {
       return;
     }
@@ -1455,11 +1462,16 @@ class ChatNotifier extends Notifier<ChatState> {
         }
       }
 
-      // Determine status from readBy / deliveredTo arrays.
-      // updateMessageStatus has "never downgrade" logic so it's safe to call
-      // even when a later delivery-receipt ack races with an earlier read ack.
+      // For groups, messages.status only reflects server acceptance (sent).
+      // Per-member read/delivered is in message_status, already written above.
+      // For DMs, we can infer the single-recipient aggregate from deliveredTo/readBy.
+      final bool isGroup = state.groupList.any(
+        (g) => g.conversationId == payload.convId,
+      );
       final MessageStatusType status;
-      if (payload.readBy != null && payload.readBy!.isNotEmpty) {
+      if (isGroup) {
+        status = MessageStatusType.sent;
+      } else if (payload.readBy != null && payload.readBy!.isNotEmpty) {
         status = MessageStatusType.read;
       } else if (payload.deliveredTo != null &&
           payload.deliveredTo!.isNotEmpty) {
@@ -1468,9 +1480,19 @@ class ChatNotifier extends Notifier<ChatState> {
         status = MessageStatusType.sent;
       }
 
+      // The conversation's last-message pointer should use the final canonical ID
+      // (newId when the backend reassigned due to snowflake collision, else original).
+      final canonicalId = payload.newId ?? payload.id;
+
+      // Always update status on the ORIGINAL id.
+      // The message row always starts with payload.id; updateMessageFields in
+      // the messaging screen renames it to newId and writes status atomically.
+      // If that rename wins the race first, this call is a silent no-op — the
+      // status was already written correctly. Never use canonicalId here or we
+      // risk updating a row that doesn't exist yet.
       await _messageRepo.updateMessageStatus(payload.id, status);
 
-      await _conversationsRepo.updateLastMessageId(payload.convId, payload.id);
+      await _conversationsRepo.updateLastMessageId(payload.convId, canonicalId);
     } catch (e) {
       debugPrint('❌ Error handling ack message: $e');
     }
