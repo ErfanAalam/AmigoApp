@@ -23,7 +23,7 @@ class CallServiceState {
   }
 
   bool get hasActiveCall => activeCall != null;
-  bool get isInCall => activeCall?.status == CallStatus.answered;
+  bool get isInCall => activeCall?.status == CallStatus.answered || activeCall?.status == CallStatus.connecting;
 }
 
 /// Riverpod provider for CallService

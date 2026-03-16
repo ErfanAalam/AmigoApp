@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/call.model.dart';
 import '../../providers/call.provider.dart';
+import '../../services/call/native_call_screen.service.dart';
 import '../../ui/snackbar.dart';
 
 /// Global call bar that appears above all app bars when a call is ongoing
@@ -52,24 +53,18 @@ class _GlobalCallBarState extends ConsumerState<GlobalCallBar>
     final callServiceNotifier = ref.read(callServiceProvider.notifier);
     final activeCall = callServiceState.activeCall;
 
-    // Check if we're on the call screen or incoming call screen by checking the current route
-    final ModalRoute<dynamic>? currentRoute = ModalRoute.of(context);
-    final String? routeName = currentRoute?.settings.name;
-    final bool isOnCallScreen =
-        routeName == '/call' || routeName == '/incoming-call';
-
-    // Check if call is ongoing (initiated, ringing, or answered) and not on call screen
+    // Check if call is ongoing (initiated, ringing, or answered)
+    // Native call screen doesn't use Flutter routes, so we always show the bar when there's an active call
     final bool shouldShow =
         activeCall != null &&
         (activeCall.status == CallStatus.initiated ||
             activeCall.status == CallStatus.ringing ||
-            activeCall.status == CallStatus.answered) &&
-        !isOnCallScreen;
+            activeCall.status == CallStatus.answered);
 
     // Debug logging only when there's an active call
     if (activeCall != null && activeCall.status != CallStatus.ended) {
       debugPrint(
-        '[GlobalCallBar] status: ${activeCall.status}, shouldShow: $shouldShow, route: $routeName, duration: ${activeCall.duration}',
+        '[GlobalCallBar] status: ${activeCall.status}, shouldShow: $shouldShow, duration: ${activeCall.duration}',
       );
     }
 
@@ -227,7 +222,20 @@ class _GlobalCallBarState extends ConsumerState<GlobalCallBar>
   }
 
   void _navigateToCallScreen(BuildContext context) {
-    Navigator.of(context).pushNamed('/call');
+    final activeCall = ref.read(callServiceProvider).activeCall;
+    if (activeCall == null) return;
+    NativeCallScreen.showCallScreen(
+      callId: activeCall.callId,
+      callerName: activeCall.userName,
+      callerPhoto: activeCall.userProfilePic,
+      callMode: activeCall.status == CallStatus.answered
+          ? 'in_call'
+          : activeCall.callType == CallType.incoming
+              ? 'incoming'
+              : 'outgoing',
+      isMuted: activeCall.isMuted,
+      isSpeakerOn: activeCall.isSpeakerOn,
+    );
   }
 
   void _endCall(BuildContext context, CallServiceNotifier notifier) async {

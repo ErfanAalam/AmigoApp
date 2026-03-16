@@ -1,0 +1,96 @@
+flowchart TB;
+  A[Caller] -->|call:init| C((Server))
+  C -->|call:ringing| D{Client Status}
+  D -.-|online| Z[Receiver]
+  Z --> B[Show Incoming Call Screen]
+  D -.-|offline| E[Send Data-only Notification]
+  E -.-|wake app| K[Process CallKit Incoming]
+  K -.- Z
+  C -->|call:accept:ack| A
+  A --> F[C Main Call Screen]
+  B -.- G[/call:accept/]
+  G --> C
+  G --> J[R Main Call Screen]
+  B -->|call:terminate(hangup)| C
+  J -->|call:terminate| C
+  C -->|call:terminate:ack| A
+  F -->|call:terminate(hangup)| C
+  C -->|call:terminate:ack| Z
+  
+  %% K -->|accept| F
+  %% B -->|reject| G[Send Reject Signal]
+  %% K -->|reject| G
+  %% G -->|notify| H[Notify Caller]
+  %% H -->|end call| I[End Call]
+  %% F -->|end call| I
+
+  classDef H1  fill:#5abddb,stroke:#333
+  classDef H2  fill:#6ec6e2,stroke:#333
+  classDef H3  fill:#82cfe9,stroke:#333
+  classDef H4  fill:#96d8f0,stroke:#333
+  classDef H5  fill:#a9e1f6,stroke:#333
+
+  classDef H6  fill:#bbf,stroke:#333
+  classDef H7  fill:#c8c8ff,stroke:#333
+  classDef H8  fill:#d5d5ff,stroke:#333
+  classDef H9  fill:#e2e2ff,stroke:#333
+  classDef H10 fill:#eeeeff,stroke:#333
+
+  classDef H11 fill:#bfb,stroke:#333
+  classDef H12 fill:#c9f5c9,stroke:#333
+  classDef H13 fill:#d4f8d4,stroke:#333
+  classDef H14 fill:#defade,stroke:#333
+  classDef H15 fill:#e9fce9,stroke:#333
+
+  classDef H16 fill:#ebe,stroke:#333
+  classDef H17 fill:#f2c9f2,stroke:#333
+  classDef H18 fill:#f7d6f7,stroke:#333
+  classDef H19 fill:#fbe3fb,stroke:#333
+  classDef H20 fill:#fdf0fd,stroke:#333
+
+  linkStyle 0,1,4  stroke:#5abddb,stroke-width:3px;
+  linkStyle 13,14  stroke:#ff5555,stroke-width:3px;
+  classDef L3  stroke:#4CAF50,stroke-width:3px;
+  classDef L4  stroke:#FFB020,stroke-width:3px;
+  classDef L5  stroke:#3B82F6,stroke-width:3px;
+  classDef L6  stroke:#8B5CF6,stroke-width:3px;
+  classDef L7  stroke:#EC4899,stroke-width:3px;
+  classDef L8  stroke:#14B8A6,stroke-width:3px;
+  linkStyle 15,16  stroke:#F97316,stroke-width:3px;
+  classDef L10 stroke:#6B7280,stroke-width:3px;
+
+  class A H1
+  class J H11
+  class F H11
+  class C H6
+  class Z H1
+%%   linkStyle 0 stroke:red,stroke-width:2px
+
+
+%% architecture-beta
+%%     group api(cloud)[API]
+%%
+%%     service db(database)[Database] in api
+%%     service disk1(disk)[Storage] in api
+%%     service disk2(disk)[Storage] in api
+%%     service server(server)[Server] in api
+%%
+%%     db:L -- R:server
+%%     disk1:T -- B:server
+%%     disk2:T -- B:db
+
+%% erDiagram
+%%           CUSTOMER }|..|{ DELIVERY-ADDRESS : has
+%%           CUSTOMER ||--o{ ORDER : places
+%%           CUSTOMER ||--o{ INVOICE : "liable for"
+%%           DELIVERY-ADDRESS ||--o{ ORDER : receives
+%%           INVOICE ||--|{ ORDER : covers
+%%           ORDER ||--|{ ORDER-ITEM : includes
+%%           PRODUCT-CATEGORY ||--|{ PRODUCT : contains
+%%           PRODUCT ||--o{ ORDER-ITEM : "ordered in"
+%%
+
+%% sequenceDiagram
+%%     Alice->>John: Hello John, how are you?
+%%     John-->>Alice: Great!
+%%     Alice-)John: See you later!

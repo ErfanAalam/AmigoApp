@@ -2,6 +2,7 @@ package com.aiexch.amigo
 
 import android.os.Bundle
 import android.view.WindowManager
+import com.aiexch.amigo.call.AmigoCallPlugin
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -12,7 +13,10 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        
+
+        // Register the native call screen plugin
+        flutterEngine.plugins.add(AmigoCallPlugin())
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "enableLockScreenFlags" -> {

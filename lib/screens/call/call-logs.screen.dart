@@ -557,11 +557,8 @@ class CallsPageState extends ConsumerState<CallsPage>
   Future<void> _initiateCall(int userId, String userName) async {
     try {
       final callServiceNotifier = ref.read(callServiceProvider.notifier);
+      // Native call screen is launched automatically by call.service.dart
       await callServiceNotifier.initiateCall(userId, userName, null);
-
-      if (context.mounted) {
-        Navigator.of(context).pushNamed('/call');
-      }
     } catch (e) {
       if (context.mounted) {
         Snack.error(

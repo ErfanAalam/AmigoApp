@@ -147,6 +147,7 @@ class CallModel {
 enum CallStatus {
   initiated('initiated'),
   ringing('ringing'),
+  connecting('connecting'),
   answered('answered'),
   ended('ended'),
   missed('missed'),
@@ -217,6 +218,7 @@ class ActiveCallState {
   final Duration? duration;
   final bool isMuted;
   final bool isSpeakerOn;
+  final bool isOnHold;
 
   ActiveCallState({
     required this.callId,
@@ -229,6 +231,7 @@ class ActiveCallState {
     this.duration,
     this.isMuted = false,
     this.isSpeakerOn = false,
+    this.isOnHold = false,
   });
 
   ActiveCallState copyWith({
@@ -242,6 +245,7 @@ class ActiveCallState {
     Duration? duration,
     bool? isMuted,
     bool? isSpeakerOn,
+    bool? isOnHold,
   }) {
     return ActiveCallState(
       callId: callId ?? this.callId,
@@ -254,6 +258,7 @@ class ActiveCallState {
       duration: duration ?? this.duration,
       isMuted: isMuted ?? this.isMuted,
       isSpeakerOn: isSpeakerOn ?? this.isSpeakerOn,
+      isOnHold: isOnHold ?? this.isOnHold,
     );
   }
 }

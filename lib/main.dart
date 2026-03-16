@@ -6,7 +6,9 @@ import 'package:amigo/utils/user.utils.dart';
 import 'package:amigo/utils/call.utils.dart';
 import 'package:flutter/material.dart' as material;
 import 'package:flutter/material.dart';
-import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+// FlutterCallkitIncoming - commented out, replaced by native call screen
+// import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'services/call/native_call_screen.service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart'
     show Permission, PermissionActions;
@@ -18,13 +20,12 @@ import 'env.dart';
 import 'package:dio/dio.dart';
 import 'models/group.model.dart';
 import 'screens/auth/login.screen.dart';
-import 'screens/call/in-call.screen.dart';
-import 'screens/call/incoming-call.screen.dart';
 import 'screens/chat/dm/dm-messaging.screen.dart';
 import 'screens/chat/group/group-messaging.screen.dart';
 import 'screens/home.layout.dart';
 import 'screens/share/external-share.screen.dart';
 import 'services/auth/auth.service.dart';
+import 'models/call.model.dart';
 import 'services/call/call-foreground.service.dart';
 import 'services/call/call.service.dart';
 import 'services/cookies.service.dart';
@@ -34,6 +35,7 @@ import 'services/socket/transport.manager.dart';
 import 'services/socket/transport.service.dart';
 import 'services/socket/ws-message.handler.dart';
 import 'services/user-status.service.dart';
+import 'ui/call/call-pill.widget.dart';
 import 'ui/loading-dots.widget.dart';
 import 'utils/navigation-helper.util.dart';
 import 'utils/ringtone.util.dart';
@@ -76,6 +78,9 @@ void main() async {
 
   // Initialize Foreground Service for keeping microphone active during calls
   await CallForegroundService.initialize();
+
+  // Initialize native call screen event listener
+  NativeCallScreen.initialize();
 
   // await TestBGService().initializeService();
 
@@ -156,6 +161,10 @@ class _MyAppState extends material.State<MyApp>
         await _transportManager.connect(accessToken);
       }
 
+      // Initialize CallService BEFORE WebSocketMessageHandler so it is already
+      // subscribed to callRingingStream when the first WS messages arrive.
+      await CallService().initialize();
+
       // Initialize centralized WebSocket message handler (only once)
       WebSocketMessageHandler().initialize();
       MessageGarbageCollector.instance.init();
@@ -188,20 +197,6 @@ class _MyAppState extends material.State<MyApp>
         final callerProfilePic = callDetails?.callerProfilePic;
 
         switch (callStatus) {
-          case 'answered':
-            // Call was answered, proceed to accept
-            await CallService().initialize();
-            await CallService().acceptCall(
-              callId: callId,
-              callerId: callerId,
-              callerName: callerName,
-              callerProfilePic: callerProfilePic,
-            );
-
-            // // Dispose all notifications from flutter_callkit_incoming
-            // await FlutterCallkitIncoming.setCallConnected(callId);
-            break;
-
           case 'declined':
             // Call was rejected, clean up
             await CallService().initialize();
@@ -219,7 +214,7 @@ class _MyAppState extends material.State<MyApp>
             break;
 
           default:
-            // No action needed
+            // 'accepting' is handled by CallService._handlePendingAccept()
             break;
         }
       }
@@ -258,20 +253,15 @@ class _MyAppState extends material.State<MyApp>
         break;
 
       case material.AppLifecycleState.resumed:
-        // App is coming to foreground
         // Re-enable wakelock if there's an active call
         if (isInCall) {
           WakelockPlus.enable();
-          debugPrint(
-            '[APP_LIFECYCLE] App resumed - enabled wakelock (active call in progress)',
-          );
         } else {
-          // Ensure wakelock is disabled when app resumes without active call
           WakelockPlus.disable();
-          debugPrint(
-            '[APP_LIFECYCLE] App resumed - disabled wakelock (no active call)',
-          );
         }
+        // NOTE: Do NOT re-open the native call screen here.
+        // Doing so causes it to reopen every time the user presses back.
+        // The call pill overlay gives the user a way to tap back into the call.
         break;
 
       case material.AppLifecycleState.hidden:
@@ -385,18 +375,16 @@ class _MyAppState extends material.State<MyApp>
   Future<void> _requestPermissions() async {
     // Request notification permission
     await Permission.notification.request();
-    // Request notification permission for callkit incoming
-    await FlutterCallkitIncoming.requestNotificationPermission({
-      "title": "Notification permission",
-      "rationaleMessagePermission":
-          "Notification permission is required, to show notification.",
-      "postNotificationMessageRequired":
-          "Notification permission is required, Please allow notification permission from setting.",
-    });
-    // Check if can use full screen intent
-    await FlutterCallkitIncoming.canUseFullScreenIntent();
-    // Request full intent permission
-    await FlutterCallkitIncoming.requestFullIntentPermission();
+    // FlutterCallkitIncoming permissions - commented out, replaced by native call screen
+    // await FlutterCallkitIncoming.requestNotificationPermission({
+    //   "title": "Notification permission",
+    //   "rationaleMessagePermission":
+    //       "Notification permission is required, to show notification.",
+    //   "postNotificationMessageRequired":
+    //       "Notification permission is required, Please allow notification permission from setting.",
+    // });
+    // await FlutterCallkitIncoming.canUseFullScreenIntent();
+    // await FlutterCallkitIncoming.requestFullIntentPermission();
   }
 
   /// Handle navigation from notification tap
@@ -629,19 +617,19 @@ class _MyAppState extends material.State<MyApp>
         visualDensity: material.VisualDensity.adaptivePlatformDensity,
         useMaterial3: true,
       ),
-      home:
-          // CallEnabledApp(
-          //   child:
-          _isLoading
+      builder: (context, child) {
+        return Stack(
+          children: [
+            child ?? const SizedBox.shrink(),
+            const GlobalCallPill(),
+          ],
+        );
+      },
+      home: _isLoading
           ? _buildLoadingScreen()
           : _isAuthenticated
-          ? MainScreen()
-          : LoginScreen(),
-      // ),
-      routes: {
-        '/call': (context) => const InCallScreen(),
-        '/incoming-call': (context) => const IncomingCallScreen(),
-      },
+              ? MainScreen()
+              : LoginScreen(),
       debugShowCheckedModeBanner: false,
     );
   }

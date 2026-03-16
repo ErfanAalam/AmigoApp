@@ -140,6 +140,8 @@ enum WSMessageType {
   callRinging('call:ringing'),
   callAccept('call:accept'),
   callTerminate('call:terminate'),
+  callHold('call:hold'),
+  callMissed('call:missed'),
   callError('call:error'),
   socketHealthCheck('socket:health_check'),
   socketPing('socket:ping'),
@@ -1225,6 +1227,8 @@ class WSMessage {
       case WSMessageType.callRinging:
       case WSMessageType.callAccept:
       case WSMessageType.callTerminate:
+      case WSMessageType.callHold:
+      case WSMessageType.callMissed:
       case WSMessageType.callError:
         try {
           return CallPayload.fromJson(payloadJson);

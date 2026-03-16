@@ -1,4 +1,3 @@
-import 'package:amigo/providers/call.provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,7 +7,6 @@ import '../providers/chat.provider.dart';
 import '../providers/notification-badge.provider.dart';
 import '../providers/theme-color.provider.dart';
 import '../ui/badge.widget.dart';
-import '../ui/call/call-bar.widget.dart';
 import '../utils/user.utils.dart';
 import 'call/call-logs.screen.dart';
 import 'chat/dm/dm-list.screen.dart';
@@ -108,19 +106,8 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     final unreadDMs = ref.watch(chatProvider).unreadDmCount;
     final unreadGroups = ref.watch(chatProvider).unreadGroupCount;
     final themeColor = ref.watch(themeColorProvider);
-    final callProvider = ref.read(callServiceProvider.notifier);
 
     return Scaffold(
-      appBar: PreferredSize(
-        preferredSize: Size.fromHeight(60),
-        // We'll use a Container to set the SafeArea background color.
-        child: Container(
-          color: callProvider.hasActiveCall
-              ? Colors.green.shade600
-              : themeColor.primary, // Otherwise, theme's top color
-          child: SafeArea(child: const GlobalCallBar()),
-        ),
-      ),
       body: PageView(
         controller: _pageController,
         children: _pages,

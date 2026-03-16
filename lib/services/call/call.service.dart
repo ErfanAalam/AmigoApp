@@ -1,15 +1,17 @@
 import 'dart:async';
 import 'package:amigo/env.dart';
 import 'package:amigo/utils/user.utils.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_callkit_incoming/entities/android_params.dart';
-import 'package:flutter_callkit_incoming/entities/call_event.dart';
-import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
-import 'package:flutter_callkit_incoming/entities/ios_params.dart';
-import 'package:flutter_callkit_incoming/entities/notification_params.dart';
-import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+// FlutterCallkitIncoming - commented out, replaced by native call screen
+// import 'package:flutter_callkit_incoming/entities/android_params.dart';
+// import 'package:flutter_callkit_incoming/entities/call_event.dart';
+// import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
+// import 'package:flutter_callkit_incoming/entities/ios_params.dart';
+// import 'package:flutter_callkit_incoming/entities/notification_params.dart';
+// import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:proximity_sensor/proximity_sensor.dart';
@@ -24,9 +26,11 @@ import '../../utils/ringtone.util.dart';
 import '../../utils/call.utils.dart';
 import '../../ui/snackbar.dart';
 import '../socket/transport.manager.dart';
+import '../socket/transport.service.dart';
 import '../cookies.service.dart';
 import '../socket/ws-message.handler.dart';
 import 'call-foreground.service.dart';
+import 'native_call_screen.service.dart';
 
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 
@@ -53,6 +57,8 @@ class CallService {
   Timer? _callDurationTimer;
   Timer? _callStartedTimer;
   Timer? _statusPollingTimer;
+  Timer? _offerRetryTimer;
+  Map<String, dynamic>? _lastOfferMsg;
   int? _pollingCallId;
 
   final TransportManager _transportManager = TransportManager();
@@ -71,6 +77,10 @@ class CallService {
   StreamSubscription<CallPayload>? _callTerminateSubscription;
   StreamSubscription<CallPayload>? _callRingingSubscription;
   StreamSubscription<CallPayload>? _callErrorSubscription;
+  StreamSubscription<CallPayload>? _callMissedSubscription;
+
+  // Call-ID deduplication to prevent WS + FCM double-processing the same call
+  final Set<int> _recentCallIds = {};
 
   // Proximity control for global screen lock
   StreamSubscription<dynamic>? _proximitySubscription;
@@ -121,7 +131,7 @@ class CallService {
   // Getters
   ActiveCallState? get activeCall => _activeCall;
   bool get hasActiveCall => _activeCall != null;
-  bool get isInCall => _activeCall?.status == CallStatus.answered;
+  bool get isInCall => _activeCall?.status == CallStatus.answered || _activeCall?.status == CallStatus.connecting;
   MediaStream? get localStream => _localStream;
   MediaStream? get remoteStream => _remoteStream;
 
@@ -131,6 +141,18 @@ class CallService {
 
     try {
       _currentUser = await UserUtils().getUserDetails();
+
+      // IMPORTANT: Read pending accept BEFORE subscribing to streams.
+      // On cold start, gap-fill call:ringing can arrive the moment we subscribe.
+      // If _handleIncomingCall fires before _handlePendingAccept reads SharedPrefs,
+      // it sets _activeCall and _handlePendingAccept bails ("already in a call").
+      // By reading SharedPrefs first and adding to dedup set, we block the replay.
+      final pendingCallDetails = await CallUtils().getCallDetails();
+      final hasPendingAccept = pendingCallDetails != null && pendingCallDetails.callStatus == 'accepting';
+      if (hasPendingAccept && pendingCallDetails.callId != null) {
+        _recentCallIds.add(pendingCallDetails.callId!);
+        Future.delayed(const Duration(seconds: 60), () => _recentCallIds.remove(pendingCallDetails.callId!));
+      }
 
       final handler = WebSocketMessageHandler();
 
@@ -154,55 +176,214 @@ class CallService {
         _handleIncomingCall,
       );
       _callErrorSubscription = handler.callErrorStream.listen(_handleCallError);
+      _callMissedSubscription = handler.callMissedStream.listen(_handleCallMissed);
 
       _isInitialized = true;
 
-      FlutterCallkitIncoming.onEvent.listen((CallEvent? event) async {
-        switch (event?.event) {
-          case Event.actionCallAccept:
-            // Get call details from event or SharedPreferences
-            final callDetails = await CallUtils().getCallDetails();
+      // Save base URL to SharedPrefs so native code (CallActionReceiver) can call
+      // the decline/accept API directly without going through Flutter.
+      _saveBaseUrlToPrefs();
 
-            await acceptCall(
-              callId: callDetails?.callId,
-              callerId: callDetails?.callerId,
-              callerName: callDetails?.callerName,
-              callerProfilePic: callDetails?.callerProfilePic,
-            );
+      // Set up native call screen event handlers (replaces FlutterCallkitIncoming)
+      _setupNativeCallScreenEvents();
 
-            // Navigator.popUntil(
-            //   NavigationHelper.navigator!.context,
-            //   (route) => route.isFirst,
-            // );
+      // Terminated-state answer: if the user tapped Answer on the notification
+      // while the app was killed, CallActionReceiver saved callStatus="accepting".
+      // We detect that here and auto-accept so the call goes through.
+      if (hasPendingAccept) {
+        _handlePendingAccept(pendingCallDetails);
+      }
 
-            break;
-
-          case Event.actionCallDecline:
-            final callId = await CallUtils().getCallId();
-            await declineCall(
-              callId: callId,
-            );
-            // FlutterCallkitIncoming.endCall(callId.toString());
-            FlutterCallkitIncoming.endAllCalls();
-            break;
-
-          case Event.actionCallEnded:
-            // Only call endCall if not already being terminated by _handleCallTerminate
-            if (!_isTerminating) {
-              endCall();
-            } else {
-              debugPrint('[CALL] CallKit actionCallEnded ignored - already terminating');
-            }
-            break;
-
-          default:
-            debugPrint('🔔 Unhandled CallKit event: ${event?.event}');
-            break;
-        }
-      });
+      // FlutterCallkitIncoming event listener - commented out, replaced by native call screen
+      // FlutterCallkitIncoming.onEvent.listen((CallEvent? event) async {
+      //   switch (event?.event) {
+      //     case Event.actionCallAccept:
+      //       final callDetails = await CallUtils().getCallDetails();
+      //       await acceptCall(
+      //         callId: callDetails?.callId,
+      //         callerId: callDetails?.callerId,
+      //         callerName: callDetails?.callerName,
+      //         callerProfilePic: callDetails?.callerProfilePic,
+      //       );
+      //       break;
+      //     case Event.actionCallDecline:
+      //       final callId = await CallUtils().getCallId();
+      //       await declineCall(callId: callId);
+      //       FlutterCallkitIncoming.endAllCalls();
+      //       break;
+      //     case Event.actionCallEnded:
+      //       if (!_isTerminating) { endCall(); }
+      //       break;
+      //     default:
+      //       break;
+      //   }
+      // });
     } catch (e) {
       debugPrint('[CALL] Error initializing CallService');
     }
+  }
+
+  /// Save the API base URL to SharedPreferences so native code (CallActionReceiver)
+  /// can make direct HTTP calls (e.g., decline) without Flutter.
+  void _saveBaseUrlToPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('api_base_url', Environment.baseUrl);
+    } catch (e) {
+      debugPrint('[CALL] Error saving base URL to prefs: $e');
+    }
+  }
+
+  /// Handle a pending "accepting" status from terminated-state answer.
+  /// [callDetails] is pre-read from SharedPrefs in initialize() BEFORE
+  /// stream subscriptions, so gap-fill call:ringing can't race us.
+  void _handlePendingAccept(CallDetails callDetails) async {
+    try {
+      final callId = callDetails.callId;
+      debugPrint('[CALL] Handling pending accept from terminated state, callId=$callId');
+
+      // Check call status from backend — the native HTTP accept may have already gone through
+      final serverStatus = await _getCallStatusFromServer(callId);
+
+      if (serverStatus == 'ended' || serverStatus == 'missed' || serverStatus == 'declined') {
+        debugPrint('[CALL] Call $callId already $serverStatus on server, clearing');
+        await CallUtils().clearCallDetails();
+        return;
+      }
+
+      final skipWs = serverStatus == 'answered';
+      if (skipWs) {
+        debugPrint('[CALL] Call $callId already answered on server, restoring local state only');
+      } else {
+        // Server says still ringing — wait for WS to send accept
+        await _waitForConnection();
+      }
+
+      await acceptCall(
+        callId: callId,
+        callerId: callDetails.callerId,
+        callerName: callDetails.callerName ?? 'Unknown',
+        callerProfilePic: callDetails.callerProfilePic,
+        skipWsAccept: skipWs,
+      );
+    } catch (e) {
+      debugPrint('[CALL] Error handling pending accept: $e');
+      try { await CallUtils().clearCallDetails(); } catch (_) {}
+    }
+  }
+
+  /// Query the backend for the current call status.
+  Future<String?> _getCallStatusFromServer(int? callId) async {
+    if (callId == null) return null;
+    try {
+      final dio = Dio();
+      final response = await dio.get(
+        '${Environment.baseUrl}/call/status/$callId',
+        options: Options(receiveTimeout: const Duration(seconds: 5)),
+      );
+      if (response.statusCode == 200 && response.data['success'] == true) {
+        return response.data['data']?['status'] as String?;
+      }
+    } catch (e) {
+      debugPrint('[CALL] Error checking call status from server: $e');
+    }
+    return null;
+  }
+
+  /// Accept via HTTP as a fallback when WS send fails.
+  Future<bool> _acceptViaHttp(int callId) async {
+    try {
+      final dio = Dio();
+      final response = await dio.post(
+        '${Environment.baseUrl}/call/accept/$callId',
+        data: {},
+        options: Options(receiveTimeout: const Duration(seconds: 5)),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('[CALL] HTTP accept fallback failed: $e');
+      return false;
+    }
+  }
+
+  /// Wait up to 10 seconds for the transport to connect.
+  Future<void> _waitForConnection() async {
+    if (_transportManager.isConnected) return;
+
+    debugPrint('[CALL] Waiting for transport connection...');
+    final completer = Completer<void>();
+    Timer? timeout;
+    StreamSubscription? sub;
+
+    timeout = Timer(const Duration(seconds: 10), () {
+      sub?.cancel();
+      if (!completer.isCompleted) {
+        debugPrint('[CALL] Transport connection timeout — proceeding anyway');
+        completer.complete();
+      }
+    });
+
+    sub = _transportManager.connectionStateStream.listen((state) {
+      if (state == TransportConnectionState.connected) {
+        timeout?.cancel();
+        sub?.cancel();
+        if (!completer.isCompleted) {
+          debugPrint('[CALL] Transport connected — proceeding with accept');
+          completer.complete();
+        }
+      }
+    });
+
+    // Check again in case it connected between the initial check and subscribing
+    if (_transportManager.isConnected && !completer.isCompleted) {
+      timeout.cancel();
+      sub.cancel();
+      completer.complete();
+    }
+
+    return completer.future;
+  }
+
+  /// Set up event handlers from native call screen
+  void _setupNativeCallScreenEvents() {
+    NativeCallScreen.onCallAccepted = (int callId) async {
+      debugPrint('[CALL] Native call screen: call accepted (callId=$callId)');
+      final callDetails = await CallUtils().getCallDetails();
+      await acceptCall(
+        callId: callDetails?.callId ?? callId,
+        callerId: callDetails?.callerId,
+        callerName: callDetails?.callerName,
+        callerProfilePic: callDetails?.callerProfilePic,
+      );
+    };
+
+    NativeCallScreen.onCallDeclined = (int callId) async {
+      debugPrint('[CALL] Native call screen: call declined (callId=$callId)');
+      await declineCall(callId: callId != 0 ? callId : null);
+    };
+
+    NativeCallScreen.onCallEnded = (int callId) async {
+      debugPrint('[CALL] Native call screen: call ended (callId=$callId)');
+      if (!_isTerminating) {
+        await endCall();
+      }
+    };
+
+    NativeCallScreen.onMuteToggled = (bool isMuted) async {
+      debugPrint('[CALL] Native call screen: mute toggled ($isMuted)');
+      // Sync mute state from native
+      if (_activeCall != null && _activeCall!.isMuted != isMuted) {
+        await toggleMute();
+      }
+    };
+
+    NativeCallScreen.onSpeakerToggled = (bool isSpeakerOn) async {
+      debugPrint('[CALL] Native call screen: speaker toggled ($isSpeakerOn)');
+      if (_activeCall != null && _activeCall!.isSpeakerOn != isSpeakerOn) {
+        await toggleSpeaker();
+      }
+    };
+
   }
 
   /// Initiate an outgoing call
@@ -277,8 +458,7 @@ class CallService {
       // Get user media
       await _setupLocalMedia();
 
-      // Enable speaker by default for outgoing calls
-      await Helper.setSpeakerphoneOn(true);
+      await Helper.setSpeakerphoneOn(false);
 
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
       final callInitPayload = CallPayload(
@@ -325,11 +505,18 @@ class CallService {
         callType: CallType.outgoing,
         status: CallStatus.initiated,
         startTime: DateTime.now(),
-        isSpeakerOn: true, // Speaker enabled by default for outgoing calls
+        isSpeakerOn: false,
       );
       
       debugPrint('[CALL] ✅ New call state set: callId=${_activeCall!.callId}, status=${_activeCall!.status}, callType=${_activeCall!.callType}');
       debugPrint('[CALL] Provider should sync within 100ms - UI should update soon');
+
+      // Show native outgoing call screen
+      await NativeCallScreen.showOutgoingCall(
+        callId: _activeCall!.callId,
+        calleeName: calleeName,
+        calleePhoto: calleeProfilePic,
+      );
 
       // Start the 30-second timeout timer
       _startCallStartedTimer();
@@ -378,6 +565,7 @@ class CallService {
     int? callerId,
     String? callerName,
     String? callerProfilePic,
+    bool skipWsAccept = false,
   }) async {
     try {
       // If _activeCall is null but we have callId, try to restore call state
@@ -417,41 +605,56 @@ class CallService {
 
       if (_currentUser == null) return;
 
-      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-      final callAcceptPayload = CallPayload(
-        callId: _activeCall!.callId,
-        callerId: _activeCall!.userId, // Use caller from active call
-        calleeId: _currentUser!.id,
-        timestamp: DateTime.now(),
-      );
+      // Send call:accept via WS (unless HTTP accept already went through)
+      if (!skipWsAccept) {
+        final callAcceptPayload = CallPayload(
+          callId: _activeCall!.callId,
+          callerId: _activeCall!.userId,
+          calleeId: _currentUser!.id,
+          timestamp: DateTime.now(),
+        );
 
-      final wsmsg = WSMessage(
-        type: WSMessageType.callAccept,
-        payload: callAcceptPayload,
-        wsTimestamp: DateTime.now(),
-      ).toJson();
+        final wsmsg = WSMessage(
+          type: WSMessageType.callAccept,
+          payload: callAcceptPayload,
+          wsTimestamp: DateTime.now(),
+        ).toJson();
 
-      _transportManager.sendMessage(wsmsg).catchError((e) {
-        debugPrint('❌ Error sending call:accept: $e');
-      });
+        final wsSent = await _transportManager.sendMessage(wsmsg);
+        if (!wsSent) {
+          debugPrint('[CALL] WS accept failed (returned false), trying HTTP fallback');
+          if (_activeCall?.callId != null) {
+            await _acceptViaHttp(_activeCall!.callId);
+          }
+        }
+      }
 
       // Cancel the call started timer since call is now accepted
       _callStartedTimer?.cancel();
       _callStartedTimer = null;
 
-      // Enable speaker by default when call is accepted
-      await Helper.setSpeakerphoneOn(true);
-      // Small delay to ensure speaker is actually enabled before updating state
-      await Future.delayed(const Duration(milliseconds: 50));
-      
-      // Update call state with speaker enabled
+      await Helper.setSpeakerphoneOn(false);
       _activeCall = _activeCall!.copyWith(
         status: CallStatus.answered,
-        isSpeakerOn: true,
+        isSpeakerOn: false,
       );
-      
+
       debugPrint('[CALL] Call accepted - status: ${_activeCall!.status}, isSpeakerOn: ${_activeCall!.isSpeakerOn}');
-      
+
+      // Transition native call screen to in-call mode
+      await NativeCallScreen.updateCallState(
+        callMode: 'in_call',
+        isMuted: _activeCall!.isMuted,
+        isSpeakerOn: _activeCall!.isSpeakerOn,
+      );
+      // Dismiss incoming notification and show ongoing notification
+      await NativeCallScreen.dismissIncomingNotification();
+      await NativeCallScreen.showOngoingNotification(
+        callId: _activeCall!.callId,
+        callerName: _activeCall!.userName,
+        callerPhoto: _activeCall!.userProfilePic,
+      );
+
       // Start timer immediately when call is accepted
       _startCallTimer();
 
@@ -600,8 +803,11 @@ class CallService {
       // Disable lock screen flags when call is declined
       await _disableLockScreenFlags();
 
-      // End all CallKit calls
-      await FlutterCallkitIncoming.endAllCalls();
+      // Dismiss native call screen and notifications
+      await NativeCallScreen.dismissCallScreen();
+
+      // FlutterCallkitIncoming - commented out, replaced by native call screen
+      // await FlutterCallkitIncoming.endAllCalls();
 
       // Clean up state
       await _cleanup();
@@ -659,12 +865,19 @@ class CallService {
       // Disable lock screen flags when call ends
       await _disableLockScreenFlags();
 
-      // End all CallKit calls FIRST before cleanup
-    try {
-      await FlutterCallkitIncoming.endAllCalls();
-    } catch (e) {
-      debugPrint('[CALL] Error ending CallKit calls: $e');
-    }
+      // Dismiss native call screen and notifications
+      try {
+        await NativeCallScreen.dismissCallScreen();
+      } catch (e) {
+        debugPrint('[CALL] Error dismissing native call screen: $e');
+      }
+
+      // FlutterCallkitIncoming - commented out, replaced by native call screen
+      // try {
+      //   await FlutterCallkitIncoming.endAllCalls();
+      // } catch (e) {
+      //   debugPrint('[CALL] Error ending CallKit calls: $e');
+      // }
 
       await CallUtils().clearCallDetails();
 
@@ -703,6 +916,15 @@ class CallService {
       track.enabled = !track.enabled;
 
       _activeCall = _activeCall?.copyWith(isMuted: !track.enabled);
+
+      // Sync mute state to native call screen
+      NativeCallScreen.updateCallState(isMuted: _activeCall?.isMuted);
+      if (_activeCall != null) {
+        NativeCallScreen.updateOngoingNotification(
+          callerName: _activeCall!.userName,
+          isMuted: _activeCall!.isMuted,
+        );
+      }
     }
   }
 
@@ -714,6 +936,19 @@ class CallService {
     await Helper.setSpeakerphoneOn(newSpeakerState);
 
     _activeCall = _activeCall!.copyWith(isSpeakerOn: newSpeakerState);
+
+    // Sync speaker state to native call screen
+    NativeCallScreen.updateCallState(isSpeakerOn: newSpeakerState);
+  }
+
+  /// Handle missed-call notification from server
+  void _handleCallMissed(CallPayload payload) async {
+    debugPrint('[CALL] Missed call from callerId=${payload.callerId}');
+    final callerName = payload.callerName ?? 'Unknown';
+    await NativeCallScreen.showMissedCallNotification(
+      callId: payload.callId ?? 0,
+      callerName: callerName,
+    );
   }
 
   /// Setup local media stream
@@ -761,7 +996,7 @@ class CallService {
 
       // Handle connection state changes
       _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
-        // Timer is now started when call is accepted, not when connection is established
+        debugPrint('[CALL] WebRTC connection state: $state');
       };
     } catch (e) {
       debugPrint('[CALL] Error creating peer connection');
@@ -795,8 +1030,26 @@ class CallService {
         wsTimestamp: DateTime.now(),
       ).toJson();
 
+      _lastOfferMsg = wsmsg;
       _transportManager.sendMessage(wsmsg).catchError((e) {
         debugPrint('❌ Error sending call:offer: $e');
+      });
+
+      // Retry sending the offer every 3s while in 'connecting' state.
+      // Covers the terminated-app case where the callee's Flutter wasn't
+      // online when the first offer was sent.
+      _offerRetryTimer?.cancel();
+      _offerRetryTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+        if (_activeCall?.status != CallStatus.connecting || _lastOfferMsg == null) {
+          _offerRetryTimer?.cancel();
+          _offerRetryTimer = null;
+          _lastOfferMsg = null;
+          return;
+        }
+        debugPrint('[CALL] Re-sending offer (callee may not have received it yet)');
+        _transportManager.sendMessage(_lastOfferMsg!).catchError((e) {
+          debugPrint('❌ Error re-sending call:offer: $e');
+        });
       });
     } catch (e) {
       debugPrint('[CALL] Error creating offer');
@@ -853,6 +1106,23 @@ class CallService {
 
       final answer = RTCSessionDescription(payload['sdp'], payload['type']);
       await _peerConnection!.setRemoteDescription(answer);
+
+      // SDP answer received — callee's Flutter is running and WebRTC is live.
+      // Stop offer retries and transition from 'connecting' → 'answered'.
+      _offerRetryTimer?.cancel();
+      _offerRetryTimer = null;
+      _lastOfferMsg = null;
+
+      if (_activeCall?.status == CallStatus.connecting) {
+        _activeCall = _activeCall!.copyWith(status: CallStatus.answered);
+        _startCallTimer();
+        NativeCallScreen.updateCallState(
+          callMode: 'in_call',
+          isMuted: _activeCall!.isMuted,
+          isSpeakerOn: _activeCall!.isSpeakerOn,
+        );
+        debugPrint('[CALL] SDP answer received — call timer started');
+      }
     } catch (e) {
       debugPrint('[CALL] Error handling answer');
     }
@@ -1018,27 +1288,20 @@ class CallService {
     // Stop status polling since call is now accepted
     _stopStatusPolling();
 
-      // Enable speaker by default when call is accepted
-      await Helper.setSpeakerphoneOn(true);
-      // Small delay to ensure speaker is actually enabled before updating state
-      await Future.delayed(const Duration(milliseconds: 50));
-      
-      // Update status to answered - this is critical for UI updates
-      // This works for both incoming and outgoing calls
-      // IMPORTANT: Update status with speaker state in single atomic operation
-    _activeCall = _activeCall!.copyWith(
-      status: CallStatus.answered,
-      isSpeakerOn: true,
-    );
-    
-    // Verify state was set correctly
-    if (_activeCall!.isSpeakerOn != true) {
-      debugPrint('[CALL] WARNING: isSpeakerOn was not set correctly in _handleCallAccept! Retrying...');
-      _activeCall = _activeCall!.copyWith(isSpeakerOn: true);
-    }
+    await Helper.setSpeakerphoneOn(false);
 
-    debugPrint('[CALL] Call status updated to answered for callId=${_activeCall!.callId}, isSpeakerOn=${_activeCall!.isSpeakerOn}');
-    
+    // For outgoing calls: use intermediate 'connecting' state while WebRTC sets up
+    // For incoming calls: go straight to 'answered' (callee is already ready)
+    final isOutgoing = _activeCall!.callType == CallType.outgoing;
+    final initialStatus = isOutgoing ? CallStatus.connecting : CallStatus.answered;
+
+    _activeCall = _activeCall!.copyWith(
+      status: initialStatus,
+      isSpeakerOn: false,
+    );
+
+    debugPrint('[CALL] Call status updated to $initialStatus for callId=${_activeCall!.callId}, isSpeakerOn=${_activeCall!.isSpeakerOn}');
+
     // Small delay to ensure UI has time to react to status change
     await Future.delayed(const Duration(milliseconds: 100));
 
@@ -1053,19 +1316,34 @@ class CallService {
       debugPrint('[CALL] Error stopping ringtone in accept');
     }
 
-    // Start timer immediately when call is accepted
-    // This sets the startTime and starts updating duration every second
-    _startCallTimer();
+    // For outgoing calls, delay timer start until WebRTC connects (onConnectionState)
+    // For incoming calls, start timer immediately
+    if (!isOutgoing) {
+      _startCallTimer();
+    }
+
+    // Transition native call screen
+    await NativeCallScreen.updateCallState(
+      callMode: isOutgoing ? 'connecting' : 'in_call',
+      isMuted: _activeCall!.isMuted,
+      isSpeakerOn: _activeCall!.isSpeakerOn,
+    );
+    await NativeCallScreen.dismissIncomingNotification();
+    await NativeCallScreen.showOngoingNotification(
+      callId: _activeCall!.callId,
+      callerName: _activeCall!.userName,
+      callerPhoto: _activeCall!.userProfilePic,
+    );
 
     // Start foreground service to keep microphone active in background
     await CallForegroundService.startService(callerName: _activeCall!.userName);
-    
+
     // Enable lock screen flags for call
     await _enableLockScreenFlags();
 
     // For outgoing calls, create offer immediately
     // For incoming calls, wait for offer from caller
-    if (_activeCall!.callType == CallType.outgoing) {
+    if (isOutgoing) {
       _createOffer();
     }
     // For incoming calls, the peer connection will be created when offer arrives
@@ -1176,9 +1454,10 @@ class CallService {
       debugPrint('[CALL] Error stopping ringtone in terminate');
     }
 
-    // End CallKit calls BEFORE cleanup (so CallKit actionCallEnded won't
-    // race with us — the _isTerminating flag guards against that)
-    await FlutterCallkitIncoming.endAllCalls();
+    // Dismiss native call screen and notifications
+    await NativeCallScreen.dismissCallScreen();
+    // FlutterCallkitIncoming - commented out, replaced by native call screen
+    // await FlutterCallkitIncoming.endAllCalls();
     FlutterRingtonePlayer().stop();
 
     // Cleanup all call resources
@@ -1257,6 +1536,14 @@ class CallService {
       return;
     }
 
+    // Dedup: WS + FCM can both fire for the same call; only process once
+    if (_recentCallIds.contains(payload.callId!)) {
+      debugPrint('[CALL] Duplicate callId=${payload.callId} ignored');
+      return;
+    }
+    _recentCallIds.add(payload.callId!);
+    Future.delayed(const Duration(seconds: 60), () => _recentCallIds.remove(payload.callId!));
+
     debugPrint('[CALL] Handling incoming call: callId=${payload.callId}, callerId=${payload.callerId}');
     debugPrint('[CALL] Current state - _activeCall: ${_activeCall != null ? "exists (callId=${_activeCall!.callId})" : "null"}, _pollingCallId: $_pollingCallId');
 
@@ -1324,96 +1611,25 @@ class CallService {
 
     debugPrint('[CALL] Verified _activeCall is still set after delay: callId=${_activeCall!.callId}');
 
-    // Check if app is in foreground - if so, navigate to incoming call screen instead of showing notification
-    // The navigator being available indicates the app is in foreground
-    final bool isAppInForeground =
-        NavigationHelper.navigator != null &&
-        NavigationHelper.navigatorKey.currentContext != null;
+    // Show native incoming call screen (works on lock screen and in foreground)
+    debugPrint('[CALL] 📱 Showing native incoming call screen for callId=${payload.callId}');
 
-    debugPrint('[CALL] Incoming call - isAppInForeground: $isAppInForeground');
+    // Show native call screen - handles both foreground and lock screen
+    // Note: ringtone is handled by the CHANNEL_INCOMING notification channel on Android
+    await NativeCallScreen.showIncomingCall(
+      callId: payload.callId!,
+      callerName: payload.callerName ?? 'Unknown',
+      callerPhoto: payload.callerPfp,
+    );
 
-    if (isAppInForeground) {
-      // App is in foreground - show incoming call screen directly
-      debugPrint(
-        '[CALL] 📱 App is in foreground - navigating to incoming call screen',
-      );
-
-      // IMPORTANT: End any existing CallKit calls first to prevent green bar
-      try {
-        await FlutterCallkitIncoming.endAllCalls();
-        debugPrint('[CALL] Ended any existing CallKit calls');
-      } catch (e) {
-        debugPrint('[CALL] Error ending CallKit calls: $e');
-      }
-
-      // Play ringtone for incoming call
-      try {
-        // await RingtoneManager.playSystemRingtone();
-        FlutterRingtonePlayer().playRingtone();
-        debugPrint('[CALL] Playing system ringtone for incoming call');
-      } catch (e) {
-        debugPrint('[CALL] Error playing system ringtone: $e');
-      }
-
-      // Navigate to incoming call screen
-      await Future.delayed(const Duration(milliseconds: 100));
-      NavigationHelper.pushNamed('/incoming-call');
-    } else {
-      // App is in background or closed - show CallKit notification
-      debugPrint(
-        '[CALL] 📱 App is NOT in foreground - showing CallKit notification',
-      );
-
-      CallKitParams params = CallKitParams(
-        id: payload.callId.toString(),
-        nameCaller: payload.callerName ?? 'Unknown',
-        appName: 'amigo',
-        avatar: payload.callerPfp ?? '',
-        handle: '1234567890',
-        type: 0,
-        duration: 30000,
-        textAccept: 'Accept',
-        textDecline: 'Decline',
-        missedCallNotification: const NotificationParams(
-          showNotification: true,
-          isShowCallback: true,
-          subtitle: 'Missed call',
-          callbackText: 'Call back',
-        ),
-        extra: <String, dynamic>{'userId': payload.calleeId},
-        android: const AndroidParams(
-          isCustomNotification: true,
-          isShowLogo: false,
-          ringtonePath: 'system_ringtone_default',
-          backgroundColor: '#06bd98',
-          backgroundUrl: 'assets/images/call_bg_dark.png',
-          actionColor: '#36b554',
-          textColor: '#ffffff',
-        ),
-        ios: const IOSParams(
-          iconName: 'CallKitLogo',
-          handleType: 'generic',
-          supportsVideo: true,
-          maximumCallGroups: 2,
-          maximumCallsPerCallGroup: 1,
-          audioSessionMode: 'default',
-          audioSessionActive: true,
-          audioSessionPreferredSampleRate: 44100.0,
-          audioSessionPreferredIOBufferDuration: 0.005,
-          supportsDTMF: true,
-          supportsHolding: true,
-          supportsGrouping: false,
-          supportsUngrouping: false,
-          ringtonePath: 'system_ringtone_default',
-        ),
-      );
-
-      // Show CallKit notification if not already answered
-      if (storageCallStatus != 'answered' &&
-          storageCallId != payload.callId.toString()) {
-        await FlutterCallkitIncoming.showCallkitIncoming(params);
-      }
-    }
+    // FlutterCallkitIncoming - commented out, replaced by native call screen
+    // if (isAppInForeground) {
+    //   await FlutterCallkitIncoming.endAllCalls();
+    //   NavigationHelper.pushNamed('/incoming-call');
+    // } else {
+    //   CallKitParams params = CallKitParams(...);
+    //   await FlutterCallkitIncoming.showCallkitIncoming(params);
+    // }
 
     // Start the 30-second timeout timer for incoming calls
     _startCallStartedTimer();
@@ -1502,6 +1718,9 @@ class CallService {
       _callDurationTimer = null;
       _callStartedTimer?.cancel();
       _callStartedTimer = null;
+      _offerRetryTimer?.cancel();
+      _offerRetryTimer = null;
+      _lastOfferMsg = null;
       debugPrint('[CALL] Timers cancelled');
 
       // Close peer connection

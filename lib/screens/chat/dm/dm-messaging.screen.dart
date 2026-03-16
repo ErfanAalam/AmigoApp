@@ -4137,9 +4137,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         widget.dm.recipientProfilePic,
       );
 
-      if (context.mounted) {
-        Navigator.of(context).pushNamed('/call');
-      }
+      // Native call screen is launched automatically by call.service.dart
     } catch (e) {
       if (context.mounted) {
         Snack.error(

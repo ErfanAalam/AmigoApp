@@ -31,7 +31,7 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
     _animationController.repeat(reverse: true);
-    
+
     // Wait a bit for Riverpod state to sync before checking
     Future.delayed(const Duration(milliseconds: 400), () {
       if (mounted) {
@@ -53,7 +53,9 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
   void _navigateAway() {
     if (_hasNavigated || !mounted) return;
     _hasNavigated = true;
-    debugPrint('[IncomingCallScreen] Navigating away from incoming call screen');
+    debugPrint(
+      '[IncomingCallScreen] Navigating away from incoming call screen',
+    );
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
@@ -65,36 +67,42 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
 
     print('[IncomingCallScreen] 📱 Build called');
     print('[IncomingCallScreen] activeCall from Riverpod: $activeCall');
-    
+
     // If activeCall is null, schedule sync after build completes
     // We can't modify providers during build, so we do it after
     if (activeCall == null) {
-      print('[IncomingCallScreen] ⚠️ activeCall is null - will sync state after build');
-      
+      print(
+        '[IncomingCallScreen] ⚠️ activeCall is null - will sync state after build',
+      );
+
       // Schedule sync after current build frame completes
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        
+
         print('[IncomingCallScreen] Manually syncing state');
         callServiceNotifier.syncState();
-        
+
         // Re-read state after sync
         final syncedCall = ref.read(callServiceProvider).activeCall;
         print('[IncomingCallScreen] activeCall after manual sync: $syncedCall');
-        
+
         // If still null, read directly from CallService as fallback
         if (syncedCall == null) {
           final callService = CallService();
           final directCall = callService.activeCall;
           if (directCall != null) {
-            print('[IncomingCallScreen] ✅ Found activeCall directly from CallService (callId=${directCall.callId}) - forcing sync');
+            print(
+              '[IncomingCallScreen] ✅ Found activeCall directly from CallService (callId=${directCall.callId}) - forcing sync',
+            );
             // Force sync and trigger rebuild
             callServiceNotifier.syncState();
             if (mounted) {
               setState(() {});
             }
           } else {
-            print('[IncomingCallScreen] ❌ No activeCall found in CallService either');
+            print(
+              '[IncomingCallScreen] ❌ No activeCall found in CallService either',
+            );
           }
         } else if (mounted) {
           // State was synced, trigger rebuild to show the call
@@ -102,7 +110,7 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
         }
       });
     }
-    
+
     if (activeCall != null) {
       print('[IncomingCallScreen] activeCall.callType: ${activeCall.callType}');
       print('[IncomingCallScreen] activeCall.status: ${activeCall.status}');
@@ -145,19 +153,18 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
       print('[IncomingCallScreen] ⏳ Waiting for state to sync...');
       return const Scaffold(
         backgroundColor: Colors.black,
-        body: Center(
-          child: CircularProgressIndicator(color: Colors.white),
-        ),
+        body: Center(child: CircularProgressIndicator(color: Colors.white)),
       );
     }
 
     // If no active call or call was declined/ended, close the screen
     // But only after we've waited for state
-    if (_hasWaitedForState && (activeCall == null ||
-        activeCall.callType != CallType.incoming ||
-        activeCall.status == CallStatus.ended ||
-        activeCall.status == CallStatus.declined ||
-        activeCall.status == CallStatus.missed)) {
+    if (_hasWaitedForState &&
+        (activeCall == null ||
+            activeCall.callType != CallType.incoming ||
+            activeCall.status == CallStatus.ended ||
+            activeCall.status == CallStatus.declined ||
+            activeCall.status == CallStatus.missed)) {
       print('[IncomingCallScreen] ❌ Call ended/declined - navigating back');
       print('[IncomingCallScreen] activeCall == null: ${activeCall == null}');
       if (activeCall != null) {
@@ -199,7 +206,9 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen>
     final currentCall = activeCall;
     if (currentCall == null) {
       if (_hasWaitedForState) {
-        print('[IncomingCallScreen] ⚠️ Still no activeCall after waiting - closing screen');
+        print(
+          '[IncomingCallScreen] ⚠️ Still no activeCall after waiting - closing screen',
+        );
         if (!_hasNavigated) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _navigateAway();

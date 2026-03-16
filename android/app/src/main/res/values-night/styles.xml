@@ -15,4 +15,13 @@
     <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
         <item name="android:windowBackground">?android:colorBackground</item>
     </style>
+
+    <!-- Edge-to-edge call screen: no title bar, transparent status/nav bars -->
+    <style name="CallTheme" parent="@android:style/Theme.NoTitleBar">
+        <item name="android:windowBackground">@drawable/bg_call_gradient</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowTranslucentStatus">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
 </resources>

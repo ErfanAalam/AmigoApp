@@ -309,10 +309,10 @@ packages:
     dependency: transitive
     description:
       name: dart_webrtc
-      sha256: "51bcda4ba5d7dd9e65a309244ce3ac0b58025e6e1f6d7442cee4cd02134ef65f"
+      sha256: "4ed7b9fa9924e5a81eb39271e2c2356739dd1039d60a13b86ba6c5f448625086"
       url: "https://pub.dev"
     source: hosted
-    version: "1.6.0"
+    version: "1.7.0"
   data_widget:
     dependency: transitive
     description:
@@ -598,14 +598,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.4.1"
-  flutter_callkit_incoming:
-    dependency: "direct main"
-    description:
-      name: flutter_callkit_incoming
-      sha256: "3589deb8b71e43f2d520a9c8a5240243f611062a8b246cdca4b1fda01fbbf9b8"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.0.0"
   flutter_contacts:
     dependency: "direct main"
     description:
@@ -780,10 +772,10 @@ packages:
     dependency: "direct main"
     description:
       name: flutter_webrtc
-      sha256: b832dc76c0d1577f14aaf35e9c38d4ed7667cbc89c492b7bf4505d8d5f62e08b
+      sha256: c549ea8ffb20167110ad0a28e5f17a2650b5bea8837d984898cd9b0ffd5fa78b
       url: "https://pub.dev"
     source: hosted
-    version: "0.12.12+hotfix.1"
+    version: "1.3.1"
   frontend_server_client:
     dependency: transitive
     description:
@@ -2073,10 +2065,10 @@ packages:
     dependency: transitive
     description:
       name: webrtc_interface
-      sha256: "2e604a31703ad26781782fb14fa8a4ee621154ee2c513d2b9938e486fa695233"
+      sha256: ad0e5786b2acd3be72a3219ef1dde9e1cac071cf4604c685f11b61d63cdd6eb3
       url: "https://pub.dev"
     source: hosted
-    version: "1.3.0"
+    version: "1.4.0"
   win32:
     dependency: transitive
     description:

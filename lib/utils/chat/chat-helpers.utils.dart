@@ -607,12 +607,8 @@ class ChatHelpers {
       // Initiate the call - this will throw if it fails
       await callService.initiateCall(userId, userName, userProfilePic);
 
-      // Check if we have an active call after initiation
-      if (callService.hasActiveCall && context.mounted) {
-        // Navigate to call screen
-        Navigator.of(context).pushNamed('/call');
-      } else {
-        // If no active call, something went wrong
+      // Native call screen is launched automatically by call.service.dart
+      if (!callService.hasActiveCall) {
         debugPrint('[ChatHelpers] No active call after initiation');
       }
     } catch (e) {

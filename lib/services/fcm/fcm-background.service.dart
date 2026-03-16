@@ -5,18 +5,18 @@ import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/message-status.repo.dart';
 import 'package:amigo/models/message.model.dart';
-import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter_callkit_incoming/entities/android_params.dart';
-import 'package:flutter_callkit_incoming/entities/call_event.dart';
-import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
-import 'package:flutter_callkit_incoming/entities/ios_params.dart';
-import 'package:flutter_callkit_incoming/entities/notification_params.dart';
-import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+// FlutterCallkitIncoming - commented out, replaced by native call screen
+// import 'package:flutter_callkit_incoming/entities/android_params.dart';
+// import 'package:flutter_callkit_incoming/entities/call_event.dart';
+// import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
+// import 'package:flutter_callkit_incoming/entities/ios_params.dart';
+// import 'package:flutter_callkit_incoming/entities/notification_params.dart';
+// import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import '../call/native_call_screen.service.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../api/api_service.dart';
@@ -61,92 +61,11 @@ Future<void> fcmBackgroundHandler(RemoteMessage message) async {
   final NotificationService notifcations = NotificationService();
   await notifcations.initialize();
 
-  FlutterCallkitIncoming.onEvent.listen((CallEvent? event) async {
-    final callUtils = CallUtils();
-    switch (event?.event) {
-      case Event.actionCallAccept:
-        final callIdStr = event?.body['id']?.toString();
-        final callerIdStr = event?.body['extra']?['callerId']?.toString();
-        final callerNameStr = event?.body['extra']?['callerName']?.toString();
-        final callerPfpStr = event?.body['extra']?['callerProfilePic']
-            ?.toString();
-        final callDetails = CallDetails(
-          callId: callIdStr != null ? int.tryParse(callIdStr) : null,
-          callerId: callerIdStr != null ? int.tryParse(callerIdStr) : null,
-          callerName: callerNameStr,
-          callerProfilePic: callerPfpStr,
-          callStatus: 'answered',
-        );
-        await callUtils.saveCallDetails(callDetails);
-
-        // Stop background polling since call is accepted
-        _stopBackgroundStatusPolling();
-
-        break;
-
-      case Event.actionCallDecline:
-        final callIdStr = event?.body['id']?.toString();
-        final callerIdStr = event?.body['extra']?['callerId']?.toString();
-        final callerNameStr = event?.body['extra']?['callerName']?.toString();
-        final callDetails = CallDetails(
-          callId: callIdStr != null ? int.tryParse(callIdStr) : null,
-          callerId: callerIdStr != null ? int.tryParse(callerIdStr) : null,
-          callerName: callerNameStr,
-          callerProfilePic: null,
-          callStatus: 'declined',
-        );
-        await callUtils.saveCallDetails(callDetails);
-
-        // Stop background polling since call is declined
-        _stopBackgroundStatusPolling();
-
-        // End CallKit notification
-        await FlutterCallkitIncoming.endCall(event?.body['id'] ?? '');
-        await FlutterCallkitIncoming.endAllCalls();
-
-        // Decline via API (unprotected endpoint - no auth needed)
-        if (callIdStr != null && callIdStr.isNotEmpty) {
-          final dio = Dio();
-          try {
-            await dio.post('${Environment.baseUrl}/call/decline/$callIdStr');
-            debugPrint('[FCM BACKGROUND] Call declined via API: $callIdStr');
-          } catch (e) {
-            debugPrint('[FCM BACKGROUND] Error declining call via API: $e');
-          }
-        }
-
-        break;
-
-      case Event.actionCallEnded:
-        await FlutterCallkitIncoming.endCall(event?.body['id'] ?? '');
-        await FlutterCallkitIncoming.endAllCalls();
-        // Stop background polling since call is ended
-        _stopBackgroundStatusPolling();
-
-        break;
-
-      case Event.actionCallTimeout:
-        final callIdStr = event?.body['id']?.toString();
-        final callerIdStr = event?.body['extra']?['callerId']?.toString();
-        final callerNameStr = event?.body['extra']?['callerName']?.toString();
-        final callDetails = CallDetails(
-          callId: callIdStr != null ? int.tryParse(callIdStr) : null,
-          callerId: callerIdStr != null ? int.tryParse(callerIdStr) : null,
-          callerName: callerNameStr,
-          callerProfilePic: null,
-          callStatus: 'missed',
-        );
-        await callUtils.saveCallDetails(callDetails);
-
-        // Stop background polling since call timed out
-        _stopBackgroundStatusPolling();
-
-        break;
-      default:
-        debugPrint('🔔 Unhandled CallKit event: ${event?.event}');
-        break;
-    }
-  });
+  // FlutterCallkitIncoming event listener - commented out, replaced by native call screen
+  // Native call screen handles accept/decline/end via AmigoCallPlugin EventChannel
+  // FlutterCallkitIncoming.onEvent.listen((CallEvent? event) async {
+  //   ...
+  // });
 
   // Parse notification data
   final data = message.data;
@@ -163,7 +82,9 @@ Future<void> fcmBackgroundHandler(RemoteMessage message) async {
       // Batched path: array of ws_messages
       final List<dynamic> arr = jsonDecode(wsMessagesStr as String);
       for (final item in arr) {
-        wsMessages.add(WSMessage.fromJson(Map<String, dynamic>.from(item as Map)));
+        wsMessages.add(
+          WSMessage.fromJson(Map<String, dynamic>.from(item as Map)),
+        );
       }
     } else if (wsMessageStr != null) {
       // Single path: still used for call notifications
@@ -185,8 +106,10 @@ Future<void> fcmBackgroundHandler(RemoteMessage message) async {
   // Handle different notification types
   switch (notificationType) {
     case 'call':
-      // Calls still use single ws_message
-      await _handleCallNotification(data, wsMessage);
+      // Calls are handled entirely by native AmigoMessagingService.
+      // Do NOT process here — the native MethodChannel is unavailable in
+      // the background isolate and causes MissingPluginException.
+      debugPrint('[BACKGROUND] Skipping call notification — handled natively');
       break;
 
     case 'ws-message':
@@ -208,6 +131,9 @@ Future<void> _handleCallNotification(
   Map<String, dynamic> data,
   WSMessage? wsMessage,
 ) async {
+  debugPrint(
+    '[BACKGROUND] Handling call notification with data: $data and wsMessage: ${wsMessage?.type}',
+  );
   try {
     CallPayload? callPayload;
 
@@ -225,7 +151,7 @@ Future<void> _handleCallNotification(
     // Determine call event type from ws_message
     final wsType = wsMessage?.type;
     if (wsType == WSMessageType.callTerminate) {
-      await _handleCallEnd(callId, callPayload, data);
+      // await _handleCallEnd(callId, callPayload, data);
       return;
     }
 
@@ -252,65 +178,20 @@ Future<void> _handleIncomingCall(
         callPayload?.callerName ?? data['callerName']?.toString() ?? 'Unknown';
     final callerProfilePic =
         callPayload?.callerPfp ?? data['callerProfilePic']?.toString() ?? '';
-    final callerPhone =
-        callPayload?.callerId.toString() ??
-        data['callerPhone']?.toString() ??
-        'Unknown';
 
-    final CallKitParams params = CallKitParams(
-      id: callId,
-      nameCaller: callerName,
-      appName: 'amigo',
-      avatar: callerProfilePic,
-      handle: callerPhone,
-      type: 0,
-      duration: 30000,
-      textAccept: 'Accept',
-      textDecline: 'Decline',
-      missedCallNotification: const NotificationParams(
-        showNotification: true,
-        isShowCallback: true,
-        subtitle: 'Missed call',
-        callbackText: 'Call back',
-      ),
-      extra: <String, dynamic>{
-        'callerId': callPayload?.callerId.toString(),
-        'callerName': callerName,
-        'callerProfilePic': callerProfilePic,
-        ...data,
-      },
-      android: const AndroidParams(
-        isCustomNotification: true,
-        isShowLogo: false,
-        ringtonePath: 'system_ringtone_default',
-        backgroundColor: '#06bd98',
-        backgroundUrl: 'assets/images/call_bg_dark.png',
-        actionColor: '#36b554',
-        textColor: '#ffffff',
-        isShowFullLockedScreen: true,
-      ),
-      ios: const IOSParams(
-        iconName: 'CallKitLogo',
-        handleType: 'generic',
-        supportsVideo: true,
-        maximumCallGroups: 2,
-        maximumCallsPerCallGroup: 1,
-        audioSessionMode: 'default',
-        audioSessionActive: true,
-        audioSessionPreferredSampleRate: 44100.0,
-        audioSessionPreferredIOBufferDuration: 0.005,
-        supportsDTMF: true,
-        supportsHolding: true,
-        supportsGrouping: false,
-        supportsUngrouping: false,
-        ringtonePath: 'system_ringtone_default',
-      ),
-    );
-
-    // Save call details in SharedPreferences so they're available for accept/decline
     final callIdInt = int.tryParse(callId);
-    final callerIdInt = callPayload?.callerId;
     final callUtils = CallUtils();
+
+    // Dedup: if this callId is already 'ringing' in SharedPreferences, skip
+    final existing = await callUtils.getCallDetails();
+    if (callIdInt != null &&
+        existing?.callId == callIdInt &&
+        existing?.callStatus == 'ringing') {
+      debugPrint('[BACKGROUND] Duplicate FCM for callId=$callIdInt, skipping');
+      return;
+    }
+
+    final callerIdInt = callPayload?.callerId;
     final callDetails = CallDetails(
       callId: callIdInt,
       callerId: callerIdInt,
@@ -320,71 +201,83 @@ Future<void> _handleIncomingCall(
     );
     await callUtils.saveCallDetails(callDetails);
 
-    await FlutterCallkitIncoming.showCallkitIncoming(params);
+    // Show native incoming call screen (replaces FlutterCallkitIncoming)
+    try {
+      await NativeCallScreen.showIncomingCall(
+        callId: callIdInt ?? 0,
+        callerName: callerName,
+        callerPhoto: callerProfilePic.isNotEmpty ? callerProfilePic : null,
+      );
+    } catch (e) {
+      debugPrint('[BACKGROUND] Error showing native call screen: $e');
+    }
 
-    // Start polling for call status after showing CallKit notification
+    // FlutterCallkitIncoming - commented out, replaced by native call screen
+    // await FlutterCallkitIncoming.showCallkitIncoming(params);
+
+    // Start polling for call status after showing notification
     if (callIdInt != null) {
-      _startBackgroundStatusPolling(callIdInt);
+      // _startBackgroundStatusPolling(callIdInt);
     }
   } catch (e) {
-    debugPrint('[BACKGROUND] Error showing CallKit notification: $e');
+    debugPrint('[BACKGROUND] Error showing call notification: $e');
   }
 }
 
 /// Handle call end notification
-Future<void> _handleCallEnd(
-  String callId,
-  CallPayload? callPayload,
-  Map<String, dynamic> data,
-) async {
-  // Stop background polling immediately since call is ended via FCM
-  _stopBackgroundStatusPolling();
-
-  // Immediately dismiss CallKit UI
-  try {
-    if (callId.isNotEmpty) {
-      await FlutterCallkitIncoming.endCall(callId);
-    }
-    await FlutterCallkitIncoming.endAllCalls();
-  } catch (e) {
-    debugPrint('[BACKGROUND] Error ending CallKit: $e');
-    try {
-      await FlutterCallkitIncoming.endAllCalls();
-    } catch (e2) {
-      debugPrint('[BACKGROUND] Error calling endAllCalls: $e2');
-    }
-  }
-
-  // Update call details in SharedPreferences to mark call as ended
-  if (callId.isNotEmpty) {
-    try {
-      final callUtils = CallUtils();
-      final callIdInt = int.tryParse(callId);
-      if (callIdInt != null) {
-        final existingCallDetails = await callUtils.getCallDetails();
-        final updatedCallDetails =
-            existingCallDetails?.copyWith(
-              callId: callIdInt,
-              callStatus: 'ended',
-            ) ??
-            CallDetails(callId: callIdInt, callStatus: 'ended');
-        await callUtils.saveCallDetails(updatedCallDetails);
-      }
-    } catch (e) {
-      debugPrint('[BACKGROUND] Error updating call details: $e');
-    }
-  }
-
-  // Show missed call notification
-  final callerName =
-      callPayload?.callerName ?? data['callerName']?.toString() ?? 'Unknown';
-  final notifcations = NotificationService();
-  await notifcations.showMessageNotification(
-    title: 'Missed Call',
-    body: 'You missed a call from $callerName',
-    // data: {'type': 'missed_call', 'callId': callId},
-  );
-}
+// Future<void> _handleCallEnd(
+//   String callId,
+//   CallPayload? callPayload,
+//   Map<String, dynamic> data,
+// ) async {
+//   // Stop background polling immediately since call is ended via FCM
+//   _stopBackgroundStatusPolling();
+//
+//   // Immediately dismiss CallKit UI
+//   try {
+//     if (callId.isNotEmpty) {
+//       await FlutterCallkitIncoming.endCall(callId);
+//     }
+//     await FlutterCallkitIncoming.endAllCalls();
+//   } catch (e) {
+//     debugPrint('[BACKGROUND] Error ending CallKit: $e');
+//     try {
+//       await FlutterCallkitIncoming.endAllCalls();
+//     } catch (e2) {
+//       debugPrint('[BACKGROUND] Error calling endAllCalls: $e2');
+//     }
+//   }
+//
+//   // Update call details in SharedPreferences to mark call as ended
+//   if (callId.isNotEmpty) {
+//     try {
+//       final callUtils = CallUtils();
+//       final callIdInt = int.tryParse(callId);
+//       if (callIdInt != null) {
+//         final existingCallDetails = await callUtils.getCallDetails();
+//         final updatedCallDetails =
+//             existingCallDetails?.copyWith(
+//               callId: callIdInt,
+//               callStatus: 'ended',
+//             ) ??
+//             CallDetails(callId: callIdInt, callStatus: 'ended');
+//         await callUtils.saveCallDetails(updatedCallDetails);
+//       }
+//     } catch (e) {
+//       debugPrint('[BACKGROUND] Error updating call details: $e');
+//     }
+//   }
+//
+//   // Show missed call notification
+//   final callerName =
+//       callPayload?.callerName ?? data['callerName']?.toString() ?? 'Unknown';
+//   final notifcations = NotificationService();
+//   await notifcations.showMessageNotification(
+//     title: 'Missed Call',
+//     body: 'You missed a call from $callerName',
+//     // data: {'type': 'missed_call', 'callId': callId},
+//   );
+// }
 
 /// Handle a batch of ws-messages in background
 Future<void> _handleMessageNotificationBatchBackground(
@@ -405,7 +298,9 @@ Future<void> _handleMessageNotificationBatchBackground(
         case WSMessageType.messageNew:
           final chatPayload = wsMessage.chatMessagePayload;
           if (chatPayload != null) {
-            final alreadyExists = await messageRepo.messageExists(chatPayload.id);
+            final alreadyExists = await messageRepo.messageExists(
+              chatPayload.id,
+            );
 
             if (!alreadyExists) {
               final msgBody =
@@ -421,7 +316,10 @@ Future<void> _handleMessageNotificationBatchBackground(
               );
             }
 
-            await _storeMessageFromPayloadBackground(chatPayload, sendReceipt: false);
+            await _storeMessageFromPayloadBackground(
+              chatPayload,
+              sendReceipt: false,
+            );
 
             deliveries.add({
               'message_id': chatPayload.id.toString(),
@@ -438,10 +336,14 @@ Future<void> _handleMessageNotificationBatchBackground(
           break;
 
         default:
-          debugPrint('[BACKGROUND] Unhandled ws-message type: ${wsMessage.type}');
+          debugPrint(
+            '[BACKGROUND] Unhandled ws-message type: ${wsMessage.type}',
+          );
       }
     } catch (e) {
-      debugPrint('[BACKGROUND] Error processing ws-message ${wsMessage.type}: $e');
+      debugPrint(
+        '[BACKGROUND] Error processing ws-message ${wsMessage.type}: $e',
+      );
     }
   }
 
@@ -567,69 +469,69 @@ Future<Map<String, dynamic>?> _fetchBackgroundCallStatus(int callId) async {
 }
 
 /// Start polling for call status in background as fallback
-void _startBackgroundStatusPolling(int callId) {
-  if (_backgroundPollingTimer != null) {
-    _backgroundPollingTimer?.cancel();
-  }
-
-  _backgroundPollingCallId = callId;
-
-  int pollCount = 0;
-  const maxPolls = 15; // 30 seconds / 2 seconds = 15 polls
-
-  _backgroundPollingTimer = Timer.periodic(const Duration(seconds: 2), (
-    timer,
-  ) async {
-    if (_backgroundPollingCallId == null) {
-      timer.cancel();
-      return;
-    }
-
-    pollCount++;
-
-    // Stop polling after 30 seconds (15 polls)
-    if (pollCount > maxPolls) {
-      timer.cancel();
-      _backgroundPollingTimer = null;
-      _backgroundPollingCallId = null;
-      return;
-    }
-
-    final statusResponse = await _fetchBackgroundCallStatus(callId);
-    if (statusResponse != null && statusResponse['success'] == true) {
-      final callData = statusResponse['data'];
-      final status = callData['status'];
-
-      if (status == 'declined' || status == 'ended') {
-        timer.cancel();
-        _backgroundPollingTimer = null;
-        _backgroundPollingCallId = null;
-
-        // End the CallKit notification
-        await FlutterCallkitIncoming.endCall(callId.toString());
-        await FlutterCallkitIncoming.endAllCalls();
-
-        // Update shared preferences
-        final callUtils = CallUtils();
-        final existingCallDetails = await callUtils.getCallDetails();
-        final updatedCallDetails =
-            existingCallDetails?.copyWith(
-              callId: callId,
-              callStatus: status == 'declined'
-                  ? 'declined'
-                  : (status == 'ended'
-                        ? 'ended'
-                        : existingCallDetails.callStatus),
-            ) ??
-            CallDetails(
-              callId: callId,
-              callStatus: status == 'declined' ? 'declined' : 'ended',
-            );
-        await callUtils.saveCallDetails(updatedCallDetails);
-      }
-    }
-  });
-}
+// void _startBackgroundStatusPolling(int callId) {
+//   if (_backgroundPollingTimer != null) {
+//     _backgroundPollingTimer?.cancel();
+//   }
+//
+//   _backgroundPollingCallId = callId;
+//
+//   int pollCount = 0;
+//   const maxPolls = 15; // 30 seconds / 2 seconds = 15 polls
+//
+//   _backgroundPollingTimer = Timer.periodic(const Duration(seconds: 2), (
+//     timer,
+//   ) async {
+//     if (_backgroundPollingCallId == null) {
+//       timer.cancel();
+//       return;
+//     }
+//
+//     pollCount++;
+//
+//     // Stop polling after 30 seconds (15 polls)
+//     if (pollCount > maxPolls) {
+//       timer.cancel();
+//       _backgroundPollingTimer = null;
+//       _backgroundPollingCallId = null;
+//       return;
+//     }
+//
+//     final statusResponse = await _fetchBackgroundCallStatus(callId);
+//     if (statusResponse != null && statusResponse['success'] == true) {
+//       final callData = statusResponse['data'];
+//       final status = callData['status'];
+//
+//       if (status == 'declined' || status == 'ended') {
+//         timer.cancel();
+//         _backgroundPollingTimer = null;
+//         _backgroundPollingCallId = null;
+//
+//         // End the CallKit notification
+//         await FlutterCallkitIncoming.endCall(callId.toString());
+//         await FlutterCallkitIncoming.endAllCalls();
+//
+//         // Update shared preferences
+//         final callUtils = CallUtils();
+//         final existingCallDetails = await callUtils.getCallDetails();
+//         final updatedCallDetails =
+//             existingCallDetails?.copyWith(
+//               callId: callId,
+//               callStatus: status == 'declined'
+//                   ? 'declined'
+//                   : (status == 'ended'
+//                         ? 'ended'
+//                         : existingCallDetails.callStatus),
+//             ) ??
+//             CallDetails(
+//               callId: callId,
+//               callStatus: status == 'declined' ? 'declined' : 'ended',
+//             );
+//         await callUtils.saveCallDetails(updatedCallDetails);
+//       }
+//     }
+//   });
+// }
 
 /// Stop background status polling
 void _stopBackgroundStatusPolling() {

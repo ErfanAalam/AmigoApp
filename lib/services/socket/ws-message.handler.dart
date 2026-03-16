@@ -78,6 +78,12 @@ class WebSocketMessageHandler {
   final StreamController<CallPayload> _callErrorController =
       StreamController<CallPayload>.broadcast();
 
+  final StreamController<CallPayload> _callHoldController =
+      StreamController<CallPayload>.broadcast();
+
+  final StreamController<CallPayload> _callMissedController =
+      StreamController<CallPayload>.broadcast();
+
   // Sync messages controller (for missed messages on reconnection)
   final StreamController<SyncMessagesPayload> _syncMessagesController =
       StreamController<SyncMessagesPayload>.broadcast();
@@ -150,6 +156,12 @@ class WebSocketMessageHandler {
 
   /// Get stream for call error events (type: 'call:error')
   Stream<CallPayload> get callErrorStream => _callErrorController.stream;
+
+  /// Get stream for call hold events (type: 'call:hold')
+  Stream<CallPayload> get callHoldStream => _callHoldController.stream;
+
+  /// Get stream for call missed events (type: 'call:missed')
+  Stream<CallPayload> get callMissedStream => _callMissedController.stream;
 
   /// Get stream for sync messages (type: 'message:sync') - sent on reconnection
   Stream<SyncMessagesPayload> get syncMessagesStream =>
@@ -378,6 +390,20 @@ class WebSocketMessageHandler {
           }
           break;
 
+        case WSMessageType.callHold:
+          final holdPayload = message.callPayload;
+          if (holdPayload != null) {
+            _callHoldController.add(holdPayload);
+          }
+          break;
+
+        case WSMessageType.callMissed:
+          final missedPayload = message.callPayload;
+          if (missedPayload != null) {
+            _callMissedController.add(missedPayload);
+          }
+          break;
+
         case WSMessageType.messageForward:
           debugPrint('↩️ Message forward: ${message.type.value}');
           break;
@@ -596,6 +622,8 @@ class WebSocketMessageHandler {
     _callRingingController.close();
     _callTerminateController.close();
     _callErrorController.close();
+    _callHoldController.close();
+    _callMissedController.close();
     _syncMessagesController.close();
     _isInitialized = false;
   }

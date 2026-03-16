@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:image_picker/image_picker.dart';
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 import 'package:drift_db_viewer/drift_db_viewer.dart';
@@ -17,6 +18,7 @@ import '../../providers/theme-color.provider.dart';
 import '../../services/auth/auth.service.dart';
 import '../../ui/snackbar.dart';
 import '../auth/login.screen.dart';
+import '../debug/debug-menu.screen.dart';
 import 'deleted-dms.screen.dart';
 import 'edit-profile.screen.dart';
 import '../../utils/network.utils.dart';
@@ -43,6 +45,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   bool isUpdatingProfilePic = false;
   int deletedChatsCount = 0;
   String appVersion = '';
+  Timer? _debugTimer;
 
   @override
   void initState() {
@@ -52,6 +55,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     _loadAppVersion();
     // _checkPermissions();
     _requestPermissions();
+  }
+
+  @override
+  void dispose() {
+    _debugTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadDeletedChatsCount() async {
@@ -1047,13 +1056,36 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                     _buildInfoSection(
                       title: 'About',
                       children: [
-                        _buildInfoItem(
-                          icon: Icons.info_outline,
-                          label: 'App Version',
-                          value: appVersion.isNotEmpty
-                              ? 'v$appVersion'
-                              : 'Loading...',
-                          valueColor: Colors.grey[700],
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onLongPressStart: (_) {
+                            _debugTimer = Timer(const Duration(seconds: 5), () {
+                              if (mounted) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const DebugMenuScreen(),
+                                  ),
+                                );
+                              }
+                            });
+                          },
+                          onLongPressEnd: (_) {
+                            _debugTimer?.cancel();
+                            _debugTimer = null;
+                          },
+                          onLongPressCancel: () {
+                            _debugTimer?.cancel();
+                            _debugTimer = null;
+                          },
+                          child: _buildInfoItem(
+                            icon: Icons.info_outline,
+                            label: 'App Version',
+                            value: appVersion.isNotEmpty
+                                ? 'v$appVersion'
+                                : 'Loading...',
+                            valueColor: Colors.grey[700],
+                          ),
                         ),
 
                         ProfileOption(
