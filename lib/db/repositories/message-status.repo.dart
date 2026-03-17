@@ -36,6 +36,7 @@ class MessageStatusRepository {
       userId: status.userId,
       deliveredAt: status.deliveredAt,
       readAt: status.readAt,
+      reaction: status.reaction,
     );
   }
 
@@ -95,6 +96,7 @@ class MessageStatusRepository {
           final conversationId = status['conversationId'] as int;
           final deliveredAt = status['deliveredAt'] as String?;
           final readAt = status['readAt'] as String?;
+          final reaction = status['reaction'] as String?;
 
           // Escape SQL strings properly - values are already validated from status map
           final deliveredAtValue = deliveredAt != null
@@ -103,16 +105,23 @@ class MessageStatusRepository {
           final readAtValue = readAt != null
               ? "'${readAt.replaceAll("'", "''")}'"
               : 'NULL';
+          final reactionValue = reaction != null
+              ? "'${reaction.replaceAll("'", "''")}'"
+              : 'NULL';
 
-          await db.customStatement('''
+          await db.customInsert(
+            '''
             INSERT INTO message_status_model (
-              conversation_id, message_id, user_id, delivered_at, read_at
-            ) VALUES ($conversationId, ${BigInt.from(messageId)}, $userId, $deliveredAtValue, $readAtValue)
+              conversation_id, message_id, user_id, delivered_at, read_at, reaction
+            ) VALUES ($conversationId, ${BigInt.from(messageId)}, $userId, $deliveredAtValue, $readAtValue, $reactionValue)
             ON CONFLICT(message_id, user_id) DO UPDATE SET
               conversation_id = excluded.conversation_id,
               delivered_at = COALESCE(excluded.delivered_at, message_status_model.delivered_at),
-              read_at = COALESCE(excluded.read_at, message_status_model.read_at)
-            ''');
+              read_at = COALESCE(excluded.read_at, message_status_model.read_at),
+              reaction = COALESCE(excluded.reaction, message_status_model.reaction)
+            ''',
+            updates: {db.messageStatusModel},
+          );
         } catch (e) {
           final errorCode = _extractSqliteErrorCode(e);
           // Only log non-duplicate errors (duplicates are expected and handled by ON CONFLICT)
@@ -715,6 +724,64 @@ class MessageStatusRepository {
         errorCode: errorCode,
       );
     }
+  }
+
+  /// Upsert the emoji reaction for a specific user on a specific message.
+  /// Pass [emoji] = null to clear the reaction.
+  Future<void> upsertReaction({
+    required int messageId,
+    required int userId,
+    required int conversationId,
+    String? emoji,
+  }) async {
+    final db = sqliteDatabase.database;
+    final emojiValue = emoji != null ? "'${emoji.replaceAll("'", "''")}'" : 'NULL';
+    // Use customInsert (not customStatement) so Drift notifies reactive stream watchers.
+    await db.customInsert(
+      '''
+      INSERT INTO message_status_model (conversation_id, message_id, user_id, reaction)
+      VALUES ($conversationId, ${BigInt.from(messageId)}, $userId, $emojiValue)
+      ON CONFLICT(message_id, user_id) DO UPDATE SET
+        reaction = $emojiValue
+      ''',
+      updates: {db.messageStatusModel},
+    );
+  }
+
+  /// Watch all emoji reactions for messages in a conversation.
+  /// Returns a reactive map of messageId -> { emoji: [{user_id, user_name}] }
+  Stream<Map<int, Map<String, dynamic>>> watchReactionsByConversation(
+    int conversationId,
+  ) {
+    final db = sqliteDatabase.database;
+    final query = db.customSelect(
+      '''
+      SELECT ms.message_id, ms.user_id, ms.reaction, u.name as user_name
+      FROM message_status_model ms
+      LEFT JOIN users u ON ms.user_id = u.id
+      WHERE ms.conversation_id = ? AND ms.reaction IS NOT NULL
+      ''',
+      variables: [Variable.withInt(conversationId)],
+      readsFrom: {db.messageStatusModel, db.users},
+    );
+    return query.watch().map((rows) {
+      final Map<int, Map<String, dynamic>> result = {};
+      for (final row in rows) {
+        final msgId = row.read<int>('message_id');
+        final userId = row.read<int>('user_id');
+        final emoji = row.read<String?>('reaction');
+        final userName = row.read<String?>('user_name') ?? 'User $userId';
+        if (emoji == null) continue;
+        result.putIfAbsent(msgId, () => {});
+        result[msgId]!.putIfAbsent(emoji, () => <Map<String, dynamic>>[]);
+        (result[msgId]![emoji] as List<Map<String, dynamic>>).add({
+          'user_id': userId,
+          'user_name': userName,
+          'reacted_at': '',
+        });
+      }
+      return result;
+    });
   }
 
   /// mark all undelivered message_status as delivered for a user

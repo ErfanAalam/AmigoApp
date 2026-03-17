@@ -889,6 +889,7 @@ class MessageRepository {
         .write(MessagesCompanion(metadata: Value(metadata)));
   }
 
+
   /// Check if message has local media (checks metadata for localMediaPath)
   Future<bool> hasLocalMedia(int messageId) async {
     final message = await getMessageById(messageId);

@@ -116,6 +116,8 @@ class MessageStatusModel extends Table {
   IntColumn get userId => integer()();
   TextColumn get deliveredAt => text().nullable()();
   TextColumn get readAt => text().nullable()();
+  // emoji the user reacted with (e.g. "👍"), null if no reaction
+  TextColumn get reaction => text().nullable()();
 }
 
 @DriftDatabase(
@@ -133,7 +135,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration {
@@ -362,11 +364,11 @@ class AppDatabase extends _$AppDatabase {
           // Preserve existing is_failed values (only new records will get the new default of 0)
           await m.database.customStatement('''
             INSERT INTO messages_new (
-              id, conversation_id, sender_id, type, body, status, 
-              attachments, metadata, is_failed, is_pinned, is_starred, 
+              id, conversation_id, sender_id, type, body, status,
+              attachments, metadata, is_failed, is_pinned, is_starred,
               is_replied, is_forwarded, is_deleted, sent_at
             )
-            SELECT 
+            SELECT
               id, conversation_id, sender_id, type, body, status,
               attachments, metadata, is_failed,
               is_pinned, is_starred, is_replied, is_forwarded, is_deleted, sent_at
@@ -378,6 +380,23 @@ class AppDatabase extends _$AppDatabase {
           await m.database.customStatement(
             'ALTER TABLE messages_new RENAME TO messages;',
           );
+        }
+
+        // Migration from version 4 to 5
+        if (from < 5) {
+          // Messages table: Add reactions column for emoji reactions (legacy - moved to message_status_model in v6)
+          await m.database.customStatement('''
+            ALTER TABLE messages ADD COLUMN reactions TEXT;
+          ''');
+        }
+
+        // Migration from version 5 to 6
+        if (from < 6) {
+          // MessageStatusModel: Add reaction column (emoji string per user per message)
+          // This replaces the reactions JSON column in the messages table
+          await m.database.customStatement('''
+            ALTER TABLE message_status_model ADD COLUMN reaction TEXT;
+          ''');
         }
       },
     );

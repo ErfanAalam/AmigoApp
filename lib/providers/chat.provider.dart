@@ -170,6 +170,7 @@ class ChatNotifier extends Notifier<ChatState> {
   StreamSubscription<MessagePinPayload>? _pinSubscription;
   StreamSubscription<NewConversationPayload>? _conversationAddedSubscription;
   StreamSubscription<DeleteMessagePayload>? _messageDeleteSubscription;
+  StreamSubscription<MessageReactPayload>? _messageReactSubscription;
   StreamSubscription<JoinLeavePayload>? _joinConvSubscription;
   StreamSubscription<ConversationActionPayload>?
   _conversationActionSubscription;
@@ -1154,6 +1155,13 @@ class ChatNotifier extends Notifier<ChatState> {
       },
     );
 
+    _messageReactSubscription = _messageHandler.messageReactStream.listen(
+      _handleMessageReact,
+      onError: (error) {
+        debugPrint('❌ Message react stream error: $error');
+      },
+    );
+
     // Handle online status updates through the onlineStatusStream from messageHandler
     _onlineStatusSubscription = _messageHandler.onlineStatusStream.listen(
       _handleOnlineStatus,
@@ -1701,6 +1709,20 @@ class ChatNotifier extends Notifier<ChatState> {
     }
   }
 
+  /// Handle incoming emoji reaction from WebSocket
+  Future<void> _handleMessageReact(MessageReactPayload payload) async {
+    try {
+      await _messageStatusRepo.upsertReaction(
+        messageId: payload.messageId,
+        userId: payload.senderId,
+        conversationId: payload.convId,
+        emoji: payload.action == 'add' ? payload.emoji : null,
+      );
+    } catch (e) {
+      debugPrint('❌ Error handling message react: $e');
+    }
+  }
+
   /// Handle conversation added
   Future<void> _handleConversationAdded(NewConversationPayload message) async {
     try {
@@ -2152,6 +2174,7 @@ class ChatNotifier extends Notifier<ChatState> {
     _joinConvSubscription?.cancel();
     _conversationAddedSubscription?.cancel();
     _messageDeleteSubscription?.cancel();
+    _messageReactSubscription?.cancel();
     _onlineStatusSubscription?.cancel();
     _joinConvSubscription?.cancel();
     _conversationActionSubscription?.cancel();

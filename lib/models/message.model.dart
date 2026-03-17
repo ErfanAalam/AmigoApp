@@ -12,6 +12,8 @@ class MessageModel {
   final MessageStatusType status;
   final Map<String, dynamic>? attachments;
   final Map<String, dynamic>? metadata;
+  // Emoji reactions: { emoji: [{user_id, user_name, reacted_at}] }
+  final Map<String, dynamic>? reactions;
   final String? localMediaPath;
   final bool? isFailed;
   final bool? isStarred;
@@ -32,6 +34,7 @@ class MessageModel {
     this.isFailed,
     this.attachments,
     this.metadata,
+    this.reactions,
     this.localMediaPath,
     this.isStarred,
     this.isReplied,
@@ -116,6 +119,7 @@ class MessageModel {
       status: messageStatus,
       attachments: json['attachments'] as Map<String, dynamic>?,
       metadata: metadata,
+      reactions: json['reactions'] as Map<String, dynamic>?,
       isFailed: isFailed ? true : null,
       isStarred: isStarred ? true : null,
       isReplied: isReplied ? true : null,
@@ -175,6 +179,7 @@ class MessageModel {
     MessageStatusType? status,
     Map<String, dynamic>? metadata,
     Map<String, dynamic>? attachments,
+    Map<String, dynamic>? reactions,
     bool? isFailed,
     bool? isStarred,
     bool? isReplied,
@@ -194,6 +199,7 @@ class MessageModel {
       status: status ?? this.status,
       metadata: metadata ?? this.metadata,
       attachments: attachments ?? this.attachments,
+      reactions: reactions ?? this.reactions,
       isFailed: isFailed ?? this.isFailed,
       isStarred: isStarred ?? this.isStarred,
       isReplied: isReplied ?? this.isReplied,

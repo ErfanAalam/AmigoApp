@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/socket.types.dart';
+import 'package:amigo/ui/chat/emoji-reaction.widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -22,6 +23,9 @@ class MessageActionSheet extends StatelessWidget {
   final VoidCallback? onDelete;
   final VoidCallback? onDeleteForMe;
   final VoidCallback? onDeleteForEveryone;
+  // Emoji reaction callback
+  final void Function(String emoji)? onReact;
+  final List<String> myReactions;
 
   const MessageActionSheet({
     super.key,
@@ -40,6 +44,8 @@ class MessageActionSheet extends StatelessWidget {
     this.onDelete,
     this.onDeleteForMe,
     this.onDeleteForEveryone,
+    this.onReact,
+    this.myReactions = const [],
   });
 
   IconData _getMessageTypeIcon(MessageType type) {
@@ -120,6 +126,20 @@ class MessageActionSheet extends StatelessWidget {
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
+              // Quick emoji reactions row
+              if (onReact != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  child: EmojiReactionPicker(
+                    myReactions: myReactions,
+                    onEmojiSelected: (emoji) {
+                      Navigator.pop(context);
+                      onReact!(emoji);
+                    },
+                  ),
+                ),
+              if (onReact != null)
+                Divider(height: 1, color: Colors.grey[200]),
               // Message preview
               Container(
                 constraints: const BoxConstraints(maxHeight: 62),

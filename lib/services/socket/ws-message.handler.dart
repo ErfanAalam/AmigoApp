@@ -88,6 +88,10 @@ class WebSocketMessageHandler {
   final StreamController<SyncMessagesPayload> _syncMessagesController =
       StreamController<SyncMessagesPayload>.broadcast();
 
+  // Emoji reactions controller
+  final StreamController<MessageReactPayload> _messageReactController =
+      StreamController<MessageReactPayload>.broadcast();
+
   bool _isInitialized = false;
 
   /// Get stream for online status (type: 'connection:status')
@@ -166,6 +170,10 @@ class WebSocketMessageHandler {
   /// Get stream for sync messages (type: 'message:sync') - sent on reconnection
   Stream<SyncMessagesPayload> get syncMessagesStream =>
       _syncMessagesController.stream;
+
+  /// Get stream for emoji reactions (type: 'message:react')
+  Stream<MessageReactPayload> get messageReactStream =>
+      _messageReactController.stream;
 
   /// Add a message directly to the messageNewStream
   /// This is used by transports (like LongPollingTransport) to add synced messages
@@ -280,6 +288,13 @@ class WebSocketMessageHandler {
           final payload = message.deleteMessagePayload;
           if (payload != null) {
             _messageDeleteController.add(payload);
+          }
+          break;
+
+        case WSMessageType.messageReact:
+          final reactPayload = message.messageReactPayload;
+          if (reactPayload != null) {
+            _messageReactController.add(reactPayload);
           }
           break;
 

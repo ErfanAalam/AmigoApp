@@ -425,6 +425,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.0"
+  emoji_picker_flutter:
+    dependency: "direct main"
+    description:
+      name: emoji_picker_flutter
+      sha256: "984d3e9b9cf3175df9a868ce4a2d9611491e80e5d3b8e2b1e8991a4998972885"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.4.0"
   expressions:
     dependency: transitive
     description:
@@ -1528,6 +1536,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.0"
+  scroll_to_index:
+    dependency: "direct main"
+    description:
+      name: scroll_to_index
+      sha256: b707546e7500d9f070d63e5acf74fd437ec7eeeb68d3412ef7b0afada0b4f176
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.0.1"
   shadcn_flutter:
     dependency: "direct main"
     description:

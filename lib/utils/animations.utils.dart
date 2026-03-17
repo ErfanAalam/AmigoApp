@@ -92,6 +92,134 @@ Widget buildTypingAnimation(List<Animation<double>> dotAnimations) {
   );
 }
 
+// ─── Reusable Staggered Animation Wrappers ──────────────────────────────────
+
+/// Staggered fade+scale entrance animation for grid tiles.
+/// Wraps any child widget with a smooth scale-up + fade-in effect,
+/// staggered by [index] (40ms per item, capped at 600ms).
+class StaggeredScaleFadeTile extends StatefulWidget {
+  final int index;
+  final Widget child;
+  final int staggerDelayMs;
+  final int maxDelayMs;
+
+  const StaggeredScaleFadeTile({
+    super.key,
+    required this.index,
+    required this.child,
+    this.staggerDelayMs = 50,
+    this.maxDelayMs = 600,
+  });
+
+  @override
+  State<StaggeredScaleFadeTile> createState() => _StaggeredScaleFadeTileState();
+}
+
+class _StaggeredScaleFadeTileState extends State<StaggeredScaleFadeTile>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _fadeAnim;
+  late Animation<double> _scaleAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+    );
+    _fadeAnim = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _scaleAnim = Tween<double>(
+      begin: 0.85,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
+    final delay = (widget.index * widget.staggerDelayMs).clamp(
+      0,
+      widget.maxDelayMs,
+    );
+    Future.delayed(Duration(milliseconds: delay), () {
+      if (mounted) _controller.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _fadeAnim,
+      child: ScaleTransition(scale: _scaleAnim, child: widget.child),
+    );
+  }
+}
+
+/// Staggered fade+slide entrance animation for list items.
+/// Wraps any child widget with a smooth slide-up + fade-in effect,
+/// staggered by [index] (55ms per item, capped at 600ms).
+class StaggeredSlideFadeItem extends StatefulWidget {
+  final int index;
+  final Widget child;
+  final int staggerDelayMs;
+  final int maxDelayMs;
+
+  const StaggeredSlideFadeItem({
+    super.key,
+    required this.index,
+    required this.child,
+    this.staggerDelayMs = 55,
+    this.maxDelayMs = 600,
+  });
+
+  @override
+  State<StaggeredSlideFadeItem> createState() => _StaggeredSlideFadeItemState();
+}
+
+class _StaggeredSlideFadeItemState extends State<StaggeredSlideFadeItem>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _fadeAnim;
+  late Animation<Offset> _slideAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 380),
+    );
+    _fadeAnim = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _slideAnim = Tween<Offset>(
+      begin: const Offset(0, 0.12),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+    final delay = (widget.index * widget.staggerDelayMs).clamp(
+      0,
+      widget.maxDelayMs,
+    );
+    Future.delayed(Duration(milliseconds: delay), () {
+      if (mounted) _controller.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _fadeAnim,
+      child: SlideTransition(position: _slideAnim, child: widget.child),
+    );
+  }
+}
+
 /// Builds a single typing dot with animation.
 Widget _buildTypingDot(int index, List<Animation<double>> dotAnimations) {
   return AnimatedBuilder(

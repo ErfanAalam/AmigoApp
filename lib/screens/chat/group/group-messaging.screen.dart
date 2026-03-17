@@ -14,6 +14,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:scroll_to_index/scroll_to_index.dart';
 
 import '../../../api/api_service.dart';
 import '../../../db/repositories/conversation-member.repo.dart';
@@ -39,6 +40,7 @@ import '../../../ui/chat/group-readby.modal.dart';
 import '../../../ui/chat/input-container.widget.dart';
 import '../../../ui/chat/media-messages.widget.dart';
 import '../../../ui/chat/media-grid.widget.dart';
+import '../../../ui/chat/emoji-reaction.widget.dart';
 import '../../../ui/chat/message.action-sheet.dart';
 import '../../../ui/chat/message.widget.dart';
 import '../../../ui/chat/pinned-message.widget.dart';
@@ -54,6 +56,7 @@ import '../../../utils/chat/audio-playback.utils.dart';
 import '../../../utils/chat/chat-helpers.utils.dart';
 import '../../../utils/chat/forward-message.utils.dart';
 import '../../../utils/chat/preview-media.utils.dart';
+import '../../../ui/snackbar.dart';
 import '../../../utils/route-transitions.util.dart';
 import 'group-info.screen.dart';
 import '../chat-details.screen.dart';
@@ -83,7 +86,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   final MessageRepository _messagesRepo = MessageRepository();
   final ConversationRepository _conversationRepo = ConversationRepository();
   final UserRepository _userRepo = UserRepository();
-  final ScrollController _scrollController = ScrollController();
+  final AutoScrollController _scrollController = AutoScrollController(
+    suggestedRowHeight: 100,
+  );
   final TextEditingController _messageController = TextEditingController();
   final FocusNode _messageFocusNode = FocusNode();
   final TransportManager _transportManager = TransportManager();
@@ -98,6 +103,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   final ImagePicker _imagePicker = ImagePicker();
   final MediaCacheService _mediaCacheService = MediaCacheService();
   List<MessageModel> _messages = [];
+  Map<int, Map<String, dynamic>> _reactionsByMessage = {};
   bool _isLoading = false;
 
   UserModel? _currentUserDetails;
@@ -138,6 +144,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   // For optimistic message handling - using filtered streams per conversation
   StreamSubscription<List<MessageModel>>? _messagesStreamSub;
+  StreamSubscription<Map<int, Map<String, dynamic>>>? _reactionsSubscription;
   // StreamSubscription<OnlineStatusPayload>? _onlineStatusSubscription;
   StreamSubscription<TransportConnectionState>?
   _transportConnectionSubscription;
@@ -266,6 +273,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   int? _highlightedMessageId; // Current match being viewed
   Set<int> _highlightedMessageIds = {}; // All matching messages
   Timer? _highlightTimer;
+
+  // Scroll-to-reply loading state
+  bool _isLoadingTargetMessage = false;
 
   // GlobalKeys for message widgets to enable accurate scrolling
   final Map<int, GlobalKey> _messageKeys = {};
@@ -610,6 +620,19 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           },
           onError: (e) {
             debugPrint('❌ Group messages stream error: $e');
+          },
+        );
+
+    _reactionsSubscription?.cancel();
+    _reactionsSubscription = _messageStatusRepo
+        .watchReactionsByConversation(widget.group.conversationId)
+        .listen(
+          (reactions) {
+            if (!mounted) return;
+            setState(() => _reactionsByMessage = reactions);
+          },
+          onError: (e) {
+            debugPrint('❌ Reactions stream error: $e');
           },
         );
 
@@ -958,6 +981,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
               'userId': status['user_id'],
               'deliveredAt': status['delivered_at'],
               'readAt': status['read_at'],
+              'reaction': status['reaction'],
             };
           }).toList();
 
@@ -3041,7 +3065,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                 //   tooltip: 'Search messages',
                 // ),
                 IconButton(
-                  icon: const Icon(Icons.info_outline, color: Colors.white),
+                  icon: const Icon(
+                    Icons.info_outline_rounded,
+                    color: Colors.white,
+                  ),
                   onPressed: _openGroupInfo,
                   tooltip: 'Group info',
                 ),
@@ -3087,8 +3114,16 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
               ],
             ),
 
+            // Loading-target-message pill
+            if (_isLoadingTargetMessage)
+              Positioned(
+                top: 10,
+                left: 0,
+                right: 0,
+                child: _buildLoadingTargetPill(),
+              ),
             // Sync indicator pill - above date separator
-            if (_isSyncingMessages)
+            if (_isSyncingMessages && !_isLoadingTargetMessage)
               Positioned(
                 top: 10,
                 left: 0,
@@ -3097,7 +3132,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
               ),
             // Sticky Date Separator - shifts down when sync pill is visible
             Positioned(
-              top: _isSyncingMessages ? 44 : 10,
+              top: (_isSyncingMessages || _isLoadingTargetMessage) ? 44 : 10,
               left: 0,
               right: 0,
               child: _buildStickyDateSeparator(),
@@ -3160,6 +3195,41 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             SizedBox(width: 7),
             Text(
               'Syncing...',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 11.5,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Pill shown while loading older pages to find a reply target
+  Widget _buildLoadingTargetPill() {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 11,
+              height: 11,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+            SizedBox(width: 7),
+            Text(
+              'Loading message...',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 11.5,
@@ -3297,16 +3367,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         // Debug: Check user ID comparison
         final isMyMessage = message.senderId == _currentUserDetails?.id;
 
-        // Get or create GlobalKey for this message
-        if (!_messageKeys.containsKey(message.id)) {
-          _messageKeys[message.id] = GlobalKey();
-        }
-        final messageKey = _messageKeys[message.id]!;
-
-        // Wrap the message with a container that has a key for scrolling
-        // This prevents widgets from being rebuilt incorrectly when messages are added
-        return Container(
-          key: messageKey,
+        // Wrap with AutoScrollTag so scrollToIndex can find this item
+        return AutoScrollTag(
+          key: ValueKey(message.id),
+          controller: _scrollController,
+          index: index,
           child: Column(
             children: [
               // Date separator - show the date for the group of messages that starts here
@@ -3430,18 +3495,19 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       onPanStart: (details) => _onSwipeStart(message, details),
       onPanUpdate: (details) => _onSwipeUpdate(message, details, isMyMessage),
       onPanEnd: (details) => _onSwipeEnd(message, details, isMyMessage),
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
         color: isSelected
             ? themeColor.primary.withOpacity(0.1)
-            : (_highlightedMessageIds.contains(message.id)
-                  ? (_highlightedMessageId == message.id
-                        ? Colors.yellow.withOpacity(
-                            0.5,
-                          ) // Current match - brighter
-                        : Colors.yellow.withOpacity(
-                            0.2,
-                          )) // Other matches - dimmer
-                  : Colors.transparent),
+            : (_highlightedMessageId == message.id &&
+                      !_highlightedMessageIds.contains(message.id))
+                  ? themeColor.primary.withOpacity(0.10)
+                  : (_highlightedMessageIds.contains(message.id)
+                        ? (_highlightedMessageId == message.id
+                              ? Colors.yellow.withOpacity(0.35)
+                              : Colors.yellow.withOpacity(0.15))
+                        : Colors.transparent),
         child: Stack(
           children: [
             _buildSwipeableMessageBubble(
@@ -3655,9 +3721,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // Check if this message is currently highlighted
     final isHighlighted = _highlightedMessageId == message.id;
 
+    final messageWithReactions = _reactionsByMessage.containsKey(message.id)
+        ? message.copyWith(reactions: _reactionsByMessage[message.id])
+        : message;
+
     return MessageBubble(
       config: MessageBubbleConfig(
-        message: message,
+        message: messageWithReactions,
         isMyMessage: isMyMessage,
         isPinned: isPinned,
         isStarred: isStarred,
@@ -3694,6 +3764,15 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         onReplyTap: _scrollToMessage,
         messagesRepo: _messagesRepo,
         userRepo: _userRepo,
+        onReact: (emoji) => _reactToMessage(message, emoji),
+        onShowReactionUsers: (reactions) {
+          showModalBottomSheet(
+            context: context,
+            backgroundColor: Colors.transparent,
+            isScrollControlled: true,
+            builder: (_) => AllReactorsSheet(reactions: reactions),
+          );
+        },
       ),
     );
   }
@@ -3868,6 +3947,20 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     if (!mounted) return;
 
+    // Determine which emojis the current user has already reacted with
+    final myReactions = <String>[];
+    if (_currentUserDetails != null) {
+      final msgReactions = _reactionsByMessage[message.id] ?? {};
+      for (final entry in msgReactions.entries) {
+        final users = (entry.value as List?) ?? [];
+        if (users.any(
+          (u) => (u['user_id'] as int?) == _currentUserDetails!.id,
+        )) {
+          myReactions.add(entry.key);
+        }
+      }
+    }
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -3889,6 +3982,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         onDelete: isAdmin || _isAdminOrStaff
             ? () => _deleteMessage(message.id)
             : null,
+        onReact: (emoji) => _reactToMessage(message, emoji),
+        myReactions: myReactions,
       ),
     );
   }
@@ -4440,6 +4535,41 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     );
   }
 
+  /// React to a message with an emoji (toggle: add if not reacted, remove if already reacted)
+  void _reactToMessage(MessageModel message, String emoji) async {
+    if (_currentUserDetails == null) return;
+
+    final msgReactions = _reactionsByMessage[message.id] ?? {};
+    final emojiUsers =
+        (msgReactions[emoji] as List?)
+            ?.map((e) => Map<String, dynamic>.from(e as Map))
+            .toList() ??
+        [];
+    final alreadyReacted = emojiUsers.any(
+      (u) => (u['user_id'] as int?) == _currentUserDetails!.id,
+    );
+    final action = alreadyReacted ? 'remove' : 'add';
+
+    await _messageStatusRepo.upsertReaction(
+      messageId: message.id,
+      userId: _currentUserDetails!.id,
+      conversationId: widget.group.conversationId,
+      emoji: action == 'add' ? emoji : null,
+    );
+
+    try {
+      await apiService.chat.reactToMessage(
+        messageId: message.id,
+        conversationId: widget.group.conversationId,
+        emoji: emoji,
+        action: action,
+        senderName: _currentUserDetails!.name,
+      );
+    } catch (e) {
+      debugPrint('❌ Failed to send reaction: $e');
+    }
+  }
+
   void _bulkDeleteMessages() async {
     final result = await apiService.chat.deleteMessage(
       _selectedMessages.map((id) => id).toList(),
@@ -4487,79 +4617,63 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
   }
 
-  /// Scroll to a specific message
+  /// Scroll to a specific message (reply-tap or pinned message tap)
   Future<void> _scrollToMessage(int messageId) async {
-    // Find the index of the message in the list
-    final messageIndex = _messages.indexWhere((msg) => msg.id == messageId);
-    if (messageIndex == -1 || !_scrollController.hasClients) {
-      return;
-    }
+    if (!mounted || !_scrollController.hasClients) return;
 
-    // PHASE 1: Scroll approximately to the message area so it gets built
-    if (messageIndex != -1) {
-      // Calculate approximate position (reverse list)
-      // Use a more accurate estimate: average message height is around 80-120px
-      final approximatePosition = (_messages.length - 1 - messageIndex) * 90.0;
+    // ── Phase 0: ensure the target message is in local DB ──
+    if (!_messages.any((m) => m.id == messageId)) {
+      setState(() => _isLoadingTargetMessage = true);
 
-      // Only scroll if the message is not near the current viewport
-      final currentPosition = _scrollController.position.pixels;
-      final viewportHeight = _scrollController.position.viewportDimension;
+      int attempts = 0;
+      const maxAttempts = 20;
+      while (!_messages.any((m) => m.id == messageId) &&
+          _hasMoreOnServer &&
+          attempts < maxAttempts &&
+          mounted) {
+        await _loadMoreMessages();
+        // Wait for the Drift stream to propagate new rows into _messages
+        await Future.delayed(const Duration(milliseconds: 150));
+        attempts++;
+      }
 
-      // If message is likely off-screen, scroll approximately to it first
-      if ((approximatePosition - currentPosition).abs() > viewportHeight / 2) {
-        try {
-          await _scrollController.animateTo(
-            approximatePosition.clamp(
-              0.0,
-              _scrollController.position.maxScrollExtent,
-            ),
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          );
+      if (mounted) {
+        setState(() => _isLoadingTargetMessage = false);
+      }
 
-          // Wait for widgets to build and layout
-          await Future.delayed(const Duration(milliseconds: 200));
-        } catch (e) {
-          debugPrint('⚠️ Error in approximate scroll: $e');
-        }
+      if (!_messages.any((m) => m.id == messageId)) {
+        if (mounted) Snack.warning('Message not found');
+        return;
       }
     }
 
-    // PHASE 2: Try to use GlobalKey to scroll to exact position
-    final messageKey = _messageKeys[messageId];
-    if (messageKey?.currentContext != null) {
-      try {
-        await Scrollable.ensureVisible(
-          messageKey!.currentContext!,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-          alignment: 0.3, // Position message at 30% from top of viewport
-        );
-        // Wait a bit for the scroll to complete
-        await Future.delayed(const Duration(milliseconds: 100));
-      } catch (e) {
-        debugPrint('⚠️ Error in ensureVisible scroll: $e');
-      }
-    }
+    if (!mounted || !_scrollController.hasClients) return;
 
-    // PHASE 3: Highlight the message
-    if (mounted) {
-      setState(() {
-        _highlightedMessageId = messageId;
-      });
+    final targetIndex = _messages.indexWhere((m) => m.id == messageId);
+    if (targetIndex == -1) return;
 
-      // Cancel any existing timer
-      _highlightTimer?.cancel();
+    // Builder index in the reversed list
+    final builderIndex = _messages.length - 1 - targetIndex;
 
-      // Remove highlight after 2 seconds
-      _highlightTimer = Timer(const Duration(milliseconds: 2000), () {
-        if (mounted) {
-          setState(() {
-            _highlightedMessageId = null;
-          });
-        }
-      });
-    }
+    // scroll_to_index handles all the heavy lifting — works even for
+    // items that haven't been built yet by using suggestedRowHeight.
+    await _scrollController.scrollToIndex(
+      builderIndex,
+      preferPosition: AutoScrollPosition.middle,
+      duration: const Duration(milliseconds: 300),
+    );
+
+    _highlightMessage(messageId);
+  }
+
+  /// Apply a timed highlight effect on the target message row
+  void _highlightMessage(int messageId) {
+    if (!mounted) return;
+    setState(() => _highlightedMessageId = messageId);
+    _highlightTimer?.cancel();
+    _highlightTimer = Timer(const Duration(milliseconds: 2000), () {
+      if (mounted) setState(() => _highlightedMessageId = null);
+    });
   }
 
   Future<void> _showForwardModal() async {
@@ -4711,13 +4825,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         builder: (context, value, child) {
           final text = value.text.trim();
           // Show recommendations if text is empty OR if it matches one of the recommendations
-          if (text.isEmpty || _messageRecommendations.contains(text)) {
-            return MessageRecommendations(
-              recommendations: _messageRecommendations,
-              onRecommendationTap: _onRecommendationTap,
-            );
-          }
-          return const SizedBox.shrink();
+          // if (text.isEmpty || _messageRecommendations.contains(text)) {
+          return MessageRecommendations(
+            recommendations: _messageRecommendations,
+            onRecommendationTap: _onRecommendationTap,
+          );
+          // }
+          // return const SizedBox.shrink();
         },
       ),
     );
@@ -4962,6 +5076,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     _isOtherTypingNotifier.dispose();
     _searchDebounceTimer?.cancel();
     _messagesStreamSub?.cancel();
+    _reactionsSubscription?.cancel();
     _transportConnectionSubscription?.cancel();
     _messageAckSubscription?.cancel();
     _messageSubscription?.cancel();

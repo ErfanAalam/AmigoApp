@@ -125,4 +125,21 @@ class ChatClient extends BaseApiClient {
       'conversation_id': conversationId,
     });
   }
+
+  /// React / un-react to a message with an emoji.
+  Future<ApiResult<dynamic>> reactToMessage({
+    required int messageId,
+    required int conversationId,
+    required String emoji,
+    required String action, // 'add' | 'remove'
+    String? senderName,
+  }) async {
+    return post('/message/react', data: {
+      'message_id': messageId.toString(),
+      'conversation_id': conversationId,
+      'emoji': emoji,
+      'action': action,
+      if (senderName != null) 'sender_name': senderName,
+    });
+  }
 }

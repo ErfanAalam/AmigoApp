@@ -29,11 +29,12 @@ class UserProfileModal extends StatelessWidget {
 
   String _getInitials(String name) {
     if (name.isEmpty) return '?';
-    final words = name.trim().split(' ');
+    final words = name.trim().split(' ').where((w) => w.isNotEmpty).toList();
     if (words.length >= 2) {
       return '${words[0][0]}${words[1][0]}'.toUpperCase();
     }
-    return words[0][0].toUpperCase();
+    if (words.isNotEmpty) return words[0][0].toUpperCase();
+    return '?';
   }
 
   @override

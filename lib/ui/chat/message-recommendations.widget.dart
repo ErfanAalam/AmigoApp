@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/theme-color.provider.dart';
@@ -21,36 +22,40 @@ class MessageRecommendations extends ConsumerWidget {
     }
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      // margin: const EdgeInsets.only(bottom: 0),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
+          spacing: 8,
           children: recommendations.map((recommendation) {
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: InkWell(
-                onTap: () => onRecommendationTap(recommendation),
-                borderRadius: BorderRadius.circular(20),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: themeColor.primary.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: themeColor.primary.withOpacity(0.3),
-                      width: 1,
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                child: InkWell(
+                  onTap: () => onRecommendationTap(recommendation),
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 15,
+                      vertical: 5,
                     ),
-                  ),
-                  child: Text(
-                    recommendation,
-                    style: TextStyle(
-                      color: themeColor.primary,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
+                    decoration: BoxDecoration(
+                      color: themeColor.primary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: themeColor.primary.withOpacity(0.3),
+                        width: 1,
+                      ),
+                    ),
+                    child: Text(
+                      recommendation,
+                      style: TextStyle(
+                        color: themeColor.primary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ),
@@ -62,4 +67,3 @@ class MessageRecommendations extends ConsumerWidget {
     );
   }
 }
-

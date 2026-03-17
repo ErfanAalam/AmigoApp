@@ -5,6 +5,7 @@ class MessageStatusModel {
   final int userId;
   final String? deliveredAt;
   final String? readAt;
+  final String? reaction;
 
   MessageStatusModel({
     required this.id,
@@ -13,6 +14,7 @@ class MessageStatusModel {
     required this.userId,
     this.deliveredAt,
     this.readAt,
+    this.reaction,
   });
 
   factory MessageStatusModel.fromJson(Map<String, dynamic> json) {
@@ -23,6 +25,7 @@ class MessageStatusModel {
       userId: json['user_id'],
       deliveredAt: json['delivered_at'],
       readAt: json['read_at'],
+      reaction: json['reaction'],
     );
   }
 
@@ -34,6 +37,7 @@ class MessageStatusModel {
       'user_id': userId,
       'delivered_at': deliveredAt,
       'read_at': readAt,
+      'reaction': reaction,
     };
   }
 
@@ -44,6 +48,7 @@ class MessageStatusModel {
     int? userId,
     String? deliveredAt,
     String? readAt,
+    String? reaction,
   }) {
     return MessageStatusModel(
       id: id ?? this.id,
@@ -52,6 +57,7 @@ class MessageStatusModel {
       userId: userId ?? this.userId,
       deliveredAt: deliveredAt ?? this.deliveredAt,
       readAt: readAt ?? this.readAt,
+      reaction: reaction ?? this.reaction,
     );
   }
 }

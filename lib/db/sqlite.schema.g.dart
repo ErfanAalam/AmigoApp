@@ -93,6 +93,7 @@ class $UsersTable extends Users with TableInfo<$UsersTable, User> {
     defaultConstraints: GeneratedColumn.constraintIsAlways(
       'CHECK ("call_access" IN (0, 1))',
     ),
+    defaultValue: const Constant(true),
   );
   @override
   List<GeneratedColumn> get $columns => [
@@ -3715,6 +3716,17 @@ class $MessageStatusModelTable extends MessageStatusModel
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _reactionMeta = const VerificationMeta(
+    'reaction',
+  );
+  @override
+  late final GeneratedColumn<String> reaction = GeneratedColumn<String>(
+    'reaction',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -3723,6 +3735,7 @@ class $MessageStatusModelTable extends MessageStatusModel
     userId,
     deliveredAt,
     readAt,
+    reaction,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -3781,6 +3794,12 @@ class $MessageStatusModelTable extends MessageStatusModel
         readAt.isAcceptableOrUnknown(data['read_at']!, _readAtMeta),
       );
     }
+    if (data.containsKey('reaction')) {
+      context.handle(
+        _reactionMeta,
+        reaction.isAcceptableOrUnknown(data['reaction']!, _reactionMeta),
+      );
+    }
     return context;
   }
 
@@ -3814,6 +3833,10 @@ class $MessageStatusModelTable extends MessageStatusModel
         DriftSqlType.string,
         data['${effectivePrefix}read_at'],
       ),
+      reaction: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}reaction'],
+      ),
     );
   }
 
@@ -3831,6 +3854,7 @@ class MessageStatusModelData extends DataClass
   final int userId;
   final String? deliveredAt;
   final String? readAt;
+  final String? reaction;
   const MessageStatusModelData({
     required this.id,
     required this.conversationId,
@@ -3838,6 +3862,7 @@ class MessageStatusModelData extends DataClass
     required this.userId,
     this.deliveredAt,
     this.readAt,
+    this.reaction,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -3851,6 +3876,9 @@ class MessageStatusModelData extends DataClass
     }
     if (!nullToAbsent || readAt != null) {
       map['read_at'] = Variable<String>(readAt);
+    }
+    if (!nullToAbsent || reaction != null) {
+      map['reaction'] = Variable<String>(reaction);
     }
     return map;
   }
@@ -3867,6 +3895,9 @@ class MessageStatusModelData extends DataClass
       readAt: readAt == null && nullToAbsent
           ? const Value.absent()
           : Value(readAt),
+      reaction: reaction == null && nullToAbsent
+          ? const Value.absent()
+          : Value(reaction),
     );
   }
 
@@ -3882,6 +3913,7 @@ class MessageStatusModelData extends DataClass
       userId: serializer.fromJson<int>(json['userId']),
       deliveredAt: serializer.fromJson<String?>(json['deliveredAt']),
       readAt: serializer.fromJson<String?>(json['readAt']),
+      reaction: serializer.fromJson<String?>(json['reaction']),
     );
   }
   @override
@@ -3894,6 +3926,7 @@ class MessageStatusModelData extends DataClass
       'userId': serializer.toJson<int>(userId),
       'deliveredAt': serializer.toJson<String?>(deliveredAt),
       'readAt': serializer.toJson<String?>(readAt),
+      'reaction': serializer.toJson<String?>(reaction),
     };
   }
 
@@ -3904,6 +3937,7 @@ class MessageStatusModelData extends DataClass
     int? userId,
     Value<String?> deliveredAt = const Value.absent(),
     Value<String?> readAt = const Value.absent(),
+    Value<String?> reaction = const Value.absent(),
   }) => MessageStatusModelData(
     id: id ?? this.id,
     conversationId: conversationId ?? this.conversationId,
@@ -3911,6 +3945,7 @@ class MessageStatusModelData extends DataClass
     userId: userId ?? this.userId,
     deliveredAt: deliveredAt.present ? deliveredAt.value : this.deliveredAt,
     readAt: readAt.present ? readAt.value : this.readAt,
+    reaction: reaction.present ? reaction.value : this.reaction,
   );
   MessageStatusModelData copyWithCompanion(MessageStatusModelCompanion data) {
     return MessageStatusModelData(
@@ -3924,6 +3959,7 @@ class MessageStatusModelData extends DataClass
           ? data.deliveredAt.value
           : this.deliveredAt,
       readAt: data.readAt.present ? data.readAt.value : this.readAt,
+      reaction: data.reaction.present ? data.reaction.value : this.reaction,
     );
   }
 
@@ -3935,14 +3971,22 @@ class MessageStatusModelData extends DataClass
           ..write('messageId: $messageId, ')
           ..write('userId: $userId, ')
           ..write('deliveredAt: $deliveredAt, ')
-          ..write('readAt: $readAt')
+          ..write('readAt: $readAt, ')
+          ..write('reaction: $reaction')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, conversationId, messageId, userId, deliveredAt, readAt);
+  int get hashCode => Object.hash(
+    id,
+    conversationId,
+    messageId,
+    userId,
+    deliveredAt,
+    readAt,
+    reaction,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -3952,7 +3996,8 @@ class MessageStatusModelData extends DataClass
           other.messageId == this.messageId &&
           other.userId == this.userId &&
           other.deliveredAt == this.deliveredAt &&
-          other.readAt == this.readAt);
+          other.readAt == this.readAt &&
+          other.reaction == this.reaction);
 }
 
 class MessageStatusModelCompanion
@@ -3963,6 +4008,7 @@ class MessageStatusModelCompanion
   final Value<int> userId;
   final Value<String?> deliveredAt;
   final Value<String?> readAt;
+  final Value<String?> reaction;
   const MessageStatusModelCompanion({
     this.id = const Value.absent(),
     this.conversationId = const Value.absent(),
@@ -3970,6 +4016,7 @@ class MessageStatusModelCompanion
     this.userId = const Value.absent(),
     this.deliveredAt = const Value.absent(),
     this.readAt = const Value.absent(),
+    this.reaction = const Value.absent(),
   });
   MessageStatusModelCompanion.insert({
     this.id = const Value.absent(),
@@ -3978,6 +4025,7 @@ class MessageStatusModelCompanion
     required int userId,
     this.deliveredAt = const Value.absent(),
     this.readAt = const Value.absent(),
+    this.reaction = const Value.absent(),
   }) : conversationId = Value(conversationId),
        messageId = Value(messageId),
        userId = Value(userId);
@@ -3988,6 +4036,7 @@ class MessageStatusModelCompanion
     Expression<int>? userId,
     Expression<String>? deliveredAt,
     Expression<String>? readAt,
+    Expression<String>? reaction,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -3996,6 +4045,7 @@ class MessageStatusModelCompanion
       if (userId != null) 'user_id': userId,
       if (deliveredAt != null) 'delivered_at': deliveredAt,
       if (readAt != null) 'read_at': readAt,
+      if (reaction != null) 'reaction': reaction,
     });
   }
 
@@ -4006,6 +4056,7 @@ class MessageStatusModelCompanion
     Value<int>? userId,
     Value<String?>? deliveredAt,
     Value<String?>? readAt,
+    Value<String?>? reaction,
   }) {
     return MessageStatusModelCompanion(
       id: id ?? this.id,
@@ -4014,6 +4065,7 @@ class MessageStatusModelCompanion
       userId: userId ?? this.userId,
       deliveredAt: deliveredAt ?? this.deliveredAt,
       readAt: readAt ?? this.readAt,
+      reaction: reaction ?? this.reaction,
     );
   }
 
@@ -4038,6 +4090,9 @@ class MessageStatusModelCompanion
     if (readAt.present) {
       map['read_at'] = Variable<String>(readAt.value);
     }
+    if (reaction.present) {
+      map['reaction'] = Variable<String>(reaction.value);
+    }
     return map;
   }
 
@@ -4049,7 +4104,8 @@ class MessageStatusModelCompanion
           ..write('messageId: $messageId, ')
           ..write('userId: $userId, ')
           ..write('deliveredAt: $deliveredAt, ')
-          ..write('readAt: $readAt')
+          ..write('readAt: $readAt, ')
+          ..write('reaction: $reaction')
           ..write(')'))
         .toString();
   }
@@ -5858,6 +5914,7 @@ typedef $$MessageStatusModelTableCreateCompanionBuilder =
       required int userId,
       Value<String?> deliveredAt,
       Value<String?> readAt,
+      Value<String?> reaction,
     });
 typedef $$MessageStatusModelTableUpdateCompanionBuilder =
     MessageStatusModelCompanion Function({
@@ -5867,6 +5924,7 @@ typedef $$MessageStatusModelTableUpdateCompanionBuilder =
       Value<int> userId,
       Value<String?> deliveredAt,
       Value<String?> readAt,
+      Value<String?> reaction,
     });
 
 class $$MessageStatusModelTableFilterComposer
@@ -5905,6 +5963,11 @@ class $$MessageStatusModelTableFilterComposer
 
   ColumnFilters<String> get readAt => $composableBuilder(
     column: $table.readAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get reaction => $composableBuilder(
+    column: $table.reaction,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -5947,6 +6010,11 @@ class $$MessageStatusModelTableOrderingComposer
     column: $table.readAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get reaction => $composableBuilder(
+    column: $table.reaction,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$MessageStatusModelTableAnnotationComposer
@@ -5979,6 +6047,9 @@ class $$MessageStatusModelTableAnnotationComposer
 
   GeneratedColumn<String> get readAt =>
       $composableBuilder(column: $table.readAt, builder: (column) => column);
+
+  GeneratedColumn<String> get reaction =>
+      $composableBuilder(column: $table.reaction, builder: (column) => column);
 }
 
 class $$MessageStatusModelTableTableManager
@@ -6027,6 +6098,7 @@ class $$MessageStatusModelTableTableManager
                 Value<int> userId = const Value.absent(),
                 Value<String?> deliveredAt = const Value.absent(),
                 Value<String?> readAt = const Value.absent(),
+                Value<String?> reaction = const Value.absent(),
               }) => MessageStatusModelCompanion(
                 id: id,
                 conversationId: conversationId,
@@ -6034,6 +6106,7 @@ class $$MessageStatusModelTableTableManager
                 userId: userId,
                 deliveredAt: deliveredAt,
                 readAt: readAt,
+                reaction: reaction,
               ),
           createCompanionCallback:
               ({
@@ -6043,6 +6116,7 @@ class $$MessageStatusModelTableTableManager
                 required int userId,
                 Value<String?> deliveredAt = const Value.absent(),
                 Value<String?> readAt = const Value.absent(),
+                Value<String?> reaction = const Value.absent(),
               }) => MessageStatusModelCompanion.insert(
                 id: id,
                 conversationId: conversationId,
@@ -6050,6 +6124,7 @@ class $$MessageStatusModelTableTableManager
                 userId: userId,
                 deliveredAt: deliveredAt,
                 readAt: readAt,
+                reaction: reaction,
               ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), BaseReferences(db, table, e)))

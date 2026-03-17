@@ -4,7 +4,10 @@ import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/providers/chat.provider.dart';
+import 'package:amigo/providers/message.provider.dart';
 import 'package:amigo/services/contact.service.dart';
+import 'package:amigo/services/user-status.service.dart';
+import 'package:amigo/utils/animations.utils.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +16,7 @@ import '../../../api/api_service.dart';
 import '../../../db/repositories/conversation-member.repo.dart';
 import '../../../models/group.model.dart';
 import '../../../models/user.model.dart';
+import '../../../config/app-colors.config.dart';
 import '../../../providers/theme-color.provider.dart';
 import '../../../ui/snackbar.dart';
 
@@ -37,6 +41,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
 
   final UserUtils _userUtils = UserUtils();
   final apiService = ApiService();
+  final UserStatusService _userStatusService = UserStatusService();
 
   Map<String, dynamic>? _groupInfo;
   List<UserModel> _availableUsers = [];
@@ -373,50 +378,130 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
       text: _groupInfo?['title'] ?? '',
     );
 
-    return showDialog(
+    showGeneralDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Edit Group Title',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        content: TextField(
-          controller: controller,
-          decoration: InputDecoration(
-            labelText: 'Group Title',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: themeColor.primary, width: 2),
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.black45,
+      transitionDuration: const Duration(milliseconds: 250),
+      pageBuilder: (context, animation1, animation2) => Container(),
+      transitionBuilder: (context, animation1, animation2, child) {
+        return FadeTransition(
+          opacity: CurvedAnimation(parent: animation1, curve: Curves.easeOut),
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.95, end: 1.0).animate(
+              CurvedAnimation(parent: animation1, curve: Curves.easeOut),
             ),
-          ),
-          maxLength: 50,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final newTitle = controller.text.trim();
-              if (newTitle.isNotEmpty && newTitle != _groupInfo?['title']) {
-                Navigator.pop(context);
-                await _updateGroupTitle(newTitle);
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: themeColor.primary,
-              foregroundColor: Colors.white,
+            child: AlertDialog(
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(16),
               ),
+              backgroundColor: Colors.white,
+              contentPadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+              content: SizedBox(
+                width: MediaQuery.of(context).size.width * 0.8,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Edit Group Name',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Enter a new name for this group',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    TextField(
+                      controller: controller,
+                      autofocus: true,
+                      maxLength: 50,
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: InputDecoration(
+                        hintText: 'Group name',
+                        hintStyle: TextStyle(color: Colors.grey.shade400),
+                        filled: true,
+                        fillColor: Colors.grey.shade50,
+                        counterStyle: TextStyle(
+                          color: Colors.grey.shade400,
+                          fontSize: 11,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(color: Colors.grey.shade200),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(color: Colors.grey.shade200),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(
+                            color: themeColor.primary,
+                            width: 1.5,
+                          ),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                      ),
+                      style: const TextStyle(fontSize: 15),
+                    ),
+                  ],
+                ),
+              ),
+              actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.grey.shade600,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                  ),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    final newTitle = controller.text.trim();
+                    if (newTitle.isNotEmpty &&
+                        newTitle != _groupInfo?['title']) {
+                      Navigator.pop(context);
+                      await _updateGroupTitle(newTitle);
+                    }
+                  },
+                  style: TextButton.styleFrom(
+                    foregroundColor: themeColor.primary,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                  ),
+                  child: const Text(
+                    'Save',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
             ),
-            child: const Text('Save'),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -529,7 +614,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     return StatefulBuilder(
       builder: (context, setDialogState) => Dialog(
         backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(16),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 32),
         child: Container(
           width: double.maxFinite,
           constraints: BoxConstraints(
@@ -537,708 +622,429 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
           ),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.15),
-                blurRadius: 20,
-                spreadRadius: 0,
-                offset: const Offset(0, 10),
-              ),
-            ],
+            borderRadius: BorderRadius.circular(16),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Header Section
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [themeColor.primary, themeColor.primaryDark],
-                  ),
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(20),
-                    topRight: Radius.circular(20),
-                  ),
-                ),
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 12, 0),
                 child: Row(
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(
-                        Icons.person_add,
-                        color: Colors.white,
-                        size: 24,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    const Expanded(
-                      child: Text(
-                        'Add Members',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Refresh button
-                        Container(
-                          margin: const EdgeInsets.only(right: 8),
-                          child: Material(
-                            color: Colors.white.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(20),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(20),
-                              onTap: () async {
-                                await _refreshContacts();
-                                // Trigger rebuild of the dialog
-                                (context as Element).markNeedsBuild();
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.all(8),
-                                child: _isRefreshingContacts
-                                    ? const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          valueColor:
-                                              AlwaysStoppedAnimation<Color>(
-                                                Colors.white,
-                                              ),
-                                        ),
-                                      )
-                                    : const Icon(
-                                        Icons.refresh,
-                                        color: Colors.white,
-                                        size: 16,
-                                      ),
-                              ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Add Members',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black87,
                             ),
                           ),
-                        ),
-                        // Selection counter
-                        if (_selectedUserIds.isNotEmpty)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              '${_selectedUserIds.length}',
-                              style: TextStyle(
-                                color: themeColor.primary,
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                              ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _selectedUserIds.isEmpty
+                                ? '${_availableUsers.length} contacts available'
+                                : '${_selectedUserIds.length} selected',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: _selectedUserIds.isEmpty
+                                  ? Colors.grey.shade500
+                                  : themeColor.primary,
+                              fontWeight: _selectedUserIds.isEmpty
+                                  ? FontWeight.normal
+                                  : FontWeight.w500,
                             ),
                           ),
-                      ],
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: _isRefreshingContacts
+                          ? null
+                          : () async {
+                              await _refreshContacts();
+                              (context as Element).markNeedsBuild();
+                            },
+                      icon: _isRefreshingContacts
+                          ? SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.grey.shade400,
+                              ),
+                            )
+                          : Icon(
+                              Icons.refresh_rounded,
+                              color: Colors.grey.shade400,
+                              size: 20,
+                            ),
+                      tooltip: 'Refresh contacts',
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: Colors.grey.shade400,
+                        size: 20,
+                      ),
                     ),
                   ],
                 ),
               ),
 
-              // Content Section
-              Flexible(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    children: [
-                      // Search Bar
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade50,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.grey.shade200),
-                        ),
-                        child: TextField(
-                          controller: searchController,
-                          onChanged: (value) {
-                            setDialogState(() {
-                              _searchQuery = value;
-                            });
-                          },
-                          decoration: InputDecoration(
-                            hintText: 'Search by name or phone number',
-                            hintStyle: TextStyle(color: Colors.grey.shade500),
-                            prefixIcon: Icon(
-                              Icons.search,
-                              color: Colors.grey.shade600,
+              // Search
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: TextField(
+                  controller: searchController,
+                  onChanged: (value) {
+                    setDialogState(() {
+                      _searchQuery = value;
+                    });
+                  },
+                  decoration: InputDecoration(
+                    hintText: 'Search contacts...',
+                    hintStyle: TextStyle(
+                      color: Colors.grey.shade400,
+                      fontSize: 14,
+                    ),
+                    prefixIcon: Icon(
+                      Icons.search_rounded,
+                      color: Colors.grey.shade400,
+                      size: 20,
+                    ),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: Icon(
+                              Icons.clear_rounded,
+                              color: Colors.grey.shade400,
+                              size: 18,
                             ),
-                            suffixIcon: _searchQuery.isNotEmpty
-                                ? IconButton(
-                                    icon: Icon(
-                                      Icons.clear,
-                                      color: Colors.grey.shade600,
-                                    ),
-                                    onPressed: () {
-                                      setDialogState(() {
-                                        _searchQuery = '';
-                                        searchController.clear();
-                                      });
-                                    },
-                                  )
-                                : null,
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 12,
-                            ),
-                          ),
-                          style: const TextStyle(fontSize: 14),
-                        ),
-                      ),
+                            onPressed: () {
+                              setDialogState(() {
+                                _searchQuery = '';
+                                searchController.clear();
+                              });
+                            },
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: Colors.grey.shade50,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                  ),
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
 
-                      const SizedBox(height: 16),
-
-                      // Stats and Select All Section
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              themeColor.primaryLight.withOpacity(0.2),
-                              themeColor.primaryLight.withOpacity(0.1),
-                            ],
-                          ),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: themeColor.primaryLight.withOpacity(0.6),
-                          ),
-                        ),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                if (_filteredUsers.isNotEmpty) ...[
-                                  Checkbox(
-                                    value:
-                                        _filteredUsers.every(
-                                          (u) =>
-                                              _selectedUserIds.contains(u.id),
-                                        ) &&
-                                        _filteredUsers.isNotEmpty,
-                                    tristate: true,
-                                    onChanged: (value) {
-                                      setDialogState(() {
-                                        if (value == true) {
-                                          _selectedUserIds.addAll(
-                                            _filteredUsers.map((u) => u.id),
-                                          );
-                                        } else {
-                                          // Remove only filtered users from selection
-                                          for (var userId in _filteredUsers.map(
-                                            (u) => u.id,
-                                          )) {
-                                            _selectedUserIds.remove(userId);
-                                          }
-                                        }
-                                      });
-                                    },
-                                    activeColor: themeColor.primary,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                  ),
-                                ],
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        _filteredUsers.isEmpty
-                                            ? 'No remaining contacts'
-                                            : _filteredUsers.every(
-                                                    (u) => _selectedUserIds
-                                                        .contains(u.id),
-                                                  ) &&
-                                                  _filteredUsers.isNotEmpty
-                                            ? 'Deselect All'
-                                            : 'Select All',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 16,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        _searchQuery.isEmpty
-                                            ? '${_availableUsers.length} available contact${_availableUsers.length > 1 ? 's' : ''}'
-                                            : '${_filteredUsers.length} result${_filteredUsers.length > 1 ? 's' : ''}',
-                                        style: TextStyle(
-                                          color: Colors.grey.shade600,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                if (_selectedUserIds.isNotEmpty)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: themeColor.primary,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Text(
-                                      '${_selectedUserIds.length} selected',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            // Select Staff Only Button
-                            if (_filteredUsers.any(
-                              (u) => u.role?.toLowerCase() == 'staff',
-                            ))
-                              SizedBox(
-                                width: double.infinity,
-                                child: ElevatedButton.icon(
-                                  onPressed: () {
-                                    setDialogState(() {
-                                      // Get all staff users from filtered list
-                                      final staffUsers = _filteredUsers
-                                          .where(
-                                            (u) =>
-                                                u.role?.toLowerCase() ==
-                                                'staff',
-                                          )
-                                          .map((u) => u.id)
-                                          .toList();
-
-                                      // Add staff users to selection
-                                      _selectedUserIds.addAll(staffUsers);
-                                    });
-                                  },
-                                  icon: const Icon(Icons.badge, size: 18),
-                                  label: Text(
-                                    'Select Staff Only (${_filteredUsers.where((u) => u.role?.toLowerCase() == 'staff').length})',
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.blue.shade600,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                      horizontal: 16,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    elevation: 0,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Users List
-                      Expanded(
-                        child: _filteredUsers.isEmpty && _searchQuery.isNotEmpty
-                            ? Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(32),
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(
-                                        Icons.search_off,
-                                        size: 64,
-                                        color: Colors.grey.shade400,
-                                      ),
-                                      const SizedBox(height: 16),
-                                      Text(
-                                        'No users found',
-                                        style: TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.w600,
-                                          color: Colors.grey.shade600,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        'Try a different search term',
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          color: Colors.grey.shade500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+              // Quick actions row
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
+                child: Row(
+                  children: [
+                    if (_filteredUsers.isNotEmpty)
+                      GestureDetector(
+                        onTap: () {
+                          setDialogState(() {
+                            final allSelected = _filteredUsers.every(
+                              (u) => _selectedUserIds.contains(u.id),
+                            );
+                            if (allSelected) {
+                              for (var u in _filteredUsers) {
+                                _selectedUserIds.remove(u.id);
+                              }
+                            } else {
+                              _selectedUserIds.addAll(
+                                _filteredUsers.map((u) => u.id),
+                              );
+                            }
+                          });
+                        },
+                        child: Text(
+                          _filteredUsers.every(
+                                (u) => _selectedUserIds.contains(u.id),
                               )
-                            : ListView.builder(
-                                itemCount: _filteredUsers.length,
-                                itemBuilder: (context, index) {
-                                  final user = _filteredUsers[index];
-                                  final isSelected = _selectedUserIds.contains(
-                                    user.id,
-                                  );
-
-                                  return AnimatedContainer(
-                                    duration: const Duration(milliseconds: 200),
-                                    margin: const EdgeInsets.only(bottom: 8),
-                                    decoration: BoxDecoration(
-                                      color: isSelected
-                                          ? themeColor.primaryLight.withOpacity(
-                                              0.2,
-                                            )
-                                          : Colors.white,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: isSelected
-                                            ? themeColor.primary
-                                            : Colors.grey.shade200,
-                                        width: isSelected ? 2 : 1,
-                                      ),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: isSelected
-                                              ? themeColor.primary.withOpacity(
-                                                  0.1,
-                                                )
-                                              : Colors.grey.withOpacity(0.05),
-                                          blurRadius: isSelected ? 8 : 4,
-                                          spreadRadius: 0,
-                                          offset: const Offset(0, 2),
-                                        ),
-                                      ],
-                                    ),
-                                    child: Material(
-                                      color: Colors.transparent,
-                                      child: InkWell(
-                                        borderRadius: BorderRadius.circular(12),
-                                        onTap: () {
-                                          setDialogState(() {
-                                            if (isSelected) {
-                                              _selectedUserIds.remove(user.id);
-                                            } else {
-                                              _selectedUserIds.add(user.id);
-                                            }
-                                          });
-                                        },
-                                        child: Padding(
-                                          padding: const EdgeInsets.all(16),
-                                          child: Row(
-                                            children: [
-                                              Stack(
-                                                children: [
-                                                  Container(
-                                                    decoration: BoxDecoration(
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            20,
-                                                          ),
-                                                      boxShadow: [
-                                                        BoxShadow(
-                                                          color: themeColor
-                                                              .primary
-                                                              .withOpacity(0.2),
-                                                          blurRadius: 8,
-                                                          spreadRadius: 0,
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    child: CircleAvatar(
-                                                      radius: 20,
-                                                      backgroundColor:
-                                                          isSelected
-                                                          ? themeColor
-                                                                .primaryLight
-                                                                .withOpacity(
-                                                                  0.4,
-                                                                )
-                                                          : Colors
-                                                                .grey
-                                                                .shade100,
-                                                      backgroundImage:
-                                                          user.profilePic !=
-                                                              null
-                                                          ? NetworkImage(
-                                                              user.profilePic!,
-                                                            )
-                                                          : null,
-                                                      child:
-                                                          user.profilePic ==
-                                                              null
-                                                          ? Text(
-                                                              user
-                                                                      .displayName
-                                                                      .isNotEmpty
-                                                                  ? user.displayName[0]
-                                                                        .toUpperCase()
-                                                                  : '?',
-                                                              style: TextStyle(
-                                                                color:
-                                                                    isSelected
-                                                                    ? Colors
-                                                                          .teal
-                                                                          .shade700
-                                                                    : Colors
-                                                                          .grey
-                                                                          .shade600,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .bold,
-                                                                fontSize: 16,
-                                                              ),
-                                                            )
-                                                          : null,
-                                                    ),
-                                                  ),
-                                                  if (isSelected)
-                                                    Positioned(
-                                                      right: -2,
-                                                      bottom: -2,
-                                                      child: Container(
-                                                        padding:
-                                                            const EdgeInsets.all(
-                                                              3,
-                                                            ),
-                                                        decoration:
-                                                            BoxDecoration(
-                                                              color: themeColor
-                                                                  .primary,
-                                                              shape: BoxShape
-                                                                  .circle,
-                                                            ),
-                                                        child: const Icon(
-                                                          Icons.check,
-                                                          color: Colors.white,
-                                                          size: 10,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                ],
-                                              ),
-                                              const SizedBox(width: 16),
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    Row(
-                                                      children: [
-                                                        Flexible(
-                                                          child: Text(
-                                                            user.displayName,
-                                                            style: TextStyle(
-                                                              fontWeight:
-                                                                  isSelected
-                                                                  ? FontWeight
-                                                                        .bold
-                                                                  : FontWeight
-                                                                        .w500,
-                                                              fontSize: 16,
-                                                              color: isSelected
-                                                                  ? Colors
-                                                                        .teal
-                                                                        .shade700
-                                                                  : Colors
-                                                                        .grey
-                                                                        .shade800,
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        if (user.role
-                                                                ?.toLowerCase() ==
-                                                            'staff')
-                                                          Container(
-                                                            margin:
-                                                                const EdgeInsets.only(
-                                                                  left: 6,
-                                                                ),
-                                                            padding:
-                                                                const EdgeInsets.symmetric(
-                                                                  horizontal: 6,
-                                                                  vertical: 2,
-                                                                ),
-                                                            decoration:
-                                                                BoxDecoration(
-                                                                  color: Colors
-                                                                      .blue
-                                                                      .shade600,
-                                                                  borderRadius:
-                                                                      BorderRadius.circular(
-                                                                        6,
-                                                                      ),
-                                                                ),
-                                                            child: const Text(
-                                                              'Staff',
-                                                              style: TextStyle(
-                                                                color: Colors
-                                                                    .white,
-                                                                fontSize: 10,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .bold,
-                                                              ),
-                                                            ),
-                                                          ),
-                                                      ],
-                                                    ),
-                                                    const SizedBox(height: 2),
-                                                    Text(
-                                                      user.phone,
-                                                      style: TextStyle(
-                                                        color: Colors
-                                                            .grey
-                                                            .shade600,
-                                                        fontSize: 13,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                              AnimatedScale(
-                                                scale: isSelected ? 1.1 : 1.0,
-                                                duration: const Duration(
-                                                  milliseconds: 150,
-                                                ),
-                                                child: Checkbox(
-                                                  value: isSelected,
-                                                  onChanged: (value) {
-                                                    setDialogState(() {
-                                                      if (value == true) {
-                                                        _selectedUserIds.add(
-                                                          user.id,
-                                                        );
-                                                      } else {
-                                                        _selectedUserIds.remove(
-                                                          user.id,
-                                                        );
-                                                      }
-                                                    });
-                                                  },
-                                                  activeColor:
-                                                      themeColor.primary,
-                                                  shape: RoundedRectangleBorder(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          4,
-                                                        ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
+                              ? 'Deselect all'
+                              : 'Select all',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: themeColor.primary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    if (_filteredUsers.any(
+                      (u) => u.role?.toLowerCase() == 'staff',
+                    )) ...[
+                      const SizedBox(width: 16),
+                      GestureDetector(
+                        onTap: () {
+                          setDialogState(() {
+                            final staffIds = _filteredUsers
+                                .where((u) => u.role?.toLowerCase() == 'staff')
+                                .map((u) => u.id);
+                            _selectedUserIds.addAll(staffIds);
+                          });
+                        },
+                        child: Text(
+                          'Staff only',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.blue.shade600,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
                       ),
                     ],
-                  ),
-                ),
-              ),
-
-              // Action Buttons
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade50,
-                  borderRadius: const BorderRadius.only(
-                    bottomLeft: Radius.circular(20),
-                    bottomRight: Radius.circular(20),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text(
-                          'Cancel',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      flex: 2,
-                      child: ElevatedButton(
-                        onPressed: _selectedUserIds.isEmpty
-                            ? null
-                            : () {
-                                Navigator.pop(context);
-                                _addMembers(_selectedUserIds.toList());
-                              },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: themeColor.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          elevation: 2,
-                          shadowColor: themeColor.primary.withOpacity(0.3),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.person_add, size: 20),
-                            const SizedBox(width: 8),
-                            Text(
-                              _selectedUserIds.isEmpty
-                                  ? 'Add Members'
-                                  : 'Add ${_selectedUserIds.length} Member${_selectedUserIds.length > 1 ? 's' : ''}',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
+                    const Spacer(),
+                    Text(
+                      _searchQuery.isEmpty
+                          ? '${_filteredUsers.length} contacts'
+                          : '${_filteredUsers.length} results',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade400,
                       ),
                     ),
                   ],
                 ),
               ),
+
+              const Divider(height: 1),
+
+              // Users List
+              Expanded(
+                child: _filteredUsers.isEmpty && _searchQuery.isNotEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.search_off_rounded,
+                              size: 48,
+                              color: Colors.grey.shade300,
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'No users found',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.grey.shade500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        itemCount: _filteredUsers.length,
+                        separatorBuilder: (_, __) => Divider(
+                          height: 1,
+                          indent: 68,
+                          color: Colors.grey.shade100,
+                        ),
+                        itemBuilder: (context, index) {
+                          final user = _filteredUsers[index];
+                          final isSelected = _selectedUserIds.contains(user.id);
+
+                          return StaggeredSlideFadeItem(
+                            index: index,
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: () {
+                                  setDialogState(() {
+                                    if (isSelected) {
+                                      _selectedUserIds.remove(user.id);
+                                    } else {
+                                      _selectedUserIds.add(user.id);
+                                    }
+                                  });
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                    vertical: 10,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 20,
+                                        backgroundColor: isSelected
+                                            ? themeColor.primaryLight
+                                                  .withOpacity(0.3)
+                                            : Colors.grey.shade100,
+                                        backgroundImage: user.profilePic != null
+                                            ? NetworkImage(user.profilePic!)
+                                            : null,
+                                        child: user.profilePic == null
+                                            ? Text(
+                                                user.displayName.isNotEmpty
+                                                    ? user.displayName[0]
+                                                          .toUpperCase()
+                                                    : '?',
+                                                style: TextStyle(
+                                                  color: isSelected
+                                                      ? themeColor.primary
+                                                      : Colors.grey.shade500,
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 15,
+                                                ),
+                                              )
+                                            : null,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Flexible(
+                                                  child: Text(
+                                                    user.displayName,
+                                                    style: TextStyle(
+                                                      fontWeight: isSelected
+                                                          ? FontWeight.w600
+                                                          : FontWeight.w400,
+                                                      fontSize: 15,
+                                                      color: Colors.black87,
+                                                    ),
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                                if (user.role?.toLowerCase() ==
+                                                    'staff')
+                                                  Container(
+                                                    margin:
+                                                        const EdgeInsets.only(
+                                                          left: 6,
+                                                        ),
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 5,
+                                                          vertical: 1,
+                                                        ),
+                                                    decoration: BoxDecoration(
+                                                      color:
+                                                          Colors.blue.shade50,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            4,
+                                                          ),
+                                                    ),
+                                                    child: Text(
+                                                      'Staff',
+                                                      style: TextStyle(
+                                                        color: Colors
+                                                            .blue
+                                                            .shade600,
+                                                        fontSize: 10,
+                                                        fontWeight:
+                                                            FontWeight.w500,
+                                                      ),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 1),
+                                            Text(
+                                              user.phone,
+                                              style: TextStyle(
+                                                color: Colors.grey.shade500,
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      AnimatedContainer(
+                                        duration: const Duration(
+                                          milliseconds: 200,
+                                        ),
+                                        width: 22,
+                                        height: 22,
+                                        decoration: BoxDecoration(
+                                          color: isSelected
+                                              ? themeColor.primary
+                                              : Colors.transparent,
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                          border: Border.all(
+                                            color: isSelected
+                                                ? themeColor.primary
+                                                : Colors.grey.shade300,
+                                            width: 1.5,
+                                          ),
+                                        ),
+                                        child: isSelected
+                                            ? const Icon(
+                                                Icons.check_rounded,
+                                                color: Colors.white,
+                                                size: 14,
+                                              )
+                                            : null,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+
+              // Bottom action
+              if (_selectedUserIds.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      top: BorderSide(color: Colors.grey.shade100),
+                    ),
+                  ),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _addMembers(_selectedUserIds.toList());
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: themeColor.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        elevation: 0,
+                      ),
+                      child: Text(
+                        'Add ${_selectedUserIds.length} Member${_selectedUserIds.length > 1 ? 's' : ''}',
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -1806,30 +1612,160 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
       return;
     }
 
-    final themeColor = ref.watch(themeColorProvider);
-    final bool? confirmed = await showDialog<bool>(
+    final bool? confirmed = await showGeneralDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Remove Member'),
-        content: Text(
-          'Are you sure you want to remove $userName from this group?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: themeColor.primary,
-              foregroundColor: Colors.white,
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, animation1, animation2) => Container(),
+      transitionBuilder: (context, animation1, animation2, child) {
+        return ScaleTransition(
+          scale: CurvedAnimation(parent: animation1, curve: Curves.easeOutBack),
+          child: FadeTransition(
+            opacity: animation1,
+            child: AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              contentPadding: EdgeInsets.zero,
+              content: Container(
+                width: MediaQuery.of(context).size.width * 0.85,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Colors.white, Colors.red.shade50],
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.person_remove_rounded,
+                              size: 48,
+                              color: Colors.red.shade600,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Remove Member',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          RichText(
+                            textAlign: TextAlign.center,
+                            text: TextSpan(
+                              style: TextStyle(
+                                color: Colors.grey.shade800,
+                                fontSize: 16,
+                                height: 1.5,
+                              ),
+                              children: [
+                                const TextSpan(text: 'Remove '),
+                                TextSpan(
+                                  text: userName,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.red.shade700,
+                                  ),
+                                ),
+                                const TextSpan(text: ' from this group?'),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: const BorderRadius.only(
+                          bottomLeft: Radius.circular(20),
+                          bottomRight: Radius.circular(20),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  side: BorderSide(color: Colors.grey.shade300),
+                                ),
+                              ),
+                              child: Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade700,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red.shade600,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                elevation: 2,
+                                shadowColor: Colors.red.withOpacity(0.3),
+                              ),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.person_remove_rounded, size: 18),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Remove',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-            child: const Text('Remove'),
           ),
-        ],
-      ),
+        );
+      },
     );
 
     if (confirmed == true) {
@@ -2391,708 +2327,977 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final themeColor = ref.watch(themeColorProvider);
+  // ─── UI Helpers ───────────────────────────────────────────────────────────
 
-    return Scaffold(
-      backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        title: const Text(
-          'Group Info',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+  Widget _buildHeroHeader(ColorTheme themeColor) {
+    final topPadding = MediaQuery.of(context).padding.top;
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [themeColor.primary, themeColor.primaryDark],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-        backgroundColor: themeColor.primary,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.white),
       ),
-      body: _isLoading
-          ? Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(themeColor.primary),
+      padding: EdgeInsets.fromLTRB(24, topPadding + kToolbarHeight + 8, 24, 44),
+      child: Column(
+        children: [
+          // Avatar with glow shadow
+          Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.28),
+                  blurRadius: 28,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: _buildGroupAvatar(
+              _groupInfo?['title'] ?? 'Group',
+              radius: 52,
+            ),
+          ),
+          const SizedBox(height: 20),
+          // Title row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  _capitalizeFirstLetter(_groupInfo?['title'] ?? 'Group'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: -0.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
               ),
-            )
-          : _errorMessage != null
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.error_outline, size: 64, color: Colors.grey[400]),
-                  const SizedBox(height: 16),
-                  Text(
-                    _errorMessage!,
-                    style: TextStyle(color: Colors.grey[600], fontSize: 16),
-                    textAlign: TextAlign.center,
+              if (_isCurrentUserAdmin()) ...[
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: _isUpdatingTitle ? null : _showEditTitleDialog,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.all(7),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: _isUpdatingTitle
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.edit_outlined,
+                            color: Colors.white,
+                            size: 15,
+                          ),
                   ),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: _loadGroupInfoFromLocal,
-                    child: const Text('Retry'),
-                  ),
-                ],
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Member count pill
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.18),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.3),
+                width: 1,
               ),
-            )
-          : FadeTransition(
-              opacity: _fadeAnimation,
-              child: SlideTransition(
-                position: _slideAnimation,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(2),
-                  child: Column(
-                    children: [
-                      // Group Header Card
-                      Card(
-                        elevation: 0,
-                        color: Colors.grey[50],
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Column(
-                            children: [
-                              _buildGroupAvatar(
-                                _groupInfo?['title'] ?? 'Group',
-                                radius: 50,
-                              ),
-                              const SizedBox(height: 16),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      _capitalizeFirstLetter(
-                                        _groupInfo?['title'] ?? 'Group',
-                                      ),
-                                      style: const TextStyle(
-                                        fontSize: 24,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.black87,
-                                      ),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  ),
-                                  if (_isCurrentUserAdmin())
-                                    IconButton(
-                                      onPressed: _isUpdatingTitle
-                                          ? null
-                                          : _showEditTitleDialog,
-                                      icon: _isUpdatingTitle
-                                          ? const SizedBox(
-                                              width: 16,
-                                              height: 16,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                              ),
-                                            )
-                                          : Icon(
-                                              Icons.edit,
-                                              color: themeColor.primary,
-                                            ),
-                                      tooltip: 'Edit group title',
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Created by ${_groupInfo?['createrName'] ?? 'Unknown'}',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+            ),
+            child: Text(
+              '${_groupInfo?['members']?.length ?? 0} members',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          // Creator info
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.person_outline_rounded,
+                color: Colors.white.withOpacity(0.65),
+                size: 13,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                'Created by ${_groupInfo?['createrName'] ?? 'Unknown'}',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.7),
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
-                      const SizedBox(height: 16),
+  Widget _buildLoadingState(ColorTheme themeColor) {
+    final topPadding = MediaQuery.of(context).padding.top;
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          height: topPadding + kToolbarHeight + 220,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [themeColor.primary, themeColor.primaryDark],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(
+                Colors.white.withOpacity(0.7),
+              ),
+              strokeWidth: 2.5,
+            ),
+          ),
+        ),
+        Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFFF5F6FA),
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(28),
+              topRight: Radius.circular(28),
+            ),
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+          child: Column(
+            children: List.generate(5, (i) => _AnimatedSkeletonTile(index: i)),
+          ),
+        ),
+      ],
+    );
+  }
 
-                      // Members Section
-                      Card(
-                        elevation: 0,
-                        color: Colors.grey[100],
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Members (${_memberSearchQuery.isEmpty ? (_groupInfo?['members']?.length ?? 0) : _filteredMembers.length})',
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (_isCurrentUserAdmin())
-                                        ElevatedButton.icon(
-                                          onPressed: _showAddMemberDialog,
-                                          icon: const Icon(
-                                            Icons.person_add,
-                                            size: 18,
-                                          ),
-                                          label: const Text('Add Member'),
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: themeColor.primary,
-                                            foregroundColor: Colors.white,
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                            ),
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 8,
-                                            ),
-                                          ),
-                                        ),
-                                      if (_isCurrentUserCreator() &&
-                                          _groupInfo?['members'] != null)
-                                        Builder(
-                                          builder: (context) {
-                                            final List<dynamic> members =
-                                                _groupInfo!['members'];
-                                            final creatorId =
-                                                _groupInfo?['createrId'] ??
-                                                _groupInfo?['created_by'];
-                                            final membersToRemove = members
-                                                .where(
-                                                  (member) =>
-                                                      member['userId'] !=
-                                                      creatorId,
-                                                )
-                                                .toList();
-
-                                            if (membersToRemove.isEmpty) {
-                                              return const SizedBox.shrink();
-                                            }
-
-                                            return Padding(
-                                              padding: EdgeInsets.only(
-                                                left: _isCurrentUserAdmin()
-                                                    ? 8
-                                                    : 0,
-                                              ),
-                                              child: ElevatedButton.icon(
-                                                onPressed:
-                                                    _showRemoveAllMembersDialog,
-                                                icon: const Icon(
-                                                  Icons.delete_sweep,
-                                                  size: 18,
-                                                ),
-                                                label: const Text('Remove All'),
-                                                style: ElevatedButton.styleFrom(
-                                                  backgroundColor: Colors.red,
-                                                  foregroundColor: Colors.white,
-                                                  shape: RoundedRectangleBorder(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          20,
-                                                        ),
-                                                  ),
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 16,
-                                                        vertical: 8,
-                                                      ),
-                                                ),
-                                              ),
-                                            );
-                                          },
-                                        ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 16),
-                              // Search Bar for Members
-                              Container(
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: Colors.grey.shade300,
-                                  ),
-                                ),
-                                child: TextField(
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _memberSearchQuery = value;
-                                    });
-                                  },
-                                  decoration: InputDecoration(
-                                    hintText: 'Search members by name',
-                                    hintStyle: TextStyle(
-                                      color: Colors.grey.shade500,
-                                    ),
-                                    prefixIcon: Icon(
-                                      Icons.search,
-                                      color: Colors.grey.shade600,
-                                    ),
-                                    suffixIcon: _memberSearchQuery.isNotEmpty
-                                        ? IconButton(
-                                            icon: Icon(
-                                              Icons.clear,
-                                              color: Colors.grey.shade600,
-                                            ),
-                                            onPressed: () {
-                                              setState(() {
-                                                _memberSearchQuery = '';
-                                              });
-                                            },
-                                          )
-                                        : null,
-                                    border: InputBorder.none,
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 12,
-                                    ),
-                                  ),
-                                  style: const TextStyle(fontSize: 14),
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              if (_groupInfo?['members'] != null)
-                                if (_filteredMembers.isEmpty &&
-                                    _memberSearchQuery.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.all(32),
-                                    child: Center(
-                                      child: Column(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          Icon(
-                                            Icons.search_off,
-                                            size: 48,
-                                            color: Colors.grey.shade400,
-                                          ),
-                                          const SizedBox(height: 16),
-                                          Text(
-                                            'No members found',
-                                            style: TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.grey.shade600,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 8),
-                                          Text(
-                                            'Try a different search term',
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                              color: Colors.grey.shade500,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  )
-                                else
-                                  ...(_filteredMembers.map((member) {
-                                    final isAdmin = member['role'] == 'admin';
-                                    final isCurrentUser =
-                                        member['userId'] ==
-                                        _currentUserDetails?.id;
-
-                                    return Container(
-                                      margin: const EdgeInsets.only(bottom: 12),
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        color: isCurrentUser
-                                            ? themeColor.primaryLight
-                                                  .withOpacity(0.2)
-                                            : Colors.grey.shade50,
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: isCurrentUser
-                                            ? Border.all(
-                                                color: themeColor.primaryLight
-                                                    .withOpacity(0.6),
-                                              )
-                                            : null,
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          CircleAvatar(
-                                            radius: 20,
-                                            backgroundColor: isAdmin
-                                                ? Colors.amber.shade100
-                                                : themeColor.primaryLight
-                                                      .withOpacity(0.4),
-                                            child: Text(
-                                              ((member['userName'] ??
-                                                          member['name'] ??
-                                                          '?')
-                                                      as String)[0]
-                                                  .toUpperCase(),
-                                              style: TextStyle(
-                                                color: isAdmin
-                                                    ? Colors.amber.shade700
-                                                    : themeColor.primary,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Row(
-                                                  children: [
-                                                    Text(
-                                                      member['userName'] ??
-                                                          member['name'] ??
-                                                          'Unknown',
-                                                      style: const TextStyle(
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                        fontSize: 16,
-                                                      ),
-                                                    ),
-                                                    if (isCurrentUser)
-                                                      Container(
-                                                        margin:
-                                                            const EdgeInsets.only(
-                                                              left: 8,
-                                                            ),
-                                                        padding:
-                                                            const EdgeInsets.symmetric(
-                                                              horizontal: 8,
-                                                              vertical: 2,
-                                                            ),
-                                                        decoration: BoxDecoration(
-                                                          color: themeColor
-                                                              .primary,
-                                                          borderRadius:
-                                                              BorderRadius.circular(
-                                                                10,
-                                                              ),
-                                                        ),
-                                                        child: const Text(
-                                                          'You',
-                                                          style: TextStyle(
-                                                            color: Colors.white,
-                                                            fontSize: 10,
-                                                            fontWeight:
-                                                                FontWeight.bold,
-                                                          ),
-                                                        ),
-                                                      ),
-                                                  ],
-                                                ),
-                                                const SizedBox(height: 2),
-                                                Row(
-                                                  children: [
-                                                    // Creator badge
-                                                    if (_isGroupCreator(
-                                                      member['userId'],
-                                                    ))
-                                                      Container(
-                                                        margin:
-                                                            const EdgeInsets.only(
-                                                              right: 6,
-                                                            ),
-                                                        padding:
-                                                            const EdgeInsets.symmetric(
-                                                              horizontal: 8,
-                                                              vertical: 2,
-                                                            ),
-                                                        decoration: BoxDecoration(
-                                                          gradient:
-                                                              LinearGradient(
-                                                                colors: [
-                                                                  Colors
-                                                                      .purple
-                                                                      .shade400,
-                                                                  Colors
-                                                                      .purple
-                                                                      .shade600,
-                                                                ],
-                                                              ),
-                                                          borderRadius:
-                                                              BorderRadius.circular(
-                                                                8,
-                                                              ),
-                                                        ),
-                                                        child: Row(
-                                                          mainAxisSize:
-                                                              MainAxisSize.min,
-                                                          children: [
-                                                            Icon(
-                                                              Icons.star,
-                                                              size: 12,
-                                                              color:
-                                                                  Colors.white,
-                                                            ),
-                                                            const SizedBox(
-                                                              width: 4,
-                                                            ),
-                                                            Text(
-                                                              'Creator',
-                                                              style: TextStyle(
-                                                                fontSize: 12,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w600,
-                                                                color: Colors
-                                                                    .white,
-                                                              ),
-                                                            ),
-                                                          ],
-                                                        ),
-                                                      ),
-                                                    // Admin/Member badge
-                                                    Container(
-                                                      padding:
-                                                          const EdgeInsets.symmetric(
-                                                            horizontal: 8,
-                                                            vertical: 2,
-                                                          ),
-                                                      decoration: BoxDecoration(
-                                                        color: isAdmin
-                                                            ? Colors
-                                                                  .amber
-                                                                  .shade100
-                                                            : Colors
-                                                                  .grey
-                                                                  .shade200,
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              8,
-                                                            ),
-                                                      ),
-                                                      child: Text(
-                                                        isAdmin
-                                                            ? 'Admin'
-                                                            : 'Member',
-                                                        style: TextStyle(
-                                                          fontSize: 12,
-                                                          fontWeight:
-                                                              FontWeight.w500,
-                                                          color: isAdmin
-                                                              ? Colors
-                                                                    .amber
-                                                                    .shade700
-                                                              : Colors
-                                                                    .grey
-                                                                    .shade700,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          if (_isCurrentUserAdmin() &&
-                                              !isCurrentUser)
-                                            Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                // Show "Make Admin" button only for non-admin members
-                                                if (!isAdmin)
-                                                  Container(
-                                                    margin:
-                                                        const EdgeInsets.only(
-                                                          right: 4,
-                                                        ),
-                                                    child: Material(
-                                                      color:
-                                                          Colors.amber.shade50,
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            8,
-                                                          ),
-                                                      child: InkWell(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              8,
-                                                            ),
-                                                        onTap: () => _promoteToAdmin(
-                                                          member['userId'],
-                                                          member['userName'] ??
-                                                              member['name'] ??
-                                                              'Unknown',
-                                                        ),
-                                                        child: Padding(
-                                                          padding:
-                                                              const EdgeInsets.all(
-                                                                8,
-                                                              ),
-                                                          child: Icon(
-                                                            Icons
-                                                                .admin_panel_settings,
-                                                            size: 20,
-                                                            color: Colors
-                                                                .amber
-                                                                .shade700,
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ),
-                                                // Show "Demote to Member" button only for admins (but not creator)
-                                                if (isAdmin &&
-                                                    !_isGroupCreator(
-                                                      member['userId'],
-                                                    ))
-                                                  Container(
-                                                    margin:
-                                                        const EdgeInsets.only(
-                                                          right: 4,
-                                                        ),
-                                                    child: Material(
-                                                      color:
-                                                          Colors.orange.shade50,
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            8,
-                                                          ),
-                                                      child: InkWell(
-                                                        borderRadius:
-                                                            BorderRadius.circular(
-                                                              8,
-                                                            ),
-                                                        onTap: () => _demoteToMember(
-                                                          member['userId'],
-                                                          member['userName'] ??
-                                                              member['name'] ??
-                                                              'Unknown',
-                                                        ),
-                                                        child: Padding(
-                                                          padding:
-                                                              const EdgeInsets.all(
-                                                                8,
-                                                              ),
-                                                          child: Icon(
-                                                            Icons.person_remove,
-                                                            size: 20,
-                                                            color: Colors
-                                                                .orange
-                                                                .shade700,
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ),
-                                                // Remove button
-                                                IconButton(
-                                                  onPressed: () =>
-                                                      _removeMember(
-                                                        member['userId'],
-                                                        member['userName'] ??
-                                                            member['name'] ??
-                                                            'Unknown',
-                                                      ),
-                                                  icon: Icon(
-                                                    Icons.remove_circle_outline,
-                                                    color: themeColor.primary,
-                                                  ),
-                                                  tooltip: 'Remove member',
-                                                ),
-                                              ],
-                                            ),
-                                        ],
-                                      ),
-                                    );
-                                  }).toList()),
-                            ],
-                          ),
-                        ),
-                      ),
-
-                      // Danger Zone Section (Admin Only)
-                      if (_isCurrentUserAdmin())
-                        SafeArea(
-                          child: Column(
-                            children: [
-                              const SizedBox(height: 16),
-                              Card(
-                                color: Colors.red.withAlpha(20),
-                                elevation: 0,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                margin: const EdgeInsets.all(6),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(10),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(2),
-                                    // decoration: BoxDecoration(
-                                    //   color: Colors.red.shade50,
-                                    //   borderRadius: BorderRadius.circular(12),
-                                    // ),
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'Delete Group',
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.w600,
-                                                  fontSize: 16,
-                                                  color: Colors.red.shade900,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                'Permanently delete this group and all its messages',
-                                                style: TextStyle(
-                                                  fontSize: 13,
-                                                  color: Colors.red.shade700,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        ElevatedButton.icon(
-                                          onPressed: _showDeleteGroupDialog,
-                                          icon: const Icon(
-                                            Icons.delete_forever,
-                                            size: 20,
-                                          ),
-                                          label: const Text('Delete'),
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: Colors.red,
-                                            foregroundColor: Colors.white,
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(10),
-                                            ),
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 10,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-                  ),
+  Widget _buildErrorState(ColorTheme themeColor) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.cloud_off_rounded,
+                size: 48,
+                color: Colors.red.shade300,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              _errorMessage!,
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 15),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _loadGroupInfoFromLocal,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Try Again'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: themeColor.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 28,
+                  vertical: 14,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
                 ),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMembersSection(ColorTheme themeColor) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Section header
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Members',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      Text(
+                        _memberSearchQuery.isEmpty
+                            ? '${_groupInfo?['members']?.length ?? 0} participants'
+                            : '${_filteredMembers.length} result${_filteredMembers.length == 1 ? '' : 's'}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Action chips
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_isCurrentUserAdmin())
+                      _buildActionChip(
+                        icon: Icons.person_add_outlined,
+                        label: 'Add',
+                        color: themeColor.primary,
+                        onTap: _showAddMemberDialog,
+                      ),
+                    if (_isCurrentUserCreator() &&
+                        _groupInfo?['members'] != null)
+                      Builder(
+                        builder: (context) {
+                          final List<dynamic> members = _groupInfo!['members'];
+                          final creatorId =
+                              _groupInfo?['createrId'] ??
+                              _groupInfo?['created_by'];
+                          final membersToRemove = members
+                              .where((m) => m['userId'] != creatorId)
+                              .toList();
+                          if (membersToRemove.isEmpty) {
+                            return const SizedBox.shrink();
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: _buildActionChip(
+                              icon: Icons.delete_sweep_outlined,
+                              label: 'Clear',
+                              color: Colors.red.shade600,
+                              onTap: _showRemoveAllMembersDialog,
+                            ),
+                          );
+                        },
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Search bar
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: TextField(
+              onChanged: (value) => setState(() => _memberSearchQuery = value),
+              decoration: InputDecoration(
+                hintText: 'Search members',
+                hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+                prefixIcon: Icon(
+                  Icons.search_rounded,
+                  color: Colors.grey.shade400,
+                  size: 20,
+                ),
+                suffixIcon: _memberSearchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: Icon(
+                          Icons.close_rounded,
+                          color: Colors.grey.shade400,
+                          size: 18,
+                        ),
+                        onPressed: () =>
+                            setState(() => _memberSearchQuery = ''),
+                      )
+                    : null,
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+              ),
+              style: const TextStyle(fontSize: 14),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Member list
+          if (_groupInfo?['members'] != null)
+            if (_filteredMembers.isEmpty && _memberSearchQuery.isNotEmpty)
+              _buildEmptySearch()
+            else
+              ...(_filteredMembers.asMap().entries.map((entry) {
+                final index = entry.key;
+                final member = entry.value as Map<String, dynamic>;
+                return _AnimatedMemberTile(
+                  key: ValueKey(member['userId']),
+                  index: index,
+                  child: _buildMemberTile(member, themeColor),
+                );
+              }).toList()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionChip({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: color.withOpacity(0.1),
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 15, color: color),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptySearch() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 48),
+      child: Center(
+        child: Column(
+          children: [
+            Icon(
+              Icons.search_off_rounded,
+              size: 52,
+              color: Colors.grey.shade300,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'No members found',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade500,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Try a different search term',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMemberTile(Map<String, dynamic> member, ColorTheme themeColor) {
+    final isAdmin = member['role'] == 'admin';
+    final isCreator = _isGroupCreator(member['userId']);
+    final isCurrentUser = member['userId'] == _currentUserDetails?.id;
+    final userId = member['userId'];
+    final isOnline = userId is int
+        ? _userStatusService.isUserOnline(userId)
+        : false;
+    final userName =
+        (member['userName'] ?? member['name'] ?? 'Unknown') as String;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: isCurrentUser
+            ? themeColor.primaryLight.withOpacity(0.08)
+            : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: isCurrentUser
+            ? Border.all(
+                color: themeColor.primaryLight.withOpacity(0.4),
+                width: 1.5,
+              )
+            : null,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            // Avatar with online indicator dot
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                CircleAvatar(
+                  radius: 24,
+                  backgroundColor: isCreator
+                      ? Colors.purple.shade100
+                      : isAdmin
+                      ? Colors.amber.shade100
+                      : themeColor.primaryLight.withOpacity(0.3),
+                  child: Text(
+                    userName.isNotEmpty ? userName[0].toUpperCase() : '?',
+                    style: TextStyle(
+                      color: isCreator
+                          ? Colors.purple.shade700
+                          : isAdmin
+                          ? Colors.amber.shade700
+                          : themeColor.primary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                    ),
+                  ),
+                ),
+                if (isOnline)
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      width: 14,
+                      height: 14,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF4CAF50),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.green.withOpacity(0.45),
+                            blurRadius: 5,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(width: 12),
+
+            // Name & badges
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          userName,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                            color: isCurrentUser
+                                ? themeColor.primary
+                                : Colors.black87,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (isCurrentUser) ...[
+                        const SizedBox(width: 6),
+                        _buildBadge('You', themeColor.primary),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      if (isCreator) ...[
+                        _buildBadge(
+                          'Creator',
+                          Colors.purple.shade500,
+                          icon: Icons.star_rounded,
+                        ),
+                        const SizedBox(width: 5),
+                      ],
+                      _buildBadge(
+                        isAdmin ? 'Admin' : 'Member',
+                        isAdmin ? Colors.amber.shade700 : Colors.grey.shade500,
+                        outlined: !isAdmin,
+                      ),
+                      if (isOnline) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          'Online',
+                          style: TextStyle(
+                            color: Colors.green.shade600,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            // Admin actions via popup menu
+            if (_isCurrentUserAdmin() && !isCurrentUser)
+              _buildMemberActionsMenu(member, isAdmin, isCreator, themeColor),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBadge(
+    String text,
+    Color color, {
+    IconData? icon,
+    bool outlined = false,
+  }) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: icon != null ? 6 : 8,
+        vertical: 2,
+      ),
+      decoration: BoxDecoration(
+        color: outlined ? Colors.transparent : color.withOpacity(0.13),
+        borderRadius: BorderRadius.circular(6),
+        border: outlined ? Border.all(color: color.withOpacity(0.4)) : null,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 11, color: color),
+            const SizedBox(width: 3),
+          ],
+          Text(
+            text,
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMemberActionsMenu(
+    Map<String, dynamic> member,
+    bool isAdmin,
+    bool isCreator,
+    ColorTheme themeColor,
+  ) {
+    final userName =
+        (member['userName'] ?? member['name'] ?? 'Unknown') as String;
+    final userId = member['userId'] as int;
+
+    return PopupMenuButton<String>(
+      color: Colors.white,
+      icon: Icon(
+        Icons.more_vert_rounded,
+        color: Colors.grey.shade400,
+        size: 20,
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: Colors.grey.shade200),
+      ),
+      elevation: 6,
+      shadowColor: Colors.black.withOpacity(0.15),
+      offset: const Offset(0, 8),
+      onSelected: (value) {
+        switch (value) {
+          case 'promote':
+            _promoteToAdmin(userId, userName);
+          case 'demote':
+            _demoteToMember(userId, userName);
+          case 'remove':
+            _removeMember(userId, userName);
+        }
+      },
+      itemBuilder: (context) => [
+        if (!isAdmin)
+          PopupMenuItem(
+            value: 'promote',
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.admin_panel_settings_outlined,
+                  color: Colors.amber.shade600,
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
+                const Text('Make Admin', style: TextStyle(fontSize: 14)),
+              ],
+            ),
+          ),
+        if (isAdmin && !isCreator)
+          PopupMenuItem(
+            value: 'demote',
+            child: Row(
+              children: [
+                Icon(
+                  Icons.arrow_downward_rounded,
+                  color: Colors.orange.shade600,
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'Remove Admin',
+                  style: TextStyle(fontSize: 14, color: Colors.orange.shade700),
+                ),
+              ],
+            ),
+          ),
+        PopupMenuItem(
+          value: 'remove',
+          child: Row(
+            children: [
+              Icon(
+                Icons.person_remove_outlined,
+                color: Colors.red.shade600,
+                size: 18,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Remove',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.red.shade600,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDangerZone(ColorTheme themeColor) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.red.shade50,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Colors.red.shade100, width: 1.5),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.red.shade100,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.delete_forever_outlined,
+                color: Colors.red.shade600,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Delete Group',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: Colors.red.shade700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Permanently deletes this group and all messages',
+                    style: TextStyle(fontSize: 12, color: Colors.red.shade400),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            ElevatedButton(
+              onPressed: _showDeleteGroupDialog,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade600,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                elevation: 0,
+              ),
+              child: const Text(
+                'Delete',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── Build ─────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
+    // Rebuild whenever any user's online status changes
+    ref.watch(userStatusStreamProvider);
+
+    return Scaffold(
+      extendBodyBehindAppBar: true,
+      backgroundColor: const Color(0xFFF5F6FA),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text(
+          'Group Info',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
+        ),
+      ),
+      body: _isLoading
+          ? _buildLoadingState(themeColor)
+          : _errorMessage != null
+          ? _buildErrorState(themeColor)
+          : FadeTransition(
+              opacity: _fadeAnimation,
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    // Gradient hero header
+                    _buildHeroHeader(themeColor),
+
+                    // Content card slides up from below the header
+                    SlideTransition(
+                      position: _slideAnimation,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF5F6FA),
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(28),
+                            topRight: Radius.circular(28),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 20,
+                              offset: const Offset(0, -6),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          children: [
+                            // Drag handle visual indicator
+                            Padding(
+                              padding: const EdgeInsets.only(top: 10),
+                              child: Container(
+                                width: 36,
+                                height: 4,
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.shade300,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                            ),
+                            _buildMembersSection(themeColor),
+                            if (_isCurrentUserAdmin())
+                              _buildDangerZone(themeColor),
+                            SizedBox(
+                              height:
+                                  MediaQuery.of(context).padding.bottom + 32,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+    );
+  }
+}
+
+// ─── Staggered member tile entrance animation ──────────────────────────────
+
+class _AnimatedMemberTile extends StatefulWidget {
+  final int index;
+  final Widget child;
+
+  const _AnimatedMemberTile({
+    super.key,
+    required this.index,
+    required this.child,
+  });
+
+  @override
+  State<_AnimatedMemberTile> createState() => _AnimatedMemberTileState();
+}
+
+class _AnimatedMemberTileState extends State<_AnimatedMemberTile>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _fade;
+  late Animation<Offset> _slide;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 380),
+    );
+    _fade = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.18),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+
+    Future.delayed(Duration(milliseconds: widget.index * 55), () {
+      if (mounted) _ctrl.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _fade,
+      child: SlideTransition(position: _slide, child: widget.child),
+    );
+  }
+}
+
+// ─── Animated skeleton loading tile ───────────────────────────────────────
+
+class _AnimatedSkeletonTile extends StatefulWidget {
+  final int index;
+  const _AnimatedSkeletonTile({required this.index});
+
+  @override
+  State<_AnimatedSkeletonTile> createState() => _AnimatedSkeletonTileState();
+}
+
+class _AnimatedSkeletonTileState extends State<_AnimatedSkeletonTile>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    )..repeat(reverse: true);
+    _anim = Tween<double>(
+      begin: 0.4,
+      end: 0.9,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (context, _) => Opacity(
+        opacity: _anim.value,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          height: 68,
+          decoration: BoxDecoration(
+            color: Colors.grey.shade200,
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      ),
     );
   }
 }

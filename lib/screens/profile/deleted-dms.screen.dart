@@ -107,7 +107,7 @@ class _DeletedChatsPageState extends ConsumerState<DeletedChatsPage> {
 
   String _getInitials(String name) {
     if (name.isEmpty) return '?';
-    final words = name.trim().split(' ');
+    final words = name.trim().split(' ').where((w) => w.isNotEmpty).toList();
     if (words.length >= 2) {
       return '${words[0][0]}${words[1][0]}'.toUpperCase();
     } else if (words.isNotEmpty) {

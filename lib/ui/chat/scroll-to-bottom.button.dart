@@ -82,7 +82,7 @@ class _ScrollToBottomButtonState extends State<ScrollToBottomButton>
         ignoring: !_isVisible,
         child: Material(
           elevation: 6,
-          shadowColor: Colors.black.withAlpha(30),
+          shadowColor: Colors.black.withAlpha(50),
           shape: const CircleBorder(),
           color: Colors.transparent,
           child: InkWell(

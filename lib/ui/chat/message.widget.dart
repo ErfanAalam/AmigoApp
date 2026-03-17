@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui';
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/socket.types.dart';
+import 'package:amigo/ui/chat/emoji-reaction.widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../config/app-colors.config.dart';
@@ -56,6 +57,10 @@ class MessageBubbleConfig {
   final MessageRepository? messagesRepo;
   final UserRepository? userRepo;
 
+  // Reaction callbacks
+  final void Function(String emoji)? onReact;
+  final void Function(Map<String, dynamic> reactions)? onShowReactionUsers;
+
   MessageBubbleConfig({
     required this.message,
     required this.isMyMessage,
@@ -85,6 +90,8 @@ class MessageBubbleConfig {
     this.onReplyTap,
     this.messagesRepo,
     this.userRepo,
+    this.onReact,
+    this.onShowReactionUsers,
   });
 }
 
@@ -159,28 +166,13 @@ class MessageBubble extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Flexible(
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
+              child: Container(
                 constraints: BoxConstraints(
                   maxWidth: MediaQuery.of(context).size.width * 0.75,
                 ),
                 margin: EdgeInsets.only(
                   left: config.isMyMessage ? 40 : 0,
                   right: config.isMyMessage ? 0 : 40,
-                ),
-                padding: config.isHighlighted
-                    ? const EdgeInsets.all(5)
-                    : EdgeInsets.zero,
-                decoration: BoxDecoration(
-                  color: config.isHighlighted
-                      ? Colors.blue.withAlpha(100)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(24),
-                    topRight: const Radius.circular(24),
-                    bottomLeft: Radius.circular(config.isMyMessage ? 24 : 0),
-                    bottomRight: Radius.circular(config.isMyMessage ? 0 : 24),
-                  ),
                 ),
                 child: config.useStackContainer
                     ? _buildStackContainer(themeColor)
@@ -214,9 +206,29 @@ class MessageBubble extends ConsumerWidget {
     return messageContent;
   }
 
+  /// Build the emoji reaction row (shown below the bubble)
+  Widget _buildReactionRow() {
+    final reactions = config.message.reactions;
+    if (reactions == null || reactions.isEmpty) return const SizedBox.shrink();
+    // Shift up by 10px so the bubble half-overlaps the message bubble's bottom edge
+    return Transform.translate(
+      offset: const Offset(0, -5),
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: config.isMyMessage ? 0 : 2,
+          right: config.isMyMessage ? 2 : 0,
+        ),
+        child: MessageReactionRow(
+          reactions: reactions,
+          onTap: () => config.onShowReactionUsers?.call(reactions),
+        ),
+      ),
+    );
+  }
+
   /// Build container using Stack (for DM)
   Widget _buildStackContainer(ColorTheme themeColor) {
-    return Stack(
+    final bubbleContent = Stack(
       children: [
         // Check if this is a media message (image/video)
         config.isMediaMessage(config.message)
@@ -252,9 +264,9 @@ class MessageBubble extends ConsumerWidget {
               )
             : Container(
                 padding: const EdgeInsets.only(
-                  top: 5,
-                  bottom: 2,
-                  left: 10,
+                  top: 6,
+                  bottom: 4,
+                  left: 12,
                   right: 10,
                 ),
                 decoration: BoxDecoration(
@@ -321,6 +333,14 @@ class MessageBubble extends ConsumerWidget {
                       ),
               ),
       ],
+    );
+
+    return Column(
+      crossAxisAlignment: config.isMyMessage
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [bubbleContent, _buildReactionRow()],
     );
   }
 
@@ -445,6 +465,8 @@ class MessageBubble extends ConsumerWidget {
                   ],
                 ),
               ),
+        // Reactions row below the bubble
+        _buildReactionRow(),
       ],
     );
   }
@@ -495,10 +517,10 @@ class MessageBubble extends ConsumerWidget {
         )
       else ...[
         Text(
-          config.messageTime,
+          config.messageTime.toLowerCase(),
           style: TextStyle(
             color: config.isMyMessage ? Colors.white70 : Colors.grey[600],
-            fontSize: 11,
+            fontSize: 10,
             fontWeight: FontWeight.w400,
           ),
         ),

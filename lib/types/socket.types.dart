@@ -130,6 +130,7 @@ enum WSMessageType {
   messagePin('message:pin'),
   messageForward('message:forward'),
   messageDelete('message:delete'),
+  messageReact('message:react'),
   messageSync('message:sync'),
   messageDelivered('message:delivered'),
   callInit('call:init'),
@@ -170,6 +171,7 @@ enum VitalWSMessageType {
   messagePin('message:pin'),
   messageForward('message:forward'),
   messageDelete('message:delete'),
+  messageReact('message:react'),
   messageNew('message:new'),
   messageDelivered('message:delivered');
 
@@ -832,6 +834,54 @@ class MessageForwardPayload {
   }
 }
 
+/// Emoji reaction on a message payload
+class MessageReactPayload {
+  final int messageId;
+  final int convId;
+  final int senderId;
+  final String? senderName;
+  final String emoji;
+  final String action; // 'add' | 'remove'
+  /// Updated full reactions map after this action:
+  /// { emoji: [{user_id, user_name, reacted_at}] }
+  final Map<String, dynamic> reactions;
+
+  MessageReactPayload({
+    required this.messageId,
+    required this.convId,
+    required this.senderId,
+    this.senderName,
+    required this.emoji,
+    required this.action,
+    required this.reactions,
+  });
+
+  factory MessageReactPayload.fromJson(Map<String, dynamic> json) {
+    final idValue = json['message_id'];
+    final messageId =
+        idValue is String ? int.parse(idValue) : (idValue as int);
+    return MessageReactPayload(
+      messageId: messageId,
+      convId: json['conv_id'] as int,
+      senderId: json['sender_id'] as int,
+      senderName: json['sender_name'] as String?,
+      emoji: json['emoji'] as String,
+      action: json['action'] as String,
+      reactions: (json['reactions'] as Map<String, dynamic>?) ?? {},
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'message_id': messageId.toString(),
+        'conv_id': convId,
+        'sender_id': senderId,
+        if (senderName != null) 'sender_name': senderName,
+        'emoji': emoji,
+        'action': action,
+        'reactions': reactions,
+      };
+}
+
 // /// Single synced message item
 // class SyncMessageItem {
 //   final int id;
@@ -1215,6 +1265,8 @@ class WSMessage {
         return MessageForwardPayload.fromJson(payloadJson);
       case WSMessageType.messageDelete:
         return DeleteMessagePayload.fromJson(payloadJson);
+      case WSMessageType.messageReact:
+        return MessageReactPayload.fromJson(payloadJson);
       case WSMessageType.messageSync:
         return SyncMessagesPayload.fromJson(payloadJson);
       case WSMessageType.messageDelivered:
@@ -1266,6 +1318,7 @@ class WSMessage {
     if (payload is MiscPayload) return payload.toJson();
     if (payload is MessagePinPayload) return payload.toJson();
     if (payload is MessageForwardPayload) return payload.toJson();
+    if (payload is MessageReactPayload) return payload.toJson();
     if (payload is SyncMessagesPayload) return payload.toJson();
     if (payload is MessageDeliveredPayload) return payload.toJson();
     if (payload is CallPayload) return payload.toJson();
@@ -1312,4 +1365,7 @@ class WSMessage {
 
   ConversationActionPayload? get conversationActionPayload =>
       payload is ConversationActionPayload ? payload : null;
+
+  MessageReactPayload? get messageReactPayload =>
+      payload is MessageReactPayload ? payload : null;
 }

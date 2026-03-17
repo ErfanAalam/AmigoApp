@@ -16,6 +16,7 @@ import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:scroll_to_index/scroll_to_index.dart';
 
 import '../../../db/repositories/message-status.repo.dart';
 import '../../../models/user.model.dart';
@@ -38,6 +39,7 @@ import '../../../ui/snackbar.dart';
 import '../../../ui/chat/input-container.widget.dart';
 import '../../../ui/chat/media-messages.widget.dart';
 import '../../../ui/chat/media-grid.widget.dart';
+import '../../../ui/chat/emoji-reaction.widget.dart';
 import '../../../ui/chat/message.action-sheet.dart';
 import '../../../ui/chat/message.widget.dart';
 import '../../../ui/chat/pinned-message.widget.dart';
@@ -71,7 +73,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   final MessageRepository _messagesRepo = MessageRepository();
   final MessageStatusRepository _messageStatusRepo = MessageStatusRepository();
   final UserRepository _userRepo = UserRepository();
-  final ScrollController _scrollController = ScrollController();
+  final AutoScrollController _scrollController = AutoScrollController(
+    suggestedRowHeight: 100,
+  );
   final TextEditingController _messageController = TextEditingController();
   final FocusNode _messageFocusNode = FocusNode();
   final TransportManager _transportManager = TransportManager();
@@ -82,6 +86,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   // stream subscriptions
   StreamSubscription<List<MessageModel>>? _messagesStreamSub;
+  StreamSubscription<Map<int, Map<String, dynamic>>>? _reactionsSubscription;
   StreamSubscription<ConnectionStatus>? _onlineStatusSubscription;
   StreamSubscription<TransportConnectionState>?
   _transportConnectionSubscription;
@@ -95,6 +100,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // State variables
   bool _isLoading = false;
   List<MessageModel> _messages = [];
+  Map<int, Map<String, dynamic>> _reactionsByMessage = {};
   // List<MessageModel> _failedMessages = [];
   MessageModel? _pinnedMessage;
   UserModel? _currentUserDetails;
@@ -165,6 +171,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   int? _highlightedMessageId; // Current match being viewed
   Set<int> _highlightedMessageIds = {}; // All matching messages
   Timer? _highlightTimer;
+
+  // Scroll-to-reply loading state
+  bool _isLoadingTargetMessage = false;
 
   // GlobalKeys for message widgets to enable accurate scrolling
   final Map<int, GlobalKey> _messageKeys = {};
@@ -540,6 +549,19 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           },
         );
 
+    _reactionsSubscription?.cancel();
+    _reactionsSubscription = _messageStatusRepo
+        .watchReactionsByConversation(widget.dm.conversationId)
+        .listen(
+          (reactions) {
+            if (!_canSetState) return;
+            _safeSetState(() => _reactionsByMessage = reactions);
+          },
+          onError: (e) {
+            debugPrint('❌ Reactions stream error: $e');
+          },
+        );
+
     // Load pinned message ID directly from database (not from widget.dm which may be stale)
     final conversation = await _conversationsRepo.getConversationById(
       widget.dm.conversationId,
@@ -833,6 +855,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             'userId': status['user_id'],
             'deliveredAt': status['delivered_at'],
             'readAt': status['read_at'],
+            'reaction': status['reaction'],
           };
         }).toList();
 
@@ -1557,131 +1580,63 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   //   _previousMessageCount = _messages.length;
   // }
 
-  /// Scroll to a specific message
-  Future<void> _scrollToMessage(int messageId, {int retryCount = 0}) async {
-    // Prevent infinite loops
-    const maxRetries = 3;
-    if (retryCount >= maxRetries) {
-      debugPrint('❌ Max retry attempts reached for message $messageId');
-      return;
-    }
-    // Check if the message exists in the current loaded messages
-    final messageIndex = _messages.indexWhere((msg) => msg.id == messageId);
+  /// Scroll to a specific message (reply-tap or pinned message tap)
+  Future<void> _scrollToMessage(int messageId) async {
+    if (!mounted || !_scrollController.hasClients) return;
 
-    if (messageIndex == -1) {
-      // Message not loaded yet - we need to load more messages
-      // Keep loading until we find the message or run out of messages
-      bool messageFound = false;
+    // ── Phase 0: ensure the target message is in local DB ──
+    if (!_messages.any((m) => m.id == messageId)) {
+      _safeSetState(() => _isLoadingTargetMessage = true);
+
       int attempts = 0;
-      const maxAttempts = 20; // Prevent infinite loops
-
-      while (!messageFound && attempts < maxAttempts) {
-        // Load more messages
-        // await _loadMoreMessages();
-
-        // Check if we found the message
-        messageFound = _messages.any((msg) => msg.id == messageId);
+      const maxAttempts = 20;
+      while (!_messages.any((m) => m.id == messageId) &&
+          _hasMoreOnServer &&
+          attempts < maxAttempts &&
+          mounted) {
+        await _loadMoreMessages();
+        // Wait for the Drift stream to propagate new rows into _messages
+        await Future.delayed(const Duration(milliseconds: 150));
         attempts++;
-
-        // Small delay to allow UI to update
-        await Future.delayed(const Duration(milliseconds: 100));
       }
 
-      if (!messageFound) {
-        // Show a user-friendly message
-        if (mounted) {
-          Snack.warning('Message not found');
-        }
+      if (_canSetState) {
+        _safeSetState(() => _isLoadingTargetMessage = false);
+      }
+
+      if (!_messages.any((m) => m.id == messageId)) {
+        if (mounted) Snack.warning('Message not found');
         return;
       }
-
-      // Update messageIndex after loading
-      final updatedIndex = _messages.indexWhere((msg) => msg.id == messageId);
-      if (updatedIndex == -1) return;
     }
 
-    // Now the message should be in our list
-    if (!_canSetState) return;
+    if (!_canSetState || !_scrollController.hasClients) return;
 
-    // PHASE 1: Scroll approximately to the message area so it gets built
-    final updatedMessageIndex = _messages.indexWhere(
-      (msg) => msg.id == messageId,
+    final targetIndex = _messages.indexWhere((m) => m.id == messageId);
+    if (targetIndex == -1) return;
+
+    // Builder index in the reversed list
+    final builderIndex = _messages.length - 1 - targetIndex;
+
+    // scroll_to_index handles all the heavy lifting — works even for
+    // items that haven't been built yet by using suggestedRowHeight.
+    await _scrollController.scrollToIndex(
+      builderIndex,
+      preferPosition: AutoScrollPosition.middle,
+      duration: const Duration(milliseconds: 300),
     );
-    if (updatedMessageIndex != -1 && _scrollController.hasClients) {
-      // Calculate approximate position (reverse list)
-      // Use a more accurate estimate: average message height is around 80-120px
-      final approximatePosition =
-          (_messages.length - 1 - updatedMessageIndex) * 90.0;
 
-      // Only scroll if the message is not near the current viewport
-      final currentPosition = _scrollController.position.pixels;
-      final viewportHeight = _scrollController.position.viewportDimension;
+    _highlightMessage(messageId);
+  }
 
-      // If message is likely off-screen, scroll approximately to it first
-      if ((approximatePosition - currentPosition).abs() > viewportHeight / 2) {
-        try {
-          await _scrollController.animateTo(
-            approximatePosition.clamp(
-              0.0,
-              _scrollController.position.maxScrollExtent,
-            ),
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          );
-
-          // Wait for widgets to build and layout
-          await Future.delayed(const Duration(milliseconds: 200));
-        } catch (e) {
-          debugPrint('⚠️ Error in approximate scroll: $e');
-        }
-      }
-    }
-
-    // PHASE 1.5: Try to use GlobalKey to scroll to exact position
-    final messageKey = _messageKeys[messageId];
-    if (messageKey?.currentContext != null) {
-      try {
-        await Scrollable.ensureVisible(
-          messageKey!.currentContext!,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-          alignment: 0.3, // Position message at 30% from top of viewport
-        );
-        // Wait a bit for the scroll to complete
-        await Future.delayed(const Duration(milliseconds: 100));
-      } catch (e) {
-        debugPrint('⚠️ Error in ensureVisible scroll: $e');
-      }
-    }
-
-    // PHASE 2: Use message ID to find and highlight the message
-    // After approximate scroll, highlight the message
-    if (!_canSetState) {
-      return;
-    }
-    _safeSetState(() {
-      _highlightedMessageId = messageId;
-    });
-
-    // Cancel any existing timer
+  /// Apply a timed highlight effect on the target message row
+  void _highlightMessage(int messageId) {
+    if (!_canSetState) return;
+    _safeSetState(() => _highlightedMessageId = messageId);
     _highlightTimer?.cancel();
-
-    // Remove highlight after 2 seconds
     _highlightTimer = Timer(const Duration(milliseconds: 2000), () {
-      _safeSetState(() {
-        _highlightedMessageId = null;
-      });
+      _safeSetState(() => _highlightedMessageId = null);
     });
-
-    // If we couldn't find the message initially, retry
-    if (updatedMessageIndex == -1 && retryCount < maxRetries - 1) {
-      // Force a rebuild and wait a bit longer
-      _safeSetState(() {});
-
-      // Try again after a longer delay
-      await Future.delayed(const Duration(milliseconds: 300));
-      _scrollToMessage(messageId, retryCount: retryCount + 1);
-    }
   }
 
   /// Toggle search mode
@@ -2112,8 +2067,16 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                 _buildMessageInput(),
               ],
             ),
+            // Loading-target-message pill
+            if (_isLoadingTargetMessage)
+              Positioned(
+                top: 10,
+                left: 0,
+                right: 0,
+                child: _buildLoadingTargetPill(),
+              ),
             // Sync indicator pill - above date separator
-            if (_isSyncingMessages)
+            if (_isSyncingMessages && !_isLoadingTargetMessage)
               Positioned(
                 top: 10,
                 left: 0,
@@ -2122,7 +2085,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
               ),
             // Sticky Date Separator - shifts down when sync pill is visible
             Positioned(
-              top: _isSyncingMessages ? 44 : 10,
+              top: (_isSyncingMessages || _isLoadingTargetMessage) ? 44 : 10,
               left: 0,
               right: 0,
               child: _buildStickyDateSeparator(),
@@ -2132,7 +2095,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
               right: 16,
               bottom: _replyToMessageData != null
                   ? 150.0
-                  : 80.0, // Position above message input
+                  : 110.0, // Position above message input
               child: ScrollToBottomButton(
                 scrollController: _scrollController,
                 onTap: _handleScrollToBottomTap,
@@ -2173,6 +2136,41 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             SizedBox(width: 7),
             Text(
               'Syncing...',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 11.5,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Pill shown while loading older pages to find a reply target
+  Widget _buildLoadingTargetPill() {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 11,
+              height: 11,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+            SizedBox(width: 7),
+            Text(
+              'Loading message...',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 11.5,
@@ -2269,15 +2267,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         // Determine if message is from current user
         final isMyMessage = message.senderId == _currentUserDetails?.id;
 
-        // Get or create GlobalKey for this message
-        if (!_messageKeys.containsKey(message.id)) {
-          _messageKeys[message.id] = GlobalKey();
-        }
-        final messageKey = _messageKeys[message.id]!;
-
-        // Wrap the message with a container that has a key for scrolling
-        return Container(
-          key: messageKey,
+        // Wrap with AutoScrollTag so scrollToIndex can find this item
+        return AutoScrollTag(
+          key: ValueKey(message.id),
+          controller: _scrollController,
+          index: index,
           child: Column(
             children: [
               // Date separator - show the date for the group of messages that starts here
@@ -2451,18 +2445,19 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         onPanStart: (details) => _onSwipeStart(message, details),
         onPanUpdate: (details) => _onSwipeUpdate(message, details, isMyMessage),
         onPanEnd: (details) => _onSwipeEnd(message, details, isMyMessage),
-        child: Container(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeInOut,
           color: isSelected
               ? themeColor.primary.withOpacity(0.1)
-              : (_highlightedMessageIds.contains(message.id)
-                    ? (_highlightedMessageId == message.id
-                          ? Colors.yellow.withOpacity(
-                              0.5,
-                            ) // Current match - brighter
-                          : Colors.yellow.withOpacity(
-                              0.2,
-                            )) // Other matches - dimmer
-                    : Colors.transparent),
+              : (_highlightedMessageId == message.id &&
+                        !_highlightedMessageIds.contains(message.id))
+                    ? themeColor.primary.withOpacity(0.10)
+                    : (_highlightedMessageIds.contains(message.id)
+                          ? (_highlightedMessageId == message.id
+                                ? Colors.yellow.withOpacity(0.35)
+                                : Colors.yellow.withOpacity(0.15))
+                          : Colors.transparent),
           child: Stack(
             children: [
               _buildSwipeableMessageBubble(
@@ -2694,9 +2689,13 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Check if this message is currently highlighted
     final isHighlighted = _highlightedMessageId == message.id;
 
+    final messageWithReactions = _reactionsByMessage.containsKey(message.id)
+        ? message.copyWith(reactions: _reactionsByMessage[message.id])
+        : message;
+
     return MessageBubble(
       config: MessageBubbleConfig(
-        message: message,
+        message: messageWithReactions,
         isMyMessage: isMyMessage,
         isPinned: isPinned,
         isStarred: isStarred,
@@ -2738,6 +2737,15 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         onReplyTap: _scrollToMessage,
         messagesRepo: _messagesRepo,
         userRepo: _userRepo,
+        onReact: (emoji) => _reactToMessage(message, emoji),
+        onShowReactionUsers: (reactions) {
+          showModalBottomSheet(
+            context: context,
+            backgroundColor: Colors.transparent,
+            isScrollControlled: true,
+            builder: (_) => AllReactorsSheet(reactions: reactions),
+          );
+        },
       ),
     );
   }
@@ -2961,6 +2969,20 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     final isPinned = _pinnedMessage?.id == message.id;
     final isStarred = _starredMessages.contains(message.id);
 
+    // Determine which emojis the current user has already reacted with on this message
+    final myReactions = <String>[];
+    if (_currentUserDetails != null) {
+      final msgReactions = _reactionsByMessage[message.id] ?? {};
+      for (final entry in msgReactions.entries) {
+        final users = (entry.value as List?) ?? [];
+        if (users.any(
+          (u) => (u['user_id'] as int?) == _currentUserDetails!.id,
+        )) {
+          myReactions.add(entry.key);
+        }
+      }
+    }
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -2979,6 +3001,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         onDeleteForEveryone: isMyMessage
             ? () => _deleteMessage(message.id, deleteForEveryone: true)
             : null,
+        onReact: (emoji) => _reactToMessage(message, emoji),
+        myReactions: myReactions,
       ),
     );
   }
@@ -3763,6 +3787,43 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     );
   }
 
+  /// React to a message with an emoji (toggle: add if not reacted, remove if already reacted)
+  void _reactToMessage(MessageModel message, String emoji) async {
+    if (_currentUserDetails == null) return;
+
+    final msgReactions = _reactionsByMessage[message.id] ?? {};
+    final emojiUsers =
+        (msgReactions[emoji] as List?)
+            ?.map((e) => Map<String, dynamic>.from(e as Map))
+            .toList() ??
+        [];
+    final alreadyReacted = emojiUsers.any(
+      (u) => (u['user_id'] as int?) == _currentUserDetails!.id,
+    );
+    final action = alreadyReacted ? 'remove' : 'add';
+
+    // Write to local DB immediately so the Drift stream re-emits
+    await _messageStatusRepo.upsertReaction(
+      messageId: message.id,
+      userId: _currentUserDetails!.id,
+      conversationId: widget.dm.conversationId,
+      emoji: action == 'add' ? emoji : null,
+    );
+
+    // Fire to backend (which will broadcast to other conversation members)
+    try {
+      await apiService.chat.reactToMessage(
+        messageId: message.id,
+        conversationId: widget.dm.conversationId,
+        emoji: emoji,
+        action: action,
+        senderName: _currentUserDetails!.name,
+      );
+    } catch (e) {
+      debugPrint('❌ Failed to send reaction: $e');
+    }
+  }
+
   void _replyToMessage(MessageModel message) async {
     if (!_canSetState) {
       return;
@@ -3942,13 +4003,13 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         builder: (context, value, child) {
           final text = value.text.trim();
           // Show recommendations if text is empty OR if it matches one of the recommendations
-          if (text.isEmpty || _messageRecommendations.contains(text)) {
-            return MessageRecommendations(
-              recommendations: _messageRecommendations,
-              onRecommendationTap: _onRecommendationTap,
-            );
-          }
-          return const SizedBox.shrink();
+          // if (text.isEmpty || _messageRecommendations.contains(text)) {
+          return MessageRecommendations(
+            recommendations: _messageRecommendations,
+            onRecommendationTap: _onRecommendationTap,
+          );
+          // }
+          // return const SizedBox.shrink();
         },
       ),
     );
@@ -4181,6 +4242,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     _messageController.dispose();
     _messageFocusNode.dispose();
     _messagesStreamSub?.cancel();
+    _reactionsSubscription?.cancel();
     _messageSubscription?.cancel();
     _messageAckSubscription?.cancel();
     _typingSubscription?.cancel();

@@ -13,8 +13,10 @@ import '../../db/repositories/conversation-member.repo.dart';
 import '../../models/contact.model.dart';
 import '../../models/user.model.dart';
 import '../../providers/chat.provider.dart';
+import '../../providers/message.provider.dart';
 import '../../providers/theme-color.provider.dart';
 import '../../services/contact.service.dart';
+import '../../services/user-status.service.dart';
 import '../../ui/snackbar.dart';
 import '../chat/dm/dm-messaging.screen.dart';
 
@@ -30,6 +32,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
   final ContactService _contactService = ContactService();
   final UserRepository _userRepository = UserRepository();
   final ContactsRepository _contactsRepository = ContactsRepository();
+  final UserStatusService _userStatusService = UserStatusService();
   final ConversationRepository _conversationRepository =
       ConversationRepository();
   final ConversationMemberRepository _conversationMemberRepository =
@@ -533,6 +536,8 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
   Widget build(BuildContext context) {
     super.build(context); // Required for AutomaticKeepAliveClientMixin
     final themeColor = ref.watch(themeColorProvider);
+    // Rebuild whenever any user's online status changes
+    ref.watch(userStatusStreamProvider);
 
     return Stack(
       children: [
@@ -822,38 +827,63 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                       padding: EdgeInsets.all(16),
                                       child: Row(
                                         children: [
-                                          Container(
-                                            decoration: BoxDecoration(
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: themeColor.primary
-                                                      .withOpacity(0.2),
-                                                  blurRadius: 12,
-                                                  offset: Offset(0, 4),
+                                          Stack(
+                                            clipBehavior: Clip.none,
+                                            children: [
+                                              Container(
+                                                decoration: BoxDecoration(
+                                                  borderRadius:
+                                                      BorderRadius.circular(20),
+                                                  boxShadow: [
+                                                    BoxShadow(
+                                                      color: themeColor.primary
+                                                          .withOpacity(0.2),
+                                                      blurRadius: 12,
+                                                      offset: Offset(0, 4),
+                                                    ),
+                                                  ],
                                                 ),
-                                              ],
-                                            ),
-                                            child: CircleAvatar(
-                                              radius: 28,
-                                              backgroundColor: themeColor
-                                                  .primary
-                                                  .withOpacity(0.1),
-                                              backgroundImage:
-                                                  user.profilePic != null
-                                                  ? CachedNetworkImageProvider(
-                                                      user.profilePic!,
-                                                    )
-                                                  : null,
-                                              child: user.profilePic == null
-                                                  ? Icon(
-                                                      Icons.person_rounded,
-                                                      color: themeColor.primary,
-                                                      size: 28,
-                                                    )
-                                                  : null,
-                                            ),
+                                                child: CircleAvatar(
+                                                  radius: 28,
+                                                  backgroundColor: themeColor
+                                                      .primary
+                                                      .withOpacity(0.1),
+                                                  backgroundImage:
+                                                      user.profilePic != null
+                                                      ? CachedNetworkImageProvider(
+                                                          user.profilePic!,
+                                                        )
+                                                      : null,
+                                                  child: user.profilePic == null
+                                                      ? Icon(
+                                                          Icons.person_rounded,
+                                                          color: themeColor.primary,
+                                                          size: 28,
+                                                        )
+                                                      : null,
+                                                ),
+                                              ),
+                                              if (_userStatusService.isUserOnline(user.id))
+                                                Positioned(
+                                                  right: 0,
+                                                  bottom: 0,
+                                                  child: Container(
+                                                    width: 14,
+                                                    height: 14,
+                                                    decoration: BoxDecoration(
+                                                      color: const Color(0xFF4CAF50),
+                                                      shape: BoxShape.circle,
+                                                      border: Border.all(color: Colors.white, width: 2.5),
+                                                      boxShadow: [
+                                                        BoxShadow(
+                                                          color: Colors.green.withOpacity(0.45),
+                                                          blurRadius: 5,
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                            ],
                                           ),
                                           SizedBox(width: 16),
                                           Expanded(

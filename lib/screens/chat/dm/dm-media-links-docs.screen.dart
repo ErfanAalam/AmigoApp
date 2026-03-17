@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../config/app-colors.config.dart';
+import '../../../utils/animations.utils.dart';
 import '../../../db/repositories/message.repo.dart';
 import '../../../models/message.model.dart';
 import '../../../models/conversations.model.dart';
@@ -33,12 +35,16 @@ class DmMediaLinksDocsScreen extends ConsumerStatefulWidget {
 
 class _DmMediaLinksDocsScreenState
     extends ConsumerState<DmMediaLinksDocsScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final MessageRepository _messagesRepo = MessageRepository();
   final MediaCacheService _mediaCacheService = MediaCacheService();
   final ThumbnailCacheService _thumbnailCacheService = ThumbnailCacheService();
 
   late TabController _tabController;
+  late AnimationController _fadeController;
+  late Animation<double> _fadeAnim;
+  late Animation<Offset> _slideAnim;
+
   List<MessageModel> _allMessages = [];
   List<MessageModel> _mediaMessages = [];
   List<MessageModel> _linkMessages = [];
@@ -49,12 +55,22 @@ class _DmMediaLinksDocsScreenState
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 450),
+    );
+    _fadeAnim = CurvedAnimation(parent: _fadeController, curve: Curves.easeOut);
+    _slideAnim = Tween<Offset>(
+      begin: const Offset(0, 0.06),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _fadeController, curve: Curves.easeOut));
     _loadMessages();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _fadeController.dispose();
     super.dispose();
   }
 
@@ -75,19 +91,19 @@ class _DmMediaLinksDocsScreenState
         if (msg.isImage || msg.isVideo) {
           return true;
         }
-        
+
         // Check attachment category if type doesn't match
         if (msg.attachments != null) {
           final attachments = msg.attachments as Map<String, dynamic>;
           final category = attachments['category']?.toString().toLowerCase();
           final mimeType = attachments['mime_type']?.toString().toLowerCase();
           final url = attachments['url'] as String?;
-          
+
           // Must have a URL to be valid media
           if (url == null || url.isEmpty) {
             return false;
           }
-          
+
           // Check category
           if (category == 'images' || category == 'image') {
             return true;
@@ -95,7 +111,7 @@ class _DmMediaLinksDocsScreenState
           if (category == 'videos' || category == 'video') {
             return true;
           }
-          
+
           // Check mime type as fallback
           if (mimeType != null) {
             if (mimeType.startsWith('image/')) {
@@ -106,7 +122,7 @@ class _DmMediaLinksDocsScreenState
             }
           }
         }
-        
+
         return false;
       }).toList();
 
@@ -115,34 +131,34 @@ class _DmMediaLinksDocsScreenState
         if (msg.isFile) {
           return true;
         }
-        
+
         // Check attachment category if type doesn't match
         if (msg.attachments != null) {
           final attachments = msg.attachments as Map<String, dynamic>;
           final category = attachments['category']?.toString().toLowerCase();
           final mimeType = attachments['mime_type']?.toString().toLowerCase();
           final url = attachments['url'] as String?;
-          
+
           // Must have a URL to be valid document
           if (url == null || url.isEmpty) {
             return false;
           }
-          
+
           // Check category
           if (category == 'docs' || category == 'document' || category == 'file') {
             return true;
           }
-          
+
           // Check mime type as fallback - exclude images and videos
           if (mimeType != null) {
-            if (!mimeType.startsWith('image/') && 
-                !mimeType.startsWith('video/') && 
+            if (!mimeType.startsWith('image/') &&
+                !mimeType.startsWith('video/') &&
                 !mimeType.startsWith('audio/')) {
               // It's a document if it's not image, video, or audio
               return true;
             }
           }
-          
+
           // If it has a file_name but no category, it might be a document
           final fileName = attachments['file_name'] as String?;
           if (fileName != null && fileName.isNotEmpty) {
@@ -158,7 +174,7 @@ class _DmMediaLinksDocsScreenState
             }
           }
         }
-        
+
         return false;
       }).toList();
 
@@ -169,15 +185,17 @@ class _DmMediaLinksDocsScreenState
       }).toList();
 
       setState(() => _isLoading = false);
+      _fadeController.forward();
     } catch (e) {
       debugPrint('❌ Error loading messages: $e');
       setState(() => _isLoading = false);
+      _fadeController.forward();
     }
   }
 
   /// Extract URLs from text using regex
   List<String> _extractUrls(String text) {
-    final urlRegex = RegExp(  
+    final urlRegex = RegExp(
       r'https?://[^\s]+|www\.[^\s]+',
       caseSensitive: false,
     );
@@ -190,81 +208,207 @@ class _DmMediaLinksDocsScreenState
     final themeColor = ref.watch(themeColorProvider);
 
     return Scaffold(
+      backgroundColor: Colors.grey[50],
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('Media, Links & Docs'),
-        backgroundColor: themeColor.primary,
+        elevation: 0,
+        backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          tabs: const [
-            Tab(
-              icon: Icon(Icons.photo_library),
-              text: 'Media',
+        title: const Text(
+          'Media, Links & Docs',
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 18,
+            letterSpacing: 0.3,
+          ),
+        ),
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                themeColor.primaryDark,
+                themeColor.primary,
+                themeColor.primaryLight,
+              ],
             ),
-            Tab(
-              icon: Icon(Icons.link),
-              text: 'Links',
+          ),
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(56),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(30),
             ),
-            Tab(
-              icon: Icon(Icons.description),
-              text: 'Docs',
+            child: TabBar(
+              controller: _tabController,
+              indicator: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(30),
+              ),
+              indicatorSize: TabBarIndicatorSize.tab,
+              dividerColor: Colors.transparent,
+              labelColor: themeColor.primaryDark,
+              unselectedLabelColor: Colors.white.withOpacity(0.85),
+              labelStyle: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+              unselectedLabelStyle: const TextStyle(
+                fontWeight: FontWeight.w500,
+                fontSize: 13,
+              ),
+              labelPadding: EdgeInsets.zero,
+              tabs: [
+                _buildTab(Icons.photo_library_rounded, 'Media', _mediaMessages.length),
+                _buildTab(Icons.link_rounded, 'Links', _linkMessages.length),
+                _buildTab(Icons.description_rounded, 'Docs', _documentMessages.length),
+              ],
             ),
-          ],
+          ),
         ),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : TabBarView(
-              controller: _tabController,
-              children: [
-                _buildMediaTab(),
-                _buildLinksTab(),
-                _buildDocumentsTab(),
-              ],
+          ? _buildLoadingState(themeColor)
+          : FadeTransition(
+              opacity: _fadeAnim,
+              child: SlideTransition(
+                position: _slideAnim,
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildMediaTab(themeColor),
+                    _buildLinksTab(themeColor),
+                    _buildDocumentsTab(themeColor),
+                  ],
+                ),
+              ),
             ),
     );
   }
 
-  Widget _buildMediaTab() {
-    if (_mediaMessages.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.photo_library_outlined,
-              size: 64,
-              color: Colors.grey[400],
-            ),
-            const SizedBox(height: 16),
+  Widget _buildTab(IconData icon, String label, int count) {
+    return Tab(
+      height: 36,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16),
+          const SizedBox(width: 5),
+          Text(label),
+          if (count > 0 && !_isLoading) ...[
+            const SizedBox(width: 4),
             Text(
-              'No media shared',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey[600],
-              ),
+              '($count)',
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w400),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadingState(ColorTheme themeColor) {
+    return Column(
+      children: [
+        // Spacer for AppBar + TabBar
+        SizedBox(height: MediaQuery.of(context).padding.top + kToolbarHeight + 56),
+        const SizedBox(height: 24),
+        Expanded(
+          child: GridView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 6,
+              mainAxisSpacing: 6,
+            ),
+            itemCount: 12,
+            itemBuilder: (context, index) {
+              return _AnimatedSkeletonTile(index: index);
+            },
+          ),
         ),
+      ],
+    );
+  }
+
+  Widget _buildEmptyState(IconData icon, String message, ColorTheme themeColor) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 100,
+            height: 100,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  themeColor.primary.withOpacity(0.08),
+                  themeColor.primaryLight.withOpacity(0.15),
+                ],
+              ),
+            ),
+            child: Icon(
+              icon,
+              size: 48,
+              color: themeColor.primary.withOpacity(0.4),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            message,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              color: Colors.grey[500],
+              letterSpacing: 0.2,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Items will appear here once shared',
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.grey[400],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMediaTab(ColorTheme themeColor) {
+    if (_mediaMessages.isEmpty) {
+      return _buildEmptyState(
+        Icons.photo_library_outlined,
+        'No media shared',
+        themeColor,
       );
     }
 
     return GridView.builder(
-      padding: const EdgeInsets.all(8),
+      padding: EdgeInsets.fromLTRB(12, 12 + kToolbarHeight + 56 + MediaQuery.of(context).padding.top, 12, 12),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
-        crossAxisSpacing: 4,
-        mainAxisSpacing: 4,
+        crossAxisSpacing: 6,
+        mainAxisSpacing: 6,
       ),
       itemCount: _mediaMessages.length,
       // Increase cache extent to keep more images in memory
       cacheExtent: 1000, // Keep images within 1000px offscreen
       itemBuilder: (context, index) {
         final message = _mediaMessages[index];
-        return _buildMediaItem(message);
+        return StaggeredScaleFadeTile(
+          index: index,
+          child: _buildMediaItem(message),
+        );
       },
     );
   }
@@ -307,11 +451,14 @@ class _DmMediaLinksDocsScreenState
 
     // Wrap in RepaintBoundary to prevent unnecessary repaints
     return RepaintBoundary(
-      child: isImage
-          ? _buildImageItem(mediaUrl, localPath, message)
-          : isVideo
-              ? _buildVideoItem(mediaUrl, localPath, message)
-              : const SizedBox.shrink(),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: isImage
+            ? _buildImageItem(mediaUrl, localPath, message)
+            : isVideo
+                ? _buildVideoItem(mediaUrl, localPath, message)
+                : const SizedBox.shrink(),
+      ),
     );
   }
 
@@ -361,96 +508,125 @@ class _DmMediaLinksDocsScreenState
     );
   }
 
-  Widget _buildLinksTab() {
+  Widget _buildLinksTab(ColorTheme themeColor) {
     if (_linkMessages.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.link_off,
-              size: 64,
-              color: Colors.grey[400],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No links shared',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey[600],
-              ),
-            ),
-          ],
-        ),
+      return _buildEmptyState(
+        Icons.link_off_rounded,
+        'No links shared',
+        themeColor,
       );
     }
 
     return ListView.builder(
-      padding: const EdgeInsets.all(8),
+      padding: EdgeInsets.fromLTRB(16, 16 + kToolbarHeight + 56 + MediaQuery.of(context).padding.top, 16, 16),
       itemCount: _linkMessages.length,
       itemBuilder: (context, index) {
         final message = _linkMessages[index];
         final urls = _extractUrls(message.body!);
-        return _buildLinkItem(message, urls);
+        return StaggeredSlideFadeItem(
+          index: index,
+          child: _buildLinkItem(message, urls, themeColor),
+        );
       },
     );
   }
 
-  Widget _buildLinkItem(MessageModel message, List<String> urls) {
-    final themeColor = ref.watch(themeColorProvider);
-
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-      child: InkWell(
-        onTap: () => _openLink(urls.first),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.link,
-                    color: themeColor.primary,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      urls.first,
-                      style: TextStyle(
-                        color: themeColor.primary,
-                        fontSize: 14,
-                        decoration: TextDecoration.underline,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+  Widget _buildLinkItem(MessageModel message, List<String> urls, ColorTheme themeColor) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => _openLink(urls.first),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        themeColor.primary.withOpacity(0.12),
+                        themeColor.primaryLight.withOpacity(0.18),
+                      ],
                     ),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                ],
-              ),
-              if (message.body != null && message.body!.length > urls.first.length) ...[
-                const SizedBox(height: 8),
-                Text(
-                  message.body!.replaceAll(urls.first, '').trim(),
-                  style: TextStyle(
-                    color: Colors.grey[700],
-                    fontSize: 13,
+                  child: Icon(
+                    Icons.link_rounded,
+                    color: themeColor.primary,
+                    size: 22,
                   ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        urls.first,
+                        style: TextStyle(
+                          color: themeColor.primary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          decoration: TextDecoration.underline,
+                          decorationColor: themeColor.primary.withOpacity(0.4),
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (message.body != null && message.body!.length > urls.first.length) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          message.body!.replaceAll(urls.first, '').trim(),
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 13,
+                            height: 1.3,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                      Text(
+                        ChatHelpers.formatMessageTime(message.sentAt),
+                        style: TextStyle(
+                          color: Colors.grey[400],
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Icon(
+                    Icons.open_in_new_rounded,
+                    size: 18,
+                    color: Colors.grey[350],
+                  ),
                 ),
               ],
-              const SizedBox(height: 8),
-              Text(
-                ChatHelpers.formatMessageTime(message.sentAt),
-                style: TextStyle(
-                  color: Colors.grey[500],
-                  fontSize: 12,
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -485,42 +661,29 @@ class _DmMediaLinksDocsScreenState
     }
   }
 
-  Widget _buildDocumentsTab() {
+  Widget _buildDocumentsTab(ColorTheme themeColor) {
     if (_documentMessages.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.description_outlined,
-              size: 64,
-              color: Colors.grey[400],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No documents shared',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey[600],
-              ),
-            ),
-          ],
-        ),
+      return _buildEmptyState(
+        Icons.description_outlined,
+        'No documents shared',
+        themeColor,
       );
     }
 
     return ListView.builder(
-      padding: const EdgeInsets.all(8),
+      padding: EdgeInsets.fromLTRB(16, 16 + kToolbarHeight + 56 + MediaQuery.of(context).padding.top, 16, 16),
       itemCount: _documentMessages.length,
       itemBuilder: (context, index) {
         final message = _documentMessages[index];
-        return _buildDocumentItem(message);
+        return StaggeredSlideFadeItem(
+          index: index,
+          child: _buildDocumentItem(message, themeColor),
+        );
       },
     );
   }
 
-  Widget _buildDocumentItem(MessageModel message) {
-    final themeColor = ref.watch(themeColorProvider);
+  Widget _buildDocumentItem(MessageModel message, ColorTheme themeColor) {
     final attachments = message.attachments;
 
     if (attachments == null) {
@@ -532,84 +695,106 @@ class _DmMediaLinksDocsScreenState
     final fileSize = attachments['file_size'] as int?;
     final mimeType = attachments['mime_type'] as String?;
 
-    IconData docIcon = Icons.description;
+    IconData docIcon = Icons.description_rounded;
+    Color iconBgColor = themeColor.primary;
     if (mimeType != null) {
       if (mimeType.contains('pdf')) {
-        docIcon = Icons.picture_as_pdf;
+        docIcon = Icons.picture_as_pdf_rounded;
+        iconBgColor = const Color(0xFFE53935);
       } else if (mimeType.contains('word') || mimeType.contains('doc')) {
-        docIcon = Icons.description;
+        docIcon = Icons.description_rounded;
+        iconBgColor = const Color(0xFF1976D2);
       } else if (mimeType.contains('excel') || mimeType.contains('sheet')) {
-        docIcon = Icons.table_chart;
+        docIcon = Icons.table_chart_rounded;
+        iconBgColor = const Color(0xFF388E3C);
       } else if (mimeType.contains('powerpoint') ||
           mimeType.contains('presentation')) {
-        docIcon = Icons.slideshow;
+        docIcon = Icons.slideshow_rounded;
+        iconBgColor = const Color(0xFFE64A19);
       } else if (mimeType.contains('zip') || mimeType.contains('rar')) {
-        docIcon = Icons.archive;
+        docIcon = Icons.archive_rounded;
+        iconBgColor = const Color(0xFF7B1FA2);
       }
     }
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-      child: InkWell(
-        onTap: documentUrl != null
-            ? () => _previewDocument(documentUrl, fileName, message.body, fileSize)
-            : null,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: themeColor.primary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
+    // Build metadata line: size · time
+    final metaParts = <String>[];
+    if (fileSize != null) {
+      metaParts.add(ChatHelpers.formatFileSize(fileSize));
+    }
+    metaParts.add(ChatHelpers.formatMessageTime(message.sentAt));
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: documentUrl != null
+              ? () => _previewDocument(documentUrl, fileName, message.body, fileSize)
+              : null,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: iconBgColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    docIcon,
+                    color: iconBgColor,
+                    size: 26,
+                  ),
                 ),
-                child: Icon(
-                  docIcon,
-                  color: themeColor.primary,
-                  size: 32,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      fileName,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (fileSize != null) ...[
-                      const SizedBox(height: 4),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        ChatHelpers.formatFileSize(fileSize),
+                        fileName,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.1,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        metaParts.join('  ·  '),
                         style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 13,
+                          color: Colors.grey[450],
+                          fontSize: 12.5,
                         ),
                       ),
                     ],
-                    const SizedBox(height: 4),
-                    Text(
-                      ChatHelpers.formatMessageTime(message.sentAt),
-                      style: TextStyle(
-                        color: Colors.grey[500],
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-              Icon(
-                Icons.chevron_right,
-                color: Colors.grey[400],
-              ),
-            ],
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 16,
+                  color: Colors.grey[350],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -631,6 +816,59 @@ class _DmMediaLinksDocsScreenState
     );
   }
 }
+
+// ─── Animated Wrappers ──────────────────────────────────────────────────────
+
+/// Shimmer loading skeleton tile
+class _AnimatedSkeletonTile extends StatefulWidget {
+  final int index;
+
+  const _AnimatedSkeletonTile({required this.index});
+
+  @override
+  State<_AnimatedSkeletonTile> createState() => _AnimatedSkeletonTileState();
+}
+
+class _AnimatedSkeletonTileState extends State<_AnimatedSkeletonTile>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final opacity = 0.4 + (_controller.value * 0.5);
+        return Opacity(
+          opacity: opacity,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.grey[200],
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ─── Cached Grid Items (unchanged) ─────────────────────────────────────────
 
 /// Optimized image grid item that keeps images alive when scrolling
 class _CachedImageGridItem extends StatefulWidget {
@@ -788,13 +1026,19 @@ class _CachedVideoGridItemState extends State<_CachedVideoGridItem>
           // Play button overlay
           Center(
             child: Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.6),
+                color: Colors.black.withOpacity(0.55),
                 shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 8,
+                  ),
+                ],
               ),
               child: const Icon(
-                Icons.play_arrow,
+                Icons.play_arrow_rounded,
                 color: Colors.white,
                 size: 24,
               ),
@@ -827,4 +1071,3 @@ class _CachedVideoGridItemState extends State<_CachedVideoGridItem>
     );
   }
 }
-
