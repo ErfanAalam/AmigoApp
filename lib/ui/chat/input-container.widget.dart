@@ -7,7 +7,7 @@ import '../../models/group.model.dart';
 import '../../providers/theme-color.provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class MessageInputContainer extends ConsumerWidget {
+class MessageInputContainer extends ConsumerStatefulWidget {
   final TextEditingController messageController;
   final ValueNotifier<bool> isOtherTypingNotifier;
   final Widget? typingIndicator;
@@ -58,136 +58,205 @@ class MessageInputContainer extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => Consumer(
-    builder: (context, ref, child) {
-      final themeColor = ref.watch(themeColorProvider);
-      // Check if this is a community group and if sending is allowed
-      final isCommunityGroupActive = _isCommunityGroupActive();
-      final shouldDisableSending = isCommunityGroup && !isCommunityGroupActive;
+  ConsumerState<MessageInputContainer> createState() =>
+      _MessageInputContainerState();
+}
 
-      return Column(
-        children: [
-          // Time restriction notice for community groups
-          if (isCommunityGroup && !isCommunityGroupActive)
-            _buildTimeRestrictionNotice(),
+class _MessageInputContainerState extends ConsumerState<MessageInputContainer>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _replyAnim;
+  late final Animation<double> _replyAnimation;
 
-          // Typing indicator
-          ValueListenableBuilder<bool>(
-            valueListenable: isOtherTypingNotifier,
-            builder: (context, isOtherTyping, child) {
-              if (isOtherTyping && typingIndicator != null) {
-                return typingIndicator!;
-              }
-              return const SizedBox.shrink();
-            },
-          ),
+  // Keeps the last reply data alive so the exit animation has content to show.
+  MessageModel? _lastReplyData;
 
-          // Message Recommendations (shown between typing indicator and message input)
-          if (recommendations != null) recommendations!,
+  @override
+  void initState() {
+    super.initState();
+    _replyAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+    );
+    _replyAnimation = CurvedAnimation(
+      parent: _replyAnim,
+      curve: Curves.easeOut,
+      reverseCurve: Curves.easeIn,
+    );
 
-          // Reply container
-          if (isReplying && replyToMessageData != null)
-            _buildReplyContainer(ref),
+    if (widget.isReplying && widget.replyToMessageData != null) {
+      _lastReplyData = widget.replyToMessageData;
+      _replyAnim.value = 1.0;
+    }
+  }
 
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: const BoxDecoration(color: Colors.white),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                IconButton(
-                  icon: Icon(
-                    Icons.attach_file,
-                    color: shouldDisableSending
-                        ? Colors.grey[400]
-                        : Colors.grey[600],
-                  ),
-                  onPressed: shouldDisableSending ? null : onAttachmentTap,
-                ),
-                Expanded(
-                  child: TextField(
-                    controller: messageController,
-                    focusNode: focusNode,
-                    enabled: !shouldDisableSending,
-                    decoration: InputDecoration(
-                      hintText: shouldDisableSending
-                          ? 'Messaging is disabled outside active hours'
-                          : 'Message',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(25),
-                        borderSide: BorderSide.none,
-                      ),
-                      filled: true,
-                      fillColor: shouldDisableSending
-                          ? Colors.grey[200]
-                          : Colors.grey[100],
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 10,
-                      ),
-                    ),
-                    maxLines: 6,
-                    minLines: 1,
-                    textInputAction: TextInputAction.newline,
-                    textCapitalization: TextCapitalization.sentences,
-                    onChanged: shouldDisableSending ? null : (value) {
-                      if (onTyping != null) {
-                        onTyping!(value);
-                      }
-                      // Update focus state when text changes
-                      if (onFocusChange != null) {
-                        onFocusChange!(focusNode?.hasFocus ?? false);
-                      }
-                    },
-                    onTap: () {
-                      if (onFocusChange != null) {
-                        onFocusChange!(true);
-                      }
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                FloatingActionButton(
-                  onPressed: (shouldDisableSending || isSending)
-                      ? null
-                      : (messageController.text.isNotEmpty
-                            ? () => onSendMessage!(MessageType.text)
-                            : () => onSendVoiceNote!()),
-                  backgroundColor: themeColor.primary,
-                  mini: true,
-                  child: messageController.text.isNotEmpty
-                      ? Icon(Icons.send, color: Colors.white)
-                      : Icon(Icons.mic, color: Colors.white),
-                ),
-              ],
-            ),
-          ),
-        ],
-      );
-    },
-  );
+  @override
+  void didUpdateWidget(MessageInputContainer oldWidget) {
+    super.didUpdateWidget(oldWidget);
 
-  Widget _buildReplyContainer(WidgetRef ref) {
+    final wasShowing =
+        oldWidget.isReplying && oldWidget.replyToMessageData != null;
+    final isShowing = widget.isReplying && widget.replyToMessageData != null;
+
+    if (!wasShowing && isShowing) {
+      // Opened — update data then animate in
+      _lastReplyData = widget.replyToMessageData;
+      _replyAnim.forward();
+    } else if (wasShowing && !isShowing) {
+      // Closed — animate out; keep _lastReplyData until animation finishes
+      _replyAnim.reverse().whenComplete(() {
+        if (mounted) setState(() => _lastReplyData = null);
+      });
+    } else if (isShowing && widget.replyToMessageData != oldWidget.replyToMessageData) {
+      // Changed reply target — swap content, no animation change needed
+      setState(() => _lastReplyData = widget.replyToMessageData);
+    }
+  }
+
+  @override
+  void dispose() {
+    _replyAnim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final themeColor = ref.watch(themeColorProvider);
-    final replyMessage = replyToMessageData!;
+    final isCommunityGroupActive = _isCommunityGroupActive();
+    final shouldDisableSending =
+        widget.isCommunityGroup && !isCommunityGroupActive;
 
-    // Determine if replied message is from current user
-    final isRepliedMessageMine = replyMessage.senderId == currentUserId;
+    return Column(
+      children: [
+        // Time restriction notice for community groups
+        if (widget.isCommunityGroup && !isCommunityGroupActive)
+          _buildTimeRestrictionNotice(),
+
+        // Typing indicator
+        ValueListenableBuilder<bool>(
+          valueListenable: widget.isOtherTypingNotifier,
+          builder: (context, isOtherTyping, child) {
+            if (isOtherTyping && widget.typingIndicator != null) {
+              return widget.typingIndicator!;
+            }
+            return const SizedBox.shrink();
+          },
+        ),
+
+        // Message Recommendations
+        if (widget.recommendations != null) widget.recommendations!,
+
+        // Reply container — always in the tree (no conditional) so the TextField
+        // never shifts position and keyboard focus is preserved.
+        // Slides in from bottom on open, slides back down on close.
+        AnimatedBuilder(
+          animation: _replyAnimation,
+          builder: (context, child) {
+            final v = _replyAnimation.value;
+            if (v == 0.0) return const SizedBox.shrink();
+            return ClipRect(
+              child: Align(
+                heightFactor: v,
+                child: FractionalTranslation(
+                  translation: Offset(0.0, 1.0 - v),
+                  child: child,
+                ),
+              ),
+            );
+          },
+          child: _lastReplyData != null
+              ? _buildReplyContainer(_lastReplyData!, themeColor)
+              : const SizedBox.shrink(),
+        ),
+
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: const BoxDecoration(color: Colors.white),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              IconButton(
+                icon: Icon(
+                  Icons.attach_file,
+                  color: shouldDisableSending
+                      ? Colors.grey[400]
+                      : Colors.grey[600],
+                ),
+                onPressed: shouldDisableSending ? null : widget.onAttachmentTap,
+              ),
+              Expanded(
+                child: TextField(
+                  controller: widget.messageController,
+                  focusNode: widget.focusNode,
+                  enabled: !shouldDisableSending,
+                  decoration: InputDecoration(
+                    hintText: shouldDisableSending
+                        ? 'Messaging is disabled outside active hours'
+                        : 'Message',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(25),
+                      borderSide: BorderSide.none,
+                    ),
+                    filled: true,
+                    fillColor: shouldDisableSending
+                        ? Colors.grey[200]
+                        : Colors.grey[100],
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 10,
+                    ),
+                  ),
+                  maxLines: 6,
+                  minLines: 1,
+                  textInputAction: TextInputAction.newline,
+                  textCapitalization: TextCapitalization.sentences,
+                  onChanged: shouldDisableSending
+                      ? null
+                      : (value) {
+                          if (widget.onTyping != null) {
+                            widget.onTyping!(value);
+                          }
+                          if (widget.onFocusChange != null) {
+                            widget.onFocusChange!(
+                              widget.focusNode?.hasFocus ?? false,
+                            );
+                          }
+                        },
+                  onTap: () {
+                    if (widget.onFocusChange != null) {
+                      widget.onFocusChange!(true);
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              FloatingActionButton(
+                onPressed: (shouldDisableSending || widget.isSending)
+                    ? null
+                    : (widget.messageController.text.isNotEmpty
+                          ? () => widget.onSendMessage!(MessageType.text)
+                          : () => widget.onSendVoiceNote!()),
+                backgroundColor: themeColor.primary,
+                mini: true,
+                child: widget.messageController.text.isNotEmpty
+                    ? Icon(Icons.send, color: Colors.white)
+                    : Icon(Icons.mic, color: Colors.white),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReplyContainer(MessageModel replyMessage, themeColor) {
+    final isRepliedMessageMine = replyMessage.senderId == widget.currentUserId;
     return Container(
       padding: const EdgeInsets.all(12),
-      margin: dm != null
-          ? EdgeInsets
-                .zero // DM doesn't have horizontal margin
-          : const EdgeInsets.symmetric(horizontal: 16), // Group has margin
       decoration: BoxDecoration(
         color: Colors.grey[50],
-        borderRadius: dm != null
-            ? const BorderRadius.only(
-                // DM only has topRight
-                topRight: Radius.circular(12),
-              )
+        borderRadius: widget.dm != null
+            ? const BorderRadius.only(topRight: Radius.circular(12))
             : const BorderRadius.only(
-                // Group has both
                 topLeft: Radius.circular(12),
                 topRight: Radius.circular(12),
               ),
@@ -195,7 +264,6 @@ class MessageInputContainer extends ConsumerWidget {
       ),
       child: Row(
         children: [
-          // Reply indicator line
           Container(
             width: 3,
             height: 40,
@@ -204,9 +272,7 @@ class MessageInputContainer extends ConsumerWidget {
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-          SizedBox(width: 12),
-
-          // Reply content
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -216,7 +282,9 @@ class MessageInputContainer extends ConsumerWidget {
                     Icon(Icons.reply, size: 16, color: themeColor.primary),
                     const SizedBox(width: 4),
                     Text(
-                      isRepliedMessageMine ? 'You' : replyMessage.senderName!,
+                      isRepliedMessageMine
+                          ? 'You'
+                          : replyMessage.senderName!,
                       style: TextStyle(
                         color: themeColor.primary,
                         fontSize: 12,
@@ -225,8 +293,8 @@ class MessageInputContainer extends ConsumerWidget {
                     ),
                   ],
                 ),
-                SizedBox(height: 4),
-                if (replyMessage.body?.isNotEmpty ?? false) ...[
+                const SizedBox(height: 4),
+                if (replyMessage.body?.isNotEmpty ?? false)
                   Text(
                     replyMessage.body!.length > 50
                         ? '${replyMessage.body!.substring(0, 50)}...'
@@ -238,8 +306,8 @@ class MessageInputContainer extends ConsumerWidget {
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                  ),
-                ] else ...[
+                  )
+                else
                   Text(
                     '📎 media',
                     style: TextStyle(
@@ -250,14 +318,11 @@ class MessageInputContainer extends ConsumerWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                ],
               ],
             ),
           ),
-
-          // Cancel reply button
           IconButton(
-            onPressed: onCancelReply,
+            onPressed: widget.onCancelReply,
             icon: Icon(Icons.close, size: 20, color: themeColor.primary),
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             padding: EdgeInsets.zero,
@@ -267,17 +332,15 @@ class MessageInputContainer extends ConsumerWidget {
     );
   }
 
-  // Helper method to check if community group is active
   bool _isCommunityGroupActive() {
-    if (!isCommunityGroup || communityGroupMetadata == null) {
-      return true; // Regular groups are always active
+    if (!widget.isCommunityGroup || widget.communityGroupMetadata == null) {
+      return true;
     }
 
-    final metadata = communityGroupMetadata!;
+    final metadata = widget.communityGroupMetadata!;
     final now = DateTime.now();
     final currentTime = TimeOfDay.fromDateTime(now);
 
-    // Check if current time is within any active time slot
     for (final timeSlot in metadata.activeTimeSlots) {
       if (_isTimeInRange(currentTime, timeSlot.startTime, timeSlot.endTime)) {
         return true;
@@ -293,16 +356,14 @@ class MessageInputContainer extends ConsumerWidget {
     final endMinutes = end.hour * 60 + end.minute;
 
     if (startMinutes <= endMinutes) {
-      // Same day range
       return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
     } else {
-      // Crosses midnight
       return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
     }
   }
 
   Widget _buildTimeRestrictionNotice() {
-    final metadata = communityGroupMetadata;
+    final metadata = widget.communityGroupMetadata;
     if (metadata == null || metadata.activeTimeSlots.isEmpty) {
       return const SizedBox.shrink();
     }

@@ -227,14 +227,14 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   double _swipeTotalDistance = 0.0;
   bool _isSwipeGesture = false;
   bool _isScrolling = false;
-  static const double _minSwipeDistance =
-      30.0; // Minimum distance to consider as swipe
-  static const double _maxVerticalDeviation =
-      40.0; // Max vertical movement allowed for horizontal swipe
+  // Minimum travel (px²) before classifying gesture direction — keeps classification stable
+  static const double _minSwipeDistanceSq = 16.0; // 4px
+  // Max vertical-to-horizontal ratio allowed — keeps swipe strictly left-to-right (~10°)
+  static const double _maxSwipeAngleRatio = 0.18;
   static const double _minSwipeVelocity =
-      800.0; // Minimum velocity for swipe completion
+      500.0; // Minimum velocity for swipe completion
   static const double _swipeThreshold =
-      0.4; // Threshold for swipe completion (0.0 to 1.0)
+      0.35; // Threshold for swipe completion (0.0 to 1.0)
 
   //
   // // Video thumbnail cache
@@ -2448,16 +2448,28 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 400),
           curve: Curves.easeInOut,
-          color: isSelected
-              ? themeColor.primary.withOpacity(0.1)
-              : (_highlightedMessageId == message.id &&
-                        !_highlightedMessageIds.contains(message.id))
-                    ? themeColor.primary.withOpacity(0.10)
-                    : (_highlightedMessageIds.contains(message.id)
-                          ? (_highlightedMessageId == message.id
-                                ? Colors.yellow.withOpacity(0.35)
-                                : Colors.yellow.withOpacity(0.15))
-                          : Colors.transparent),
+          decoration: BoxDecoration(
+            borderRadius: isMyMessage
+                ? const BorderRadius.only(
+                    topLeft: Radius.circular(12),
+                    topRight: Radius.circular(12),
+                    bottomLeft: Radius.circular(12),
+                  )
+                : const BorderRadius.only(
+                    topLeft: Radius.circular(12),
+                    topRight: Radius.circular(12),
+                    bottomRight: Radius.circular(12),
+                  ),
+            color: isSelected
+                ? themeColor.primary.withAlpha(100)
+                : (_highlightedMessageIds.contains(message.id)
+                      ? (_highlightedMessageId == message.id
+                            ? Color.fromARGB(50, 0, 27, 41)
+                            : Color.fromARGB(25, 0, 27, 41))
+                      : (_highlightedMessageId == message.id
+                            ? Color.fromARGB(50, 0, 27, 41)
+                            : Colors.transparent)),
+          ),
           child: Stack(
             children: [
               _buildSwipeableMessageBubble(
@@ -2550,34 +2562,32 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         _isScrolling)
       return;
 
-    // Calculate total distance moved from start position
     final currentPosition = details.globalPosition;
-    final horizontalDistance = currentPosition.dx - _swipeStartPosition!.dx;
-    final verticalDistance = (currentPosition.dy - _swipeStartPosition!.dy)
-        .abs();
+    final dx = currentPosition.dx - _swipeStartPosition!.dx;
+    final dy = (currentPosition.dy - _swipeStartPosition!.dy).abs();
 
-    _swipeTotalDistance = horizontalDistance.abs();
-
-    // Determine if this is a horizontal swipe gesture
+    // Classify gesture direction as soon as we have a few pixels of movement.
+    // Using squared distance avoids sqrt and keeps things fast.
     if (!_isSwipeGesture) {
-      // Check if we have enough horizontal movement and not too much vertical movement
-      if (_swipeTotalDistance > _minSwipeDistance &&
-          verticalDistance < _maxVerticalDeviation) {
+      final distSq = dx * dx + dy * dy;
+      if (distSq < _minSwipeDistanceSq)
+        return; // too little movement to classify
+
+      // Strictly left-to-right: vertical component must be < ~10° off horizontal
+      if (dx > 0 && dy < dx * _maxSwipeAngleRatio) {
         _isSwipeGesture = true;
-      } else if (verticalDistance > _maxVerticalDeviation) {
-        // Too much vertical movement, this is likely a scroll, not a swipe
+      } else {
+        // Any vertical tilt, left swipe, or diagonal → treat as scroll immediately
         _isScrolling = true;
         return;
       }
     }
 
-    // Only proceed if this is confirmed as a horizontal swipe
-    if (_isSwipeGesture && horizontalDistance > 0) {
+    // Track finger in real-time with zero lag once classified as a swipe
+    if (dx > 0) {
       final controller = _swipeAnimationControllers[message.id];
       if (controller != null) {
-        // Calculate swipe progress (0 to 1) based on total distance
-        final progress = (_swipeTotalDistance / 100).clamp(0.0, 1.0);
-        controller.value = progress;
+        controller.value = (dx / 100).clamp(0.0, 1.0);
       }
     }
   }
@@ -3830,6 +3840,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
     _safeSetState(() {
       _replyToMessageData = message;
+    });
+    // Keep keyboard open — re-request focus after the layout settles
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_canSetState) _messageFocusNode.requestFocus();
     });
   }
 
