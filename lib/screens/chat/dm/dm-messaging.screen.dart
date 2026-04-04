@@ -182,6 +182,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   bool _jumpHasNewerMessages = true;
   bool _isLoadingJumpOlder = false;
   bool _isLoadingJumpNewer = false;
+  bool _isScrollingToJumpTarget =
+      false; // Guard: true while scrollToIndex animates
   static const int _jumpWindowSize = 300;
 
   List<MessageModel> get _displayMessages =>
@@ -975,7 +977,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     final maxScrollExtent = _scrollController.position.maxScrollExtent;
     final distanceFromTop = maxScrollExtent - scrollPosition;
 
-    if (_isInJumpMode) {
+    if (_isInJumpMode && !_isScrollingToJumpTarget) {
       if (distanceFromTop <= 1000) _loadJumpOlderMessages();
       if (scrollPosition <= 200) _loadJumpNewerMessages();
     } else if (!_isLoadingTargetMessage) {
@@ -1463,7 +1465,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
       _animateNewMessage(newMsg.id);
       // scroll to bottom when a new message is sent
-      _scrollToBottom();
+      _handleScrollToBottomTap();
     }
 
     try {
@@ -1677,11 +1679,13 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
       final idx = _jumpMessages.indexWhere((m) => m.id == messageId);
       if (idx == -1) return;
+      _isScrollingToJumpTarget = true;
       await _scrollController.scrollToIndex(
         _jumpMessages.length - 1 - idx,
         preferPosition: AutoScrollPosition.middle,
         duration: const Duration(milliseconds: 300),
       );
+      _isScrollingToJumpTarget = false;
       _highlightMessage(messageId);
     } catch (e) {
       debugPrint('[DM] _jumpToMessage: $e');
@@ -3479,7 +3483,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             _sortMessagesBySentAt();
           });
           _animateNewMessage(newMsg.id);
-          _scrollToBottom();
+          _handleScrollToBottomTap();
         }
         // Also update in DB
       } else {
@@ -3489,7 +3493,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         });
 
         _animateNewMessage(newMsg.id);
-        _scrollToBottom();
+        _handleScrollToBottomTap();
 
         // immediately insert message in the localDB for future reference
         await _messagesRepo.insertMessage(newMsg);

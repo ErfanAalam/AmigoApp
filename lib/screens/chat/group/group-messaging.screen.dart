@@ -284,6 +284,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   bool _jumpHasNewerMessages = true;
   bool _isLoadingJumpOlder = false;
   bool _isLoadingJumpNewer = false;
+  bool _isScrollingToJumpTarget =
+      false; // Guard: true while scrollToIndex animates
   static const int _jumpWindowSize = 300;
 
   List<MessageModel> get _displayMessages =>
@@ -1270,7 +1272,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     final maxScrollExtent = _scrollController.position.maxScrollExtent;
     final distanceFromTop = maxScrollExtent - scrollPosition;
 
-    if (_isInJumpMode) {
+    if (_isInJumpMode && !_isScrollingToJumpTarget) {
       if (distanceFromTop <= 1000) _loadJumpOlderMessages();
       if (scrollPosition <= 200) _loadJumpNewerMessages();
     } else if (!_isLoadingTargetMessage) {
@@ -1931,7 +1933,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             _sortMessagesBySentAt();
           });
           _animateNewMessage(newMsg.id);
-          _scrollToBottom();
+          _handleScrollToBottomTap();
         }
         // Also update in DB
       } else {
@@ -1941,7 +1943,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         });
 
         _animateNewMessage(newMsg.id);
-        _scrollToBottom();
+        _handleScrollToBottomTap();
 
         // immediately insert message in the localDB for future reference
         await _messagesRepo.insertMessage(newMsg);
@@ -2542,7 +2544,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       });
 
       _animateNewMessage(newMsg.id);
-      _scrollToBottom();
+      _handleScrollToBottomTap();
     }
 
     try {
@@ -4783,11 +4785,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
       final idx = _jumpMessages.indexWhere((m) => m.id == messageId);
       if (idx == -1) return;
+      _isScrollingToJumpTarget = true;
       await _scrollController.scrollToIndex(
         _jumpMessages.length - 1 - idx,
         preferPosition: AutoScrollPosition.middle,
         duration: const Duration(milliseconds: 300),
       );
+      _isScrollingToJumpTarget = false;
       _highlightMessage(messageId);
     } catch (e) {
       debugPrint('[Group] _jumpToMessage: $e');
