@@ -106,7 +106,8 @@ class _MessageInputContainerState extends ConsumerState<MessageInputContainer>
       _replyAnim.reverse().whenComplete(() {
         if (mounted) setState(() => _lastReplyData = null);
       });
-    } else if (isShowing && widget.replyToMessageData != oldWidget.replyToMessageData) {
+    } else if (isShowing &&
+        widget.replyToMessageData != oldWidget.replyToMessageData) {
       // Changed reply target — swap content, no animation change needed
       setState(() => _lastReplyData = widget.replyToMessageData);
     }
@@ -282,9 +283,7 @@ class _MessageInputContainerState extends ConsumerState<MessageInputContainer>
                     Icon(Icons.reply, size: 16, color: themeColor.primary),
                     const SizedBox(width: 4),
                     Text(
-                      isRepliedMessageMine
-                          ? 'You'
-                          : replyMessage.senderName!,
+                      isRepliedMessageMine ? 'You' : replyMessage.senderName!,
                       style: TextStyle(
                         color: themeColor.primary,
                         fontSize: 12,

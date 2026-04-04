@@ -26,54 +26,60 @@ class ContactMessageWidget extends ConsumerWidget {
     }
 
     return Container(
-      constraints: const BoxConstraints(maxWidth: 280),
+      constraints: const BoxConstraints(maxWidth: 300),
+      decoration: BoxDecoration(
+        // color: isMyMessage
+        //     ? themeColor.primaryLight.withAlpha(50)
+        //     : themeColor.primary.withAlpha(50),
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // Header with contact icon
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: themeColor.primary.withOpacity(0.1),
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(12),
-                topRight: Radius.circular(12),
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.contacts,
-                  size: 18,
-                  color: isMyMessage ? Colors.white : themeColor.primary,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  contacts.length == 1
-                      ? 'Contact'
-                      : '${contacts.length} Contacts',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: isMyMessage ? Colors.white : themeColor.primary,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          // Container(
+          //   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          //   decoration: BoxDecoration(
+          //     // color: isMyMessage
+          //     //     ? themeColor.primaryLight.withAlpha(50)
+          //     //     : themeColor.primary.withAlpha(50),
+          //     borderRadius: const BorderRadius.only(
+          //       topLeft: Radius.circular(12),
+          //       topRight: Radius.circular(12),
+          //     ),
+          //   ),
+          //   child: Row(
+          //     children: [
+          //       Icon(
+          //         Icons.contacts,
+          //         size: 18,
+          //         color: isMyMessage ? Colors.white : themeColor.primary,
+          //       ),
+          //       const SizedBox(width: 8),
+          //       Text(
+          //         contacts.length == 1
+          //             ? 'Contact'
+          //             : '${contacts.length} Contacts',
+          //         style: TextStyle(
+          //           fontSize: 13,
+          //           fontWeight: FontWeight.w600,
+          //           color: isMyMessage ? Colors.white : themeColor.primary,
+          //         ),
+          //       ),
+          //     ],
+          //   ),
+          // ),
 
           // Contact cards
           Container(
             decoration: BoxDecoration(
-              color: isMyMessage
-                  ? Colors.white.withOpacity(0.2)
-                  : Colors.grey[50],
-              borderRadius: const BorderRadius.only(
-                bottomLeft: Radius.circular(12),
-                bottomRight: Radius.circular(12),
-              ),
+              // color: isMyMessage
+              //     ? themeColor.primaryLight.withAlpha(50)
+              //     : themeColor.primary.withAlpha(50),
+              borderRadius: const BorderRadius.all(Radius.circular(12)),
             ),
             child: Column(
+              spacing: 5,
               children: contacts.asMap().entries.map((entry) {
                 final index = entry.key;
                 final contact = entry.value;
@@ -102,36 +108,33 @@ class ContactMessageWidget extends ConsumerWidget {
     return InkWell(
       onTap: () => _makePhoneCall(contact.phoneNumber),
       child: Container(
+        // margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          border: Border(
-            bottom: isLast
-                ? BorderSide.none
-                : BorderSide(
-                    color: isMyMessage
-                        ? Colors.white.withOpacity(0.1)
-                        : Colors.grey[200]!,
-                    width: 0.5,
-                  ),
-          ),
+          color: isMyMessage
+              ? Colors.white.withAlpha(30)
+              : themeColor.primary.withAlpha(50),
+          borderRadius: BorderRadius.all(Radius.circular(12)),
         ),
         child: Row(
+          spacing: 12,
           children: [
             // Contact avatar
             Container(
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: themeColor.primary.withOpacity(0.15),
+                color: isMyMessage
+                    ? Colors.white.withAlpha(35)
+                    : themeColor.primary.withAlpha(50),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.person,
                 size: 22,
-                color: themeColor.primary,
+                color: isMyMessage ? Colors.white : themeColor.primaryDark,
               ),
             ),
-            const SizedBox(width: 12),
             // Contact info
             Expanded(
               child: Column(
@@ -180,9 +183,7 @@ class ContactMessageWidget extends ConsumerWidget {
             Icon(
               Icons.phone_outlined,
               size: 18,
-              color: isMyMessage
-                  ? Colors.white.withOpacity(0.7)
-                  : themeColor.primary,
+              color: isMyMessage ? Colors.white : themeColor.primary,
             ),
           ],
         ),
@@ -208,10 +209,12 @@ List<ContactModel> parseContactsFromMessage(MessageModel message) {
           .map((contactJson) {
             try {
               return ContactModel(
-                displayName: contactJson['name'] ?? contactJson['displayName'] ?? '',
+                displayName:
+                    contactJson['name'] ?? contactJson['displayName'] ?? '',
                 firstName: contactJson['firstName'] ?? '',
                 lastName: contactJson['lastName'] ?? '',
-                phoneNumber: contactJson['phone'] ?? contactJson['phoneNumber'] ?? '',
+                phoneNumber:
+                    contactJson['phone'] ?? contactJson['phoneNumber'] ?? '',
               );
             } catch (e) {
               return null;
@@ -223,61 +226,16 @@ List<ContactModel> parseContactsFromMessage(MessageModel message) {
     }
   }
 
-  // Fallback: parse from body text (format: "name: phone,\nname2: phone")
-  if (message.body != null && message.body!.isNotEmpty) {
-    final lines = message.body!.split(',\n');
-    final contacts = <ContactModel>[];
-    
-    for (final line in lines) {
-      final parts = line.split(':');
-      if (parts.length >= 2) {
-        final name = parts[0].trim();
-        final phone = parts.sublist(1).join(':').trim();
-        if (name.isNotEmpty && phone.isNotEmpty) {
-          contacts.add(ContactModel(
-            displayName: name,
-            firstName: name.split(' ').first,
-            lastName: name.split(' ').length > 1
-                ? name.split(' ').sublist(1).join(' ')
-                : '',
-            phoneNumber: phone,
-          ));
-        }
-      }
-    }
-    
-    return contacts;
-  }
-
   return [];
 }
 
 /// Check if message contains shared contacts
+/// Only returns true when contacts were explicitly shared via the contact
+/// selection flow (metadata['contacts'] is set). Regular text messages
+/// containing phone numbers should render as normal text, not contact bubbles.
 bool isContactMessage(MessageModel message) {
-  // Check metadata first
   if (message.metadata != null && message.metadata!['contacts'] != null) {
     return true;
   }
-  
-  // Check body format: "name: phone,\nname2: phone"
-  if (message.body != null && message.body!.contains(':')) {
-    final lines = message.body!.split(',\n');
-    if (lines.length > 0) {
-      // Check if at least one line matches the pattern
-      for (final line in lines) {
-        final parts = line.split(':');
-        if (parts.length >= 2) {
-          final name = parts[0].trim();
-          final phone = parts.sublist(1).join(':').trim();
-          // Basic validation: name and phone should not be empty
-          if (name.isNotEmpty && phone.isNotEmpty && phone.length >= 7) {
-            return true;
-          }
-        }
-      }
-    }
-  }
-  
   return false;
 }
-

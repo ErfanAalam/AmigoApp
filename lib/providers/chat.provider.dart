@@ -288,6 +288,18 @@ class ChatNotifier extends Notifier<ChatState> {
             conversationsList,
           );
 
+          // Delete local DMs that no longer exist on the server
+          final serverConvIds = convList.map((c) => c.id).toSet();
+          final deletedDmIds = existingConvIdsSet
+              .where((id) => !serverConvIds.contains(id))
+              .toList();
+          if (deletedDmIds.isNotEmpty) {
+            debugPrint('🗑️ Removing ${deletedDmIds.length} deleted DMs from local DB');
+            for (final id in deletedDmIds) {
+              await _conversationsRepo.deleteConversation(id);
+            }
+          }
+
           // Filter conversations to only include new ones
           final newConvs = convList
               .where((conv) => !existingConvIdsSet.contains(conv.id))
@@ -469,6 +481,18 @@ class ChatNotifier extends Notifier<ChatState> {
         final existingGroupConvIds = await _conversationsRepo
             .getAllConversationIds(type: ChatType.group);
         final existingGroupConvIdsSet = existingGroupConvIds.toSet();
+
+        // Delete local groups that no longer exist on the server
+        final serverGroupConvIds = convs.map((c) => c.id).toSet();
+        final deletedGroupIds = existingGroupConvIdsSet
+            .where((id) => !serverGroupConvIds.contains(id))
+            .toList();
+        if (deletedGroupIds.isNotEmpty) {
+          debugPrint('🗑️ Removing ${deletedGroupIds.length} deleted groups from local DB');
+          for (final id in deletedGroupIds) {
+            await _conversationsRepo.deleteConversation(id);
+          }
+        }
 
         // Filter group conversations to only include new ones
         final newGroupConvs = convs

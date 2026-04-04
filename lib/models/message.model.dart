@@ -211,6 +211,33 @@ class MessageModel {
   }
 }
 
+class MessagesAroundResponse {
+  final List<MessageModel> messages;
+  final List<Map<String, dynamic>> members;
+  final bool hasOlder;
+  final bool hasNewer;
+
+  MessagesAroundResponse({
+    required this.messages,
+    required this.members,
+    required this.hasOlder,
+    required this.hasNewer,
+  });
+
+  factory MessagesAroundResponse.fromJson(Map<String, dynamic> json) {
+    final messagesData = json['messages'] ?? [];
+    final membersData  = json['members']  ?? [];
+    return MessagesAroundResponse(
+      messages: (messagesData as List)
+          .map((m) => MessageModel.fromJson(m as Map<String, dynamic>))
+          .toList(),
+      members:  (membersData as List).cast<Map<String, dynamic>>(),
+      hasOlder: json['hasOlder'] == true,
+      hasNewer: json['hasNewer'] == true,
+    );
+  }
+}
+
 class ConversationHistoryResponse {
   final List<MessageModel> messages;
   final int totalCount;

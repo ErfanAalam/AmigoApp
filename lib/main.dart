@@ -84,6 +84,10 @@ void main() async {
 
   // await TestBGService().initializeService();
 
+  // Limit Flutter's image decode cache to 80 MB to prevent OOM crashes
+  // during fast scrolling with many media messages
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 80 * 1024 * 1024;
+
   // Run the app (with Riverpod)
   material.runApp(ProviderScope(child: MyApp(key: MyApp.appStateKey)));
 }

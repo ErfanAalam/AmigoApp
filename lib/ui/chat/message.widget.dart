@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 import 'dart:ui';
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/socket.types.dart';
@@ -232,42 +233,68 @@ class MessageBubble extends ConsumerWidget {
       children: [
         // Check if this is a media message (image/video)
         config.isMediaMessage(config.message)
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Reply message preview (if this is a reply)
-                  if (config.message.isReply)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: config.isMyMessage
-                            ? themeColor.primary
-                            : Colors.grey[100],
-                        borderRadius: BorderRadius.only(
-                          topLeft: const Radius.circular(0),
-                          topRight: const Radius.circular(0),
-                          bottomLeft: const Radius.circular(4),
-                          bottomRight: const Radius.circular(4),
+            ? IntrinsicWidth(
+                child: Column(
+                  crossAxisAlignment: config.message.isReply
+                      ? CrossAxisAlignment.stretch
+                      : CrossAxisAlignment.end,
+                  children: [
+                    // Reply message preview (if this is a reply)
+                    if (config.message.isReply)
+                      Transform.translate(
+                        offset: const Offset(0, 12),
+                        child: Container(
+                          padding: const EdgeInsets.only(
+                            top: 5,
+                            left: 8,
+                            right: 8,
+                            bottom: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: config.isMyMessage
+                                ? themeColor.primary
+                                : Colors.grey[100],
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(14),
+                              topRight: Radius.circular(14),
+                            ),
+                          ),
+                          child: _buildReplyPreviewWithFetch(),
                         ),
                       ),
-                      child: _buildReplyPreviewWithFetch(),
+                    // Media content without outer padding
+                    ClipRRect(
+                      borderRadius: BorderRadius.only(
+                        topLeft: config.message.isReply
+                            ? Radius.zero
+                            : const Radius.circular(14),
+                        topRight: config.message.isReply
+                            ? Radius.zero
+                            : const Radius.circular(14),
+                        bottomLeft: Radius.circular(
+                          config.isMyMessage ? 14 : 0,
+                        ),
+                        bottomRight: Radius.circular(
+                          config.isMyMessage ? 0 : 14,
+                        ),
+                      ),
+                      child: config.buildMessageContent(
+                        config.message,
+                        config.isMyMessage,
+                      ),
                     ),
-                  // Media content without outer padding
-                  config.buildMessageContent(
-                    config.message,
-                    config.isMyMessage,
-                  ),
-                ],
+                  ],
+                ),
               )
             : Container(
+                constraints: config.message.isReply
+                    ? const BoxConstraints(minWidth: 146)
+                    : const BoxConstraints(minWidth: 100),
                 padding: const EdgeInsets.only(
-                  top: 6,
+                  top: 7,
                   bottom: 4,
-                  left: 12,
-                  right: 10,
+                  left: 9,
+                  right: 8,
                 ),
                 decoration: BoxDecoration(
                   color: config.isMyMessage
@@ -304,7 +331,7 @@ class MessageBubble extends ConsumerWidget {
                             ),
 
                             // gap between content and time
-                            const SizedBox(height: 1),
+                            // const SizedBox(height: 1),
                             // Time and status row - aligned to right
                             Align(
                               alignment: Alignment.centerRight,
@@ -404,6 +431,9 @@ class MessageBubble extends ConsumerWidget {
                 ],
               )
             : Container(
+                constraints: config.message.isReply
+                    ? const BoxConstraints(minWidth: 160)
+                    : const BoxConstraints(minWidth: 100),
                 padding: const EdgeInsets.only(
                   top: 5,
                   bottom: 2,
@@ -712,16 +742,14 @@ class _ReplyPreviewWithFetchState extends State<_ReplyPreviewWithFetch>
     }
 
     try {
+      final parsedReplyMessageId = replyMessageId is int
+          ? replyMessageId
+          : int.tryParse(replyMessageId.toString()) ?? 0;
+
       // Fetch the replied message
       final replyMessage = await widget.messagesRepo!.getMessageById(
-        replyMessageId is int
-            ? replyMessageId
-            : int.tryParse(replyMessageId.toString()) ?? 0,
+        parsedReplyMessageId,
       );
-
-      if (replyMessage == null) {
-        return;
-      }
 
       // Fetch sender name if sender_id is available
       String? senderName;
@@ -738,9 +766,24 @@ class _ReplyPreviewWithFetchState extends State<_ReplyPreviewWithFetch>
       // Use sender name from reply_to metadata if available, otherwise use fetched name
       senderName = replyTo['sender_name'] as String? ?? senderName;
 
+      // If the replied message isn't in the local DB yet (not loaded),
+      // build a placeholder from the metadata so the reply container still shows
+      final effectiveReplyMessage = replyMessage ?? MessageModel(
+        id: parsedReplyMessageId,
+        conversationId: widget.message.conversationId,
+        senderId: replySenderId is int
+            ? replySenderId
+            : int.tryParse(replySenderId?.toString() ?? '') ?? 0,
+        senderName: senderName ?? 'Unknown User',
+        body: replyTo['body']?.toString(),
+        type: MessageType.text,
+        status: MessageStatusType.sent,
+        sentAt: replyTo['created_at']?.toString() ?? '',
+      );
+
       // Store in global cache AND state - this persists across widget recreations
       final cacheData = {
-        'message': replyMessage,
+        'message': effectiveReplyMessage,
         'senderName': senderName ?? 'Unknown User',
       };
       _ReplyDataCache.set(widget.message.id, cacheData);
@@ -749,7 +792,7 @@ class _ReplyPreviewWithFetchState extends State<_ReplyPreviewWithFetch>
       // Once stored, it will NEVER change unless message ID changes
       if (mounted) {
         setState(() {
-          _cachedReplyMessage = replyMessage;
+          _cachedReplyMessage = effectiveReplyMessage;
           _cachedSenderName = senderName ?? 'Unknown User';
           _isLoading = false;
         });
@@ -964,14 +1007,14 @@ class ReplyPreview extends ConsumerWidget {
     return GestureDetector(
       onTap: () => config.onTap(config.replyMessage.id),
       child: Container(
-        width: config.useFullWidth ? double.infinity : null,
-        margin: const EdgeInsets.only(bottom: 8),
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 4),
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: config.isMyMessage
               ? config.myMessageBackgroundColor
               : config.otherMessageBackgroundColor,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(12),
           border: Border(
             left: BorderSide(
               color: config.isMyMessage ? Colors.white : themeColor.primary,

@@ -96,21 +96,17 @@ class _ScrollToBottomButtonState extends State<ScrollToBottomButton>
                   width: 42,
                   height: 42,
                   decoration: BoxDecoration(
-                    color: Colors.white.withAlpha(100),
+                    color: Colors.black.withAlpha(180),
                     shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.teal.withAlpha(50),
-                      width: 1,
-                    ),
                   ),
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
                       Center(
                         child: Icon(
-                          Icons.keyboard_arrow_down,
-                          color: Colors.teal[700],
-                          size: 28,
+                          Icons.arrow_downward_rounded,
+                          color: Colors.white,
+                          size: 20,
                         ),
                       ),
                       // Unread count badge

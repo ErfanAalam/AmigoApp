@@ -22,9 +22,24 @@ class ChatClient extends BaseApiClient {
     required int conversationId,
     int page = 1,
     int limit = 20,
+    int? beforeMessageId,
+    int? afterMessageId,
+  }) async {
+    var path = '/chat/get-conversation-history/$conversationId?page=$page&limit=$limit';
+    if (beforeMessageId != null) path += '&before_message_id=$beforeMessageId';
+    if (afterMessageId  != null) path += '&after_message_id=$afterMessageId';
+    return get(path);
+  }
+
+  /// Get messages around a specific message (for jump-to-message)
+  Future<ApiResult<dynamic>> getMessagesAround({
+    required int conversationId,
+    required int messageId,
+    int before = 50,
+    int after  = 50,
   }) async {
     return get(
-      '/chat/get-conversation-history/$conversationId?page=$page&limit=$limit',
+      '/chat/get-messages-around/$conversationId/$messageId?before=$before&after=$after',
     );
   }
 

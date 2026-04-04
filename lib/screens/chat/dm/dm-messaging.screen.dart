@@ -175,6 +175,18 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // Scroll-to-reply loading state
   bool _isLoadingTargetMessage = false;
 
+  // ── Jump mode ─────────────────────────────────────────────────────────────
+  List<MessageModel> _jumpMessages = [];
+  bool _isInJumpMode = false;
+  bool _jumpHasOlderMessages = true;
+  bool _jumpHasNewerMessages = true;
+  bool _isLoadingJumpOlder = false;
+  bool _isLoadingJumpNewer = false;
+  static const int _jumpWindowSize = 300;
+
+  List<MessageModel> get _displayMessages =>
+      _isInJumpMode ? _jumpMessages : _messages;
+
   // GlobalKeys for message widgets to enable accurate scrolling
   final Map<int, GlobalKey> _messageKeys = {};
 
@@ -908,7 +920,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   /// Update sticky date separator based on current scroll position
   void _updateStickyDateSeparator() {
-    if (_messages.isEmpty || !_scrollController.hasClients) return;
+    if (_displayMessages.isEmpty || !_scrollController.hasClients) return;
 
     // Calculate which message is currently visible at the top
     final scrollOffset = _scrollController.offset;
@@ -916,9 +928,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     final visibleIndex = (scrollOffset / itemHeight).floor();
 
     // Find the message that should show the sticky date
-    final messageIndex = _messages.length - 1 - visibleIndex;
-    if (messageIndex >= 0 && messageIndex < _messages.length) {
-      final currentMessage = _messages[messageIndex];
+    final messageIndex = _displayMessages.length - 1 - visibleIndex;
+    if (messageIndex >= 0 && messageIndex < _displayMessages.length) {
+      final currentMessage = _displayMessages[messageIndex];
       final currentDateString = ChatHelpers.getMessageDateString(
         currentMessage.sentAt,
       );
@@ -963,8 +975,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     final maxScrollExtent = _scrollController.position.maxScrollExtent;
     final distanceFromTop = maxScrollExtent - scrollPosition;
 
-    if (distanceFromTop <= 200) {
-      await _loadMoreMessages();
+    if (_isInJumpMode) {
+      if (distanceFromTop <= 1000) _loadJumpOlderMessages();
+      if (scrollPosition <= 200) _loadJumpNewerMessages();
+    } else if (!_isLoadingTargetMessage) {
+      if (distanceFromTop <= 200) await _loadMoreMessages();
     }
   }
 
@@ -1531,7 +1546,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   /// Handle scroll to bottom button tap
   void _handleScrollToBottomTap() {
-    _scrollToBottom();
+    _exitJumpMode();
+    // _scrollToBottom();
     // Clear unread count
     // setState(() {
     //   _unreadCountWhileScrolled = 0;
@@ -1584,49 +1600,27 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   Future<void> _scrollToMessage(int messageId) async {
     if (!mounted || !_scrollController.hasClients) return;
 
-    // ── Phase 0: ensure the target message is in local DB ──
-    if (!_messages.any((m) => m.id == messageId)) {
-      _safeSetState(() => _isLoadingTargetMessage = true);
-
-      int attempts = 0;
-      const maxAttempts = 20;
-      while (!_messages.any((m) => m.id == messageId) &&
-          _hasMoreOnServer &&
-          attempts < maxAttempts &&
-          mounted) {
-        await _loadMoreMessages();
-        // Wait for the Drift stream to propagate new rows into _messages
-        await Future.delayed(const Duration(milliseconds: 150));
-        attempts++;
-      }
-
-      if (_canSetState) {
-        _safeSetState(() => _isLoadingTargetMessage = false);
-      }
-
-      if (!_messages.any((m) => m.id == messageId)) {
-        if (mounted) Snack.warning('Message not found');
-        return;
+    // Fast path: only if message is within 100 items of the bottom (visible or near-visible).
+    // For anything farther, scrollToIndex through hundreds of items is too slow — use jump mode.
+    final current = _displayMessages;
+    if (current.isNotEmpty) {
+      final idx = current.indexWhere((m) => m.id == messageId);
+      if (idx != -1) {
+        final builderIndex = current.length - 1 - idx;
+        if (builderIndex <= 100) {
+          await _scrollController.scrollToIndex(
+            builderIndex,
+            preferPosition: AutoScrollPosition.middle,
+            duration: const Duration(milliseconds: 300),
+          );
+          _highlightMessage(messageId);
+          return;
+        }
       }
     }
 
-    if (!_canSetState || !_scrollController.hasClients) return;
-
-    final targetIndex = _messages.indexWhere((m) => m.id == messageId);
-    if (targetIndex == -1) return;
-
-    // Builder index in the reversed list
-    final builderIndex = _messages.length - 1 - targetIndex;
-
-    // scroll_to_index handles all the heavy lifting — works even for
-    // items that haven't been built yet by using suggestedRowHeight.
-    await _scrollController.scrollToIndex(
-      builderIndex,
-      preferPosition: AutoScrollPosition.middle,
-      duration: const Duration(milliseconds: 300),
-    );
-
-    _highlightMessage(messageId);
+    // Jump mode: server fetches a 100-message window, replaces display list instantly
+    await _jumpToMessage(messageId);
   }
 
   /// Apply a timed highlight effect on the target message row
@@ -1637,6 +1631,166 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     _highlightTimer = Timer(const Duration(milliseconds: 2000), () {
       _safeSetState(() => _highlightedMessageId = null);
     });
+  }
+
+  Future<void> _jumpToMessage(int messageId) async {
+    if (!_canSetState) return;
+    _safeSetState(() => _isLoadingTargetMessage = true);
+    try {
+      final result = await apiService.chat.getMessagesAround(
+        conversationId: widget.dm.conversationId,
+        messageId: messageId,
+        before: 50,
+        after: 50,
+      );
+      if (!_canSetState) return;
+      if (result.data == null) {
+        _safeSetState(() => _isLoadingTargetMessage = false);
+        if (mounted) Snack.warning('Could not load message');
+        return;
+      }
+      final around = MessagesAroundResponse.fromJson(
+        result.data as Map<String, dynamic>,
+      );
+      _safeSetState(() {
+        final sorted = List<MessageModel>.from(around.messages)
+          ..sort((a, b) {
+            try {
+              return DateTime.parse(
+                a.sentAt,
+              ).compareTo(DateTime.parse(b.sentAt));
+            } catch (_) {
+              return a.sentAt.compareTo(b.sentAt);
+            }
+          });
+        // Deduplicate by message ID
+        final seen = <int>{};
+        _jumpMessages = sorted.where((m) => seen.add(m.id)).toList();
+        _jumpHasOlderMessages = around.hasOlder;
+        _jumpHasNewerMessages = around.hasNewer;
+        _isInJumpMode = true;
+        _isLoadingTargetMessage = false;
+      });
+
+      await Future.delayed(const Duration(milliseconds: 100));
+      if (!_canSetState || !_scrollController.hasClients) return;
+
+      final idx = _jumpMessages.indexWhere((m) => m.id == messageId);
+      if (idx == -1) return;
+      await _scrollController.scrollToIndex(
+        _jumpMessages.length - 1 - idx,
+        preferPosition: AutoScrollPosition.middle,
+        duration: const Duration(milliseconds: 300),
+      );
+      _highlightMessage(messageId);
+    } catch (e) {
+      debugPrint('[DM] _jumpToMessage: $e');
+      if (_canSetState) _safeSetState(() => _isLoadingTargetMessage = false);
+      if (mounted) Snack.warning('Could not load message');
+    }
+  }
+
+  Future<void> _loadJumpOlderMessages() async {
+    if (_isLoadingJumpOlder || !_jumpHasOlderMessages || !_isInJumpMode) return;
+    if (!_canSetState) return;
+    _safeSetState(() => _isLoadingJumpOlder = true);
+    try {
+      final result = await apiService.chat.getConversationHistory(
+        conversationId: widget.dm.conversationId,
+        beforeMessageId: _jumpMessages.first.id,
+        limit: 50,
+      );
+      if (!_canSetState || !_isInJumpMode) return;
+      if (result.data != null) {
+        final history = ConversationHistoryResponse.fromJson(
+          result.data as Map<String, dynamic>,
+        );
+        if (history.messages.isNotEmpty) {
+          _safeSetState(() {
+            final existingIds = _jumpMessages.map((m) => m.id).toSet();
+            final newMessages = history.messages
+                .where((m) => !existingIds.contains(m.id))
+                .toList();
+            _jumpMessages = [...newMessages, ..._jumpMessages];
+            if (_jumpMessages.length > _jumpWindowSize) {
+              final excess = _jumpMessages.length - _jumpWindowSize;
+              _jumpMessages = _jumpMessages.sublist(
+                0,
+                _jumpMessages.length - excess,
+              );
+              _jumpHasNewerMessages = true;
+            }
+            _jumpHasOlderMessages = history.hasNextPage;
+          });
+        } else {
+          _safeSetState(() => _jumpHasOlderMessages = false);
+        }
+      }
+    } catch (e) {
+      debugPrint('[DM] _loadJumpOlderMessages: $e');
+    } finally {
+      if (_canSetState) _safeSetState(() => _isLoadingJumpOlder = false);
+    }
+  }
+
+  Future<void> _loadJumpNewerMessages() async {
+    if (_isLoadingJumpNewer || !_jumpHasNewerMessages || !_isInJumpMode) return;
+    if (!_canSetState) return;
+    _safeSetState(() => _isLoadingJumpNewer = true);
+    try {
+      final result = await apiService.chat.getConversationHistory(
+        conversationId: widget.dm.conversationId,
+        afterMessageId: _jumpMessages.last.id,
+        limit: 50,
+      );
+      if (!_canSetState || !_isInJumpMode) return;
+      if (result.data != null) {
+        final history = ConversationHistoryResponse.fromJson(
+          result.data as Map<String, dynamic>,
+        );
+        if (history.messages.isEmpty || !history.hasNextPage) {
+          _safeSetState(() => _isLoadingJumpNewer = false);
+          _exitJumpMode();
+          return;
+        }
+        _safeSetState(() {
+          final existingIds = _jumpMessages.map((m) => m.id).toSet();
+          final newMessages = history.messages
+              .where((m) => !existingIds.contains(m.id))
+              .toList();
+          _jumpMessages = [..._jumpMessages, ...newMessages];
+          if (_jumpMessages.length > _jumpWindowSize) {
+            final excess = _jumpMessages.length - _jumpWindowSize;
+            _jumpMessages = _jumpMessages.sublist(excess);
+            _jumpHasOlderMessages = true;
+          }
+          _jumpHasNewerMessages = history.hasNextPage;
+        });
+      }
+    } catch (e) {
+      debugPrint('[DM] _loadJumpNewerMessages: $e');
+    } finally {
+      if (_canSetState) _safeSetState(() => _isLoadingJumpNewer = false);
+    }
+  }
+
+  void _exitJumpMode() {
+    if (!_canSetState) return;
+    _safeSetState(() {
+      _isInJumpMode = false;
+      _jumpMessages = [];
+      _jumpHasOlderMessages = true;
+      _jumpHasNewerMessages = true;
+      _isLoadingJumpOlder = false;
+      _isLoadingJumpNewer = false;
+      _highlightedMessageId = null;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_canSetState && _scrollController.hasClients) _scrollToBottom();
+    });
+
+    // termporary fix to ensure scroll to bottom after jump mode exit
+    Timer(const Duration(milliseconds: 800), _scrollToBottom);
   }
 
   /// Toggle search mode
@@ -2085,7 +2239,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
               ),
             // Sticky Date Separator - shifts down when sync pill is visible
             Positioned(
-              top: (_isSyncingMessages || _isLoadingTargetMessage) ? 44 : 10,
+              top:
+                  (_isSyncingMessages ||
+                      _isLoadingTargetMessage ||
+                      _isInJumpMode)
+                  ? 54
+                  : 10,
               left: 0,
               right: 0,
               child: _buildStickyDateSeparator(),
@@ -2107,6 +2266,47 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                     0.0, // Not used anymore, positioning handled by parent
               ),
             ),
+            // "Return to Latest" — visible only in jump mode
+            if (_isInJumpMode)
+              Positioned(
+                top: (_isSyncingMessages || _isLoadingTargetMessage) ? 54 : 10,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: GestureDetector(
+                    onTap: _exitJumpMode,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black87,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.arrow_downward_rounded,
+                            color: Colors.white,
+                            size: 14,
+                          ),
+                          SizedBox(width: 6),
+                          Text(
+                            'Return to latest',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -2185,7 +2385,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   Widget _buildMessagesList() {
     // Only show "No messages yet" if we've fully initialized and confirmed no messages
-    if (_messages.isEmpty && !_isLoading) {
+    if (_displayMessages.isEmpty && !_isLoading && !_isInJumpMode) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -2207,7 +2407,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
 
     // Find media groups (4+ consecutive media messages)
-    final mediaGroups = ChatHelpers.findConsecutiveMediaGroups(_messages);
+    final mediaGroups = ChatHelpers.findConsecutiveMediaGroups(
+      _displayMessages,
+    );
     final Set<int> groupedMessageIndices = {};
     for (final group in mediaGroups) {
       for (int i = group.startIndex; i <= group.endIndex; i++) {
@@ -2219,16 +2421,19 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       controller: _scrollController,
       reverse: true, // Start from bottom (newest messages)
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: _messages.length + (_isLoadingMore ? 1 : 0),
+      itemCount:
+          _displayMessages.length + (_isLoadingMore && !_isInJumpMode ? 1 : 0),
       physics:
           const ClampingScrollPhysics(), // Better performance than bouncing
-      cacheExtent: 500, // Reduce cache extent to save memory
+      cacheExtent: 200,
       addAutomaticKeepAlives: false, // Don't keep all items alive
       addRepaintBoundaries:
           true, // Add repaint boundaries for better performance
       itemBuilder: (context, index) {
         // Show load-more spinner at the top (highest index in reversed list)
-        if (_isLoadingMore && index == _messages.length) {
+        if (!_isInJumpMode &&
+            _isLoadingMore &&
+            index == _displayMessages.length) {
           return const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
             child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
@@ -2238,12 +2443,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         // Calculate the actual message index, accounting for indicators
         int messageIndex = index;
         // Bounds check to prevent index out of bounds errors
-        if (messageIndex < 0 || messageIndex >= _messages.length) {
+        if (messageIndex < 0 || messageIndex >= _displayMessages.length) {
           return const SizedBox.shrink(); // Return empty widget for invalid indices
         }
 
-        final actualIndex = _messages.length - 1 - messageIndex;
-        final message = _messages[actualIndex];
+        final actualIndex = _displayMessages.length - 1 - messageIndex;
+        final message = _displayMessages[actualIndex];
 
         // Check if this message is part of a media group
         final mediaGroup = mediaGroups.firstWhere(
@@ -2275,7 +2480,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           child: Column(
             children: [
               // Date separator - show the date for the group of messages that starts here
-              if (ChatHelpers.shouldShowDateSeparator(_messages, messageIndex))
+              if (ChatHelpers.shouldShowDateSeparator(
+                _displayMessages,
+                messageIndex,
+              ))
                 DateSeparator(dateTimeString: message.sentAt),
               // Message bubble with long press
               _buildMessageWithActions(message, isMyMessage),
@@ -2303,8 +2511,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         children: [
           // Date separator if needed
           if (ChatHelpers.shouldShowDateSeparator(
-            _messages,
-            _messages.length - 1 - actualIndex,
+            _displayMessages,
+            _displayMessages.length - 1 - actualIndex,
           ))
             DateSeparator(dateTimeString: firstMessage.sentAt),
           // Media grid
@@ -2388,11 +2596,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             }
 
             // Find a message with the current date to get the formatted date string
-            final messageWithCurrentDate = _messages.firstWhere(
+            final messageWithCurrentDate = _displayMessages.firstWhere(
               (message) =>
                   ChatHelpers.getMessageDateString(message.sentAt) ==
                   currentDate,
-              orElse: () => _messages.first,
+              orElse: () => _displayMessages.first,
             );
 
             return Center(
@@ -4251,6 +4459,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   void dispose() {
     if (_isDisposed) return; // Prevent multiple dispose calls
     _isDisposed = true;
+    _jumpMessages = [];
+    _isInJumpMode = false;
 
     _scrollController.dispose();
     _messageController.dispose();
