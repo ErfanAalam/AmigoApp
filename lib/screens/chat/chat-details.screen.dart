@@ -243,6 +243,23 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
     }
   }
 
+  Future<void> _softDeleteDm() async {
+    try {
+      await ref.read(chatProvider.notifier).handleChatAction(
+            'delete',
+            conversationId,
+            chatType,
+          );
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      if (mounted) {
+        Snack.error('Failed to delete chat');
+      }
+    }
+  }
+
   Future<void> _deleteChat() async {
     final chatName = isGroup
         ? widget.group!.title
@@ -914,7 +931,9 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Permanently delete all messages',
+                    isGroup
+                        ? 'Permanently delete all messages'
+                        : 'Move to deleted chats',
                     style: TextStyle(fontSize: 12, color: Colors.red.shade400),
                   ),
                 ],
@@ -922,7 +941,7 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
             ),
             const SizedBox(width: 12),
             ElevatedButton(
-              onPressed: _deleteChat,
+              onPressed: isGroup ? _deleteChat : _softDeleteDm,
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red.shade600,
                 foregroundColor: Colors.white,
@@ -1031,12 +1050,13 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
                     child: _buildInfoSection(),
                   ),
 
-                  // Danger zone
-                  StaggeredSlideFadeItem(
-                    index: 3,
-                    staggerDelayMs: 120,
-                    child: _buildDangerZone(),
-                  ),
+                  // Danger zone - DMs always, groups only for admin/creator
+                  if (!isGroup || widget.group!.role == 'admin')
+                    StaggeredSlideFadeItem(
+                      index: 3,
+                      staggerDelayMs: 120,
+                      child: _buildDangerZone(),
+                    ),
 
                   SizedBox(
                     height:
