@@ -34,9 +34,10 @@ class MessageBubbleConfig {
   final bool Function(MessageModel message) isMediaMessage;
 
   // ReplyPreview configuration (used if buildReplyPreview is null)
-  final int? currentUserId;
-  final int? conversationUserId; // For DM fallback logic
-  final void Function(int messageId)? onReplyTap; // Scroll to message callback
+  final String? currentUserId;
+  final String? conversationUserId; // For DM fallback logic
+  final void Function(String messageId)?
+  onReplyTap; // Scroll to message callback
 
   // Optional callbacks for DM-specific features
   final Widget Function(MessageModel message)? buildMessageStatusTicks;
@@ -44,8 +45,8 @@ class MessageBubbleConfig {
   onRetryFailedMessage; // Retry callback for failed messages
   final bool
   isResendingMessage; // Whether this message is currently being resent
-  final void Function(int messageId)? onResendFailedMessage;
-  final void Function(int messageId)? onDeleteFailedMessage;
+  final void Function(String messageId)? onResendFailedMessage;
+  final void Function(String messageId)? onDeleteFailedMessage;
 
   // Configuration flags
   final bool isGroupChat; // true for group, false for DM
@@ -209,22 +210,8 @@ class MessageBubble extends ConsumerWidget {
 
   /// Build the emoji reaction row (shown below the bubble)
   Widget _buildReactionRow() {
-    final reactions = config.message.reactions;
-    if (reactions == null || reactions.isEmpty) return const SizedBox.shrink();
-    // Shift up by 10px so the bubble half-overlaps the message bubble's bottom edge
-    return Transform.translate(
-      offset: const Offset(0, -5),
-      child: Padding(
-        padding: EdgeInsets.only(
-          left: config.isMyMessage ? 0 : 2,
-          right: config.isMyMessage ? 2 : 0,
-        ),
-        child: MessageReactionRow(
-          reactions: reactions,
-          onTap: () => config.onShowReactionUsers?.call(reactions),
-        ),
-      ),
-    );
+    // Reactions disabled — MessageModel no longer carries reactions.
+    return const SizedBox.shrink();
   }
 
   /// Build container using Stack (for DM)
@@ -462,21 +449,21 @@ class MessageBubble extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Show sender name for group messages (non-my messages)
-                    if (!config.isMyMessage) ...[
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4, bottom: 2),
-                        child: Text(
-                          config.message.senderName?.isNotEmpty ?? false
-                              ? config.message.senderName ?? ''
-                              : 'Unknown User',
-                          style: TextStyle(
-                            color: themeColor.primary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ],
+                    // if (!config.isMyMessage) ...[
+                    //   Padding(
+                    //     padding: const EdgeInsets.only(top: 4, bottom: 2),
+                    //     child: Text(
+                    //       config.message.senderName?.isNotEmpty ?? false
+                    //           ? config.message.senderName ?? ''
+                    //           : 'Unknown User',
+                    //       style: TextStyle(
+                    //         color: themeColor.primary,
+                    //         fontSize: 12,
+                    //         fontWeight: FontWeight.w700,
+                    //       ),
+                    //     ),
+                    //   ),
+                    // ],
                     // Reply message preview (if this is a reply)
                     if (config.message.isReply) _buildReplyPreviewWithFetch(),
 
@@ -511,8 +498,7 @@ class MessageBubble extends ConsumerWidget {
 
   /// Build children for time and status row
   List<Widget> _buildTimeAndStatusRowChildren() {
-    final isFailed = config.message.status == MessageStatusType.failed;
-    // || (config.message.metadata?['upload_failed'] == true);
+    final isFailed = config.message.isFailed;
     final isMyMessage = config.isMyMessage;
 
     return [
@@ -625,13 +611,13 @@ class MessageBubble extends ConsumerWidget {
 
 /// Global static cache for reply data to persist across widget recreations
 class _ReplyDataCache {
-  static final Map<int, Map<String, dynamic>> _cache = {};
+  static final Map<String, Map<String, dynamic>> _cache = {};
 
-  static Map<String, dynamic>? get(int messageId) {
+  static Map<String, dynamic>? get(String messageId) {
     return _cache[messageId];
   }
 
-  static void set(int messageId, Map<String, dynamic> data) {
+  static void set(String messageId, Map<String, dynamic> data) {
     _cache[messageId] = data;
   }
 }
@@ -646,9 +632,9 @@ class _ReplyPreviewWithFetch extends StatefulWidget {
   buildReplyPreviewWidget;
   final Widget Function(MessageModel replyMessage, bool isMyMessage)?
   buildReplyPreview;
-  final void Function(int messageId)? onReplyTap;
-  final int? currentUserId;
-  final int? conversationUserId;
+  final void Function(String messageId)? onReplyTap;
+  final String? currentUserId;
+  final String? conversationUserId;
   final bool isGroupChat;
 
   const _ReplyPreviewWithFetch({
@@ -725,61 +711,35 @@ class _ReplyPreviewWithFetchState extends State<_ReplyPreviewWithFetch>
   }
 
   Future<void> _loadReplyData() async {
-    if (!widget.message.isReply || widget.message.metadata == null) {
-      return;
-    }
-
-    final replyTo = widget.message.metadata!['reply_to'];
-    if (replyTo == null || replyTo is! Map<String, dynamic>) {
-      return;
-    }
-
-    final replyMessageId = replyTo['message_id'];
-    final replySenderId = replyTo['sender_id'];
-
-    if (replyMessageId == null || widget.messagesRepo == null) {
+    final replyMessageId = widget.message.repliedTo;
+    if (replyMessageId == null ||
+        replyMessageId.isEmpty ||
+        widget.messagesRepo == null) {
       return;
     }
 
     try {
-      final parsedReplyMessageId = replyMessageId is int
-          ? replyMessageId
-          : int.tryParse(replyMessageId.toString()) ?? 0;
-
       // Fetch the replied message
       final replyMessage = await widget.messagesRepo!.getMessageById(
-        parsedReplyMessageId,
+        replyMessageId,
       );
 
-      // Fetch sender name if sender_id is available
+      // Fetch sender name from users table if we have the reply message
       String? senderName;
-      if (replySenderId != null && widget.userRepo != null) {
-        final senderId = replySenderId is int
-            ? replySenderId
-            : int.tryParse(replySenderId.toString());
-        if (senderId != null) {
-          final user = await widget.userRepo!.getUserById(senderId);
-          senderName = user?.displayName ?? user?.name;
-        }
+      if (replyMessage != null &&
+          replyMessage.senderId != null &&
+          widget.userRepo != null) {
+        final user = await widget.userRepo!.getUserById(replyMessage.senderId!);
+        senderName = user?.displayName ?? user?.name;
       }
+      senderName ??= replyMessage?.senderName;
 
-      // Use sender name from reply_to metadata if available, otherwise use fetched name
-      senderName = replyTo['sender_name'] as String? ?? senderName;
-
-      // If the replied message isn't in the local DB yet (not loaded),
-      // build a placeholder from the metadata so the reply container still shows
-      final effectiveReplyMessage = replyMessage ?? MessageModel(
-        id: parsedReplyMessageId,
-        conversationId: widget.message.conversationId,
-        senderId: replySenderId is int
-            ? replySenderId
-            : int.tryParse(replySenderId?.toString() ?? '') ?? 0,
-        senderName: senderName ?? 'Unknown User',
-        body: replyTo['body']?.toString(),
-        type: MessageType.text,
-        status: MessageStatusType.sent,
-        sentAt: replyTo['created_at']?.toString() ?? '',
-      );
+      // If the replied message isn't in the local DB yet, keep it null so the
+      // reply preview simply won't render.
+      final effectiveReplyMessage = replyMessage;
+      if (effectiveReplyMessage == null) {
+        return;
+      }
 
       // Store in global cache AND state - this persists across widget recreations
       final cacheData = {
@@ -953,9 +913,9 @@ class _VideoThumbnailWidgetState extends ConsumerState<VideoThumbnailWidget> {
 class ReplyPreviewConfig {
   final MessageModel replyMessage;
   final bool isMyMessage;
-  final int? currentUserId;
-  final int? conversationUserId; // For DM fallback logic
-  final void Function(int messageId) onTap; // Scroll to message callback
+  final String? currentUserId;
+  final String? conversationUserId; // For DM fallback logic
+  final void Function(String messageId) onTap; // Scroll to message callback
   final bool isGroupChat; // true for group, false for DM
 
   // Styling differences

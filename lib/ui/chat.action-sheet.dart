@@ -30,8 +30,8 @@ class ChatActionMenu extends StatelessWidget {
     final displayName = isDm ? dm!.recipientName : group!.title;
     final displayPic = isDm ? dm!.recipientProfilePic : null;
     final lastMessage = isDm
-        ? dm!.lastMessageBody
-        : (group!.metadata?.lastMessage?.body ?? group!.lastMessageBody);
+        ? dm!.lastMsgBody
+        : (group!.metadata?.lastMessage?.body ?? group!.lastMsgBody);
 
     return Container(
       padding: EdgeInsets.only(bottom: 27),

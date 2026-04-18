@@ -5,15 +5,15 @@ import '../services/draft-message.service.dart';
 /// Riverpod provider for draft messages state
 /// Maps conversationId -> draft text
 final draftMessagesProvider =
-    NotifierProvider<DraftMessagesNotifier, Map<int, String>>(
+    NotifierProvider<DraftMessagesNotifier, Map<String, String>>(
       () => DraftMessagesNotifier(),
     );
 
-class DraftMessagesNotifier extends Notifier<Map<int, String>> {
+class DraftMessagesNotifier extends Notifier<Map<String, String>> {
   final DraftMessageService _draftService = DraftMessageService();
 
   @override
-  Map<int, String> build() {
+  Map<String, String> build() {
     // Load drafts asynchronously
     Future.microtask(() => _loadDrafts());
     return {};
@@ -28,12 +28,12 @@ class DraftMessagesNotifier extends Notifier<Map<int, String>> {
   }
 
   /// Save draft for a conversation
-  Future<void> saveDraft(int conversationId, String draftText) async {
+  Future<void> saveDraft(String conversationId, String draftText) async {
     await _draftService.saveDraft(conversationId, draftText);
 
     if (draftText.trim().isEmpty) {
       // Remove from state if empty
-      final newState = Map<int, String>.from(state);
+      final newState = Map<String, String>.from(state);
       newState.remove(conversationId);
       state = newState;
     } else {
@@ -43,15 +43,15 @@ class DraftMessagesNotifier extends Notifier<Map<int, String>> {
   }
 
   /// Remove draft for a conversation
-  Future<void> removeDraft(int conversationId) async {
+  Future<void> removeDraft(String conversationId) async {
     await _draftService.removeDraft(conversationId);
-    final newState = Map<int, String>.from(state);
+    final newState = Map<String, String>.from(state);
     newState.remove(conversationId);
     state = newState;
   }
 
   /// Get draft for a conversation
-  String? getDraft(int conversationId) {
+  String? getDraft(String conversationId) {
     return state[conversationId];
   }
 

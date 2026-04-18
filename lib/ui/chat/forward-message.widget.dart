@@ -10,12 +10,12 @@ import '../../ui/snackbar.dart';
 
 /// Forward Message Modal widget for both DM and group chats
 class ForwardMessageModal extends ConsumerStatefulWidget {
-  final Set<int> messagesToForward;
+  final Set<String> messagesToForward;
   final List<DmModel>? dmList;
   final List<GroupModel>? groupList;
   final bool isLoading;
-  final Function(List<int>) onForward;
-  final int currentConversationId;
+  final Function(List<String>) onForward;
+  final String currentConversationId;
 
   const ForwardMessageModal({
     super.key,
@@ -40,7 +40,7 @@ class _ForwardMessageModalState extends ConsumerState<ForwardMessageModal>
   late Animation<double> _fadeAnimation;
 
   final TextEditingController _searchController = TextEditingController();
-  final Set<int> _selectedConversations = {};
+  final Set<String> _selectedConversations = {};
   List<DmModel> _filteredDmList = [];
   List<GroupModel> _filteredGroupList = [];
   String _searchQuery = '';
@@ -91,14 +91,14 @@ class _ForwardMessageModalState extends ConsumerState<ForwardMessageModal>
       // Filter DM list - exclude current conversation
       final dmList = widget.dmList ?? [];
       _filteredDmList = dmList
-          .where((dm) => dm.conversationId != widget.currentConversationId)
+          .where((dm) => dm.chatId != widget.currentConversationId)
           .toList();
 
       // Filter Group list - exclude current conversation
       final groupList = widget.groupList ?? [];
       _filteredGroupList = groupList
           .where(
-            (group) => group.conversationId != widget.currentConversationId,
+            (group) => group.chatId != widget.currentConversationId,
           )
           .toList();
 
@@ -126,7 +126,7 @@ class _ForwardMessageModalState extends ConsumerState<ForwardMessageModal>
     });
   }
 
-  void _toggleConversationSelection(int conversationId) {
+  void _toggleConversationSelection(String conversationId) {
     setState(() {
       if (_selectedConversations.contains(conversationId)) {
         _selectedConversations.remove(conversationId);
@@ -489,7 +489,7 @@ class _ForwardMessageModalState extends ConsumerState<ForwardMessageModal>
                                     final group =
                                         _filteredGroupList[actualIndex];
                                     final isSelected = _selectedConversations
-                                        .contains(group.conversationId);
+                                        .contains(group.chatId);
 
                                     return AnimatedContainer(
                                       duration: const Duration(
@@ -518,7 +518,7 @@ class _ForwardMessageModalState extends ConsumerState<ForwardMessageModal>
                                       child: ListTile(
                                         onTap: () =>
                                             _toggleConversationSelection(
-                                              group.conversationId,
+                                              group.chatId,
                                             ),
                                         leading: _buildGroupAvatar(group),
                                         title: Row(
@@ -563,9 +563,9 @@ class _ForwardMessageModalState extends ConsumerState<ForwardMessageModal>
                                             ),
                                           ],
                                         ),
-                                        subtitle: group.lastMessageBody != null
+                                        subtitle: group.lastMsgBody != null
                                             ? Text(
-                                                group.lastMessageBody!,
+                                                group.lastMsgBody!,
                                                 style: TextStyle(
                                                   color: Colors.grey[600],
                                                   fontSize: 14,
@@ -610,7 +610,7 @@ class _ForwardMessageModalState extends ConsumerState<ForwardMessageModal>
                                     }
                                     final dm = _filteredDmList[actualIndex];
                                     final isSelected = _selectedConversations
-                                        .contains(dm.conversationId);
+                                        .contains(dm.chatId);
 
                                     return AnimatedContainer(
                                       duration: const Duration(
@@ -639,7 +639,7 @@ class _ForwardMessageModalState extends ConsumerState<ForwardMessageModal>
                                       child: ListTile(
                                         onTap: () =>
                                             _toggleConversationSelection(
-                                              dm.conversationId,
+                                              dm.chatId,
                                             ),
                                         leading: _buildDmAvatar(dm, themeColor),
                                         title: Text(
@@ -654,9 +654,9 @@ class _ForwardMessageModalState extends ConsumerState<ForwardMessageModal>
                                                 : Colors.black87,
                                           ),
                                         ),
-                                        subtitle: dm.lastMessageBody != null
+                                        subtitle: dm.lastMsgBody != null
                                             ? Text(
-                                                dm.lastMessageBody!,
+                                                dm.lastMsgBody!,
                                                 style: TextStyle(
                                                   color: Colors.grey[600],
                                                   fontSize: 14,

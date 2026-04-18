@@ -1,248 +1,77 @@
-class ConversationModel {
-  final int id;
-  final String type;
-  final String? title;
-  final int createrId;
-  final int? unreadCount;
-  final int? lastMessageId;
-  final int? pinnedMessageId;
-  final bool? isDeleted;
-  final bool? isPinned;
-  final bool? isFavorite;
-  final bool? isMuted;
-  final String createdAt;
-  final String? updatedAt;
-  final bool? needSync;
+import 'package:freezed_annotation/freezed_annotation.dart';
 
-  ConversationModel({
-    required this.id,
-    required this.type,
-    this.title,
-    required this.createrId,
-    this.lastMessageId,
-    this.pinnedMessageId,
-    this.unreadCount,
-    this.isDeleted,
-    this.isPinned,
-    this.isMuted,
-    this.isFavorite,
-    required this.createdAt,
-    this.updatedAt,
-    this.needSync,
-  });
+part 'conversations.model.freezed.dart';
+part 'conversations.model.g.dart';
 
-  factory ConversationModel.fromJson(Map<String, dynamic> json) {
-    return ConversationModel(
-      id: json['id'],
-      type: json['type'],
-      title: json['title'],
-      createrId: json['createrId'],
-      lastMessageId: json['lastMessageId'],
-      pinnedMessageId: json['pinnedMessageId'],
-      unreadCount: json['unreadCount'],
-      isDeleted: json['isDeleted'],
-      isPinned: json['isPinned'],
-      isMuted: json['isMuted'],
-      isFavorite: json['isFavorite'],
-      createdAt: json['createdAt'],
-      updatedAt: json['updatedAt'],
-      needSync: json['needSync'],
-    );
-  }
+@freezed
+abstract class ChatModel with _$ChatModel {
+  const factory ChatModel({
+    required String id,
+    required String type,
+    String? title,
+    @JsonKey(name: 'creater_id') String? createrId,
+    @JsonKey(name: 'unread_count') int? unreadCount,
+    @JsonKey(name: 'last_msg_id') String? lastMsgId,
+    @JsonKey(name: 'last_msg_at') String? lastMsgAt,
+    @JsonKey(name: 'pinned_msg_id') String? pinnedMsgId,
+    @JsonKey(name: 'deleted_at') String? deletedAt,
+    @JsonKey(name: 'is_pinned') @Default(false) bool isPinned,
+    @JsonKey(name: 'is_favorite') @Default(false) bool isFavorite,
+    @JsonKey(name: 'is_muted') @Default(false) bool isMuted,
+    @JsonKey(name: 'created_at') String? createdAt,
+    @JsonKey(name: 'updated_at') String? updatedAt,
+    @JsonKey(name: 'need_sync') @Default(true) bool needSync,
+  }) = _ChatModel;
 
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'type': type,
-      'title': title,
-      'createrId': createrId,
-      'lastMessageId': lastMessageId,
-      'pinnedMessageId': pinnedMessageId,
-      'unreadCount': unreadCount,
-      'isDeleted': isDeleted,
-      'isPinned': isPinned,
-      'isMuted': isMuted,
-      'isFavorite': isFavorite,
-      'createdAt': createdAt,
-      'updatedAt': updatedAt,
-      'needSync': needSync,
-    };
-  }
+  factory ChatModel.fromJson(Map<String, dynamic> json) =>
+      _$ChatModelFromJson(json);
 }
 
-class DmModel {
-  final int conversationId;
-  final int recipientId;
-  final String recipientName;
-  final String recipientPhone;
-  final String? recipientProfilePic;
-  final int? lastMessageId;
-  final String? lastMessageType;
-  final String? lastMessageBody;
-  final String? lastMessageAt;
-  final int? pinnedMessageId;
-  final int? unreadCount;
-  final bool isRecipientOnline;
-  final bool? isDeleted;
-  final bool? isPinned;
-  final bool? isMuted;
-  final bool? isFavorite;
-  final String createdAt;
+// Back-compat alias so the many screen/provider references keep compiling
+// until they're migrated to ChatModel directly.
+typedef ConversationModel = ChatModel;
 
-  DmModel({
-    required this.conversationId,
-    required this.recipientId,
-    required this.recipientName,
-    required this.recipientPhone,
-    this.recipientProfilePic,
-    this.lastMessageId,
-    this.lastMessageType,
-    this.lastMessageBody,
-    this.lastMessageAt,
-    this.unreadCount,
-    required this.isRecipientOnline,
-    this.isDeleted,
-    this.isPinned,
-    this.isMuted,
-    this.isFavorite,
-    required this.createdAt,
-    this.pinnedMessageId,
-  });
+@freezed
+abstract class DmModel with _$DmModel {
+  const factory DmModel({
+    @JsonKey(name: 'chat_id') required String chatId,
+    @JsonKey(name: 'recipient_id') required String recipientId,
+    @JsonKey(name: 'recipient_name') required String recipientName,
+    @JsonKey(name: 'recipient_phone') required String recipientPhone,
+    @JsonKey(name: 'recipient_profile_pic') String? recipientProfilePic,
+    @JsonKey(name: 'last_msg_id') String? lastMsgId,
+    @JsonKey(name: 'last_msg_type') String? lastMsgType,
+    @JsonKey(name: 'last_msg_body') String? lastMsgBody,
+    @JsonKey(name: 'last_msg_at') String? lastMsgAt,
+    @JsonKey(name: 'pinned_msg_id') String? pinnedMsgId,
+    @JsonKey(name: 'unread_count') int? unreadCount,
+    @JsonKey(name: 'is_online') @Default(false) bool isRecipientOnline,
+    @JsonKey(name: 'deleted_at') String? deletedAt,
+    @JsonKey(name: 'is_pinned') @Default(false) bool isPinned,
+    @JsonKey(name: 'is_muted') @Default(false) bool isMuted,
+    @JsonKey(name: 'is_favorite') @Default(false) bool isFavorite,
+    @JsonKey(name: 'created_at') required String createdAt,
+  }) = _DmModel;
 
-  factory DmModel.fromJson(Map<String, dynamic> json) {
-    return DmModel(
-      conversationId: json['conversationId'],
-      recipientId: json['recipientId'],
-      recipientName: json['recipientName'],
-      recipientPhone: json['recipientPhone'],
-      recipientProfilePic: json['recipientProfilePic'],
-      lastMessageId: json['lastMessageId'],
-      lastMessageType: json['lastMessageType'],
-      lastMessageBody: json['lastMessageBody'],
-      lastMessageAt: json['lastMessageAt'],
-      unreadCount: json['unreadCount'],
-      isRecipientOnline: json['isOnline'],
-      isDeleted: json['isDeleted'],
-      isPinned: json['isPinned'],
-      isMuted: json['isMuted'],
-      isFavorite: json['isFavorite'],
-      createdAt: json['createdAt'],
-      pinnedMessageId: json['pinnedMessageId'],
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'conversationId': conversationId,
-      'recipientId': recipientId,
-      'recipientName': recipientName,
-      'recipientPhone': recipientPhone,
-      'recipientProfilePic': recipientProfilePic,
-      'lastMessageId': lastMessageId,
-      'lastMessageType': lastMessageType,
-      'lastMessageBody': lastMessageBody,
-      'lastMessageAt': lastMessageAt,
-      'unreadCount': unreadCount,
-      'isOnline': isRecipientOnline,
-      'isDeleted': isDeleted,
-      'isPinned': isPinned,
-      'isMuted': isMuted,
-      'isFavorite': isFavorite,
-      'createdAt': createdAt,
-      'pinnedMessageId': pinnedMessageId,
-    };
-  }
-
-  DmModel copyWith({
-    int? conversationId,
-    int? recipientId,
-    String? recipientName,
-    String? recipientPhone,
-    String? recipientProfilePic,
-    int? lastMessageId,
-    String? lastMessageType,
-    String? lastMessageBody,
-    String? lastMessageAt,
-    int? unreadCount,
-    bool? isRecipientOnline,
-    bool? isDeleted,
-    bool? isPinned,
-    bool? isMuted,
-    bool? isFavorite,
-    String? createdAt,
-    int? pinnedMessageId,
-  }) {
-    return DmModel(
-      conversationId: conversationId ?? this.conversationId,
-      recipientId: recipientId ?? this.recipientId,
-      recipientName: recipientName ?? this.recipientName,
-      recipientPhone: recipientPhone ?? this.recipientPhone,
-      recipientProfilePic: recipientProfilePic ?? this.recipientProfilePic,
-      lastMessageId: lastMessageId ?? this.lastMessageId,
-      lastMessageType: lastMessageType ?? this.lastMessageType,
-      lastMessageBody: lastMessageBody ?? this.lastMessageBody,
-      lastMessageAt: lastMessageAt ?? this.lastMessageAt,
-      unreadCount: unreadCount ?? this.unreadCount,
-      isRecipientOnline: isRecipientOnline ?? this.isRecipientOnline,
-      isDeleted: isDeleted ?? this.isDeleted,
-      isPinned: isPinned ?? this.isPinned,
-      isMuted: isMuted ?? this.isMuted,
-      isFavorite: isFavorite ?? this.isFavorite,
-      createdAt: createdAt ?? this.createdAt,
-      pinnedMessageId: pinnedMessageId ?? this.pinnedMessageId,
-    );
-  }
+  factory DmModel.fromJson(Map<String, dynamic> json) =>
+      _$DmModelFromJson(json);
 }
 
-class ConversationMemberModel {
-  final int? id;
-  final int conversationId;
-  final int userId;
-  final String role;
-  final int? unreadCount;
-  final String? joinedAt;
-  final String? removedAt;
-  final int? lastReadMessageId;
-  final int? lastDeliveredMessageId;
+@freezed
+abstract class ChatMemberModel with _$ChatMemberModel {
+  const factory ChatMemberModel({
+    String? id,
+    @JsonKey(name: 'chat_id') required String chatId,
+    @JsonKey(name: 'user_id') required String userId,
+    required String role,
+    @JsonKey(name: 'joined_at') String? joinedAt,
+    @JsonKey(name: 'removed_at') String? removedAt,
+    @JsonKey(name: 'last_read_msg_id') String? lastReadMsgId,
+    @JsonKey(name: 'last_delivered_msg_id') String? lastDeliveredMsgId,
+  }) = _ChatMemberModel;
 
-  ConversationMemberModel({
-    this.id,
-    required this.conversationId,
-    required this.userId,
-    required this.role,
-    this.unreadCount,
-    this.joinedAt,
-    this.removedAt,
-    this.lastReadMessageId,
-    this.lastDeliveredMessageId,
-  });
+  factory ChatMemberModel.fromJson(Map<String, dynamic> json) =>
+      _$ChatMemberModelFromJson(json);
 }
 
-// to json function for the coveersation member modal
-Map<String, dynamic> toJson(ConversationMemberModel conversationMemberModel) {
-  return {
-    'id': conversationMemberModel.id,
-    'conversationId': conversationMemberModel.conversationId,
-    'userId': conversationMemberModel.userId,
-    'role': conversationMemberModel.role,
-    'unreadCount': conversationMemberModel.unreadCount,
-  };
-}
-
-class ConversationWithMiscs extends ConversationModel {
-  final String lastMessageBody;
-  final String lastMessageType;
-  final String lastMessageAt;
-
-  ConversationWithMiscs({
-    required this.lastMessageBody,
-    required this.lastMessageType,
-    required this.lastMessageAt,
-
-    required super.id,
-    required super.lastMessageId,
-    required super.type,
-    required super.createrId,
-    required super.createdAt,
-  });
-}
+typedef ConversationMemberModel = ChatMemberModel;

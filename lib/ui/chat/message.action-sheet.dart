@@ -66,6 +66,8 @@ class MessageActionSheet extends StatelessWidget {
         return Icons.forward;
       case MessageType.reaction:
         return Icons.emoji_emotions;
+      case MessageType.media:
+        return Icons.perm_media;
       case MessageType.system:
         return Icons.info;
       case MessageType.text:
@@ -91,6 +93,8 @@ class MessageActionSheet extends StatelessWidget {
         return 'Forwarded';
       case MessageType.reaction:
         return 'Reaction';
+      case MessageType.media:
+        return 'Media';
       case MessageType.system:
         return 'System message';
       case MessageType.text:

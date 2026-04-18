@@ -179,22 +179,22 @@ Future<void> _handleIncomingCall(
     final callerProfilePic =
         callPayload?.callerPfp ?? data['callerProfilePic']?.toString() ?? '';
 
-    final callIdInt = int.tryParse(callId);
+    final callIdStr = callId.isNotEmpty ? callId : null;
     final callUtils = CallUtils();
 
     // Dedup: if this callId is already 'ringing' in SharedPreferences, skip
     final existing = await callUtils.getCallDetails();
-    if (callIdInt != null &&
-        existing?.callId == callIdInt &&
+    if (callIdStr != null &&
+        existing?.callId == callIdStr &&
         existing?.callStatus == 'ringing') {
-      debugPrint('[BACKGROUND] Duplicate FCM for callId=$callIdInt, skipping');
+      debugPrint('[BACKGROUND] Duplicate FCM for callId=$callIdStr, skipping');
       return;
     }
 
-    final callerIdInt = callPayload?.callerId;
+    final callerIdStr = callPayload?.callerId;
     final callDetails = CallDetails(
-      callId: callIdInt,
-      callerId: callerIdInt,
+      callId: callIdStr,
+      callerId: callerIdStr,
       callerName: callerName,
       callerProfilePic: callerProfilePic.isNotEmpty ? callerProfilePic : null,
       callStatus: 'ringing',
@@ -204,7 +204,7 @@ Future<void> _handleIncomingCall(
     // Show native incoming call screen (replaces FlutterCallkitIncoming)
     try {
       await NativeCallScreen.showIncomingCall(
-        callId: callIdInt ?? 0,
+        callId: callIdStr ?? '',
         callerName: callerName,
         callerPhoto: callerProfilePic.isNotEmpty ? callerProfilePic : null,
       );
@@ -216,7 +216,7 @@ Future<void> _handleIncomingCall(
     // await FlutterCallkitIncoming.showCallkitIncoming(params);
 
     // Start polling for call status after showing notification
-    if (callIdInt != null) {
+    if (callIdStr != null) {
       // _startBackgroundStatusPolling(callIdInt);
     }
   } catch (e) {
@@ -310,7 +310,7 @@ Future<void> _handleMessageNotificationBatchBackground(
                       : 'New message');
 
               await notificationService.showMessageNotification(
-                title: chatPayload.senderName ?? 'New Message',
+                title: 'New Message',
                 body: msgBody.trim(),
                 chatPayload: chatPayload,
               );
@@ -552,19 +552,14 @@ Future<void> _storeMessageFromPayloadBackground(
     // Convert to MessageModel and store in local DB
     final messageModel = MessageModel(
       id: chatPayload.id,
-      conversationId: chatPayload.convId,
+      chatId: chatPayload.convId,
       senderId: chatPayload.senderId,
-      senderName: chatPayload.senderName,
       type: chatPayload.msgType,
       body: chatPayload.body,
-      status: MessageStatusType
-          .delivered, // Messages from notifications are delivered
-      attachments: chatPayload.attachments,
-      metadata: chatPayload.metadata,
-      isStarred: false,
-      isReplied: chatPayload.replyToMessageId != null,
-      isForwarded: false,
-      isDeleted: false,
+      attachments: chatPayload.attachments is Map<String, dynamic>
+          ? chatPayload.attachments as Map<String, dynamic>
+          : null,
+      repliedTo: chatPayload.repliedTo,
       sentAt: chatPayload.sentAt.toIso8601String(),
     );
 

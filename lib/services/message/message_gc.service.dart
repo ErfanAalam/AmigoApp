@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../../api/api_service.dart';
-import '../../db/repositories/conversations.repo.dart';
 import '../../db/repositories/message.repo.dart';
 import '../../models/message.model.dart';
 import '../../types/socket.types.dart';
@@ -23,7 +22,6 @@ class MessageGarbageCollector {
   static const _periodicInterval = Duration(seconds: 20);
 
   final _messageRepo = MessageRepository();
-  final _convRepo = ConversationRepository();
   final _transportManager = TransportManager();
   final _apiService = ApiService();
 
@@ -65,9 +63,9 @@ class MessageGarbageCollector {
       debugPrint('[MSG-GC] Found ${stalled.length} stalled message(s)');
 
       // Group by conversation
-      final Map<int, List<MessageModel>> byConv = {};
+      final Map<String, List<MessageModel>> byConv = {};
       for (final m in stalled) {
-        byConv.putIfAbsent(m.conversationId, () => []).add(m);
+        byConv.putIfAbsent(m.chatId, () => []).add(m);
       }
 
       for (final entry in byConv.entries) {
@@ -81,11 +79,11 @@ class MessageGarbageCollector {
   }
 
   Future<void> _processGroup(
-    int convId,
+    String convId,
     List<MessageModel> msgs,
-    int userId,
+    String userId,
   ) async {
-    final ids = msgs.map((m) => m.id.toString()).toList();
+    final ids = msgs.map((m) => m.id).toList();
 
     final response = await _apiService.chat.verifyMessageIds(
       messageIds: ids,
@@ -104,7 +102,7 @@ class MessageGarbageCollector {
         <String>{};
 
     for (final msg in msgs) {
-      final idStr = msg.id.toString();
+      final idStr = msg.id;
       if (found.containsKey(idStr)) {
         await _updateFoundStatus(msg, found[idStr] as Map<String, dynamic>);
       } else if (notFound.contains(idStr)) {
@@ -117,30 +115,24 @@ class MessageGarbageCollector {
     MessageModel msg,
     Map<String, dynamic> info,
   ) async {
-    final readBy = (info['read_by'] as List?)?.isNotEmpty ?? false;
-    final deliveredTo = (info['delivered_to'] as List?)?.isNotEmpty ?? false;
-    final newStatus = readBy
-        ? MessageStatusType.read
-        : deliveredTo
-        ? MessageStatusType.delivered
-        : MessageStatusType.sent;
-
+    // Status tracking moved to MessageInfo table; for now simply clear failed flag.
     debugPrint(
-      '[MSG-GC] msg ${msg.id} found on server → updating to ${newStatus.value}',
+      '[MSG-GC] msg ${msg.id} found on server → clearing failed flag',
     );
-    await _messageRepo.updateMessageStatus(msg.id, newStatus);
+    await _messageRepo.updateMessageFields(msg.id, isFailed: false);
   }
 
-  Future<void> _retryNotFound(MessageModel msg, int convId) async {
-    // Skip media where upload itself failed
+  Future<void> _retryNotFound(MessageModel msg, String convId) async {
+    // Skip media where upload itself failed — we no longer track metadata on
+    // MessageModel, so only skip based on isFailed flag.
     final isMedia = [
       MessageType.image,
       MessageType.video,
       MessageType.audio,
       MessageType.document,
     ].contains(msg.type);
-    if (isMedia && msg.metadata?['upload_failed'] == true) {
-      debugPrint('[MSG-GC] msg ${msg.id} skipped — upload_failed=true');
+    if (isMedia && msg.isFailed) {
+      debugPrint('[MSG-GC] msg ${msg.id} skipped — isFailed=true');
       return;
     }
 
@@ -149,29 +141,19 @@ class MessageGarbageCollector {
       return;
     }
 
-    // Resolve conversation type for payload
-    final convTypeStr = await _convRepo.getConversationTypeById(convId);
-    final convType = ChatType.fromString(convTypeStr) ?? ChatType.dm;
-
     // Reset to unsent before retry
-    await _messageRepo.updateMessageFields(
-      msg.id,
-      status: MessageStatusType.unsent,
-      isFailed: false,
-    );
+    await _messageRepo.updateMessageFields(msg.id, isFailed: false);
 
     debugPrint('[MSG-GC] Retrying msg ${msg.id} in conv $convId');
 
     final chatPayload = ChatMessagePayload(
       id: msg.id,
       convId: convId,
-      senderId: msg.senderId,
-      senderName: msg.senderName ?? '',
+      senderId: msg.senderId ?? '',
       attachments: msg.attachments,
-      convType: convType,
       msgType: msg.type,
       body: msg.body,
-      metadata: msg.metadata,
+      repliedTo: msg.repliedTo,
       sentAt: DateTime.parse(msg.sentAt).toUtc(),
     );
 
@@ -184,11 +166,7 @@ class MessageGarbageCollector {
     final sent = await _transportManager.sendMessage(wsmsg);
     if (!sent) {
       debugPrint('[MSG-GC] Retry failed for msg ${msg.id} — marking failed');
-      await _messageRepo.updateMessageFields(
-        msg.id,
-        status: MessageStatusType.failed,
-        isFailed: true,
-      );
+      await _messageRepo.updateMessageFields(msg.id, isFailed: true);
     }
   }
 }

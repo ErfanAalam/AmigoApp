@@ -1,415 +1,165 @@
-import 'package:amigo/utils/chat/chat-helpers.utils.dart';
+import 'package:freezed_annotation/freezed_annotation.dart';
 
-class GroupModel {
-  final int conversationId;
-  final String title;
-  final List<GroupMember>? members;
-  final GroupMetadata? metadata;
-  final int? lastMessageId;
-  final String? lastMessageType;
-  final String? lastMessageBody;
-  final String? lastMessageAt;
-  final int? pinnedMessageId;
-  final String? role; // user's role in the group (admin/member)
-  final int unreadCount;
-  final bool? isPinned;
-  final bool? isMuted;
-  final bool? isFavorite;
-  final String joinedAt;
+part 'group.model.freezed.dart';
+part 'group.model.g.dart';
 
-  GroupModel({
-    required this.conversationId,
-    required this.title,
-    this.members,
-    this.metadata,
-    this.lastMessageId,
-    this.lastMessageType,
-    this.lastMessageBody,
-    this.lastMessageAt,
-    this.role,
-    this.unreadCount = 0,
-    this.isPinned,
-    this.isMuted,
-    this.isFavorite,
-    required this.joinedAt,
-    this.pinnedMessageId,
-  });
+@freezed
+abstract class GroupModel with _$GroupModel {
+  const GroupModel._();
 
-  factory GroupModel.fromJson(Map<String, dynamic> json) {
-    return GroupModel(
-      conversationId: json['conversationId'] ?? json['conversation_id'] ?? 0,
-      title: json['title'] ?? '',
-      members: (json['members'] as List<dynamic>?)
-          ?.map((member) => GroupMember.fromJson(member))
-          .toList(),
-      metadata: json['metadata'] != null
-          ? GroupMetadata.fromJson(json['metadata'])
-          : null,
-      lastMessageId: ChatHelpers.parseToInt(
-        json['lastMessageId'] ?? json['last_message_id'],
-      ),
-      lastMessageType: json['lastMessageType'] ?? json['last_message_type'],
-      lastMessageBody: json['lastMessageBody'] ?? json['last_message_body'],
-      lastMessageAt: json['lastMessageAt'] ?? json['last_message_at'],
-      role: json['role'] ?? json['userRole'],
-      unreadCount:
-          json['unreadCount'] ??
-          json['unread_count'] ??
-          json['userUnreadCount'] ??
-          0,
-      isPinned: json['isPinned'] ?? json['is_pinned'],
-      isMuted: json['isMuted'] ?? json['is_muted'],
-      isFavorite: json['isFavorite'] ?? json['is_favorite'],
-      joinedAt:
-          json['joinedAt'] ??
-          json['joined_at'] ??
-          json['userJoinedAt'] ??
-          DateTime.now().toIso8601String(),
-      pinnedMessageId: ChatHelpers.parseToInt(
-        json['pinnedMessageId'] ?? json['pinned_message_id'],
-      ),
-    );
+  const factory GroupModel({
+    @JsonKey(name: 'chat_id') required String chatId,
+    @Default('') String title,
+    List<GroupMember>? members,
+    GroupMetadata? metadata,
+    @JsonKey(name: 'last_msg_id') String? lastMsgId,
+    @JsonKey(name: 'last_msg_type') String? lastMsgType,
+    @JsonKey(name: 'last_msg_body') String? lastMsgBody,
+    @JsonKey(name: 'last_msg_at') String? lastMsgAt,
+    @JsonKey(name: 'pinned_msg_id') String? pinnedMsgId,
+    String? role,
+    @JsonKey(name: 'unread_count') @Default(0) int unreadCount,
+    @JsonKey(name: 'is_pinned') @Default(false) bool isPinned,
+    @JsonKey(name: 'is_muted') @Default(false) bool isMuted,
+    @JsonKey(name: 'is_favorite') @Default(false) bool isFavorite,
+    @JsonKey(name: 'joined_at') @Default('') String joinedAt,
+  }) = _GroupModel;
+
+  factory GroupModel.fromJson(Map<String, dynamic> json) =>
+      _$GroupModelFromJson(json);
+
+  static Map<String, dynamic> normalizeApiResponse(Map<String, dynamic> json) {
+    return <String, dynamic>{
+      'chat_id': json['chat_id'] ?? json['conversationId'] ?? '',
+      'title': json['title'] ?? '',
+      'members': json['members'],
+      'metadata': json['metadata'],
+      'last_msg_id': json['last_msg_id'] ?? json['lastMsgId'],
+      'last_msg_type': json['last_msg_type'] ?? json['lastMsgType'],
+      'last_msg_body': json['last_msg_body'] ?? json['lastMsgBody'],
+      'last_msg_at': json['last_msg_at'] ?? json['lastMsgAt'],
+      'pinned_msg_id': json['pinned_msg_id'] ?? json['pinnedMsgId'],
+      'role': json['role'],
+      'unread_count': json['unread_count'] ?? json['unreadCount'] ?? 0,
+      'is_pinned': json['is_pinned'] ?? json['isPinned'] ?? false,
+      'is_muted': json['is_muted'] ?? json['isMuted'] ?? false,
+      'is_favorite': json['is_favorite'] ?? json['isFavorite'] ?? false,
+      'joined_at': json['joined_at'] ?? json['joinedAt'] ?? '',
+    };
   }
 
-  // Helper to get member count
   int get memberCount => members?.length ?? 0;
 
-  // Helper to get display members (excluding current user for display)
-  List<GroupMember> getDisplayMembers(int currentUserId) {
+  List<GroupMember> getDisplayMembers(String currentUserId) {
     return members
             ?.where((member) => member.userId != currentUserId)
             .toList() ??
-        [];
+        const <GroupMember>[];
   }
 
-  // Helper to check if user is admin
-  bool isUserAdmin(int userId) {
-    if (members == null) return false;
-    final member = members!.firstWhere(
-      (member) => member.userId == userId,
-      orElse: () => GroupMember(userId: 0, name: '', role: 'member'),
-    );
-    return member.role == 'admin';
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'conversationId': conversationId,
-      'title': title,
-      'members': members?.map((member) => member.toJson()).toList(),
-      'metadata': metadata?.toJson(),
-      'lastMessageId': lastMessageId,
-      'lastMessageType': lastMessageType,
-      'lastMessageBody': lastMessageBody,
-      'lastMessageAt': lastMessageAt,
-      'role': role,
-      'unreadCount': unreadCount,
-      'isPinned': isPinned,
-      'isMuted': isMuted,
-      'isFavorite': isFavorite,
-      'joinedAt': joinedAt,
-      'pinnedMessageId': pinnedMessageId,
-    };
-  }
-
-  GroupModel copyWith({
-    int? conversationId,
-    String? title,
-    List<GroupMember>? members,
-    GroupMetadata? metadata,
-    int? lastMessageId,
-    String? lastMessageType,
-    String? lastMessageBody,
-    String? lastMessageAt,
-    String? role,
-    int? unreadCount,
-    bool? isPinned,
-    bool? isMuted,
-    bool? isFavorite,
-    String? joinedAt,
-    int? pinnedMessageId,
-  }) {
-    return GroupModel(
-      conversationId: conversationId ?? this.conversationId,
-      title: title ?? this.title,
-      members: members ?? this.members,
-      metadata: metadata ?? this.metadata,
-      lastMessageId: lastMessageId ?? this.lastMessageId,
-      lastMessageType: lastMessageType ?? this.lastMessageType,
-      lastMessageBody: lastMessageBody ?? this.lastMessageBody,
-      lastMessageAt: lastMessageAt ?? this.lastMessageAt,
-      role: role ?? this.role,
-      unreadCount: unreadCount ?? this.unreadCount,
-      isPinned: isPinned ?? this.isPinned,
-      isMuted: isMuted ?? this.isMuted,
-      isFavorite: isFavorite ?? this.isFavorite,
-      joinedAt: joinedAt ?? this.joinedAt,
-      pinnedMessageId: pinnedMessageId ?? this.pinnedMessageId,
-    );
+  bool isUserAdmin(String userId) {
+    final m = members;
+    if (m == null) return false;
+    for (final member in m) {
+      if (member.userId == userId) return member.role == 'admin';
+    }
+    return false;
   }
 }
 
-class GroupMember {
-  final int userId;
-  final String name;
-  final String? profilePic;
-  final String role; // 'admin' or 'member'
-  final String? joinedAt;
+@freezed
+abstract class GroupMember with _$GroupMember {
+  const factory GroupMember({
+    @JsonKey(name: 'user_id') required String userId,
+    required String name,
+    @JsonKey(name: 'profile_pic') String? profilePic,
+    @Default('member') String role,
+    @JsonKey(name: 'joined_at') String? joinedAt,
+  }) = _GroupMember;
 
-  GroupMember({
-    required this.userId,
-    required this.name,
-    this.profilePic,
-    required this.role,
-    this.joinedAt,
-  });
-
-  factory GroupMember.fromJson(Map<String, dynamic> json) {
-    return GroupMember(
-      userId: json['userId'] ?? json['user_id'] ?? 0,
-      name: json['name'] ?? json['user_name'] ?? '',
-      profilePic: json['profilePic'] ?? json['profile_pic'],
-      role: json['role'] ?? 'member',
-      joinedAt: json['joinedAt'] ?? json['joined_at'],
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'userId': userId,
-      'name': name,
-      'profilePic': profilePic,
-      'role': role,
-      'joinedAt': joinedAt,
-    };
-  }
-
-  GroupMember copyWith({
-    int? userId,
-    String? name,
-    String? profilePic,
-    String? role,
-    String? joinedAt,
-  }) {
-    return GroupMember(
-      userId: userId ?? this.userId,
-      name: name ?? this.name,
-      profilePic: profilePic ?? this.profilePic,
-      role: role ?? this.role,
-      joinedAt: joinedAt ?? this.joinedAt,
-    );
-  }
+  factory GroupMember.fromJson(Map<String, dynamic> json) =>
+      _$GroupMemberFromJson(json);
 }
 
-class GroupMetadata {
-  final GroupLastMessage? lastMessage;
-  final int totalMessages;
-  final String? createdAt;
-  final int createdBy;
-  final GroupPinnedMessage? pinnedMessage;
+@freezed
+abstract class GroupMetadata with _$GroupMetadata {
+  const factory GroupMetadata({
+    @JsonKey(name: 'last_message') GroupLastMessage? lastMessage,
+    @JsonKey(name: 'total_messages') @Default(0) int totalMessages,
+    @JsonKey(name: 'created_at') String? createdAt,
+    @JsonKey(name: 'created_by') String? createdBy,
+    @JsonKey(name: 'pinned_message') GroupPinnedMessage? pinnedMessage,
+  }) = _GroupMetadata;
 
-  GroupMetadata({
-    this.lastMessage,
-    required this.totalMessages,
-    this.createdAt,
-    required this.createdBy,
-    this.pinnedMessage,
-  });
-
-  factory GroupMetadata.fromJson(Map<String, dynamic> json) {
-    return GroupMetadata(
-      lastMessage: json['last_message'] != null
-          ? GroupLastMessage.fromJson(json['last_message'])
-          : null,
-      totalMessages: json['total_messages'] ?? json['totalMessages'] ?? 0,
-      createdAt: json['created_at'] ?? json['createdAt'],
-      createdBy: json['created_by'] ?? json['createdBy'] ?? 0,
-      pinnedMessage: json['pinned_message'] != null
-          ? GroupPinnedMessage.fromJson(json['pinned_message'])
-          : null,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'last_message': lastMessage?.toJson(),
-      'total_messages': totalMessages,
-      'created_at': createdAt,
-      'created_by': createdBy,
-      'pinned_message': pinnedMessage?.toJson(),
-    };
-  }
-
-  GroupMetadata copyWith({
-    GroupLastMessage? lastMessage,
-    int? totalMessages,
-    String? createdAt,
-    int? createdBy,
-    GroupPinnedMessage? pinnedMessage,
-  }) {
-    return GroupMetadata(
-      lastMessage: lastMessage ?? this.lastMessage,
-      totalMessages: totalMessages ?? this.totalMessages,
-      createdAt: createdAt ?? this.createdAt,
-      createdBy: createdBy ?? this.createdBy,
-      pinnedMessage: pinnedMessage ?? this.pinnedMessage,
-    );
-  }
+  factory GroupMetadata.fromJson(Map<String, dynamic> json) =>
+      _$GroupMetadataFromJson(json);
 }
 
-class GroupLastMessage {
-  final int id;
-  final String? body;
-  final String type;
-  final int? senderId;
-  final String? senderName;
-  final String createdAt;
-  final int? conversationId;
-  final Map<String, dynamic>? attachmentData;
-
-  GroupLastMessage({
-    required this.id,
-    this.body,
-    required this.type,
-    this.senderId,
-    this.senderName,
-    required this.createdAt,
-    this.conversationId,
-    this.attachmentData,
-  });
-
-  factory GroupLastMessage.fromJson(Map<String, dynamic> json) {
-    return GroupLastMessage(
-      id: ChatHelpers.parseToInt(json['id']),
-      body: json['body'] ?? '',
-      type: json['type'] ?? 'text',
-      senderId: json['sender_id'] ?? json['senderId'] ?? 0,
-      senderName: json['sender_name'] ?? json['senderName'] ?? '',
-      createdAt: json['created_at'] ?? json['createdAt'] ?? '',
-      conversationId: json['conversation_id'] ?? json['conversationId'] ?? 0,
-      attachmentData: json['attachments'] as Map<String, dynamic>?,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'body': body,
-      'type': type,
-      'sender_id': senderId,
-      'sender_name': senderName,
-      'created_at': createdAt,
-      'conversation_id': conversationId,
-      'attachments': attachmentData,
-    };
-  }
-
-  GroupLastMessage copyWith({
-    int? id,
+@freezed
+abstract class GroupLastMessage with _$GroupLastMessage {
+  const factory GroupLastMessage({
+    required String id,
     String? body,
-    String? type,
-    int? senderId,
-    String? senderName,
-    String? createdAt,
-    int? conversationId,
-    Map<String, dynamic>? attachmentData,
-  }) {
-    return GroupLastMessage(
-      id: id ?? this.id,
-      body: body ?? this.body,
-      type: type ?? this.type,
-      senderId: senderId ?? this.senderId,
-      senderName: senderName ?? this.senderName,
-      createdAt: createdAt ?? this.createdAt,
-      conversationId: conversationId ?? this.conversationId,
-      attachmentData: attachmentData ?? this.attachmentData,
-    );
-  }
+    @Default('text') String type,
+    @JsonKey(name: 'sender_id') String? senderId,
+    @JsonKey(name: 'sender_name') String? senderName,
+    @JsonKey(name: 'created_at') required String createdAt,
+    @JsonKey(name: 'chat_id') String? chatId,
+    @JsonKey(name: 'attachments') Map<String, dynamic>? attachmentData,
+  }) = _GroupLastMessage;
+
+  factory GroupLastMessage.fromJson(Map<String, dynamic> json) =>
+      _$GroupLastMessageFromJson(json);
 }
 
-// Helper class for group creation
+@freezed
+abstract class GroupPinnedMessage with _$GroupPinnedMessage {
+  const factory GroupPinnedMessage({
+    @JsonKey(name: 'user_id') required String userId,
+    @JsonKey(name: 'message_id') required String messageId,
+    @JsonKey(name: 'pinned_at') required String pinnedAt,
+  }) = _GroupPinnedMessage;
+
+  factory GroupPinnedMessage.fromJson(Map<String, dynamic> json) =>
+      _$GroupPinnedMessageFromJson(json);
+}
+
 class CreateGroupRequest {
   final String title;
-  final List<int> memberIds;
+  final List<String> memberIds;
 
   CreateGroupRequest({required this.title, required this.memberIds});
 
-  Map<String, dynamic> toJson() {
-    return {'title': title, 'member_ids': memberIds};
-  }
+  Map<String, dynamic> toJson() => {'title': title, 'member_ids': memberIds};
 
-  CreateGroupRequest copyWith({String? title, List<int>? memberIds}) {
-    return CreateGroupRequest(
-      title: title ?? this.title,
-      memberIds: memberIds ?? this.memberIds,
-    );
-  }
+  CreateGroupRequest copyWith({String? title, List<String>? memberIds}) =>
+      CreateGroupRequest(
+        title: title ?? this.title,
+        memberIds: memberIds ?? this.memberIds,
+      );
 }
 
-// Helper class for member management
 class GroupMemberAction {
-  final int conversationId;
-  final int userId;
+  final String chatId;
+  final String userId;
   final String? role;
 
   GroupMemberAction({
-    required this.conversationId,
+    required this.chatId,
     required this.userId,
     this.role,
   });
 
-  Map<String, dynamic> toJson() {
-    return {
-      'conversation_id': conversationId,
-      'user_id': userId,
-      if (role != null) 'role': role,
-    };
-  }
+  Map<String, dynamic> toJson() => {
+        'chat_id': chatId,
+        'user_id': userId,
+        if (role != null) 'role': role,
+      };
 
-  GroupMemberAction copyWith({int? conversationId, int? userId, String? role}) {
-    return GroupMemberAction(
-      conversationId: conversationId ?? this.conversationId,
-      userId: userId ?? this.userId,
-      role: role ?? this.role,
-    );
-  }
-}
-
-class GroupPinnedMessage {
-  final int userId;
-  final int messageId;
-  final String pinnedAt;
-
-  GroupPinnedMessage({
-    required this.userId,
-    required this.messageId,
-    required this.pinnedAt,
-  });
-
-  factory GroupPinnedMessage.fromJson(Map<String, dynamic> json) {
-    return GroupPinnedMessage(
-      userId: _parseToInt(json['user_id']),
-      messageId: _parseToInt(json['message_id']),
-      pinnedAt: json['pinned_at'] ?? DateTime.now().toIso8601String(),
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {'user_id': userId, 'message_id': messageId, 'pinned_at': pinnedAt};
-  }
-
-  GroupPinnedMessage copyWith({int? userId, int? messageId, String? pinnedAt}) {
-    return GroupPinnedMessage(
-      userId: userId ?? this.userId,
-      messageId: messageId ?? this.messageId,
-      pinnedAt: pinnedAt ?? this.pinnedAt,
-    );
-  }
-
-  static int _parseToInt(dynamic value) {
-    if (value == null) return 0;
-    if (value is int) return value;
-    if (value is String) return int.tryParse(value) ?? 0;
-    return 0;
-  }
+  GroupMemberAction copyWith({String? chatId, String? userId, String? role}) =>
+      GroupMemberAction(
+        chatId: chatId ?? this.chatId,
+        userId: userId ?? this.userId,
+        role: role ?? this.role,
+      );
 }

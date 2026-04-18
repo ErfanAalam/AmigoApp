@@ -109,7 +109,7 @@ class CallServiceNotifier extends Notifier<CallServiceState> {
   }
 
   Future<void> initiateCall(
-    int calleeId,
+    String calleeId,
     String calleeName,
     String? calleeProfilePic,
   ) async {
@@ -120,8 +120,8 @@ class CallServiceNotifier extends Notifier<CallServiceState> {
   }
 
   Future<void> restoreCallState(
-    int callId,
-    int callerId,
+    String callId,
+    String callerId,
     String callerName,
     String? callerProfilePic,
   ) async {
@@ -135,8 +135,8 @@ class CallServiceNotifier extends Notifier<CallServiceState> {
   }
 
   Future<void> acceptCall({
-    int? callId,
-    int? callerId,
+    String? callId,
+    String? callerId,
     String? callerName,
     String? callerProfilePic,
   }) async {
@@ -150,7 +150,7 @@ class CallServiceNotifier extends Notifier<CallServiceState> {
     _startDurationUpdates();
   }
 
-  Future<void> declineCall({String? reason, int? callId}) async {
+  Future<void> declineCall({String? reason, String? callId}) async {
     await _callService.declineCall(reason: reason, callId: callId);
     _syncState();
   }

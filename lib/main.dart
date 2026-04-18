@@ -31,6 +31,7 @@ import 'services/call/call.service.dart';
 import 'services/cookies.service.dart';
 import 'services/fcm/fcm-init.service.dart';
 import 'services/message/message_gc.service.dart';
+import 'services/message/status-ack.service.dart';
 import 'services/socket/transport.manager.dart';
 import 'services/socket/transport.service.dart';
 import 'services/socket/ws-message.handler.dart';
@@ -241,6 +242,9 @@ class _MyAppState extends material.State<MyApp>
       case material.AppLifecycleState.paused:
       case material.AppLifecycleState.inactive:
       case material.AppLifecycleState.detached:
+        // Flush any pending status acks to MissedWsMessages before going to background
+        StatusAckService.instance.flushNow();
+
         // App is going to background or being closed
         // Only keep wakelock if there's an active call in progress
         if (!isInCall) {
@@ -394,7 +398,7 @@ class _MyAppState extends material.State<MyApp>
   /// Handle navigation from notification tap
   void _handleNotificationNavigation(ChatMessagePayload data) async {
     debugPrint(
-      '📨 Handling notification navigation: convId=${data.convId}, type=${data.convType}',
+      '📨 Handling notification navigation: convId=${data.convId}',
     );
 
     // Ensure user is authenticated before navigating
@@ -415,10 +419,18 @@ class _MyAppState extends material.State<MyApp>
     await Future.delayed(const Duration(milliseconds: 200));
 
     try {
+      // Look up conversation type from local DB since ChatMessagePayload
+      // no longer carries convType.
+      final conversationsRepo = ConversationRepository();
+      final conv = await conversationsRepo.getConversationById(data.convId);
+      final convType = conv?.type != null
+          ? ChatType.fromString(conv!.type) ?? ChatType.dm
+          : ChatType.dm;
+
       // Try to fetch the conversation from local DB with retry
       await _fetchAndNavigateToConversationWithRetry(
         data.convId,
-        data.convType,
+        convType,
       );
     } catch (e) {
       debugPrint('❌ Error navigating to conversation from notification: $e');
@@ -427,7 +439,7 @@ class _MyAppState extends material.State<MyApp>
 
   /// Fetch conversation details and navigate to appropriate page with retry
   Future<void> _fetchAndNavigateToConversationWithRetry(
-    int conversationId,
+    String conversationId,
     ChatType convType, {
     int maxRetries = 10,
     Duration retryDelay = const Duration(milliseconds: 300),
@@ -502,7 +514,7 @@ class _MyAppState extends material.State<MyApp>
 
   /// Navigate to DM conversation
   void _navigateToDM(DmModel dm) {
-    debugPrint('🚀 Navigating to DM conversation: ${dm.conversationId}');
+    debugPrint('🚀 Navigating to DM conversation: ${dm.chatId}');
     
     // Use NavigationHelper's pushRouteWithRetry for more reliable navigation
     NavigationHelper.pushRouteWithRetry(
@@ -514,7 +526,7 @@ class _MyAppState extends material.State<MyApp>
 
   /// Navigate to group conversation
   void _navigateToGroup(GroupModel group) {
-    debugPrint('🚀 Navigating to group conversation: ${group.conversationId}');
+    debugPrint('🚀 Navigating to group conversation: ${group.chatId}');
     
     // Use NavigationHelper's pushRouteWithRetry for more reliable navigation
     NavigationHelper.pushRouteWithRetry(

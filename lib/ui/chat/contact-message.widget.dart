@@ -199,11 +199,11 @@ class ContactMessageWidget extends ConsumerWidget {
   }
 }
 
-/// Parse contacts from message metadata or body
+/// Parse contacts from message attachments
 List<ContactModel> parseContactsFromMessage(MessageModel message) {
-  // First try to get from metadata
-  if (message.metadata != null) {
-    final contactsData = message.metadata!['contacts'];
+  final attachments = message.attachments;
+  if (attachments is Map<String, dynamic>) {
+    final contactsData = attachments['contacts'];
     if (contactsData != null && contactsData is List) {
       return contactsData
           .map((contactJson) {
@@ -231,10 +231,11 @@ List<ContactModel> parseContactsFromMessage(MessageModel message) {
 
 /// Check if message contains shared contacts
 /// Only returns true when contacts were explicitly shared via the contact
-/// selection flow (metadata['contacts'] is set). Regular text messages
+/// selection flow (attachments['contacts'] is set). Regular text messages
 /// containing phone numbers should render as normal text, not contact bubbles.
 bool isContactMessage(MessageModel message) {
-  if (message.metadata != null && message.metadata!['contacts'] != null) {
+  final attachments = message.attachments;
+  if (attachments is Map<String, dynamic> && attachments['contacts'] != null) {
     return true;
   }
   return false;

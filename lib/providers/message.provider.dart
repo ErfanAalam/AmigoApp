@@ -10,7 +10,7 @@ import '../services/user-status.service.dart';
 /// Backed by a Drift watch query — the UI auto-rebuilds whenever any write
 /// path (WebSocket, long-polling, FCM background handler) inserts into SQLite.
 final messageStreamProvider =
-    StreamProvider.family<List<MessageModel>, int>((ref, convId) {
+    StreamProvider.family<List<MessageModel>, String>((ref, convId) {
   return MessageRepository().watchMessages(convId);
 });
 
@@ -29,6 +29,6 @@ final groupListStreamProvider = StreamProvider<List<GroupModel>>((ref) {
 /// Reactive stream of user online status map.
 /// Bridges UserStatusService into Riverpod so the DM list rebuilds
 /// whenever any user goes online/offline without needing a DB write.
-final userStatusStreamProvider = StreamProvider<Map<int, bool>>((ref) {
+final userStatusStreamProvider = StreamProvider<Map<String, bool>>((ref) {
   return UserStatusService().userStatusStream;
 });

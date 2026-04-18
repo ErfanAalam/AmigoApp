@@ -433,33 +433,32 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
         }
 
         final dm = DmModel(
-          conversationId: conversationData['id'],
+          chatId: conversationData['id']?.toString() ?? '',
           recipientId: user.id,
           recipientName: user.displayName,
           recipientPhone: user.phone,
           recipientProfilePic: user.profilePic,
           unreadCount: 0,
           isRecipientOnline: user.isOnline,
-          createdAt: conversationData['created_at'],
+          createdAt: conversationData['created_at']?.toString() ?? '',
         );
 
         final conversation = ConversationModel(
-          id: conversationData['id'],
+          id: conversationData['id']?.toString() ?? '',
           type: 'dm',
           unreadCount: 0,
-          pinnedMessageId: null,
-          createrId: conversationData['creater_id'],
-          createdAt: conversationData['created_at'],
+          createrId: conversationData['creater_id']?.toString(),
+          createdAt: conversationData['created_at']?.toString(),
         );
 
         // store the conversation in local db
         await _conversationRepository.insertConversations([conversation]);
 
         final receiverMember = ConversationMemberModel(
-          conversationId: conversationData['id'],
+          chatId: conversationData['id']?.toString() ?? '',
           userId: user.id,
           role: 'member',
-          joinedAt: conversationData['created_at'],
+          joinedAt: conversationData['created_at']?.toString(),
         );
 
         // Store conversation members in SQLite

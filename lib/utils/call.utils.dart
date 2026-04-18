@@ -69,9 +69,9 @@ class CallUtils {
   }
 
   // Save individual call fields (for backward compatibility)
-  Future<void> saveCallId(int callId) async {
+  Future<void> saveCallId(String callId) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('current_call_id', callId.toString());
+    await prefs.setString('current_call_id', callId);
 
     // Also update the CallDetails object
     final existing = await getCallDetails();
@@ -80,9 +80,9 @@ class CallUtils {
     }
   }
 
-  Future<void> saveCallerId(int callerId) async {
+  Future<void> saveCallerId(String callerId) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('current_caller_id', callerId.toString());
+    await prefs.setString('current_caller_id', callerId);
 
     // Also update the CallDetails object
     final existing = await getCallDetails();
@@ -131,18 +131,14 @@ class CallUtils {
   }
 
   // Get individual call fields (for backward compatibility)
-  Future<int?> getCallId() async {
+  Future<String?> getCallId() async {
     final prefs = await SharedPreferences.getInstance();
-    final callIdStr = prefs.getString('current_call_id');
-    if (callIdStr == null) return null;
-    return int.tryParse(callIdStr);
+    return prefs.getString('current_call_id');
   }
 
-  Future<int?> getCallerId() async {
+  Future<String?> getCallerId() async {
     final prefs = await SharedPreferences.getInstance();
-    final callerIdStr = prefs.getString('current_caller_id');
-    if (callerIdStr == null) return null;
-    return int.tryParse(callerIdStr);
+    return prefs.getString('current_caller_id');
   }
 
   Future<String?> getCallerName() async {
@@ -185,8 +181,8 @@ class CallUtils {
             callerProfilePic != null ||
             callStatus != null)) {
       final callDetails = CallDetails(
-        callId: callIdStr != null ? int.tryParse(callIdStr) : null,
-        callerId: callerIdStr != null ? int.tryParse(callerIdStr) : null,
+        callId: callIdStr,
+        callerId: callerIdStr,
         callerName: callerName,
         callerProfilePic: callerProfilePic,
         callStatus: callStatus,

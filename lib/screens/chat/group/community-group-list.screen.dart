@@ -126,17 +126,17 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
         lastMessage: group.metadata!.lastMessage,
         totalMessages: group.metadata!.totalMessages,
         createdAt: group.metadata!.createdAt,
-        createdBy: group.metadata!.createdBy,
+        createdBy: group.metadata!.createdBy ?? '',
       );
     }
 
     return CommunityGroupModel(
-      conversationId: group.conversationId,
+      chatId: group.chatId,
       title: group.title,
       type: ChatType.communityGroup.value,
       members: group.members ?? [],
       metadata: metadata,
-      lastMessageAt: group.lastMessageAt,
+      lastMessageAt: group.lastMsgAt,
       role: group.role,
       joinedAt: group.joinedAt,
     );
@@ -152,7 +152,7 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
       localInnerGroups = localGroups
           .where(
             (group) =>
-                widget.community.groupIds.contains(group.conversationId) ||
+                widget.community.groupIds.contains(group.chatId) ||
                 group.metadata?.createdBy == widget.community.id,
           )
           .map((g) => _convertGroupModelToCommunityGroupModel(g))
@@ -252,11 +252,11 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
     }
 
     return GroupModel(
-      conversationId: cg.conversationId,
+      chatId: cg.chatId,
       title: cg.title,
       members: cg.members,
       metadata: metadata,
-      lastMessageAt: cg.lastMessageAt,
+      lastMsgAt: cg.lastMessageAt,
       role: cg.role,
       unreadCount: 0, // Community groups don't track unread count
       joinedAt: cg.joinedAt,
@@ -500,7 +500,7 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
             onTap: () {
               // Convert CommunityGroupModel to GroupModel for navigation
               final groupModel = GroupModel(
-                conversationId: innerGroup.conversationId,
+                chatId: innerGroup.chatId,
                 title: innerGroup.title,
                 // type: ChatType.communityGroup.value,
                 members: innerGroup.members,
@@ -512,7 +512,7 @@ class _CommunityInnerGroupsPageState extends State<CommunityInnerGroupsPage> {
                         createdBy: innerGroup.metadata!.createdBy,
                       )
                     : null,
-                lastMessageAt: innerGroup.lastMessageAt,
+                lastMsgAt: innerGroup.lastMessageAt,
                 role: innerGroup.role,
                 unreadCount:
                     0, // Community inner groups don't track unread count

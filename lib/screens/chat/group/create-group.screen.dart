@@ -38,7 +38,7 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
       ConversationMemberRepository();
   List<UserModel> _allUsers = [];
   List<UserModel> _filteredUsers = [];
-  Set<int> _selectedUserIds = {};
+  Set<String> _selectedUserIds = {};
   bool _isLoading = false;
   bool _isCreating = false;
 
@@ -117,7 +117,7 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
     }
   }
 
-  void _toggleUserSelection(int userId) {
+  void _toggleUserSelection(String userId) {
     setState(() {
       if (_selectedUserIds.contains(userId)) {
         _selectedUserIds.remove(userId);
@@ -172,19 +172,20 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
         if (mounted) {
           Snack.success('Group "$groupName" created successfully!');
 
+          final newChatId = response['data']['id'].toString();
+          final currentUser = await UserUtils().getUserDetails();
           final newGroupConversation = GroupModel(
-            conversationId: response['data']['id'],
+            chatId: newChatId,
             title: groupName,
             joinedAt: DateTime.now().toIso8601String(),
           );
 
           final newGroup = ConversationModel(
-            id: response['data']['id'],
+            id: newChatId,
             type: 'group',
             unreadCount: 0,
             title: groupName,
-            pinnedMessageId: null,
-            createrId: (await UserUtils().getUserDetails())?.id ?? 0,
+            createrId: currentUser?.id ?? '',
             createdAt: DateTime.now().toIso8601String(),
           );
 
@@ -192,7 +193,7 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
 
           for (var userId in _selectedUserIds) {
             final receiverMember = ConversationMemberModel(
-              conversationId: response['data']['id'],
+              chatId: newChatId,
               userId: userId,
               role: 'member',
               joinedAt: DateTime.now().toIso8601String(),
@@ -203,11 +204,10 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
             ]);
           }
 
-          final joinConvPayload = JoinLeavePayload(
-            convId: response['data']['id'],
-            convType: ChatType.group,
-            userId: (await UserUtils().getUserDetails())?.id ?? 0,
-            userName: (await UserUtils().getUserDetails())?.name ?? '',
+          final joinConvPayload = ConvJoinPayload(
+            convId: newChatId,
+            userId: currentUser?.id ?? '',
+            lastReadMsgId: '',
           ).toJson();
 
           final wsmsg = WSMessage(

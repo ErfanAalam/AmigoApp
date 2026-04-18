@@ -333,35 +333,19 @@ class ChatHelpers {
 
   /// Cache media file for a message
   ///
-  /// [url] - The media URL to cache
-  /// [messageId] - The message ID
-  /// [messagesRepo] - MessagesRepository instance
-  /// [mediaCacheService] - MediaCacheService instance
-  /// [checkExistingCache] - Whether to check if already cached (default: true)
-  /// [debugPrefix] - Optional prefix for debug messages (e.g., "group message")
+  /// NOTE: Local media caching via `hasLocalMedia`/`updateLocalMediaPath` was
+  /// removed from MessageRepository. This helper is left as a no-op for
+  /// backward compatibility; callers now rely on MediaCacheService directly.
   static Future<void> cacheMediaForMessage({
     required String url,
-    required int messageId,
+    required String messageId,
     required dynamic mediaCacheService,
     bool checkExistingCache = true,
     String? debugPrefix,
   }) async {
     try {
-      // Check if already cached in DB (only for DM, groups skip this check)
-      if (checkExistingCache) {
-        final hasLocalMedia = await messageRepo.hasLocalMedia(messageId);
-        if (hasLocalMedia) {
-          return;
-        }
-      }
-
       // Download and cache
-      final localPath = await mediaCacheService.downloadAndCacheMedia(url);
-      if (localPath != null) {
-        // Update database with local path
-        await messageRepo.updateLocalMediaPath(messageId, localPath);
-        final prefix = debugPrefix != null ? '$debugPrefix ' : '';
-      }
+      await mediaCacheService.downloadAndCacheMedia(url);
     } catch (e) {
       final prefix = debugPrefix != null ? '$debugPrefix ' : '';
       debugPrint('❌ Error caching media for $prefix$messageId: $e');
@@ -403,10 +387,10 @@ class ChatHelpers {
   /// [setState] - Callback to update state
   static Future<void> togglePinMessage({
     required MessageModel message,
-    required int conversationId,
-    required int? currentPinnedMessageId,
+    required String conversationId,
+    required String? currentPinnedMessageId,
     required void Function(MessageModel?) setPinnedMessageId,
-    required int? currentUserId,
+    required String? currentUserId,
     required void Function(void Function()) setState,
   }) async {
     final wasPinned = message.id == currentPinnedMessageId;
@@ -448,103 +432,6 @@ class ChatHelpers {
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
   }
 
-  /// Toggle star message
-  ///
-  /// [messageId] - The message ID to star/unstar
-  /// [conversationId] - The conversation ID
-  /// [starredMessages] - Set of starred message IDs
-  /// [currentUserId] - Current user ID
-  /// [setState] - Callback to update state
-  static Future<void> toggleStarMessage({
-    required int messageId,
-    required int conversationId,
-    required Set<int> starredMessages,
-    required int? currentUserId,
-    required void Function(void Function()) setState,
-  }) async {
-    final isCurrentlyStarred = starredMessages.contains(messageId);
-
-    // Update UI immediately
-    setState(() {
-      if (isCurrentlyStarred) {
-        starredMessages.remove(messageId);
-      } else {
-        starredMessages.add(messageId);
-      }
-    });
-
-    // Save to local storage
-    try {
-      await messageRepo.toggleStarMessage(messageId);
-    } catch (e) {
-      debugPrint('❌ Error saving star state to storage: $e');
-      // Revert UI state on storage error
-      setState(() {
-        if (isCurrentlyStarred) {
-          starredMessages.add(messageId);
-        } else {
-          starredMessages.remove(messageId);
-        }
-      });
-    }
-  }
-
-  /// Bulk star/unstar messages
-  ///
-  /// [conversationId] - The conversation ID
-  /// [selectedMessages] - Set of selected message IDs
-  /// [starredMessages] - Set of starred message IDs
-  /// [currentUserId] - Current user ID
-  /// [setState] - Callback to update state
-  /// [exitSelectionMode] - Callback to exit selection mode
-  static Future<void> bulkStarMessages({
-    required int conversationId,
-    required Set<int> selectedMessages,
-    required Set<int> starredMessages,
-    required int? currentUserId,
-    required void Function(void Function()) setState,
-    required void Function() exitSelectionMode,
-  }) async {
-    final messagesToStar = selectedMessages.toList();
-    final areAllStarred = messagesToStar.every(
-      (id) => starredMessages.contains(id),
-    );
-
-    // Determine action - if all are starred, unstar them; otherwise star them
-    final action = areAllStarred ? 'unstar' : 'star';
-
-    // Update UI immediately
-    setState(() {
-      if (areAllStarred) {
-        starredMessages.removeAll(messagesToStar);
-      } else {
-        starredMessages.addAll(messagesToStar);
-      }
-    });
-    exitSelectionMode();
-
-    // Save each message to local storage
-    try {
-      for (final messageId in messagesToStar) {
-        if (areAllStarred) {
-          await messageRepo.unstarMessage(messageId);
-        } else {
-          await messageRepo.starMessage(messageId);
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ Error bulk ${action}ring messages in storage: $e');
-      // Revert UI state on storage error
-      setState(() {
-        if (areAllStarred) {
-          starredMessages.addAll(messagesToStar);
-        } else {
-          starredMessages.removeAll(messagesToStar);
-        }
-      });
-    }
-  }
-
   /// Bulk forward messages
   ///
   /// [selectedMessages] - Set of selected message IDs
@@ -553,8 +440,8 @@ class ChatHelpers {
   /// [exitSelectionMode] - Callback to exit selection mode
   /// [showForwardModal] - Callback to show forward modal
   static Future<void> bulkForwardMessages({
-    required Set<int> selectedMessages,
-    required Set<int> messagesToForward,
+    required Set<String> selectedMessages,
+    required Set<String> messagesToForward,
     required void Function(void Function()) setState,
     required void Function() exitSelectionMode,
     required Future<void> Function() showForwardModal,
@@ -578,7 +465,7 @@ class ChatHelpers {
   static Future<void> initiateCall({
     required BuildContext context,
     required dynamic websocketService,
-    required int userId,
+    required String userId,
     required String userName,
     String? userProfilePic,
   }) async {

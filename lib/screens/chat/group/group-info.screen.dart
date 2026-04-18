@@ -45,7 +45,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
 
   Map<String, dynamic>? _groupInfo;
   List<UserModel> _availableUsers = [];
-  final Set<int> _selectedUserIds = {};
+  final Set<String> _selectedUserIds = {};
   bool _isLoading = true;
   bool _isUpdatingTitle = false;
   bool _isRefreshingContacts = false;
@@ -138,11 +138,11 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
   Future<void> _loadGroupInfoFromLocal() async {
     try {
       final groupInfo = await _conversationRepository
-          .getGroupWithMembersByConvId(widget.group.conversationId);
+          .getGroupWithMembersByConvId(widget.group.chatId);
       if (groupInfo != null) {
         // Get conversation to access createrId
         final conv = await _conversationRepository.getConversationById(
-          widget.group.conversationId,
+          widget.group.chatId,
         );
 
         final groupInfoMap = groupInfo.toJson();
@@ -173,10 +173,13 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
 
           // If creator name not found in members, try to get from users table
           if (creatorName == null || creatorName.isEmpty) {
-            final creatorUser = await _userRepository.getUserById(
-              conv.createrId,
-            );
-            creatorName = creatorUser?.displayName ?? 'Unknown';
+            final creatorId = conv.createrId;
+            if (creatorId != null) {
+              final creatorUser = await _userRepository.getUserById(creatorId);
+              creatorName = creatorUser?.displayName ?? 'Unknown';
+            } else {
+              creatorName = 'Unknown';
+            }
           }
 
           groupInfoMap['createrName'] = creatorName;
@@ -306,7 +309,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     } catch (_) {}
   }
 
-  bool _isUserAlreadyMember(int userId) {
+  bool _isUserAlreadyMember(String userId) {
     if (_groupInfo?['members'] == null) return false;
     final List<dynamic> members = _groupInfo!['members'];
     return members.any((member) => member['userId'] == userId);
@@ -513,7 +516,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
 
       final response = (await apiService.group.updateGroupTitle(
         title: newTitle,
-        conversationId: widget.group.conversationId,
+        conversationId: widget.group.chatId,
       )).toMap();
 
       if (response['success'] == true) {
@@ -1052,7 +1055,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     );
   }
 
-  Future<void> _addMembers(List<int> userIds) async {
+  Future<void> _addMembers(List<String> userIds) async {
     if (userIds.isEmpty) return;
     // print('userIds: $userIds');
     try {
@@ -1060,7 +1063,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
 
       // Add all members at once
       final response = (await apiService.group.addMember(
-        conversationId: widget.group.conversationId,
+        conversationId: widget.group.chatId,
         userIds: userIds,
       )).toMap();
 
@@ -1071,13 +1074,10 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
         final members = userIds
             .map(
               (userId) => ConversationMemberModel(
-                conversationId: widget.group.conversationId,
+                chatId: widget.group.chatId,
                 userId: userId,
                 role: 'member',
                 joinedAt: DateTime.now().toIso8601String(),
-                unreadCount: 0,
-                lastReadMessageId: 0,
-                lastDeliveredMessageId: null,
               ),
             )
             .toList();
@@ -1099,13 +1099,13 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     }
   }
 
-  bool _isGroupCreator(int userId) {
+  bool _isGroupCreator(String userId) {
     // Check if the user is the creator of the group
     final creatorId = _groupInfo?['createrId'] ?? _groupInfo?['created_by'];
     return userId == creatorId;
   }
 
-  Future<void> _promoteToAdmin(int userId, String userName) async {
+  Future<void> _promoteToAdmin(String userId, String userName) async {
     if (!_isCurrentUserAdmin()) {
       _showSnackBar('Only admins can promote members', isError: true);
       return;
@@ -1124,7 +1124,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
         final id = TaskSnack.show(message: 'Promoting $userName to admin...');
 
         final response = (await apiService.group.promoteToAdmin(
-          conversationId: widget.group.conversationId,
+          conversationId: widget.group.chatId,
           userId: userId,
         )).toMap();
 
@@ -1136,7 +1136,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
           );
 
           await _conversationMemberRepository.updateMemberRole(
-            widget.group.conversationId,
+            widget.group.chatId,
             userId,
             'admin',
           );
@@ -1156,7 +1156,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     }
   }
 
-  Future<void> _demoteToMember(int userId, String userName) async {
+  Future<void> _demoteToMember(String userId, String userName) async {
     if (!_isCurrentUserAdmin()) {
       _showSnackBar('Only admins can demote members', isError: true);
       return;
@@ -1180,7 +1180,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
         final id = TaskSnack.show(message: 'Demoting $userName to member');
 
         final response = (await apiService.group.demoteToMember(
-          conversationId: widget.group.conversationId,
+          conversationId: widget.group.chatId,
           userId: userId,
         )).toMap();
 
@@ -1191,7 +1191,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
             message: '$userName has been demoted to member',
           );
           await _conversationMemberRepository.updateMemberRole(
-            widget.group.conversationId,
+            widget.group.chatId,
             userId,
             'member',
           );
@@ -1601,7 +1601,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     );
   }
 
-  Future<void> _removeMember(int userId, String userName) async {
+  Future<void> _removeMember(String userId, String userName) async {
     if (!_isCurrentUserAdmin()) {
       _showSnackBar('Only admins can remove members', isError: true);
       return;
@@ -1771,7 +1771,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     if (confirmed == true) {
       try {
         final response = (await apiService.group.removeMember(
-          conversationId: widget.group.conversationId,
+          conversationId: widget.group.chatId,
           userId: userId,
         )).toMap();
 
@@ -1780,7 +1780,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
 
           await _conversationMemberRepository
               .deleteMemberByConversationAndUserId(
-                widget.group.conversationId,
+                widget.group.chatId,
                 userId,
               );
 
@@ -2033,10 +2033,10 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
       int failCount = 0;
 
       for (var member in membersToRemove) {
-        final userId = member['userId'];
+        final userId = member['userId'].toString();
         try {
           final response = (await apiService.group.removeMember(
-            conversationId: widget.group.conversationId,
+            conversationId: widget.group.chatId,
             userId: userId,
           )).toMap();
 
@@ -2044,7 +2044,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
             successCount++;
             await _conversationMemberRepository
                 .deleteMemberByConversationAndUserId(
-                  widget.group.conversationId,
+                  widget.group.chatId,
                   userId,
                 );
           } else {
@@ -2282,19 +2282,19 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
       final loadingId = TaskSnack.show(message: 'Deleting group');
 
       final response = (await apiService.group.deleteGroup(
-        widget.group.conversationId,
+        widget.group.chatId,
       )).toMap();
 
       if (response['success'] == true) {
         // Delete from local database
         await _conversationRepository.deleteConversation(
-          widget.group.conversationId,
+          widget.group.chatId,
         );
 
         // Update state to remove the group
         ref
             .read(chatProvider.notifier)
-            .removeGroupFromState(widget.group.conversationId);
+            .removeGroupFromState(widget.group.chatId);
 
         TaskSnack.resolve(
           id: loadingId,
@@ -2753,12 +2753,10 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
 
   Widget _buildMemberTile(Map<String, dynamic> member, ColorTheme themeColor) {
     final isAdmin = member['role'] == 'admin';
-    final isCreator = _isGroupCreator(member['userId']);
-    final isCurrentUser = member['userId'] == _currentUserDetails?.id;
-    final userId = member['userId'];
-    final isOnline = userId is int
-        ? _userStatusService.isUserOnline(userId)
-        : false;
+    final userId = member['userId'].toString();
+    final isCreator = _isGroupCreator(userId);
+    final isCurrentUser = userId == _currentUserDetails?.id;
+    final isOnline = _userStatusService.isUserOnline(userId);
     final userName =
         (member['userName'] ?? member['name'] ?? 'Unknown') as String;
 
@@ -2947,7 +2945,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
   ) {
     final userName =
         (member['userName'] ?? member['name'] ?? 'Unknown') as String;
-    final userId = member['userId'] as int;
+    final userId = member['userId'].toString();
 
     return PopupMenuButton<String>(
       color: Colors.white,

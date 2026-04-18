@@ -83,7 +83,7 @@ class CallsPageState extends ConsumerState<CallsPage>
     // Step 1: Load from local DB immediately (no loading spinner if we have data)
     try {
       final List<CallModel> localCalls = await callRepo.getAllCalls(
-        currentUser?.id ?? 0,
+        currentUser?.id ?? '',
       );
       if (mounted) {
         setState(() {
@@ -110,9 +110,9 @@ class CallsPageState extends ConsumerState<CallsPage>
 
       if (response.isSuccess && response.hasData) {
         final List<dynamic> callsData = response.data;
-        final currentUserId = currentUser?.id ?? 0;
+        final currentUserId = currentUser?.id ?? '';
         final List<CallModel> calls = callsData
-            .map((c) => CallModel.fromJson(c, currentUserId: currentUserId))
+            .map((c) => CallModel.fromBackend(c, currentUserId: currentUserId))
             .toList();
 
         // Save to local DB
@@ -188,7 +188,7 @@ class CallsPageState extends ConsumerState<CallsPage>
     List<CallHistoryItem> newList,
   ) {
     // Create a map of old calls by ID for quick lookup
-    final oldMap = <int, CallHistoryItem>{};
+    final oldMap = <String, CallHistoryItem>{};
     for (final call in oldList) {
       oldMap[call.id] = call;
     }
@@ -554,7 +554,7 @@ class CallsPageState extends ConsumerState<CallsPage>
     }
   }
 
-  Future<void> _initiateCall(int userId, String userName) async {
+  Future<void> _initiateCall(String userId, String userName) async {
     try {
       final callServiceNotifier = ref.read(callServiceProvider.notifier);
       // Native call screen is launched automatically by call.service.dart
@@ -590,10 +590,10 @@ class CallsPageState extends ConsumerState<CallsPage>
 
 // Data model for call history items
 class CallHistoryItem {
-  final int id;
-  final int callerId;
-  final int calleeId;
-  final int contactId; // The other person's ID
+  final String id;
+  final String callerId;
+  final String calleeId;
+  final String contactId; // The other person's ID
   final String contactName; // The other person's name
   final String? contactProfilePic; // The other person's profile picture
   final DateTime startedAt;
@@ -622,10 +622,10 @@ class CallHistoryItem {
 
   factory CallHistoryItem.fromJson(Map<String, dynamic> json) {
     return CallHistoryItem(
-      id: _parseInt(json['id']),
-      callerId: _parseInt(json['caller_id']),
-      calleeId: _parseInt(json['callee_id']),
-      contactId: _parseInt(json['contact_id']),
+      id: json['id']?.toString() ?? '',
+      callerId: json['caller_id']?.toString() ?? '',
+      calleeId: json['callee_id']?.toString() ?? '',
+      contactId: json['contact_id']?.toString() ?? '',
       contactName: json['contact_name']?.toString() ?? 'Unknown',
       contactProfilePic: json['contact_profile_pic']?.toString(),
       startedAt: DateTime.parse(json['started_at']),

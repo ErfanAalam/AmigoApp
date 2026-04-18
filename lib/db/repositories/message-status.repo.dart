@@ -1,18 +1,18 @@
-import 'package:amigo/utils/chat/chat-helpers.utils.dart';
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:drift/remote.dart';
 import 'package:flutter/foundation.dart';
-import 'package:shadcn_flutter/shadcn_flutter.dart';
+import 'package:uuid/uuid.dart';
 import '../../models/message-status.model.dart';
+import '../../types/socket.types.dart' show MessageStatusType;
 import '../sqlite.db.dart';
-import '../sqlite.schema.dart' hide MessageStatusModel;
+import '../sqlite.schema.dart';
 import '../../types/sqlite.types.dart';
 
 class MessageStatusRepository {
   final sqliteDatabase = SqliteDatabase.instance;
+  static const _uuid = Uuid();
 
-  /// Helper method to extract SQLite error code from exception
   int? _extractSqliteErrorCode(dynamic e) {
     try {
       if (e is DriftRemoteException) {
@@ -21,30 +21,28 @@ class MessageStatusRepository {
           return remoteCause.extendedResultCode;
         }
       }
-    } catch (_) {
-      // Ignore errors during error extraction
-    }
+    } catch (_) {}
     return null;
   }
 
-  /// Helper method to convert MessageStatusModelData row to MessageStatusType model
-  MessageStatusModel _statusToModel(MessageStatusModelData status) {
-    return MessageStatusModel(
-      id: status.id,
-      conversationId: status.conversationId,
-      messageId: status.messageId.toInt(),
-      userId: status.userId,
-      deliveredAt: status.deliveredAt,
-      readAt: status.readAt,
-      reaction: status.reaction,
+  MessageInfoModel _rowToModel(MessageInfoData row) {
+    return MessageInfoModel(
+      id: row.id,
+      chatId: row.chatId,
+      messageId: row.messageId,
+      userId: row.userId,
+      deliveredAt: row.deliveredAt,
+      readAt: row.readAt,
+      reaction: row.reaction,
+      deletedAt: row.deletedAt,
     );
   }
 
-  /// Insert a single message status
+  /// Insert a single message info row
   Future<SqliteResult<void>> insertMessageStatus({
-    required int conversationId,
-    required int messageId,
-    required int userId,
+    required String chatId,
+    required String messageId,
+    required String userId,
     String? deliveredAt,
     String? readAt,
   }) async {
@@ -56,29 +54,30 @@ class MessageStatusRepository {
       final readAtValue = readAt != null
           ? "'${readAt.replaceAll("'", "''")}'"
           : 'NULL';
-      await db.customStatement('''
-        INSERT INTO message_status_model (conversation_id, message_id, user_id, delivered_at, read_at)
-        VALUES ($conversationId, ${BigInt.from(messageId)}, $userId, $deliveredAtValue, $readAtValue)
+      final id = _uuid.v4();
+      await db.customInsert(
+        '''
+        INSERT INTO message_info (id, chat_id, message_id, user_id, delivered_at, read_at)
+        VALUES ('$id', '$chatId', '$messageId', '$userId', $deliveredAtValue, $readAtValue)
         ON CONFLICT(message_id, user_id) DO UPDATE SET
-          conversation_id = excluded.conversation_id,
-          delivered_at = COALESCE(excluded.delivered_at, message_status_model.delivered_at),
-          read_at = COALESCE(excluded.read_at, message_status_model.read_at)
-      ''');
-      return SqliteResult.success(message: 'Message status inserted');
+          chat_id = excluded.chat_id,
+          delivered_at = COALESCE(excluded.delivered_at, message_info.delivered_at),
+          read_at = COALESCE(excluded.read_at, message_info.read_at)
+        ''',
+        updates: {db.messageInfo},
+      );
+      return SqliteResult.success(message: 'Message info inserted');
     } catch (e) {
       final errorCode = _extractSqliteErrorCode(e);
-      debugPrint("Error inserting message status: $e");
+      debugPrint("Error inserting message info: $e");
       return SqliteResult.error(
-        message: 'Failed to insert message status',
+        message: 'Failed to insert message info',
         errorCode: errorCode,
       );
     }
   }
 
-  /// Insert multiple message statuses (bulk insert)
-  /// Uses raw SQL with ON CONFLICT to handle unique constraint on (message_id, user_id)
-  /// This is much more efficient than checking existence first - single DB call per status
-  /// No existence check needed - ON CONFLICT handles duplicates automatically
+  /// Insert multiple message info rows in a single transaction.
   Future<void> insertMessageStatuses(
     List<Map<String, dynamic>> statuses,
   ) async {
@@ -86,19 +85,15 @@ class MessageStatusRepository {
 
     final db = sqliteDatabase.database;
     await db.transaction(() async {
-      // Use raw SQL with ON CONFLICT targeting the unique index (message_id, user_id)
-      // This avoids the need to check existence first, reducing DB calls significantly
-      // COALESCE preserves existing values if new ones are null
       for (final status in statuses) {
         try {
-          final messageId = ChatHelpers.parseToInt(status['messageId']);
-          final userId = status['userId'] as int;
-          final conversationId = status['conversationId'] as int;
+          final messageId = status['messageId'].toString();
+          final userId = status['userId'].toString();
+          final chatId = (status['chatId'] ?? status['conversationId']).toString();
           final deliveredAt = status['deliveredAt'] as String?;
           final readAt = status['readAt'] as String?;
           final reaction = status['reaction'] as String?;
 
-          // Escape SQL strings properly - values are already validated from status map
           final deliveredAtValue = deliveredAt != null
               ? "'${deliveredAt.replaceAll("'", "''")}'"
               : 'NULL';
@@ -108,40 +103,37 @@ class MessageStatusRepository {
           final reactionValue = reaction != null
               ? "'${reaction.replaceAll("'", "''")}'"
               : 'NULL';
+          final id = _uuid.v4();
 
           await db.customInsert(
             '''
-            INSERT INTO message_status_model (
-              conversation_id, message_id, user_id, delivered_at, read_at, reaction
-            ) VALUES ($conversationId, ${BigInt.from(messageId)}, $userId, $deliveredAtValue, $readAtValue, $reactionValue)
+            INSERT INTO message_info (
+              id, chat_id, message_id, user_id, delivered_at, read_at, reaction
+            ) VALUES ('$id', '$chatId', '$messageId', '$userId', $deliveredAtValue, $readAtValue, $reactionValue)
             ON CONFLICT(message_id, user_id) DO UPDATE SET
-              conversation_id = excluded.conversation_id,
-              delivered_at = COALESCE(excluded.delivered_at, message_status_model.delivered_at),
-              read_at = COALESCE(excluded.read_at, message_status_model.read_at),
-              reaction = COALESCE(excluded.reaction, message_status_model.reaction)
+              chat_id = excluded.chat_id,
+              delivered_at = COALESCE(excluded.delivered_at, message_info.delivered_at),
+              read_at = COALESCE(excluded.read_at, message_info.read_at),
+              reaction = COALESCE(excluded.reaction, message_info.reaction)
             ''',
-            updates: {db.messageStatusModel},
+            updates: {db.messageInfo},
           );
         } catch (e) {
           final errorCode = _extractSqliteErrorCode(e);
-          // Only log non-duplicate errors (duplicates are expected and handled by ON CONFLICT)
           if (errorCode != 1555 && errorCode != 2067) {
             debugPrint(
-              "Error inserting message status: $e (errorCode: $errorCode)",
+              "Error inserting message info: $e (errorCode: $errorCode)",
             );
           }
-          // Continue with next status instead of failing the whole batch
         }
       }
     });
   }
 
-  // Insert messagestatus with multiple userids for a message
-  /// Continues inserting even if some statuses fail (e.g., duplicates)
   Future<void> insertMessageStatusesWithMultipleUserIds({
-    required int messageId,
-    required int conversationId,
-    required List<int> userIds,
+    required String messageId,
+    required String chatId,
+    required List<String> userIds,
     String? deliveredAt,
     String? readAt,
   }) async {
@@ -150,7 +142,7 @@ class MessageStatusRepository {
       for (final userId in userIds) {
         try {
           await insertMessageStatus(
-            conversationId: conversationId,
+            chatId: chatId,
             messageId: messageId,
             userId: userId,
             deliveredAt: deliveredAt,
@@ -158,198 +150,165 @@ class MessageStatusRepository {
           );
         } catch (e) {
           final errorCode = _extractSqliteErrorCode(e);
-          // Only log non-duplicate errors (duplicates are expected)
           if (errorCode != 1555) {
             debugPrint(
-              "Error inserting message status for userId $userId: $e (errorCode: $errorCode)",
+              "Error inserting message info for userId $userId: $e (errorCode: $errorCode)",
             );
           }
-          // Continue with next user instead of failing the whole batch
         }
       }
     });
   }
 
-  /// Get all message statuses
-  Future<List<MessageStatusModel>> getAllMessageStatuses() async {
+  Future<List<MessageInfoModel>> getAllMessageStatuses() async {
     final db = sqliteDatabase.database;
-    final statuses = await db.select(db.messageStatusModel).get();
-    return statuses.map((status) => _statusToModel(status)).toList();
+    final rows = await db.select(db.messageInfo).get();
+    return rows.map(_rowToModel).toList();
   }
 
-  /// Get message status by ID
-  Future<MessageStatusModel?> getMessageStatusById(int id) async {
+  Future<MessageInfoModel?> getMessageStatusById(String id) async {
     final db = sqliteDatabase.database;
-    final status = await (db.select(
-      db.messageStatusModel,
-    )..where((t) => t.id.equals(BigInt.from(id)))).getSingleOrNull();
-
-    if (status == null) return null;
-    return _statusToModel(status);
+    final row = await (db.select(db.messageInfo)
+          ..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+    if (row == null) return null;
+    return _rowToModel(row);
   }
 
-  /// Get message statuses by messageId
-  Future<List<MessageStatusModel>> getMessageStatusesByMessageId(
-    int messageId,
+  Future<List<MessageInfoModel>> getMessageStatusesByMessageId(
+    String messageId,
   ) async {
     final db = sqliteDatabase.database;
-    final statuses = await (db.select(
-      db.messageStatusModel,
-    )..where((t) => t.messageId.equals(BigInt.from(messageId)))).get();
-    return statuses.map((status) => _statusToModel(status)).toList();
+    final rows = await (db.select(db.messageInfo)
+          ..where((t) => t.messageId.equals(messageId)))
+        .get();
+    return rows.map(_rowToModel).toList();
   }
 
-  /// Get message statuses by conversationId
-  Future<List<MessageStatusModel>> getMessageStatusesByConversationId(
-    int conversationId,
+  Future<List<MessageInfoModel>> getMessageStatusesByConversationId(
+    String chatId,
   ) async {
     final db = sqliteDatabase.database;
-    final statuses = await (db.select(
-      db.messageStatusModel,
-    )..where((t) => t.conversationId.equals(conversationId))).get();
-    return statuses.map((status) => _statusToModel(status)).toList();
+    final rows = await (db.select(db.messageInfo)
+          ..where((t) => t.chatId.equals(chatId)))
+        .get();
+    return rows.map(_rowToModel).toList();
   }
 
-  /// Get message statuses by userId
-  Future<List<MessageStatusModel>> getMessageStatusesByUserId(
-    int userId,
+  Future<List<MessageInfoModel>> getMessageStatusesByUserId(
+    String userId,
   ) async {
     final db = sqliteDatabase.database;
-    final statuses = await (db.select(
-      db.messageStatusModel,
-    )..where((t) => t.userId.equals(userId))).get();
-    return statuses.map((status) => _statusToModel(status)).toList();
+    final rows = await (db.select(db.messageInfo)
+          ..where((t) => t.userId.equals(userId)))
+        .get();
+    return rows.map(_rowToModel).toList();
   }
 
-  /// Get all rows by messageId (returns raw data)
-  Future<List<MessageStatusModelData>> getAllReadStatusesByMessageId(
-    int messageId,
+  Future<List<MessageInfoData>> getAllReadStatusesByMessageId(
+    String messageId,
   ) async {
     final db = sqliteDatabase.database;
-    final rows =
-        await (db.select(db.messageStatusModel)..where(
-              (t) =>
-                  t.messageId.equals(BigInt.from(messageId)) &
-                  t.readAt.isNotNull(),
-            ))
-            .get();
-    return rows;
+    return (db.select(db.messageInfo)
+          ..where((t) =>
+              t.messageId.equals(messageId) & t.readAt.isNotNull()))
+        .get();
   }
 
-  Future<List<MessageStatusModelData>> getAllDeliveredStatusesByMessageId(
-    int messageId,
+  Future<List<MessageInfoData>> getAllDeliveredStatusesByMessageId(
+    String messageId,
   ) async {
     final db = sqliteDatabase.database;
-    final rows =
-        await (db.select(db.messageStatusModel)..where(
-              (t) =>
-                  t.messageId.equals(BigInt.from(messageId)) &
-                  t.deliveredAt.isNotNull(),
-            ))
-            .get();
-    return rows;
+    return (db.select(db.messageInfo)
+          ..where((t) =>
+              t.messageId.equals(messageId) & t.deliveredAt.isNotNull()))
+        .get();
   }
 
-  /// Get all rows by conversationId (returns raw data)
-  Future<List<MessageStatusModelData>> getAllRowsByConversationId(
-    int conversationId,
+  Future<List<MessageInfoData>> getAllRowsByConversationId(
+    String chatId,
   ) async {
     final db = sqliteDatabase.database;
-    final rows = await (db.select(
-      db.messageStatusModel,
-    )..where((t) => t.conversationId.equals(conversationId))).get();
-    return rows;
+    return (db.select(db.messageInfo)
+          ..where((t) => t.chatId.equals(chatId)))
+        .get();
   }
 
-  /// Get message status by messageId and userId (specific user's status for a message)
-  Future<MessageStatusModel?> getMessageStatusByMessageAndUser(
-    int messageId,
-    int userId,
+  Future<MessageInfoModel?> getMessageStatusByMessageAndUser(
+    String messageId,
+    String userId,
   ) async {
     final db = sqliteDatabase.database;
-    final statuses =
-        await (db.select(db.messageStatusModel)..where(
-              (t) =>
-                  t.messageId.equals(BigInt.from(messageId)) &
-                  t.userId.equals(userId),
-            ))
-            .get();
+    final rows = await (db.select(db.messageInfo)
+          ..where((t) =>
+              t.messageId.equals(messageId) & t.userId.equals(userId)))
+        .get();
 
-    if (statuses.isEmpty) return null;
+    if (rows.isEmpty) return null;
 
-    // If there are duplicates, return the first one and clean up duplicates
-    if (statuses.length > 1) {
-      // Keep the first one (usually the most recent due to auto-increment id)
-      final firstStatus = statuses.first;
-
-      // Delete duplicates in a transaction
+    if (rows.length > 1) {
+      final first = rows.first;
       await db.transaction(() async {
-        for (int i = 1; i < statuses.length; i++) {
-          await (db.delete(
-            db.messageStatusModel,
-          )..where((t) => t.id.equals(statuses[i].id))).go();
+        for (int i = 1; i < rows.length; i++) {
+          await (db.delete(db.messageInfo)
+                ..where((t) => t.id.equals(rows[i].id)))
+              .go();
         }
       });
-
-      return _statusToModel(firstStatus);
+      return _rowToModel(first);
     }
 
-    return _statusToModel(statuses.first);
+    return _rowToModel(rows.first);
   }
 
-  /// Get all read statuses for a message
-  Future<List<MessageStatusModel>> getReadStatusesByMessageId(
-    int messageId,
+  Future<List<MessageInfoModel>> getReadStatusesByMessageId(
+    String messageId,
   ) async {
     final db = sqliteDatabase.database;
-    final statuses =
-        await (db.select(db.messageStatusModel)..where(
-              (t) =>
-                  t.messageId.equals(BigInt.from(messageId)) &
-                  t.readAt.isNotNull(),
-            ))
-            .get();
-    return statuses.map((status) => _statusToModel(status)).toList();
+    final rows = await (db.select(db.messageInfo)
+          ..where((t) =>
+              t.messageId.equals(messageId) & t.readAt.isNotNull()))
+        .get();
+    return rows.map(_rowToModel).toList();
   }
 
-  /// Get all delivered statuses for a message
-  Future<List<MessageStatusModel>> getDeliveredStatusesByMessageId(
-    int messageId,
+  Future<List<MessageInfoModel>> getDeliveredStatusesByMessageId(
+    String messageId,
   ) async {
     final db = sqliteDatabase.database;
-    final statuses =
-        await (db.select(db.messageStatusModel)..where(
-              (t) =>
-                  t.messageId.equals(BigInt.from(messageId)) &
-                  t.deliveredAt.isNotNull(),
-            ))
-            .get();
-    return statuses.map((status) => _statusToModel(status)).toList();
+    final rows = await (db.select(db.messageInfo)
+          ..where((t) =>
+              t.messageId.equals(messageId) & t.deliveredAt.isNotNull()))
+        .get();
+    return rows.map(_rowToModel).toList();
   }
 
-  /// Mark message as delivered for a user
   Future<SqliteResult<void>> markAsDelivered({
-    required int messageId,
-    required int userId,
+    required String messageId,
+    required String userId,
     String? deliveredAt,
   }) async {
     try {
       final db = sqliteDatabase.database;
       final timestamp = deliveredAt ?? DateTime.now().toIso8601String();
 
-      final message = await (db.select(
-        db.messages,
-      )..where((t) => t.id.equals(BigInt.from(messageId)))).getSingleOrNull();
+      final message = await (db.select(db.messages)
+            ..where((t) => t.id.equals(messageId)))
+          .getSingleOrNull();
 
       if (message != null) {
-        final deliveredAtSql = "'${timestamp.replaceAll("'", "''")}'" ;
-        await db.customStatement('''
-          INSERT INTO message_status_model (conversation_id, message_id, user_id, delivered_at)
-          VALUES (${message.conversationId}, ${BigInt.from(messageId)}, $userId, $deliveredAtSql)
+        final deliveredAtSql = "'${timestamp.replaceAll("'", "''")}'";
+        final id = _uuid.v4();
+        await db.customInsert(
+          '''
+          INSERT INTO message_info (id, chat_id, message_id, user_id, delivered_at)
+          VALUES ('$id', '${message.chatId}', '$messageId', '$userId', $deliveredAtSql)
           ON CONFLICT(message_id, user_id) DO UPDATE SET
-            conversation_id = excluded.conversation_id,
+            chat_id = excluded.chat_id,
             delivered_at = excluded.delivered_at
-        ''');
+          ''',
+          updates: {db.messageInfo},
+        );
         return SqliteResult.success(message: 'Message marked as delivered');
       } else {
         return SqliteResult.error(message: 'Message not found');
@@ -364,30 +323,33 @@ class MessageStatusRepository {
     }
   }
 
-  /// Mark message as read for a user
   Future<SqliteResult<void>> markAsRead({
-    required int messageId,
-    required int userId,
+    required String messageId,
+    required String userId,
     String? readAt,
   }) async {
     try {
       final db = sqliteDatabase.database;
       final timestamp = readAt ?? DateTime.now().toIso8601String();
 
-      final message = await (db.select(
-        db.messages,
-      )..where((t) => t.id.equals(BigInt.from(messageId)))).getSingleOrNull();
+      final message = await (db.select(db.messages)
+            ..where((t) => t.id.equals(messageId)))
+          .getSingleOrNull();
 
       if (message != null) {
         final timestampSql = "'${timestamp.replaceAll("'", "''")}'";
-        await db.customStatement('''
-          INSERT INTO message_status_model (conversation_id, message_id, user_id, delivered_at, read_at)
-          VALUES (${message.conversationId}, ${BigInt.from(messageId)}, $userId, $timestampSql, $timestampSql)
+        final id = _uuid.v4();
+        await db.customInsert(
+          '''
+          INSERT INTO message_info (id, chat_id, message_id, user_id, delivered_at, read_at)
+          VALUES ('$id', '${message.chatId}', '$messageId', '$userId', $timestampSql, $timestampSql)
           ON CONFLICT(message_id, user_id) DO UPDATE SET
-            conversation_id = excluded.conversation_id,
-            delivered_at = COALESCE(message_status_model.delivered_at, excluded.delivered_at),
+            chat_id = excluded.chat_id,
+            delivered_at = COALESCE(message_info.delivered_at, excluded.delivered_at),
             read_at = excluded.read_at
-        ''');
+          ''',
+          updates: {db.messageInfo},
+        );
         return SqliteResult.success(message: 'Message marked as read');
       } else {
         return SqliteResult.error(message: 'Message not found');
@@ -402,11 +364,9 @@ class MessageStatusRepository {
     }
   }
 
-  /// Mark multiple messages as delivered for a user
-  /// Continues processing even if some operations fail
   Future<void> markMultipleAsDelivered({
-    required List<int> messageIds,
-    required int userId,
+    required List<String> messageIds,
+    required String userId,
     String? deliveredAt,
   }) async {
     if (messageIds.isEmpty) return;
@@ -417,37 +377,37 @@ class MessageStatusRepository {
     await db.transaction(() async {
       for (final messageId in messageIds) {
         try {
-          final message =
-              await (db.select(db.messages)
-                    ..where((t) => t.id.equals(BigInt.from(messageId))))
-                  .getSingleOrNull();
+          final message = await (db.select(db.messages)
+                ..where((t) => t.id.equals(messageId)))
+              .getSingleOrNull();
 
           if (message != null) {
             final deliveredAtSql = "'${timestamp.replaceAll("'", "''")}'";
-            await db.customStatement('''
-              INSERT INTO message_status_model (conversation_id, message_id, user_id, delivered_at)
-              VALUES (${message.conversationId}, ${BigInt.from(messageId)}, $userId, $deliveredAtSql)
+            final id = _uuid.v4();
+            await db.customInsert(
+              '''
+              INSERT INTO message_info (id, chat_id, message_id, user_id, delivered_at)
+              VALUES ('$id', '${message.chatId}', '$messageId', '$userId', $deliveredAtSql)
               ON CONFLICT(message_id, user_id) DO UPDATE SET
-                conversation_id = excluded.conversation_id,
+                chat_id = excluded.chat_id,
                 delivered_at = excluded.delivered_at
-            ''');
+              ''',
+              updates: {db.messageInfo},
+            );
           }
         } catch (e) {
           final errorCode = _extractSqliteErrorCode(e);
           debugPrint(
             "Error marking message $messageId as delivered: $e (errorCode: $errorCode)",
           );
-          // Continue with next message instead of failing the whole batch
         }
       }
     });
   }
 
-  /// Mark multiple messages as read for a user
-  /// Continues processing even if some operations fail
   Future<void> markMultipleAsRead({
-    required List<int> messageIds,
-    required int userId,
+    required List<String> messageIds,
+    required String userId,
     String? readAt,
   }) async {
     if (messageIds.isEmpty) return;
@@ -458,49 +418,49 @@ class MessageStatusRepository {
     await db.transaction(() async {
       for (final messageId in messageIds) {
         try {
-          final message =
-              await (db.select(db.messages)
-                    ..where((t) => t.id.equals(BigInt.from(messageId))))
-                  .getSingleOrNull();
+          final message = await (db.select(db.messages)
+                ..where((t) => t.id.equals(messageId)))
+              .getSingleOrNull();
 
           if (message != null) {
             final timestampSql = "'${timestamp.replaceAll("'", "''")}'";
-            await db.customStatement('''
-              INSERT INTO message_status_model (conversation_id, message_id, user_id, delivered_at, read_at)
-              VALUES (${message.conversationId}, ${BigInt.from(messageId)}, $userId, $timestampSql, $timestampSql)
+            final id = _uuid.v4();
+            await db.customInsert(
+              '''
+              INSERT INTO message_info (id, chat_id, message_id, user_id, delivered_at, read_at)
+              VALUES ('$id', '${message.chatId}', '$messageId', '$userId', $timestampSql, $timestampSql)
               ON CONFLICT(message_id, user_id) DO UPDATE SET
-                conversation_id = excluded.conversation_id,
-                delivered_at = COALESCE(message_status_model.delivered_at, excluded.delivered_at),
+                chat_id = excluded.chat_id,
+                delivered_at = COALESCE(message_info.delivered_at, excluded.delivered_at),
                 read_at = excluded.read_at
-            ''');
+              ''',
+              updates: {db.messageInfo},
+            );
           }
         } catch (e) {
           final errorCode = _extractSqliteErrorCode(e);
           debugPrint(
             "Error marking message $messageId as read: $e (errorCode: $errorCode)",
           );
-          // Continue with next message instead of failing the whole batch
         }
       }
     });
   }
 
-  /// Update deliveredAt timestamp
   Future<void> updateDeliveredAt({
-    required int messageId,
+    required String messageId,
     String? deliveredAt,
   }) async {
     final db = sqliteDatabase.database;
-    await (db.update(db.messageStatusModel)
-          ..where((t) => t.messageId.equals(BigInt.from(messageId))))
-        .write(MessageStatusModelCompanion(deliveredAt: Value(deliveredAt)));
+    await (db.update(db.messageInfo)
+          ..where((t) => t.messageId.equals(messageId)))
+        .write(MessageInfoCompanion(deliveredAt: Value(deliveredAt)));
   }
 
-  // update deliveredAt timestamp for a specific user with message id
   Future<SqliteResult<void>> updateDeliveredAtForUser({
-    required int messageId,
-    required int userId,
-    required int conversationId,
+    required String messageId,
+    required String userId,
+    required String chatId,
     String? deliveredAt,
   }) async {
     try {
@@ -508,13 +468,17 @@ class MessageStatusRepository {
       final deliveredAtSql = deliveredAt != null
           ? "'${deliveredAt.replaceAll("'", "''")}'"
           : 'NULL';
-      await db.customStatement('''
-        INSERT INTO message_status_model (conversation_id, message_id, user_id, delivered_at)
-        VALUES ($conversationId, ${BigInt.from(messageId)}, $userId, $deliveredAtSql)
+      final id = _uuid.v4();
+      await db.customInsert(
+        '''
+        INSERT INTO message_info (id, chat_id, message_id, user_id, delivered_at)
+        VALUES ('$id', '$chatId', '$messageId', '$userId', $deliveredAtSql)
         ON CONFLICT(message_id, user_id) DO UPDATE SET
-          conversation_id = excluded.conversation_id,
+          chat_id = excluded.chat_id,
           delivered_at = excluded.delivered_at
-      ''');
+        ''',
+        updates: {db.messageInfo},
+      );
       return SqliteResult.success(message: 'DeliveredAt updated');
     } catch (e) {
       final errorCode = _extractSqliteErrorCode(e);
@@ -528,11 +492,10 @@ class MessageStatusRepository {
     }
   }
 
-  // update readAt timestamp for a specific user with message id
   Future<SqliteResult<void>> updateReadAtForUser({
-    required int messageId,
-    required int userId,
-    required int conversationId,
+    required String messageId,
+    required String userId,
+    required String chatId,
     String? readAt,
   }) async {
     try {
@@ -540,13 +503,17 @@ class MessageStatusRepository {
       final readAtSql = readAt != null
           ? "'${readAt.replaceAll("'", "''")}'"
           : 'NULL';
-      await db.customStatement('''
-        INSERT INTO message_status_model (conversation_id, message_id, user_id, read_at)
-        VALUES ($conversationId, ${BigInt.from(messageId)}, $userId, $readAtSql)
+      final id = _uuid.v4();
+      await db.customInsert(
+        '''
+        INSERT INTO message_info (id, chat_id, message_id, user_id, read_at)
+        VALUES ('$id', '$chatId', '$messageId', '$userId', $readAtSql)
         ON CONFLICT(message_id, user_id) DO UPDATE SET
-          conversation_id = excluded.conversation_id,
+          chat_id = excluded.chat_id,
           read_at = excluded.read_at
-      ''');
+        ''',
+        updates: {db.messageInfo},
+      );
       return SqliteResult.success(message: 'ReadAt updated');
     } catch (e) {
       final errorCode = _extractSqliteErrorCode(e);
@@ -560,164 +527,120 @@ class MessageStatusRepository {
     }
   }
 
-  /// Delete message status by ID
-  Future<bool> deleteMessageStatus(int id) async {
+  Future<bool> deleteMessageStatus(String id) async {
     final db = sqliteDatabase.database;
-    final deleted = await (db.delete(
-      db.messageStatusModel,
-    )..where((t) => t.id.equals(BigInt.from(id)))).go();
+    final deleted = await (db.delete(db.messageInfo)
+          ..where((t) => t.id.equals(id)))
+        .go();
     return deleted > 0;
   }
 
-  /// Delete message statuses by messageId
-  Future<void> deleteMessageStatusesByMessageId(int messageId) async {
+  Future<void> deleteMessageStatusesByMessageId(String messageId) async {
     final db = sqliteDatabase.database;
-    await (db.delete(
-      db.messageStatusModel,
-    )..where((t) => t.messageId.equals(BigInt.from(messageId)))).go();
+    await (db.delete(db.messageInfo)
+          ..where((t) => t.messageId.equals(messageId)))
+        .go();
   }
 
-  /// Delete message statuses by conversationId
-  Future<void> deleteMessageStatusesByConversationId(int conversationId) async {
+  Future<void> deleteMessageStatusesByConversationId(String chatId) async {
     final db = sqliteDatabase.database;
-    await (db.delete(
-      db.messageStatusModel,
-    )..where((t) => t.conversationId.equals(conversationId))).go();
+    await (db.delete(db.messageInfo)
+          ..where((t) => t.chatId.equals(chatId)))
+        .go();
   }
 
-  /// Delete message status by messageId and userId
   Future<bool> deleteMessageStatusByMessageAndUser(
-    int messageId,
-    int userId,
+    String messageId,
+    String userId,
   ) async {
     final db = sqliteDatabase.database;
-    final deleted =
-        await (db.delete(db.messageStatusModel)..where(
-              (t) =>
-                  t.messageId.equals(BigInt.from(messageId)) &
-                  t.userId.equals(userId),
-            ))
-            .go();
+    final deleted = await (db.delete(db.messageInfo)
+          ..where((t) =>
+              t.messageId.equals(messageId) & t.userId.equals(userId)))
+        .go();
     return deleted > 0;
   }
 
-  /// Clear all message statuses
   Future<void> clearAllMessageStatuses() async {
     final db = sqliteDatabase.database;
-    await db.delete(db.messageStatusModel).go();
+    await db.delete(db.messageInfo).go();
   }
 
-  /// Get read count for a message
-  Future<int> getReadCountByMessageId(int messageId) async {
+  Future<int> getReadCountByMessageId(String messageId) async {
     final db = sqliteDatabase.database;
-    final count =
-        await (db.selectOnly(db.messageStatusModel)
-              ..addColumns([db.messageStatusModel.id.count()])
-              ..where(
-                db.messageStatusModel.messageId.equals(BigInt.from(messageId)) &
-                    db.messageStatusModel.readAt.isNotNull(),
-              ))
-            .getSingle();
-    return count.read(db.messageStatusModel.id.count()) ?? 0;
+    final count = await (db.selectOnly(db.messageInfo)
+          ..addColumns([db.messageInfo.id.count()])
+          ..where(
+            db.messageInfo.messageId.equals(messageId) &
+                db.messageInfo.readAt.isNotNull(),
+          ))
+        .getSingle();
+    return count.read(db.messageInfo.id.count()) ?? 0;
   }
 
-  /// Get delivered count for a message
-  Future<int> getDeliveredCountByMessageId(int messageId) async {
+  Future<int> getDeliveredCountByMessageId(String messageId) async {
     final db = sqliteDatabase.database;
-    final count =
-        await (db.selectOnly(db.messageStatusModel)
-              ..addColumns([db.messageStatusModel.id.count()])
-              ..where(
-                db.messageStatusModel.messageId.equals(BigInt.from(messageId)) &
-                    db.messageStatusModel.deliveredAt.isNotNull(),
-              ))
-            .getSingle();
-    return count.read(db.messageStatusModel.id.count()) ?? 0;
+    final count = await (db.selectOnly(db.messageInfo)
+          ..addColumns([db.messageInfo.id.count()])
+          ..where(
+            db.messageInfo.messageId.equals(messageId) &
+                db.messageInfo.deliveredAt.isNotNull(),
+          ))
+        .getSingle();
+    return count.read(db.messageInfo.id.count()) ?? 0;
   }
 
-  /// Get unread count for a message
-  Future<int> getUnreadCountByMessageId(int messageId) async {
+  Future<int> getUnreadCountByMessageId(String messageId) async {
     final db = sqliteDatabase.database;
-    final totalCount =
-        await (db.selectOnly(db.messageStatusModel)
-              ..addColumns([db.messageStatusModel.id.count()])
-              ..where(
-                db.messageStatusModel.messageId.equals(BigInt.from(messageId)),
-              ))
-            .getSingle();
+    final total = await (db.selectOnly(db.messageInfo)
+          ..addColumns([db.messageInfo.id.count()])
+          ..where(db.messageInfo.messageId.equals(messageId)))
+        .getSingle();
     final readCount = await getReadCountByMessageId(messageId);
-    return (totalCount.read(db.messageStatusModel.id.count()) ?? 0) - readCount;
+    return (total.read(db.messageInfo.id.count()) ?? 0) - readCount;
   }
 
-  /// Get undelivered count for a message
-  Future<int> getUndeliveredCountByMessageId(int messageId) async {
+  Future<int> getUndeliveredCountByMessageId(String messageId) async {
     final db = sqliteDatabase.database;
-    final totalCount =
-        await (db.selectOnly(db.messageStatusModel)
-              ..addColumns([db.messageStatusModel.id.count()])
-              ..where(
-                db.messageStatusModel.messageId.equals(BigInt.from(messageId)),
-              ))
-            .getSingle();
+    final total = await (db.selectOnly(db.messageInfo)
+          ..addColumns([db.messageInfo.id.count()])
+          ..where(db.messageInfo.messageId.equals(messageId)))
+        .getSingle();
     final deliveredCount = await getDeliveredCountByMessageId(messageId);
-    return (totalCount.read(db.messageStatusModel.id.count()) ?? 0) -
-        deliveredCount;
+    return (total.read(db.messageInfo.id.count()) ?? 0) - deliveredCount;
   }
 
-  /// Check if message is read by user
-  Future<bool> isReadByUser(int messageId, int userId) async {
+  Future<bool> isReadByUser(String messageId, String userId) async {
     final status = await getMessageStatusByMessageAndUser(messageId, userId);
     return status != null && status.readAt != null;
   }
 
-  /// Check if message is delivered to user
-  Future<bool> isDeliveredToUser(int messageId, int userId) async {
+  Future<bool> isDeliveredToUser(String messageId, String userId) async {
     final status = await getMessageStatusByMessageAndUser(messageId, userId);
     return status != null && status.deliveredAt != null;
   }
 
-  // update the message id in the message status table
-  Future<SqliteResult<void>> updateMessageId(
-    int optimisticId,
-    int canonicalId,
-  ) async {
-    try {
-      final db = sqliteDatabase.database;
-      await (db.update(
-        db.messageStatusModel,
-      )..where((t) => t.messageId.equals(BigInt.from(optimisticId)))).write(
-        MessageStatusModelCompanion(messageId: Value(BigInt.from(canonicalId))),
-      );
-      return SqliteResult.success(message: 'Message ID updated');
-    } catch (e) {
-      final errorCode = _extractSqliteErrorCode(e);
-      debugPrint("Error updating message ID: $e");
-      return SqliteResult.error(
-        message: 'Failed to update message ID',
-        errorCode: errorCode,
-      );
-    }
-  }
-
-  /// Mark all messages in a conversation as read for a user where readAt is null
+  /// Mark all messages in a chat as read for a user where readAt is null.
   Future<SqliteResult<void>> markAllAsReadByConversationAndUser({
-    required int conversationId,
-    required int userId,
+    required String chatId,
+    required String userId,
     String? readAt,
   }) async {
     try {
       final db = sqliteDatabase.database;
       final timestamp = readAt ?? DateTime.now().toIso8601String();
 
-      // Bulk update all undelivered statuses in a single query
-      await (db.update(db.messageStatusModel)
-            ..where((t) => t.userId.equals(userId) & t.readAt.isNull()))
-          .write(MessageStatusModelCompanion(readAt: Value(timestamp)));
+      await (db.update(db.messageInfo)
+            ..where((t) =>
+                t.chatId.equals(chatId) &
+                t.userId.equals(userId) &
+                t.readAt.isNull()))
+          .write(MessageInfoCompanion(readAt: Value(timestamp)));
       return SqliteResult.success(message: 'All messages marked as read');
     } catch (e) {
       final errorCode = _extractSqliteErrorCode(e);
       debugPrint(
-        'Error marking all as read for conversation $conversationId and user $userId: $e',
+        'Error marking all as read for chat $chatId and user $userId: $e',
       );
       return SqliteResult.error(
         message: 'Failed to mark all messages as read',
@@ -729,46 +652,47 @@ class MessageStatusRepository {
   /// Upsert the emoji reaction for a specific user on a specific message.
   /// Pass [emoji] = null to clear the reaction.
   Future<void> upsertReaction({
-    required int messageId,
-    required int userId,
-    required int conversationId,
+    required String messageId,
+    required String userId,
+    required String chatId,
     String? emoji,
   }) async {
     final db = sqliteDatabase.database;
-    final emojiValue = emoji != null ? "'${emoji.replaceAll("'", "''")}'" : 'NULL';
-    // Use customInsert (not customStatement) so Drift notifies reactive stream watchers.
+    final emojiValue =
+        emoji != null ? "'${emoji.replaceAll("'", "''")}'" : 'NULL';
+    final id = _uuid.v4();
     await db.customInsert(
       '''
-      INSERT INTO message_status_model (conversation_id, message_id, user_id, reaction)
-      VALUES ($conversationId, ${BigInt.from(messageId)}, $userId, $emojiValue)
+      INSERT INTO message_info (id, chat_id, message_id, user_id, reaction)
+      VALUES ('$id', '$chatId', '$messageId', '$userId', $emojiValue)
       ON CONFLICT(message_id, user_id) DO UPDATE SET
         reaction = $emojiValue
       ''',
-      updates: {db.messageStatusModel},
+      updates: {db.messageInfo},
     );
   }
 
-  /// Watch all emoji reactions for messages in a conversation.
+  /// Watch all emoji reactions for messages in a chat.
   /// Returns a reactive map of messageId -> { emoji: [{user_id, user_name}] }
-  Stream<Map<int, Map<String, dynamic>>> watchReactionsByConversation(
-    int conversationId,
+  Stream<Map<String, Map<String, dynamic>>> watchReactionsByConversation(
+    String chatId,
   ) {
     final db = sqliteDatabase.database;
     final query = db.customSelect(
       '''
-      SELECT ms.message_id, ms.user_id, ms.reaction, u.name as user_name
-      FROM message_status_model ms
-      LEFT JOIN users u ON ms.user_id = u.id
-      WHERE ms.conversation_id = ? AND ms.reaction IS NOT NULL
+      SELECT mi.message_id, mi.user_id, mi.reaction, u.name as user_name
+      FROM message_info mi
+      LEFT JOIN users u ON mi.user_id = u.id
+      WHERE mi.chat_id = ? AND mi.reaction IS NOT NULL
       ''',
-      variables: [Variable.withInt(conversationId)],
-      readsFrom: {db.messageStatusModel, db.users},
+      variables: [Variable.withString(chatId)],
+      readsFrom: {db.messageInfo, db.users},
     );
     return query.watch().map((rows) {
-      final Map<int, Map<String, dynamic>> result = {};
+      final Map<String, Map<String, dynamic>> result = {};
       for (final row in rows) {
-        final msgId = row.read<int>('message_id');
-        final userId = row.read<int>('user_id');
+        final msgId = row.read<String>('message_id');
+        final userId = row.read<String>('user_id');
         final emoji = row.read<String?>('reaction');
         final userName = row.read<String?>('user_name') ?? 'User $userId';
         if (emoji == null) continue;
@@ -784,18 +708,53 @@ class MessageStatusRepository {
     });
   }
 
-  /// mark all undelivered message_status as delivered for a user
+  /// Reactive stream: msgId → {delivered: bool, read: bool}
+  /// Fires whenever message_info changes for the given chat.
+  Stream<Map<String, MessageStatusType>> watchDeliveryStatusByConversation(
+    String chatId,
+  ) {
+    final db = sqliteDatabase.database;
+    final query = db.customSelect(
+      '''
+      SELECT mi.message_id,
+             MAX(mi.delivered_at) AS delivered_at,
+             MAX(mi.read_at) AS read_at
+      FROM message_info mi
+      WHERE mi.chat_id = ?
+      GROUP BY mi.message_id
+      ''',
+      variables: [Variable.withString(chatId)],
+      readsFrom: {db.messageInfo},
+    );
+    return query.watch().map((rows) {
+      final Map<String, MessageStatusType> result = {};
+      for (final row in rows) {
+        final msgId = row.read<String>('message_id');
+        final readAt = row.read<String?>('read_at');
+        final deliveredAt = row.read<String?>('delivered_at');
+        if (readAt != null) {
+          result[msgId] = MessageStatusType.read;
+        } else if (deliveredAt != null) {
+          result[msgId] = MessageStatusType.delivered;
+        } else {
+          result[msgId] = MessageStatusType.sent;
+        }
+      }
+      return result;
+    });
+  }
+
   Future<SqliteResult<void>> markAllAsDeliveredForUser({
-    required int userId,
+    required String userId,
     String? deliveredAt,
   }) async {
     try {
       final db = sqliteDatabase.database;
       final timestamp = deliveredAt ?? DateTime.now().toIso8601String();
-      // Bulk update all undelivered statuses in a single query
-      await (db.update(db.messageStatusModel)
-            ..where((t) => t.userId.equals(userId) & t.deliveredAt.isNull()))
-          .write(MessageStatusModelCompanion(deliveredAt: Value(timestamp)));
+      await (db.update(db.messageInfo)
+            ..where((t) =>
+                t.userId.equals(userId) & t.deliveredAt.isNull()))
+          .write(MessageInfoCompanion(deliveredAt: Value(timestamp)));
       return SqliteResult.success(message: 'All messages marked as delivered');
     } catch (e) {
       final errorCode = _extractSqliteErrorCode(e);

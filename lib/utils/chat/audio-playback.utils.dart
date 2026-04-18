@@ -179,9 +179,9 @@ class AudioPlaybackManager {
             _mediaCacheService != null &&
             _messagesRepo != null) {
           // Extract message ID from audioKey (format: messageId_url)
-          final messageId = int.tryParse(audioKey.split('_').first);
+          final messageId = audioKey.split('_').first;
 
-          if (messageId != null) {
+          if (messageId.isNotEmpty) {
             try {
               final message = _messages.firstWhere(
                 (msg) => msg.id == messageId,

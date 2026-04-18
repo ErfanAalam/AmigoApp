@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -40,12 +39,8 @@ class NetworkConnectivityUtil {
   Timer? _periodicCheckTimer;
 
   // Configuration
-  static const Duration _pingTimeout = Duration(seconds: 5);
-  static const Duration _wsTestTimeout = Duration(seconds: 10);
-  static const Duration _periodicCheckInterval = Duration(seconds: 5);
-  static const int _pingRetries = 2;
-  // static const int _wsTestRetries = 1;
-  // static const int _pollingTestRetries = 1;
+  static const Duration _pingTimeout = Duration(seconds: 3);
+  static const Duration _periodicCheckInterval = Duration(seconds: 15);
 
   // Getters
   NetworkState get currentState => _currentState;
@@ -100,7 +95,7 @@ class NetworkConnectivityUtil {
     );
   }
 
-  /// Perform a full network check (ping, WS test, polling test)
+  /// Perform a lightweight network check (single HTTP ping)
   Future<NetworkState> _performFullCheck() async {
     try {
       // Get current connectivity
@@ -116,33 +111,19 @@ class NetworkConnectivityUtil {
         return offlineState;
       }
 
-      // Test server reachability via ping
+      // Single lightweight ping to check server reachability
       final pingResult = await pingServer();
       final isServerReachable = pingResult.success;
       final quality = NetworkQuality.fromPingLatency(pingResult.latencyMs);
 
-      // Test WebSocket availability (only if server is reachable)
-      WebSocketTestResult wsResult;
+      // Determine preferred transmission mode:
+      // If server is reachable, prefer WebSocket; never go to none based on quality alone.
+      final TransmissionMode preferredMode;
       if (isServerReachable) {
-        wsResult = await testWebSocketConnectivity();
+        preferredMode = TransmissionMode.websocket;
       } else {
-        wsResult = WebSocketTestResult.failure('Server unreachable');
+        preferredMode = TransmissionMode.none;
       }
-
-      // Test polling availability (only if server is reachable)
-      PingTestResult pollingResult;
-      if (isServerReachable) {
-        pollingResult = await pingServer();
-      } else {
-        pollingResult = PingTestResult.failure('Server unreachable');
-      }
-
-      // Determine preferred transmission mode
-      final preferredMode = _determinePreferredTransmissionMode(
-        wsResult: wsResult,
-        pollingResult: pollingResult,
-        quality: quality,
-      );
 
       // Create new state
       final newState = NetworkState(
@@ -151,8 +132,8 @@ class NetworkConnectivityUtil {
         pingLatencyMs: pingResult.latencyMs,
         lastChecked: DateTime.now(),
         isServerReachable: isServerReachable,
-        isWebSocketAvailable: wsResult.isAvailable,
-        isPollingAvailable: pollingResult.success,
+        isWebSocketAvailable: isServerReachable,
+        isPollingAvailable: isServerReachable,
         preferredTransmissionMode: preferredMode,
       );
 
@@ -189,82 +170,29 @@ class NetworkConnectivityUtil {
     }
   }
 
-  /// Ping the server to check reachability and latency
+  /// Ping the server to check reachability and latency (single attempt, 3s timeout)
   Future<PingTestResult> pingServer() async {
-    // Use the root endpoint for ping
     final pingUrl = '${Environment.baseUrl}/';
 
-    for (int attempt = 0; attempt < _pingRetries; attempt++) {
-      try {
-        final stopwatch = Stopwatch()..start();
-
-        final response = await http
-            .get(Uri.parse(pingUrl))
-            .timeout(_pingTimeout);
-
-        stopwatch.stop();
-
-        if (response.statusCode == 200) {
-          return PingTestResult.success(stopwatch.elapsedMilliseconds);
-        } else {
-          return PingTestResult.failure(
-            'Server returned status ${response.statusCode}',
-          );
-        }
-      } catch (e) {
-        if (attempt == _pingRetries - 1) {
-          return PingTestResult.failure(e.toString());
-        }
-        // Wait a bit before retry
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
-    }
-    return PingTestResult.failure('All ping attempts failed');
-  }
-
-  /// Test WebSocket connectivity
-  Future<WebSocketTestResult> testWebSocketConnectivity() async {
     try {
       final stopwatch = Stopwatch()..start();
 
-      // Try to connect to WebSocket with proper token encoding
-      final wsUrl =
-          '${Environment.websocketUrl}?token=websocket-connectivity-check';
-
-      debugPrint('[NETWORK] Testing WebSocket connectivity: $wsUrl');
-
-      final socket = await WebSocket.connect(wsUrl).timeout(_wsTestTimeout);
-      debugPrint(
-        '[NETWORK] Testing WebSocket connectivity: socket ready-state: ${socket.readyState}',
-      );
+      final response = await http
+          .get(Uri.parse(pingUrl))
+          .timeout(_pingTimeout);
 
       stopwatch.stop();
-      await socket.close();
 
-      return WebSocketTestResult.success(stopwatch.elapsedMilliseconds);
+      if (response.statusCode == 200) {
+        return PingTestResult.success(stopwatch.elapsedMilliseconds);
+      } else {
+        return PingTestResult.failure(
+          'Server returned status ${response.statusCode}',
+        );
+      }
     } catch (e) {
-      return WebSocketTestResult.failure(e.toString());
+      return PingTestResult.failure(e.toString());
     }
-  }
-
-  /// Determine preferred transmission mode based on test results
-  TransmissionMode _determinePreferredTransmissionMode({
-    required WebSocketTestResult wsResult,
-    required PingTestResult pollingResult,
-    required NetworkQuality quality,
-  }) {
-    // If WebSocket is available and quality is acceptable, prefer WebSocket
-    if (wsResult.isAvailable && quality.isAcceptable) {
-      return TransmissionMode.websocket;
-    }
-
-    // If polling is available, use it as fallback
-    if (pollingResult.success) {
-      return TransmissionMode.longPolling;
-    }
-
-    // No transmission available
-    return TransmissionMode.none;
   }
 
   /// Manually trigger a full network check

@@ -64,7 +64,7 @@ class _DeletedChatsPageState extends ConsumerState<DeletedChatsPage> {
 
   Future<void> _restoreChat(Map<String, dynamic> chatData) async {
     try {
-      final conversationId = chatData['conversationId'] as int;
+      final conversationId = chatData['conversationId'] as String;
       await _conversationRepo.markAsDeleted(conversationId, false);
       await apiService.chat.reviveChat(conversationId);
 

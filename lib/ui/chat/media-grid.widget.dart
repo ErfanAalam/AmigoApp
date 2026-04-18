@@ -9,7 +9,7 @@ class MediaGridWidget extends StatelessWidget {
   final List<MessageModel> mediaMessages;
   final bool isMyMessage;
   final Function(List<MessageModel>, int) onTap;
-  final Function(String, int) onCacheImage;
+  final Function(String, String) onCacheImage;
   final Map<String, String?> videoThumbnailCache;
   final Map<String, Future<String?>> videoThumbnailFutures;
   final Future<String?> Function(String, String) generateVideoThumbnail;
@@ -143,39 +143,22 @@ class MediaGridWidget extends StatelessWidget {
                   ),
                 ),
               ),
-            // Upload status overlay
-            if (message.metadata?['is_uploading'] == true)
+            // Upload status overlay: show indicator when localMediaPath present but no remote URL
+            if ((message.localMediaPath != null &&
+                    message.localMediaPath!.isNotEmpty) &&
+                (mediaUrl == null || mediaUrl.isEmpty))
               Container(
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.5),
                 ),
                 child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          value: (message.metadata?['upload_progress'] as int?) != null
-                              ? (message.metadata!['upload_progress'] as int) / 100.0
-                              : null,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                        ),
-                      ),
-                      if ((message.metadata?['upload_progress'] as int?) != null) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          '${message.metadata!['upload_progress']}%',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ],
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
                   ),
                 ),
               ),
@@ -215,7 +198,7 @@ class MediaGridWidget extends StatelessWidget {
         return buildCachedImage(
           imageUrl: mediaUrl,
           localPath: null,
-          messageId: 0,
+          messageId: '',
           onCacheMedia: (url, id) => onCacheImage(url, id),
         );
       } else if (isVideo) {

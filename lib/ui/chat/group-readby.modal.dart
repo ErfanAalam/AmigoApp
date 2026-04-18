@@ -22,7 +22,7 @@ class MemberWithStatus {
 class ReadByModal extends ConsumerStatefulWidget {
   final MessageModel message;
   final List<UserModel> members;
-  final int? currentUserId;
+  final String? currentUserId;
 
   const ReadByModal({
     super.key,
@@ -67,7 +67,7 @@ class _ReadByModalState extends ConsumerState<ReadByModal>
     );
 
     // Create a map of userId -> status for quick lookup
-    final statusMap = <int, MessageStatusModel>{};
+    final statusMap = <String, MessageStatusModel>{};
     for (final status in allStatuses) {
       statusMap[status.userId] = status;
     }

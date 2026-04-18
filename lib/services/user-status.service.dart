@@ -10,30 +10,30 @@ class UserStatusService {
   UserStatusService._internal();
 
   // Map to store online status for each user ID
-  final Map<int, bool> _usersOnlineStatus = {};
+  final Map<String, bool> _usersOnlineStatus = {};
 
   // Stream controller for status updates
-  final StreamController<Map<int, bool>> _onlineStatusController =
-      StreamController<Map<int, bool>>.broadcast();
+  final StreamController<Map<String, bool>> _onlineStatusController =
+      StreamController<Map<String, bool>>.broadcast();
 
   // Getters
-  Stream<Map<int, bool>> get userStatusStream => _onlineStatusController.stream;
-  Map<int, bool> get onlineStatus => Map.unmodifiable(_usersOnlineStatus);
+  Stream<Map<String, bool>> get userStatusStream =>
+      _onlineStatusController.stream;
+  Map<String, bool> get onlineStatus => Map.unmodifiable(_usersOnlineStatus);
 
   /// Check if a user is online
-  bool isUserOnline(int userId) {
+  bool isUserOnline(String userId) {
     return _usersOnlineStatus[userId] ?? false;
   }
 
   /// Set user online status
-  // void setUserOnline(int userId, {bool isOnline = true}) {
-  void setUserOnlineStatus(int userId, {bool isOnline = true}) {
+  void setUserOnlineStatus(String userId, {bool isOnline = true}) {
     _usersOnlineStatus[userId] = isOnline;
     _notifyStatusChange();
   }
 
   /// Handle user_online WebSocket message
-  void handleUserOnlineMessage(ConnectionStatus payload) {
+  void handleUserOnlineMessage(ConnectionStatusPayload payload) {
     try {
       setUserOnlineStatus(
         payload.senderId,
@@ -51,7 +51,7 @@ class UserStatusService {
   }
 
   /// Remove specific user status
-  void removeUserStatus(int userId) {
+  void removeUserStatus(String userId) {
     if (_usersOnlineStatus.containsKey(userId)) {
       _usersOnlineStatus.remove(userId);
       _notifyStatusChange();

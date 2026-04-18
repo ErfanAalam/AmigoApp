@@ -61,7 +61,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
 
     await ref
         .read(chatProvider.notifier)
-        .handleChatAction(action, conversation.conversationId, ChatType.dm);
+        .handleChatAction(action, conversation.chatId, ChatType.dm);
   }
 
   /// Show delete confirmation dialog
@@ -350,7 +350,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
           final query = chatState.searchQuery.toLowerCase();
           conversationsToShow = allDms.where((dm) {
             return dm.recipientName.toLowerCase().contains(query) ||
-                (dm.lastMessageBody?.toLowerCase().contains(query) ?? false) ||
+                (dm.lastMsgBody?.toLowerCase().contains(query) ?? false) ||
                 dm.recipientPhone.toLowerCase().contains(query);
           }).toList();
         }
@@ -394,7 +394,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
           }
 
           final typingUsers =
-              chatState.typingConvUsers[conversation.conversationId];
+              chatState.typingConvUsers[conversation.chatId];
           final isTyping = typingUsers != null && typingUsers.isNotEmpty;
 
           return ChatListItem(
@@ -405,20 +405,20 @@ class ChatsPageState extends ConsumerState<ChatsPage>
             isMuted: conversation.isMuted ?? false,
             isFavorite: conversation.isFavorite ?? false,
             onLongPress: () => _showChatActions(conversation),
-            conversationId: conversation.conversationId,
+            conversationId: conversation.chatId,
             onAvatarTap: () async {
               final result = await UserProfileModal.show(
                 context: context,
                 dm: DmModel(
-                  conversationId: conversation.conversationId,
+                  chatId: conversation.chatId,
                   recipientId: conversation.recipientId,
                   recipientName: conversation.recipientName,
                   recipientPhone: conversation.recipientPhone,
                   recipientProfilePic: conversation.recipientProfilePic,
                   isRecipientOnline: conversation.isRecipientOnline,
                   createdAt: conversation.createdAt,
-                  lastMessageAt: conversation.lastMessageAt,
-                  lastMessageBody: conversation.lastMessageBody,
+                  lastMsgAt: conversation.lastMsgAt,
+                  lastMsgBody: conversation.lastMsgBody,
                 ),
                 isOnline: _userStatusService.isUserOnline(
                   conversation.recipientId,
@@ -434,7 +434,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
               ref
                   .read(chatProvider.notifier)
                   .setActiveConversation(
-                    conversation.conversationId,
+                    conversation.chatId,
                     ChatType.dm,
                   );
 
@@ -447,7 +447,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
               // Clear unread count again when returning from inner chat
               ref
                   .read(chatProvider.notifier)
-                  .clearUnreadCount(conversation.conversationId, ChatType.dm);
+                  .clearUnreadCount(conversation.chatId, ChatType.dm);
               // Clear active conversation when returning from inner chat
               ref.read(chatProvider.notifier).setActiveConversation(null, null);
             },
@@ -469,7 +469,7 @@ class ChatListItem extends ConsumerWidget {
   final bool isPinned;
   final bool isMuted;
   final bool isFavorite;
-  final int conversationId;
+  final String conversationId;
 
   const ChatListItem({
     super.key,
@@ -620,8 +620,8 @@ class ChatListItem extends ConsumerWidget {
       lastMessageType = 'text';
       attachmentData = null;
     } else {
-      lastMessageBody = conversation.lastMessageBody ?? 'No messages yet';
-      lastMessageType = conversation.lastMessageType;
+      lastMessageBody = conversation.lastMsgBody ?? 'No messages yet';
+      lastMessageType = conversation.lastMsgType;
       attachmentData = null; // DmModel doesn't have attachmentData in metadata
     }
 
@@ -631,8 +631,8 @@ class ChatListItem extends ConsumerWidget {
       attachmentData,
     );
 
-    final timeText = conversation.lastMessageAt != null
-        ? _formatTime(conversation.lastMessageAt!)
+    final timeText = conversation.lastMsgAt != null
+        ? _formatTime(conversation.lastMsgAt!)
         : _formatTime(conversation.createdAt);
 
     return Container(

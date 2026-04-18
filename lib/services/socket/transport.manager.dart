@@ -1,14 +1,18 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 
+import '../../db/repositories/missed-ws-messages.repo.dart';
 import '../../utils/network.utils.dart';
 import '../../types/network.types.dart';
 import '../../api/api_service.dart';
 import '../../services/cookies.service.dart';
 import '../../utils/navigation-helper.util.dart';
 import '../message/message_gc.service.dart';
+import '../message/status-ack.service.dart';
 import 'transport.service.dart';
 
 /// Transport manager that handles fallback logic between transports.
@@ -58,8 +62,6 @@ class TransportManager {
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
   static const int _maxReconnectAttempts = 50;
-  static const Duration _baseReconnectDelay = Duration(seconds: 1);
-  static const Duration _maxReconnectDelay = Duration(seconds: 60);
 
   // Track if disconnectivity popup is shown
   bool _isDisconnectivityPopupShown = false;
@@ -116,31 +118,11 @@ class TransportManager {
 
     debugPrint('[TRANSPORT-MGR] Starting connection attempt');
 
-    // Check network state first
-    final networkState = await _networkUtil.checkNetwork();
-    debugPrint('[TRANSPORT-MGR] Network state: $networkState');
-
-    // If network is not available, schedule reconnect
-    if (!networkState.isAvailable) {
-      debugPrint('[TRANSPORT-MGR] Network not available, scheduling reconnect');
-      _isConnecting = false;
-      if (_allowReconnect) {
-        _scheduleReconnect();
-      }
-      return false;
-    }
-
-    // Determine preferred transport based on network state
-    final preferredMode = networkState.preferredTransmissionMode;
     bool connected = false;
 
-    // Try preferred transport first, then fallback
-    if (preferredMode == TransmissionMode.websocket &&
-        networkState.isWebSocketAvailable &&
-        _wsFailures < _maxFailuresBeforeFallback) {
-      debugPrint(
-        '[TRANSPORT-MGR] Network recommends WebSocket, attempting connection',
-      );
+    // Try WebSocket first (unless too many recent failures)
+    if (_wsFailures < _maxFailuresBeforeFallback) {
+      debugPrint('[TRANSPORT-MGR] Attempting WebSocket connection');
       connected = await _tryTransport(_wsTransport, TransportType.websocket);
       if (connected) {
         _wsFailures = 0;
@@ -152,12 +134,10 @@ class TransportManager {
       debugPrint('[TRANSPORT-MGR] WebSocket failed (failures: $_wsFailures)');
     }
 
-    // Fallback to polling if WebSocket failed or not preferred
-    // Try polling if server is reachable (internet available), even if network check says polling unavailable
-    // This ensures fallback works when WebSocket is blocked but HTTP works
-    if (!connected && networkState.isServerReachable) {
+    // Fallback to polling
+    if (!connected) {
       debugPrint(
-        '[TRANSPORT-MGR] Attempting Long Polling connection (fallback from WebSocket)',
+        '[TRANSPORT-MGR] Attempting Long Polling connection (fallback)',
       );
       connected = await _tryTransport(
         _pollingTransport,
@@ -168,24 +148,6 @@ class TransportManager {
         _startBackgroundWsReconnect();
         return true;
       }
-    }
-
-    // If preferred mode is polling but it failed, try WebSocket as last resort
-    if (!connected &&
-        preferredMode == TransmissionMode.longPolling &&
-        networkState.isWebSocketAvailable &&
-        _wsFailures < _maxFailuresBeforeFallback) {
-      debugPrint(
-        '[TRANSPORT-MGR] Polling failed, trying WebSocket as fallback',
-      );
-      connected = await _tryTransport(_wsTransport, TransportType.websocket);
-      if (connected) {
-        _wsFailures = 0;
-        _isConnecting = false;
-        _stopBackgroundWsReconnect();
-        return true;
-      }
-      _wsFailures++;
     }
 
     _isConnecting = false;
@@ -224,6 +186,32 @@ class TransportManager {
 
         _connectionStateController.add(TransportConnectionState.connected);
         _transportTypeController.add(type);
+
+        // Replay any WS messages that were queued while offline.
+        try {
+          final missedRepo = MissedWsMessagesRepository();
+          final pending = await missedRepo.getAllPending();
+          if (pending.isNotEmpty) {
+            debugPrint(
+              '[TRANSPORT-MGR] Replaying ${pending.length} missed WS messages',
+            );
+            for (final event in pending) {
+              final payload =
+                  jsonDecode(event.payload) as Map<String, dynamic>;
+              final wsMsg = {
+                'type': event.eventType,
+                'payload': payload,
+                'ws_timestamp':
+                    DateTime.now().toUtc().toIso8601String(),
+              };
+              await _currentTransport?.sendMessage(wsMsg);
+            }
+            await missedRepo.clearAll();
+            debugPrint('[TRANSPORT-MGR] Missed WS message replay complete');
+          }
+        } catch (e) {
+          debugPrint('[TRANSPORT-MGR] Error replaying missed WS messages: $e');
+        }
 
         // Gap-fill: immediately poll for any messages missed during the gap.
         // Pass _messageController.add so synced messages are routed through
@@ -315,6 +303,9 @@ class TransportManager {
   }
 
   void _handleTransportDisconnection() {
+    // Flush any pending status acks to MissedWsMessages before reconnect.
+    StatusAckService.instance.flushNow();
+
     if (!_allowReconnect) {
       debugPrint('[TRANSPORT-MGR] Reconnect not allowed, skipping');
       return;
@@ -424,15 +415,10 @@ class TransportManager {
       return;
     }
 
-    // Calculate delay with exponential backoff + jitter
-    // final baseDelay =
-    //     _baseReconnectDelay.inMilliseconds *
-    //     (1 << min(_reconnectAttempts, 5)); // Cap exponential at 2^5
-    // final jitter = Random().nextInt(1000); // Add up to 1 second jitter
-    // final delay = Duration(
-    //   milliseconds: min(baseDelay + jitter, _maxReconnectDelay.inMilliseconds),
-    // );
-    final delay = Duration(seconds: 2);
+    // Exponential backoff: 2s → 4s → 8s → 16s → 30s (capped)
+    final delay = Duration(
+      seconds: min(2 * pow(2, _reconnectAttempts).toInt(), 30),
+    );
 
     _reconnectAttempts++;
     debugPrint(

@@ -15,9 +15,9 @@ class NativeCallScreen {
   static StreamSubscription? _eventSubscription;
 
   // Callbacks for native events
-  static Function(int callId)? onCallAccepted;
-  static Function(int callId)? onCallDeclined;
-  static Function(int callId)? onCallEnded;
+  static Function(String callId)? onCallAccepted;
+  static Function(String callId)? onCallDeclined;
+  static Function(String callId)? onCallEnded;
   static Function(bool isMuted)? onMuteToggled;
   static Function(bool isSpeakerOn)? onSpeakerToggled;
 
@@ -32,15 +32,15 @@ class NativeCallScreen {
 
           switch (eventName) {
             case 'onCallAccepted':
-              final callId = event['callId'] as int? ?? 0;
+              final callId = event['callId']?.toString() ?? '';
               onCallAccepted?.call(callId);
               break;
             case 'onCallDeclined':
-              final callId = event['callId'] as int? ?? 0;
+              final callId = event['callId']?.toString() ?? '';
               onCallDeclined?.call(callId);
               break;
             case 'onCallEnded':
-              final callId = event['callId'] as int? ?? 0;
+              final callId = event['callId']?.toString() ?? '';
               onCallEnded?.call(callId);
               break;
             case 'onMuteToggled':
@@ -72,7 +72,7 @@ class NativeCallScreen {
 
   /// Show incoming call screen (full-screen on lock screen)
   static Future<bool> showIncomingCall({
-    required int callId,
+    required String callId,
     required String callerName,
     String? callerPhoto,
     String? callerPhone,
@@ -93,7 +93,7 @@ class NativeCallScreen {
 
   /// Show outgoing call screen
   static Future<bool> showOutgoingCall({
-    required int callId,
+    required String callId,
     required String calleeName,
     String? calleePhoto,
     String? calleePhone,
@@ -114,7 +114,7 @@ class NativeCallScreen {
 
   /// Show call screen with specific mode
   static Future<bool> showCallScreen({
-    required int callId,
+    required String callId,
     required String callerName,
     String? callerPhoto,
     String callMode = 'in_call',
@@ -172,7 +172,7 @@ class NativeCallScreen {
 
   /// Show ongoing call notification with timer
   static Future<bool> showOngoingNotification({
-    required int callId,
+    required String callId,
     required String callerName,
     String? callerPhoto,
   }) async {
@@ -235,7 +235,7 @@ class NativeCallScreen {
 
   /// Show a missed call notification in the notification panel
   static Future<bool> showMissedCallNotification({
-    required int callId,
+    required String callId,
     required String callerName,
   }) async {
     try {

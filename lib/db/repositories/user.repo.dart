@@ -30,7 +30,7 @@ class UserRepository {
     // For required fields (name, phone), preserve if new value is empty
     // For optional fields, preserve if new value is null
     final userCompanion = UsersCompanion.insert(
-      id: Value(user.id),
+      id: user.id,
       name: user.name.isEmpty && existingUser != null
           ? existingUser.name
           : user.name,
@@ -58,7 +58,7 @@ class UserRepository {
       // For required fields (name, phone), preserve if new value is empty
       // For optional fields, preserve if new value is null
       final userCompanion = UsersCompanion.insert(
-        id: Value(user.id),
+        id: user.id,
         name: user.name.isEmpty && existingUser != null
             ? existingUser.name
             : user.name,
@@ -115,7 +115,7 @@ class UserRepository {
     if (usersToInsert.isNotEmpty) {
       for (final user in usersToInsert) {
         final userCompanion = UsersCompanion.insert(
-          id: Value(user.id),
+          id: user.id,
           name: user.name,
           username: Value(user.username),
           phone: user.phone,
@@ -162,7 +162,7 @@ class UserRepository {
 
     for (final user in users) {
       final userCompanion = UsersCompanion.insert(
-        id: Value(user.id),
+        id: user.id,
         name: user.name,
         username: Value(user.username),
         phone: user.phone,
@@ -184,7 +184,7 @@ class UserRepository {
   }
 
   /// Get a user by ID
-  Future<UserModel?> getUserById(int userId) async {
+  Future<UserModel?> getUserById(String userId) async {
     final db = sqliteDatabase.database;
 
     final user = await (db.select(
@@ -272,7 +272,7 @@ class UserRepository {
   }
 
   /// Get multiple users by their IDs
-  Future<List<UserModel>> getUsersByIds(List<int> userIds) async {
+  Future<List<UserModel>> getUsersByIds(List<String> userIds) async {
     if (userIds.isEmpty) return [];
 
     final db = sqliteDatabase.database;
@@ -321,7 +321,7 @@ class UserRepository {
   }
 
   /// Update user's name
-  Future<void> updateUserName(int userId, String name) async {
+  Future<void> updateUserName(String userId, String name) async {
     final db = sqliteDatabase.database;
     await (db.update(db.users)..where((t) => t.id.equals(userId))).write(
       UsersCompanion(name: Value(name)),
@@ -329,7 +329,7 @@ class UserRepository {
   }
 
   /// Update user's username (contact name)
-  Future<void> updateUserUsername(int userId, String? username) async {
+  Future<void> updateUserUsername(String userId, String? username) async {
     final db = sqliteDatabase.database;
     await (db.update(db.users)..where((t) => t.id.equals(userId))).write(
       UsersCompanion(username: Value(username)),
@@ -339,7 +339,7 @@ class UserRepository {
   /// Update user's username and role together
   /// This ensures role is preserved when updating username from contacts
   Future<void> updateUserUsernameAndRole(
-    int userId,
+    String userId,
     String? username,
     String? role,
   ) async {
@@ -350,7 +350,7 @@ class UserRepository {
   }
 
   /// Update user's phone number
-  Future<void> updateUserPhone(int userId, String phone) async {
+  Future<void> updateUserPhone(String userId, String phone) async {
     final db = sqliteDatabase.database;
     await (db.update(db.users)..where((t) => t.id.equals(userId))).write(
       UsersCompanion(phone: Value(phone)),
@@ -358,7 +358,7 @@ class UserRepository {
   }
 
   /// Update user's role
-  Future<void> updateUserRole(int userId, String role) async {
+  Future<void> updateUserRole(String userId, String role) async {
     final db = sqliteDatabase.database;
     await (db.update(db.users)..where((t) => t.id.equals(userId))).write(
       UsersCompanion(role: Value(role)),
@@ -366,7 +366,7 @@ class UserRepository {
   }
 
   /// Update user's profile picture
-  Future<void> updateUserProfilePic(int userId, String? profilePic) async {
+  Future<void> updateUserProfilePic(String userId, String? profilePic) async {
     final db = sqliteDatabase.database;
     await (db.update(db.users)..where((t) => t.id.equals(userId))).write(
       UsersCompanion(profilePic: Value(profilePic)),
@@ -374,7 +374,7 @@ class UserRepository {
   }
 
   /// Update user's online status
-  Future<void> updateUserOnlineStatus(int userId, bool isOnline) async {
+  Future<void> updateUserOnlineStatus(String userId, bool isOnline) async {
     final db = sqliteDatabase.database;
     await (db.update(db.users)..where((t) => t.id.equals(userId))).write(
       UsersCompanion(isOnline: Value(isOnline)),
@@ -382,7 +382,7 @@ class UserRepository {
   }
 
   /// Delete a user by ID
-  Future<bool> deleteUser(int userId) async {
+  Future<bool> deleteUser(String userId) async {
     final db = sqliteDatabase.database;
     final deleted = await (db.delete(
       db.users,
@@ -391,7 +391,7 @@ class UserRepository {
   }
 
   /// Delete multiple users by their IDs
-  Future<int> deleteUsers(List<int> userIds) async {
+  Future<int> deleteUsers(List<String> userIds) async {
     if (userIds.isEmpty) return 0;
 
     final db = sqliteDatabase.database;
@@ -418,7 +418,7 @@ class UserRepository {
       // Insert new users
       for (final user in users) {
         final userCompanion = UsersCompanion.insert(
-          id: Value(user.id),
+          id: user.id,
           name: user.name,
           username: Value(user.username),
           phone: user.phone,
@@ -433,7 +433,7 @@ class UserRepository {
   }
 
   /// Check if a user exists by ID
-  Future<bool> userExists(int userId) async {
+  Future<bool> userExists(String userId) async {
     final db = sqliteDatabase.database;
     final user = await (db.select(
       db.users,

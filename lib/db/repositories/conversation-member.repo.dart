@@ -1,6 +1,7 @@
 import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:drift/drift.dart';
+import 'package:uuid/uuid.dart';
 import '../../models/group.model.dart';
 import '../../models/user.model.dart';
 import '../sqlite.db.dart';
@@ -9,125 +10,105 @@ import '../sqlite.schema.dart';
 class ConversationMemberRepository {
   final sqliteDatabase = SqliteDatabase.instance;
 
-  /// Helper method to convert ConversationMember row to ConversationMemberModel
-  ConversationMemberModel _conversationMemberToModel(
-    ConversationMember member,
-  ) {
-    return ConversationMemberModel(
+  /// Helper method to convert ChatMember row to ChatMemberModel
+  ChatMemberModel _chatMemberToModel(ChatMember member) {
+    return ChatMemberModel(
       id: member.id,
-      conversationId: member.conversationId,
+      chatId: member.chatId,
       userId: member.userId,
       role: member.role,
-      unreadCount: member.unreadCount,
       joinedAt: member.joinedAt,
       removedAt: member.removedAt,
-      lastReadMessageId: member.lastReadMessageId?.toInt(),
-      lastDeliveredMessageId: member.lastDeliveredMessageId?.toInt(),
+      lastReadMsgId: member.lastReadMsgId,
+      lastDeliveredMsgId: member.lastDeliveredMsgId,
     );
   }
 
-  /// Insert multiple conversation members (bulk insert)
+  /// Insert multiple chat members (bulk insert)
   Future<void> insertConversationMembers(
-    List<ConversationMemberModel> members,
+    List<ChatMemberModel> members,
   ) async {
     final db = sqliteDatabase.database;
 
     for (final member in members) {
-      // Check if member already exists to preserve existing values
       final existingMember = await getMemberByConversationAndUser(
-        member.conversationId,
+        member.chatId,
         member.userId,
       );
 
-      final memberCompanion = ConversationMembersCompanion.insert(
-        conversationId: member.conversationId,
+      final memberCompanion = ChatMembersCompanion.insert(
+        id: member.id ?? existingMember?.id ?? '',
+        chatId: member.chatId,
         userId: member.userId,
-        role: member.role, // role is required (non-nullable)
-        unreadCount: Value(
-          member.unreadCount ?? existingMember?.unreadCount ?? 0,
-        ),
+        role: member.role,
         joinedAt: Value(member.joinedAt ?? existingMember?.joinedAt),
         removedAt: Value(member.removedAt ?? existingMember?.removedAt),
-        lastReadMessageId: Value(
-          () {
-            final value = member.lastReadMessageId ?? existingMember?.lastReadMessageId;
-            return value != null ? BigInt.from(value) : null;
-          }(),
+        lastReadMsgId: Value(
+          member.lastReadMsgId ?? existingMember?.lastReadMsgId,
         ),
-        lastDeliveredMessageId: Value(
-          () {
-            final value = member.lastDeliveredMessageId ?? existingMember?.lastDeliveredMessageId;
-            return value != null ? BigInt.from(value) : null;
-          }(),
+        lastDeliveredMsgId: Value(
+          member.lastDeliveredMsgId ?? existingMember?.lastDeliveredMsgId,
         ),
       );
-      await db
-          .into(db.conversationMembers)
-          .insertOnConflictUpdate(memberCompanion);
+      await db.into(db.chatMembers).insertOnConflictUpdate(memberCompanion);
     }
   }
 
-  /// Insert or update conversation members efficiently - only inserts new members and updates existing ones if data changed
+  /// Insert or update chat members efficiently - only inserts new members and updates existing ones if data changed
   Future<void> insertOrUpdateConversationMembers(
-    List<ConversationMemberModel> members,
+    List<ChatMemberModel> members,
   ) async {
     if (members.isEmpty) return;
 
     final db = sqliteDatabase.database;
 
-    // Batch fetch all existing members for this conversation
-    final conversationId = members.first.conversationId;
-    final existingMembers = await getMembersByConversationId(conversationId);
+    final chatId = members.first.chatId;
+    final existingMembers = await getMembersByConversationId(chatId);
     final existingMembersMap = {
       for (var member in existingMembers)
-        '${member.conversationId}_${member.userId}': member
+        '${member.chatId}_${member.userId}': member,
     };
 
-    final List<ConversationMemberModel> membersToInsert = [];
-    final List<ConversationMemberModel> membersToUpdate = [];
+    final List<ChatMemberModel> membersToInsert = [];
+    final List<ChatMemberModel> membersToUpdate = [];
 
     for (final member in members) {
-      final key = '${member.conversationId}_${member.userId}';
+      final key = '${member.chatId}_${member.userId}';
       final existingMember = existingMembersMap[key];
 
       if (existingMember == null) {
-        // Member doesn't exist, add to insert list
         membersToInsert.add(member);
       } else {
-        // Member exists, check if any data has changed
-        bool hasChanged = 
-            member.role != existingMember.role ||
+        bool hasChanged = member.role != existingMember.role ||
             member.joinedAt != existingMember.joinedAt ||
             member.removedAt != existingMember.removedAt;
-        
+
         if (hasChanged) {
           membersToUpdate.add(member);
         }
       }
     }
 
-    // Insert new members
     if (membersToInsert.isNotEmpty) {
       for (final member in membersToInsert) {
-        final memberCompanion = ConversationMembersCompanion.insert(
-          conversationId: member.conversationId,
+        final memberCompanion = ChatMembersCompanion.insert(
+          id: member.id ?? '${member.chatId}_${member.userId}',
+          chatId: member.chatId,
           userId: member.userId,
           role: member.role,
-          unreadCount: Value(member.unreadCount ?? 0),
           joinedAt: Value(member.joinedAt),
           removedAt: Value(member.removedAt),
-          lastReadMessageId: Value(member.lastReadMessageId != null ? BigInt.from(member.lastReadMessageId!) : null),
-          lastDeliveredMessageId: Value(member.lastDeliveredMessageId != null ? BigInt.from(member.lastDeliveredMessageId!) : null),
+          lastReadMsgId: Value(member.lastReadMsgId),
+          lastDeliveredMsgId: Value(member.lastDeliveredMsgId),
         );
-        await db.into(db.conversationMembers).insert(memberCompanion);
+        await db.into(db.chatMembers).insert(memberCompanion);
       }
     }
 
-    // Update existing members only if data changed
     if (membersToUpdate.isNotEmpty) {
       for (final member in membersToUpdate) {
-        final companion = ConversationMembersCompanion(
-          conversationId: Value(member.conversationId),
+        final companion = ChatMembersCompanion(
+          chatId: Value(member.chatId),
           userId: Value(member.userId),
           role: Value(member.role),
           joinedAt: member.joinedAt != null
@@ -137,140 +118,133 @@ class ConversationMemberRepository {
               ? Value(member.removedAt!)
               : const Value.absent(),
         );
-        await (db.update(db.conversationMembers)..where(
-              (t) =>
-                  t.conversationId.equals(member.conversationId) &
-                  t.userId.equals(member.userId),
-            ))
+        await (db.update(db.chatMembers)
+              ..where(
+                (t) =>
+                    t.chatId.equals(member.chatId) &
+                    t.userId.equals(member.userId),
+              ))
             .write(companion);
       }
     }
   }
 
-  /// Insert multiple conversation members (insert only, no update on conflict)
-  /// Use this when you've already checked that members don't exist
+  /// Insert multiple chat members (insert only, no update on conflict)
   Future<void> insertConversationMembersOnly(
-    List<ConversationMemberModel> members,
+    List<ChatMemberModel> members,
   ) async {
     final db = sqliteDatabase.database;
 
     for (final member in members) {
-      final memberCompanion = ConversationMembersCompanion.insert(
-        conversationId: member.conversationId,
+      final memberCompanion = ChatMembersCompanion.insert(
+        id: member.id ?? '${member.chatId}_${member.userId}',
+        chatId: member.chatId,
         userId: member.userId,
-        role: member.role, // role is required (non-nullable)
-        unreadCount: Value(member.unreadCount ?? 0),
+        role: member.role,
         joinedAt: Value(member.joinedAt),
         removedAt: Value(member.removedAt),
-        lastReadMessageId: Value(member.lastReadMessageId != null ? BigInt.from(member.lastReadMessageId!) : null),
-        lastDeliveredMessageId: Value(member.lastDeliveredMessageId != null ? BigInt.from(member.lastDeliveredMessageId!) : null),
+        lastReadMsgId: Value(member.lastReadMsgId),
+        lastDeliveredMsgId: Value(member.lastDeliveredMsgId),
       );
-      await db.into(db.conversationMembers).insert(memberCompanion);
+      await db.into(db.chatMembers).insertOnConflictUpdate(memberCompanion);
     }
   }
 
-  /// Get all conversation members
-  Future<List<ConversationMemberModel>> getAllConversationMembers() async {
+  /// Get all chat members
+  Future<List<ChatMemberModel>> getAllConversationMembers() async {
     final db = sqliteDatabase.database;
 
-    final query = db.select(db.conversationMembers)
+    final query = db.select(db.chatMembers)
       ..orderBy([
         (t) => OrderingTerm(expression: t.joinedAt, mode: OrderingMode.desc),
       ]);
 
     final members = await query.get();
 
-    return members.map((member) => _conversationMemberToModel(member)).toList();
+    return members.map(_chatMemberToModel).toList();
   }
 
-  /// Clear all conversation members from the database
+  /// Clear all chat members from the database
   Future<void> clearAllConversationMembers() async {
     final db = sqliteDatabase.database;
-    await db.delete(db.conversationMembers).go();
+    await db.delete(db.chatMembers).go();
   }
 
-  /// Update a conversation member
-  Future<void> updateConversationMember(ConversationMemberModel member) async {
+  /// Update a chat member
+  Future<void> updateConversationMember(ChatMemberModel member) async {
     final db = sqliteDatabase.database;
 
-    // role is required (non-nullable), so always update it
-    // For nullable fields, only update if provided, otherwise preserve existing using Value.absent()
-    final companion = ConversationMembersCompanion(
-      conversationId: Value(member.conversationId),
+    final companion = ChatMembersCompanion(
+      chatId: Value(member.chatId),
       userId: Value(member.userId),
       role: Value(member.role),
-      unreadCount: member.unreadCount != null
-          ? Value(member.unreadCount!)
-          : const Value.absent(),
       joinedAt: member.joinedAt != null
           ? Value(member.joinedAt!)
           : const Value.absent(),
       removedAt: member.removedAt != null
           ? Value(member.removedAt!)
           : const Value.absent(),
-      lastReadMessageId: member.lastReadMessageId != null
-          ? Value(BigInt.from(member.lastReadMessageId!))
+      lastReadMsgId: member.lastReadMsgId != null
+          ? Value(member.lastReadMsgId!)
           : const Value.absent(),
-      lastDeliveredMessageId: member.lastDeliveredMessageId != null
-          ? Value(BigInt.from(member.lastDeliveredMessageId!))
+      lastDeliveredMsgId: member.lastDeliveredMsgId != null
+          ? Value(member.lastDeliveredMsgId!)
           : const Value.absent(),
     );
 
-    // Use update instead of replace to preserve existing values
-    await (db.update(db.conversationMembers)..where(
-          (t) =>
-              t.conversationId.equals(member.conversationId) &
-              t.userId.equals(member.userId),
-        ))
+    await (db.update(db.chatMembers)
+          ..where(
+            (t) =>
+                t.chatId.equals(member.chatId) &
+                t.userId.equals(member.userId),
+          ))
         .write(companion);
   }
 
-  /// Get a conversation member by ID
-  Future<ConversationMemberModel?> getConversationMemberById(
-    int memberId,
-  ) async {
+  /// Get a chat member by ID
+  Future<ChatMemberModel?> getConversationMemberById(String memberId) async {
     final db = sqliteDatabase.database;
 
-    final member = await (db.select(
-      db.conversationMembers,
-    )..where((t) => t.id.equals(memberId))).getSingleOrNull();
+    final member = await (db.select(db.chatMembers)
+          ..where((t) => t.id.equals(memberId)))
+        .getSingleOrNull();
 
     if (member == null) return null;
 
-    return _conversationMemberToModel(member);
+    return _chatMemberToModel(member);
   }
 
-  /// Delete a conversation member by ID
-  Future<bool> deleteConversationMember(int memberId) async {
+  /// Delete a chat member by ID
+  Future<bool> deleteConversationMember(String memberId) async {
     final db = sqliteDatabase.database;
-    final deleted = await (db.delete(
-      db.conversationMembers,
-    )..where((t) => t.id.equals(memberId))).go();
+    final deleted = await (db.delete(db.chatMembers)
+          ..where((t) => t.id.equals(memberId)))
+        .go();
     return deleted > 0;
   }
 
-  /// Get all members of a conversation
-  Future<List<ConversationMemberModel>> getMembersByConversationId(
-    int conversationId,
+  /// Get all members of a chat
+  Future<List<ChatMemberModel>> getMembersByConversationId(
+    String chatId,
   ) async {
     final db = sqliteDatabase.database;
 
-    final query = db.select(db.conversationMembers)
-      ..where((t) => t.conversationId.equals(conversationId))
+    final query = db.select(db.chatMembers)
+      ..where((t) => t.chatId.equals(chatId))
       ..orderBy([
         (t) => OrderingTerm(expression: t.joinedAt, mode: OrderingMode.desc),
       ]);
 
     final members = await query.get();
 
-    return members.map((member) => _conversationMemberToModel(member)).toList();
+    return members.map(_chatMemberToModel).toList();
   }
 
-  // get all members of conversations with user details
+  /// get all members of a chat with user details
   Future<List<UserModel>> getMembersWithUserDetailsByConversationId(
-    int conversationId,
+    String chatId,
   ) async {
-    final members = await getMembersByConversationId(conversationId);
+    final members = await getMembersByConversationId(chatId);
     final userIds = members.map((member) => member.userId).toList();
     final users = await UserRepository()
         .getUsersByIds(userIds)
@@ -281,51 +255,45 @@ class ConversationMemberRepository {
     return users;
   }
 
-  // update member role
+  /// update member role
   Future<void> updateMemberRole(
-    int conversationId,
-    int userId,
+    String chatId,
+    String userId,
     String role,
   ) async {
     final db = sqliteDatabase.database;
-    await (db.update(db.conversationMembers)..where(
-          (t) =>
-              t.userId.equals(userId) & t.conversationId.equals(conversationId),
-        ))
-        .write(ConversationMembersCompanion(role: Value(role)));
+    await (db.update(db.chatMembers)
+          ..where(
+            (t) => t.userId.equals(userId) & t.chatId.equals(chatId),
+          ))
+        .write(ChatMembersCompanion(role: Value(role)));
   }
 
   /// Get group members with their details and role using SQL JOIN
-  /// Joins ConversationMembers with Users table to get complete member information
   Future<List<GroupMember>> getGroupMembersWithDetails(
-    int conversationId,
+    String chatId,
   ) async {
     final db = sqliteDatabase.database;
 
-    // Create query with LEFT JOIN to Users table
-    final query =
-        db.select(db.conversationMembers).join([
-            leftOuterJoin(
-              db.users,
-              db.users.id.equalsExp(db.conversationMembers.userId),
-            ),
-          ])
-          ..where(db.conversationMembers.conversationId.equals(conversationId))
-          ..where(
-            db.conversationMembers.removedAt.isNull(),
-          ) // Only active members
-          ..orderBy([
-            OrderingTerm(
-              expression: db.conversationMembers.joinedAt,
-              mode: OrderingMode.asc,
-            ),
-          ]);
+    final query = db.select(db.chatMembers).join([
+          leftOuterJoin(
+            db.users,
+            db.users.id.equalsExp(db.chatMembers.userId),
+          ),
+        ])
+      ..where(db.chatMembers.chatId.equals(chatId))
+      ..where(db.chatMembers.removedAt.isNull())
+      ..orderBy([
+        OrderingTerm(
+          expression: db.chatMembers.joinedAt,
+          mode: OrderingMode.asc,
+        ),
+      ]);
 
-    // Execute query and map results
     final results = await query.get();
 
     return results.map((row) {
-      final member = row.readTable(db.conversationMembers);
+      final member = row.readTable(db.chatMembers);
       final user = row.readTableOrNull(db.users);
 
       return GroupMember(
@@ -333,16 +301,16 @@ class ConversationMemberRepository {
         name: user?.name ?? '',
         profilePic: user?.profilePic,
         role: member.role,
-        joinedAt: member.joinedAt,
+        joinedAt: member.joinedAt ?? '',
       );
     }).toList();
   }
 
-  /// Get all conversations a user is a member of
-  Future<List<ConversationMemberModel>> getMembersByUserId(int userId) async {
+  /// Get all chats a user is a member of
+  Future<List<ChatMemberModel>> getMembersByUserId(String userId) async {
     final db = sqliteDatabase.database;
 
-    final query = db.select(db.conversationMembers)
+    final query = db.select(db.chatMembers)
       ..where((t) => t.userId.equals(userId))
       ..orderBy([
         (t) => OrderingTerm(expression: t.joinedAt, mode: OrderingMode.desc),
@@ -350,128 +318,112 @@ class ConversationMemberRepository {
 
     final members = await query.get();
 
-    return members.map((member) => _conversationMemberToModel(member)).toList();
+    return members.map(_chatMemberToModel).toList();
   }
 
-  /// Get active members of a conversation (not removed)
-  Future<List<ConversationMemberModel>> getActiveMembersByConversationId(
-    int conversationId,
+  /// Get active members of a chat (not removed)
+  Future<List<ChatMemberModel>> getActiveMembersByConversationId(
+    String chatId,
   ) async {
     final db = sqliteDatabase.database;
 
-    final query = db.select(db.conversationMembers)
-      ..where(
-        (t) => t.conversationId.equals(conversationId) & t.removedAt.isNull(),
-      )
+    final query = db.select(db.chatMembers)
+      ..where((t) => t.chatId.equals(chatId) & t.removedAt.isNull())
       ..orderBy([
         (t) => OrderingTerm(expression: t.joinedAt, mode: OrderingMode.desc),
       ]);
 
     final members = await query.get();
 
-    return members.map((member) => _conversationMemberToModel(member)).toList();
+    return members.map(_chatMemberToModel).toList();
   }
 
-  /// Update unread count for a conversation member
-  Future<void> updateUnreadCount(int memberId, int unreadCount) async {
+  /// Mark chat member as read (update lastReadMsgId)
+  Future<void> markAsRead(String memberId, String lastReadMsgId) async {
     final db = sqliteDatabase.database;
-    await (db.update(db.conversationMembers)
+    await (db.update(db.chatMembers)
           ..where((t) => t.id.equals(memberId)))
-        .write(ConversationMembersCompanion(unreadCount: Value(unreadCount)));
-  }
-
-  /// Mark conversation member as read (update lastReadMessageId)
-  Future<void> markAsRead(int memberId, int lastReadMessageId) async {
-    final db = sqliteDatabase.database;
-    await (db.update(
-      db.conversationMembers,
-    )..where((t) => t.id.equals(memberId))).write(
-      ConversationMembersCompanion(
-        lastReadMessageId: Value(BigInt.from(lastReadMessageId)),
-        unreadCount: const Value(0),
-      ),
+        .write(
+      ChatMembersCompanion(lastReadMsgId: Value(lastReadMsgId)),
     );
   }
 
-  /// Update last delivered message ID for a conversation member
+  /// Update last delivered message ID for a chat member
   Future<void> updateLastDeliveredMessageId(
-    int memberId,
-    int lastDeliveredMessageId,
+    String memberId,
+    String lastDeliveredMsgId,
   ) async {
     final db = sqliteDatabase.database;
-    await (db.update(
-      db.conversationMembers,
-    )..where((t) => t.id.equals(memberId))).write(
-      ConversationMembersCompanion(
-        lastDeliveredMessageId: Value(BigInt.from(lastDeliveredMessageId)),
-      ),
+    await (db.update(db.chatMembers)
+          ..where((t) => t.id.equals(memberId)))
+        .write(
+      ChatMembersCompanion(lastDeliveredMsgId: Value(lastDeliveredMsgId)),
     );
   }
 
-  /// Update role of a conversation member
-  Future<void> updateRole(int memberId, String role) async {
+  /// Update role of a chat member
+  Future<void> updateRole(String memberId, String role) async {
     final db = sqliteDatabase.database;
-    await (db.update(db.conversationMembers)
+    await (db.update(db.chatMembers)
           ..where((t) => t.id.equals(memberId)))
-        .write(ConversationMembersCompanion(role: Value(role)));
+        .write(ChatMembersCompanion(role: Value(role)));
   }
 
-  /// Mark conversation member as removed (soft delete)
-  Future<void> markAsRemoved(int memberId) async {
+  /// Mark chat member as removed (soft delete)
+  Future<void> markAsRemoved(String memberId) async {
     final db = sqliteDatabase.database;
-    await (db.update(
-      db.conversationMembers,
-    )..where((t) => t.id.equals(memberId))).write(
-      ConversationMembersCompanion(
+    await (db.update(db.chatMembers)
+          ..where((t) => t.id.equals(memberId)))
+        .write(
+      ChatMembersCompanion(
         removedAt: Value(DateTime.now().toIso8601String()),
       ),
     );
   }
 
-  /// Get a conversation member by conversation ID and user ID
-  Future<ConversationMemberModel?> getMemberByConversationAndUser(
-    int conversationId,
-    int userId,
+  /// Get a chat member by chat ID and user ID
+  Future<ChatMemberModel?> getMemberByConversationAndUser(
+    String chatId,
+    String userId,
   ) async {
     final db = sqliteDatabase.database;
 
-    final members =
-        await (db.select(db.conversationMembers)
-              ..where(
-                (t) =>
-                    t.conversationId.equals(conversationId) &
-                    t.userId.equals(userId) &
-                    t.removedAt.isNull(), // Only get active members
-              )
-              ..orderBy([
-                (t) => OrderingTerm(expression: t.id, mode: OrderingMode.desc),
-              ])
-              ..limit(1))
-            .get();
+    final members = await (db.select(db.chatMembers)
+          ..where(
+            (t) =>
+                t.chatId.equals(chatId) &
+                t.userId.equals(userId) &
+                t.removedAt.isNull(),
+          )
+          ..orderBy([
+            (t) => OrderingTerm(expression: t.id, mode: OrderingMode.desc),
+          ])
+          ..limit(1))
+        .get();
 
     if (members.isEmpty) return null;
 
-    return _conversationMemberToModel(members.first);
+    return _chatMemberToModel(members.first);
   }
 
-  /// Delete all members of a conversation
-  Future<void> deleteMembersByConversationId(int conversationId) async {
+  /// Delete all members of a chat
+  Future<void> deleteMembersByConversationId(String chatId) async {
     final db = sqliteDatabase.database;
-    await (db.delete(
-      db.conversationMembers,
-    )..where((t) => t.conversationId.equals(conversationId))).go();
+    await (db.delete(db.chatMembers)
+          ..where((t) => t.chatId.equals(chatId)))
+        .go();
   }
 
-  /// Delete a member by conversation ID and user ID
+  /// Delete a member by chat ID and user ID
   Future<void> deleteMemberByConversationAndUserId(
-    int conversationId,
-    int userId,
+    String chatId,
+    String userId,
   ) async {
     final db = sqliteDatabase.database;
-    await (db.delete(db.conversationMembers)..where(
-          (t) =>
-              t.userId.equals(userId) & t.conversationId.equals(conversationId),
-        ))
+    await (db.delete(db.chatMembers)
+          ..where(
+            (t) => t.userId.equals(userId) & t.chatId.equals(chatId),
+          ))
         .go();
   }
 }

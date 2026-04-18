@@ -361,8 +361,8 @@ class _GlobalCallPillState extends ConsumerState<GlobalCallPill>
   }
 
   ActiveCallState _emptyState() => ActiveCallState(
-    callId: 0,
-    userId: 0,
+    callId: '',
+    userId: '',
     userName: '',
     callType: CallType.outgoing,
     status: CallStatus.initiated,

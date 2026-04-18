@@ -41,8 +41,8 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
   int? _memberCount;
 
   bool get isGroup => widget.group != null;
-  int get conversationId =>
-      widget.dm?.conversationId ?? widget.group!.conversationId;
+  String get conversationId =>
+      widget.dm?.chatId ?? widget.group!.chatId;
   ChatType get chatType => isGroup ? ChatType.group : ChatType.dm;
 
   @override
@@ -62,7 +62,7 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
       final chatState = ref.read(chatProvider);
       try {
         final dm = chatState.dmList.firstWhere(
-          (dm) => dm.conversationId == widget.dm!.conversationId,
+          (dm) => dm.chatId == widget.dm!.chatId,
         );
         final user = UserModel(
           id: dm.recipientId,
@@ -80,7 +80,7 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
       final currentUser = await UserUtils().getUserDetails();
       final currentUserId = currentUser?.id;
       final members = await _conversationMemberRepo
-          .getActiveMembersByConversationId(widget.dm!.conversationId);
+          .getActiveMembersByConversationId(widget.dm!.chatId);
 
       if (members.isNotEmpty && currentUserId != null) {
         for (final member in members) {
@@ -153,7 +153,7 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
       final chatState = ref.read(chatProvider);
       try {
         return chatState.dmList.firstWhere(
-          (dm) => dm.conversationId == conversationId,
+          (dm) => dm.chatId == conversationId,
         );
       } catch (_) {}
     }
@@ -165,7 +165,7 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
       final chatState = ref.read(chatProvider);
       try {
         return chatState.groupList.firstWhere(
-          (g) => g.conversationId == conversationId,
+          (g) => g.chatId == conversationId,
         );
       } catch (_) {}
     }

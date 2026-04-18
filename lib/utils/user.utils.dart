@@ -77,7 +77,7 @@ class UserUtils {
 
   /// Get display name for a user ID from local database
   /// Returns username (from contacts) if available, otherwise server name
-  Future<String?> getDisplayNameForUserId(int userId) async {
+  Future<String?> getDisplayNameForUserId(String userId) async {
     try {
       final userRepo = UserRepository();
       final user = await userRepo.getUserById(userId);
@@ -121,7 +121,7 @@ class UserUtils {
   /// This ensures contact names (username) are preserved instead of server names
   Future<List<CallModel>> enrichCallsWithDisplayNames(
     List<CallModel> calls,
-    int currentUserId,
+    String currentUserId,
   ) async {
     try {
       final userRepo = UserRepository();

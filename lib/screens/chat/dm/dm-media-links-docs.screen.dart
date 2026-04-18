@@ -26,7 +26,7 @@ class DmMediaLinksDocsScreen extends ConsumerStatefulWidget {
     this.group,
   }) : assert(dm != null || group != null, 'Either dm or group must be provided');
 
-  int get conversationId => dm?.conversationId ?? group!.conversationId;
+  String get conversationId => dm?.chatId ?? group!.chatId;
 
   @override
   ConsumerState<DmMediaLinksDocsScreen> createState() =>

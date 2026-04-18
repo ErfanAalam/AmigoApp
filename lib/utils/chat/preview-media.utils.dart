@@ -275,7 +275,7 @@ Future<void> openUnifiedMediaPreview({
   Function(File, String, {MessageModel? failedMessage})? onRetryImage,
   Function(File, String, {MessageModel? failedMessage})? onRetryVideo,
   Function(String)? showErrorDialog,
-  Set<int>? starredMessages,
+  Set<String>? starredMessages,
 }) async {
   if (!mounted || messages.isEmpty) return;
 

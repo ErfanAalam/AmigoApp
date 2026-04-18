@@ -18,7 +18,7 @@ class ContactsRepository {
 
       // For required fields (name, phone), preserve if new value is empty
       final contactCompanion = ContactsCompanion.insert(
-        id: Value(contact.id),
+        id: contact.id,
         name: contact.name.isEmpty && existingContact != null
             ? existingContact.name
             : contact.name,
@@ -61,7 +61,7 @@ class ContactsRepository {
       // Insert new contacts
       for (final contact in contacts) {
         final contactCompanion = ContactsCompanion.insert(
-          id: Value(contact.id),
+          id: contact.id,
           name: contact.name,
           phone: contact.phone,
           profilePic: Value(contact.profilePic),

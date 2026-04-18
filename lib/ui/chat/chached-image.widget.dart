@@ -6,8 +6,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 Widget buildCachedImage({
   required String imageUrl,
   String? localPath,
-  required int messageId,
-  required Function(String, int) onCacheMedia,
+  required String messageId,
+  required Function(String, String) onCacheMedia,
   double width = 200,
   double height = 200,
 }) {
@@ -44,8 +44,8 @@ Widget buildCachedImage({
 /// Build network image widget with caching
 Widget buildNetworkImage({
   required String imageUrl,
-  required int messageId,
-  required Function(String, int) onCacheMedia,
+  required String messageId,
+  required Function(String, String) onCacheMedia,
   double width = 200,
   double height = 200,
 }) {

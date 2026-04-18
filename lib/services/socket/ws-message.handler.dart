@@ -19,14 +19,17 @@ class WebSocketMessageHandler {
   StreamSubscription<Map<String, dynamic>>? _messageSubscription;
 
   // Stream controllers for different message types
-  final StreamController<ConnectionStatus> _onlineStatusController =
-      StreamController<ConnectionStatus>.broadcast();
+  final StreamController<ConnectionStatusPayload> _onlineStatusController =
+      StreamController<ConnectionStatusPayload>.broadcast();
 
   final StreamController<ChatMessagePayload> _messageNewController =
       StreamController<ChatMessagePayload>.broadcast();
 
-  final StreamController<ChatMessageAckPayload> _messageAckController =
-      StreamController<ChatMessageAckPayload>.broadcast();
+  final StreamController<MessageSentAckPayload> _messageSentAckController =
+      StreamController<MessageSentAckPayload>.broadcast();
+
+  final StreamController<MessageStatusAckPayload> _messageStatusAckController =
+      StreamController<MessageStatusAckPayload>.broadcast();
 
   final StreamController<TypingPayload> _typingController =
       StreamController<TypingPayload>.broadcast();
@@ -44,11 +47,8 @@ class WebSocketMessageHandler {
   final StreamController<DeleteMessagePayload> _messageDeleteController =
       StreamController<DeleteMessagePayload>.broadcast();
 
-  final StreamController<JoinLeavePayload> _joinConversationController =
-      StreamController<JoinLeavePayload>.broadcast();
-
-  final StreamController<JoinLeavePayload> _leaveConversationController =
-      StreamController<JoinLeavePayload>.broadcast();
+  final StreamController<ConvJoinPayload> _joinConversationController =
+      StreamController<ConvJoinPayload>.broadcast();
 
   // Call message stream controllers
   final StreamController<CallPayload> _callInitController =
@@ -84,10 +84,6 @@ class WebSocketMessageHandler {
   final StreamController<CallPayload> _callMissedController =
       StreamController<CallPayload>.broadcast();
 
-  // Sync messages controller (for missed messages on reconnection)
-  final StreamController<SyncMessagesPayload> _syncMessagesController =
-      StreamController<SyncMessagesPayload>.broadcast();
-
   // Emoji reactions controller
   final StreamController<MessageReactPayload> _messageReactController =
       StreamController<MessageReactPayload>.broadcast();
@@ -95,16 +91,20 @@ class WebSocketMessageHandler {
   bool _isInitialized = false;
 
   /// Get stream for online status (type: 'connection:status')
-  Stream<ConnectionStatus> get onlineStatusStream =>
+  Stream<ConnectionStatusPayload> get onlineStatusStream =>
       _onlineStatusController.stream;
 
   /// Get stream for messages (type: 'message:new')
   Stream<ChatMessagePayload> get messageNewStream =>
       _messageNewController.stream;
 
-  /// Get stream for media messages (type: 'message:ack')
-  Stream<ChatMessageAckPayload> get messageAckStream =>
-      _messageAckController.stream;
+  /// Get stream for sent ack (type: 'message:sent:ack')
+  Stream<MessageSentAckPayload> get messageSentAckStream =>
+      _messageSentAckController.stream;
+
+  /// Get stream for status ack (type: 'message:status:ack')
+  Stream<MessageStatusAckPayload> get messageStatusAckStream =>
+      _messageStatusAckController.stream;
 
   /// Get stream for typing indicators (type: 'conversation:typing')
   Stream<TypingPayload> get typingStream => _typingController.stream;
@@ -125,13 +125,9 @@ class WebSocketMessageHandler {
   Stream<DeleteMessagePayload> get messageDeleteStream =>
       _messageDeleteController.stream;
 
-  /// Get stream for conversation join/leave events (type: 'conversation:join')
-  Stream<JoinLeavePayload> get joinConversationStream =>
+  /// Get stream for conversation join events (type: 'conversation:join')
+  Stream<ConvJoinPayload> get joinConversationStream =>
       _joinConversationController.stream;
-
-  /// Get stream for conversation leave events (type: 'conversation:leave')
-  Stream<JoinLeavePayload> get leaveConversationStream =>
-      _leaveConversationController.stream;
 
   /// Get stream for call init events (type: 'call:init')
   Stream<CallPayload> get callInitStream => _callInitController.stream;
@@ -167,10 +163,6 @@ class WebSocketMessageHandler {
   /// Get stream for call missed events (type: 'call:missed')
   Stream<CallPayload> get callMissedStream => _callMissedController.stream;
 
-  /// Get stream for sync messages (type: 'message:sync') - sent on reconnection
-  Stream<SyncMessagesPayload> get syncMessagesStream =>
-      _syncMessagesController.stream;
-
   /// Get stream for emoji reactions (type: 'message:react')
   Stream<MessageReactPayload> get messageReactStream =>
       _messageReactController.stream;
@@ -191,7 +183,7 @@ class WebSocketMessageHandler {
     _messageSubscription = _transportManager.messageStream.listen(
       (jsonMap) {
         try {
-          print("passing through ws message handler: ${jsonMap['type']}");
+          debugPrint("passing through ws message handler: ${jsonMap['type']}");
           // Parse the JSON map into WSMessage
           final message = WSMessage.fromJson(jsonMap);
           _handleMessage(message);
@@ -215,7 +207,7 @@ class WebSocketMessageHandler {
       switch (message.type) {
         // ---------------------------------------------------
         case WSMessageType.connectionStatus:
-          final payload = message.onlineStatusPayload;
+          final payload = message.connectionStatusPayload;
           if (payload != null) {
             _userStatusService.handleUserOnlineMessage(payload);
             _onlineStatusController.add(payload);
@@ -237,20 +229,12 @@ class WebSocketMessageHandler {
             // Push a synthetic system ChatMessagePayload so message listeners update in-place
             final systemMessagePayload = ChatMessagePayload(
               id: actionPayload.eventId,
-              senderId: actionPayload.actorId ?? 0,
-              senderName: actionPayload.actorName,
+              senderId: actionPayload.actorId ?? '',
               convId: actionPayload.convId,
-              convType: actionPayload.convType,
               msgType: MessageType.system,
               body: actionPayload.message,
               attachments: null,
-              metadata: {
-                'action': actionPayload.action.value,
-                'members': actionPayload.members
-                    .map((m) => m.toJson())
-                    .toList(),
-              },
-              replyToMessageId: null,
+              repliedTo: null,
               sentAt: actionPayload.actionAt,
             );
             _messageNewController.add(systemMessagePayload);
@@ -265,10 +249,17 @@ class WebSocketMessageHandler {
           }
           break;
 
-        case WSMessageType.messageAck:
-          final payload = message.chatMessageAckPayload;
+        case WSMessageType.messageSentAck:
+          final payload = message.messageSentAckPayload;
           if (payload != null) {
-            _messageAckController.add(payload);
+            _messageSentAckController.add(payload);
+          }
+          break;
+
+        case WSMessageType.messageStatusAck:
+          final payload = message.messageStatusAckPayload;
+          if (payload != null) {
+            _messageStatusAckController.add(payload);
           }
           break;
 
@@ -299,14 +290,7 @@ class WebSocketMessageHandler {
           break;
 
         case WSMessageType.conversationJoin:
-          final payload = message.joinLeavePayload;
-          if (payload != null) {
-            _joinConversationController.add(payload);
-          }
-          break;
-
-        case WSMessageType.conversationLeave:
-          final payload = message.joinLeavePayload;
+          final payload = message.convJoinPayload;
           if (payload != null) {
             _joinConversationController.add(payload);
           }
@@ -422,41 +406,6 @@ class WebSocketMessageHandler {
         case WSMessageType.messageForward:
           debugPrint('↩️ Message forward: ${message.type.value}');
           break;
-
-        case WSMessageType.messageSync:
-          final payload = message.syncMessagesPayload;
-          if (payload != null) {
-            debugPrint('🔄 Syncing ${payload.totalCount} missed messages');
-            _syncMessagesController.add(payload);
-
-            // Also emit individual messages as new messages so chat UI updates
-            // This ensures message lists get updated regardless of which screen user is on
-            for (final syncMsg in payload.messages) {
-              // final chatPayload = ChatMessagePayload(
-              //   optimisticId: syncMsg.id, // Use server ID as optimistic ID
-              //   canonicalId: syncMsg.id,
-              //   senderId: syncMsg.senderId,
-              //   senderName: syncMsg.senderName,
-              //   convId: syncMsg.convId,
-              //   convType: syncMsg.convType,
-              //   msgType: syncMsg.msgType,
-              //   body: syncMsg.body,
-              //   attachments: syncMsg.attachments,
-              //   metadata: syncMsg.metadata,
-              //   replyToMessageId: null,
-              //   sentAt: syncMsg.sentAt,
-              // );
-              _messageNewController.add(syncMsg);
-            }
-          }
-          break;
-
-        case WSMessageType.messageDelivered:
-          // Delivery receipt acknowledgment - handled by message:ack stream
-          // This case exists for completeness but delivery receipts are handled
-          // via message:ack which is already processed above
-          debugPrint('📬 Delivery receipt received');
-          break;
       }
     } catch (e) {
       debugPrint('❌ Error handling WebSocket message');
@@ -464,50 +413,57 @@ class WebSocketMessageHandler {
   }
 
   /// Get a filtered stream for messages in a specific conversation
-  Stream<ChatMessagePayload> messagesForConversation(int conversationId) {
+  Stream<ChatMessagePayload> messagesForConversation(String conversationId) {
     return messageNewStream.where(
       (payload) => payload.convId == conversationId,
     );
   }
 
-  /// Get a filtered stream for messages in a specific conversation
-  Stream<ChatMessageAckPayload> messagesAckForConversation(int conversationId) {
-    return messageAckStream.where(
+  /// Get a filtered stream for sent acks in a specific conversation
+  Stream<MessageSentAckPayload> sentAckForConversation(String conversationId) {
+    return messageSentAckStream.where(
       (payload) => payload.convId == conversationId,
     );
   }
 
+  /// Get a filtered stream for status acks in a specific conversation
+  Stream<MessageStatusAckPayload> statusAckForConversation(String conversationId) {
+    return messageStatusAckStream.where(
+      (payload) => payload.acks.any((ack) => ack.chatId == conversationId),
+    );
+  }
+
   /// Get a filtered stream for typing indicators in a specific conversation
-  Stream<TypingPayload> typingForConversation(int conversationId) {
+  Stream<TypingPayload> typingForConversation(String conversationId) {
     return typingStream.where((payload) => payload.convId == conversationId);
   }
 
   /// Get a filtered stream for message pins in a specific conversation
-  Stream<MessagePinPayload> messagePinsForConversation(int conversationId) {
+  Stream<MessagePinPayload> messagePinsForConversation(String conversationId) {
     return messagePinStream.where(
       (payload) => payload.convId == conversationId,
     );
   }
 
   /// Get a filtered stream for message replies in a specific conversation
-  Stream<ChatMessagePayload> messageRepliesForConversation(int conversationId) {
+  Stream<ChatMessagePayload> messageRepliesForConversation(String conversationId) {
     return messageNewStream.where(
       (payload) =>
-          payload.convId == conversationId && payload.replyToMessageId != null,
+          payload.convId == conversationId && payload.repliedTo != null,
     );
   }
 
   /// Get a filtered stream for message delete events in a specific conversation
   Stream<DeleteMessagePayload> messageDeletesForConversation(
-    int conversationId,
+    String conversationId,
   ) {
     return messageDeleteStream.where(
       (payload) => payload.convId == conversationId,
     );
   }
 
-  /// Get a filtered stream for conversation join/leave events in a specific conversation
-  Stream<JoinLeavePayload> joinConversation(int conversationId) {
+  /// Get a filtered stream for conversation join events in a specific conversation
+  Stream<ConvJoinPayload> joinForConversation(String conversationId) {
     return joinConversationStream.where(
       (payload) => payload.convId == conversationId,
     );
@@ -619,7 +575,8 @@ class WebSocketMessageHandler {
     _messageSubscription?.cancel();
     _messageSubscription = null;
     _messageNewController.close();
-    _messageAckController.close();
+    _messageSentAckController.close();
+    _messageStatusAckController.close();
     _typingController.close();
     _messagePinController.close();
     _onlineStatusController.close();
@@ -627,7 +584,6 @@ class WebSocketMessageHandler {
     _conversationActionController.close();
     _messageDeleteController.close();
     _joinConversationController.close();
-    _leaveConversationController.close();
     _callInitController.close();
     _callInitAckController.close();
     _callOfferController.close();
@@ -639,7 +595,6 @@ class WebSocketMessageHandler {
     _callErrorController.close();
     _callHoldController.close();
     _callMissedController.close();
-    _syncMessagesController.close();
     _isInitialized = false;
   }
 }

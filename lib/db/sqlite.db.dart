@@ -30,10 +30,10 @@ class SqliteDatabase {
       try {
         await db.transaction(() async {
           // Clear all tables in the correct order (respecting foreign key constraints)
-          await db.delete(db.messageStatusModel).go();
+          await db.delete(db.messageInfo).go();
           await db.delete(db.messages).go();
-          await db.delete(db.conversationMembers).go();
-          await db.delete(db.conversations).go();
+          await db.delete(db.chatMembers).go();
+          await db.delete(db.chats).go();
           await db.delete(db.calls).go();
           await db.delete(db.contacts).go();
           await db.delete(db.users).go();

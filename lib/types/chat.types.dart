@@ -1,21 +1,17 @@
 class TypingUser {
-  final int userId;
+  final String userId;
   final String? userName;
   final String? userPfp;
-  final int? convId;
+  final String? convId;
 
   TypingUser({required this.userId, this.userName, this.userPfp, this.convId});
 
   factory TypingUser.fromJson(Map<String, dynamic> json) {
     return TypingUser(
-      userId: json['user_id'] is int
-          ? json['user_id']
-          : (json['user_id'] is String ? int.tryParse(json['user_id']) : null),
+      userId: json['user_id']?.toString() ?? '',
       userName: json['user_name']?.toString(),
       userPfp: json['user_pfp']?.toString(),
-      convId: json['conv_id'] is int
-          ? json['conv_id']
-          : (json['conv_id'] is String ? int.tryParse(json['conv_id']) : null),
+      convId: json['conv_id']?.toString(),
     );
   }
 
@@ -29,10 +25,10 @@ class TypingUser {
   }
 
   TypingUser copyWith({
-    int? userId,
+    String? userId,
     String? userName,
     String? userPfp,
-    int? convId,
+    String? convId,
   }) {
     return TypingUser(
       userId: userId ?? this.userId,

@@ -12,7 +12,7 @@ class GroupClient extends BaseApiClient {
   /// Create a new group
   Future<ApiResult<dynamic>> createGroup({
     required String title,
-    required List<int> memberIds,
+    required List<String> memberIds,
   }) async {
     return post(
       '/chat/group/create-group',
@@ -27,8 +27,8 @@ class GroupClient extends BaseApiClient {
 
   /// Add members to group
   Future<ApiResult<dynamic>> addMember({
-    required int conversationId,
-    required List<int> userIds,
+    required String conversationId,
+    required List<String> userIds,
     String role = 'member',
   }) async {
     return post(
@@ -43,8 +43,8 @@ class GroupClient extends BaseApiClient {
 
   /// Remove member from group
   Future<ApiResult<dynamic>> removeMember({
-    required int conversationId,
-    required int userId,
+    required String conversationId,
+    required String userId,
   }) async {
     return delete(
       '/chat/group/remove-member',
@@ -54,7 +54,7 @@ class GroupClient extends BaseApiClient {
 
   /// Update group title
   Future<ApiResult<dynamic>> updateGroupTitle({
-    required int conversationId,
+    required String conversationId,
     required String title,
   }) async {
     return put(
@@ -65,15 +65,15 @@ class GroupClient extends BaseApiClient {
 
   /// Delete group conversation
   Future<ApiResult<dynamic>> deleteGroup(
-    int conversationId,
+    String conversationId,
   ) async {
     return delete('/chat/soft-delete-chat/$conversationId');
   }
 
   /// Promote user to admin
   Future<ApiResult<dynamic>> promoteToAdmin({
-    required int conversationId,
-    required int userId,
+    required String conversationId,
+    required String userId,
   }) async {
     return post(
       '/chat/group/promote-to-admin',
@@ -83,8 +83,8 @@ class GroupClient extends BaseApiClient {
 
   /// Demote admin to member
   Future<ApiResult<dynamic>> demoteToMember({
-    required int conversationId,
-    required int userId,
+    required String conversationId,
+    required String userId,
   }) async {
     return post(
       '/chat/group/demote-to-member',
@@ -94,7 +94,7 @@ class GroupClient extends BaseApiClient {
 
   /// Get group info
   Future<ApiResult<dynamic>> getGroupInfo(
-    int conversationId,
+    String conversationId,
   ) async {
     return get('/chat/group/get-group-info/$conversationId');
   }

@@ -6,7 +6,7 @@ import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/message.model.dart';
-import 'package:amigo/utils/snowflake.util.dart';
+import 'package:amigo/utils/id.utils.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -19,6 +19,7 @@ import 'package:scroll_to_index/scroll_to_index.dart';
 import '../../../api/api_service.dart';
 import '../../../db/repositories/conversation-member.repo.dart';
 import '../../../db/repositories/message-status.repo.dart';
+import '../../../db/repositories/missed-ws-messages.repo.dart';
 import '../../../models/community.model.dart';
 import '../../../models/group.model.dart';
 import '../../../models/user.model.dart';
@@ -32,6 +33,7 @@ import '../../../services/media-cache.service.dart';
 import '../../../services/socket/transport.manager.dart';
 import '../../../services/socket/transport.service.dart';
 import '../../../services/socket/ws-message.handler.dart';
+import '../../../services/user-info-cache.service.dart';
 import '../../../types/socket.types.dart';
 import '../../../ui/chat/attachment.action-sheet.dart';
 import '../../../ui/chat/date.widgets.dart';
@@ -103,7 +105,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   final ImagePicker _imagePicker = ImagePicker();
   final MediaCacheService _mediaCacheService = MediaCacheService();
   List<MessageModel> _messages = [];
-  Map<int, Map<String, dynamic>> _reactionsByMessage = {};
+  Map<String, Map<String, dynamic>> _reactionsByMessage = {};
+  Map<String, MessageStatusType> _deliveryStatusByMessage = {};
+  StreamSubscription<Map<String, MessageStatusType>>? _deliveryStatusSubscription;
   bool _isLoading = false;
 
   UserModel? _currentUserDetails;
@@ -116,7 +120,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   // Automatic resend state variable - initialized to true to disable manual resend until initialization completes
   bool _isResendingFailedMessages = true;
-  final Map<int, bool> _resendingFailedMessages = {};
+  final Map<String, bool> _resendingFailedMessages = {};
 
   List<UserModel> _conversationMembers = [];
 
@@ -132,6 +136,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   // bool _isCheckingCache = true;
   bool _isTyping = false;
   bool _isSendingMessage = false;
+  String? _lastSentReadMsgId;
   bool _isAdminOrStaff = false;
   // bool _isOtherTyping = false;
   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
@@ -144,13 +149,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   // For optimistic message handling - using filtered streams per conversation
   StreamSubscription<List<MessageModel>>? _messagesStreamSub;
-  StreamSubscription<Map<int, Map<String, dynamic>>>? _reactionsSubscription;
+  StreamSubscription<Map<String, Map<String, dynamic>>>? _reactionsSubscription;
   // StreamSubscription<OnlineStatusPayload>? _onlineStatusSubscription;
   StreamSubscription<TransportConnectionState>?
   _transportConnectionSubscription;
   StreamSubscription<TypingPayload>? _typingSubscription;
   StreamSubscription<ChatMessagePayload>? _messageSubscription;
-  StreamSubscription<ChatMessageAckPayload>? _messageAckSubscription;
+  StreamSubscription<MessageSentAckPayload>? _messageAckSubscription;
   StreamSubscription<MessagePinPayload>? _messagePinSubscription;
   StreamSubscription<DeleteMessagePayload>? _messageDeleteSubscription;
   // int _optimisticMessageId = -1;
@@ -253,13 +258,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   // }
 
   // Message selection and actions
-  final Set<int> _selectedMessages = {};
+  final Set<String> _selectedMessages = {};
   // bool _isSelectionMode = false;
   MessageModel? _pinnedMessage; // Only one message can be pinned
-  final Set<int> _starredMessages = {};
+  final Set<String> _starredMessages = {};
 
   // Forward message state
-  final Set<int> _messagesToForward = {};
+  final Set<String> _messagesToForward = {};
   bool _isLoadingConversations = false;
 
   // Reply message state
@@ -270,8 +275,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   // bool _isReplying = false;
 
   // Highlighted message state (for scroll-to effect)
-  int? _highlightedMessageId; // Current match being viewed
-  Set<int> _highlightedMessageIds = {}; // All matching messages
+  String? _highlightedMessageId; // Current match being viewed
+  Set<String> _highlightedMessageIds = {}; // All matching messages
   Timer? _highlightTimer;
 
   // Scroll-to-reply loading state
@@ -292,7 +297,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       _isInJumpMode ? _jumpMessages : _messages;
 
   // GlobalKeys for message widgets to enable accurate scrolling
-  final Map<int, GlobalKey> _messageKeys = {};
+  final Map<String, GlobalKey> _messageKeys = {};
 
   // Sticky date separator state
   String? _currentStickyDate;
@@ -313,7 +318,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   // Search state
   bool _isSearchMode = false;
   final TextEditingController _searchController = TextEditingController();
-  List<int> _searchMatches = []; // List of message IDs that match search
+  List<String> _searchMatches = []; // List of message IDs that match search
   int _currentMatchIndex = -1; // Current match index in _searchMatches
   Timer? _searchDebounceTimer;
 
@@ -333,14 +338,14 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   ];
 
   // Message animation controllers
-  final Map<int, AnimationController> _messageAnimationControllers = {};
-  final Map<int, Animation<double>> _messageSlideAnimations = {};
-  final Map<int, Animation<double>> _messageFadeAnimations = {};
-  final Set<int> _animatedMessages = {};
+  final Map<String, AnimationController> _messageAnimationControllers = {};
+  final Map<String, Animation<double>> _messageSlideAnimations = {};
+  final Map<String, Animation<double>> _messageFadeAnimations = {};
+  final Set<String> _animatedMessages = {};
 
   // Swipe animation controllers for reply gesture
-  final Map<int, AnimationController> _swipeAnimationControllers = {};
-  final Map<int, Animation<double>> _swipeAnimations = {};
+  final Map<String, AnimationController> _swipeAnimationControllers = {};
+  final Map<String, Animation<double>> _swipeAnimations = {};
 
   // Swipe gesture tracking variables
   Offset? _swipeStartPosition;
@@ -382,10 +387,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     // Clear notifications for this conversation when opened
     NotificationService().clearConversationNotifications(
-      widget.group.conversationId.toString(),
+      widget.group.chatId.toString(),
     );
 
-    // _websocketService.connect(widget.group.conversationId);
+    // _websocketService.connect(widget.group.chatId);
 
     getAllConversationMembers();
 
@@ -419,7 +424,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   Future<void> getAllConversationMembers() async {
     final members = await _conversationMemberRepo
-        .getMembersWithUserDetailsByConversationId(widget.group.conversationId);
+        .getMembersWithUserDetailsByConversationId(widget.group.chatId);
     setState(() {
       _conversationMembers = members;
     });
@@ -427,7 +432,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       '-------conversation members: ${_conversationMembers.length}-------',
     );
     debugPrint(
-      '-------conversation members: ${widget.group.conversationId}-------',
+      '-------conversation members: ${widget.group.chatId}-------',
     );
   }
 
@@ -435,12 +440,12 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   Future<void> _loadDraft() async {
     // Load directly from service for immediate access
     final draftService = DraftMessageService();
-    final draft = await draftService.getDraft(widget.group.conversationId);
+    final draft = await draftService.getDraft(widget.group.chatId);
     if (draft != null && draft.isNotEmpty) {
       _messageController.text = draft;
       // Also update the provider state
       final draftNotifier = ref.read(draftMessagesProvider.notifier);
-      draftNotifier.saveDraft(widget.group.conversationId, draft);
+      draftNotifier.saveDraft(widget.group.chatId, draft);
     }
   }
 
@@ -476,7 +481,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       if (mounted) {
         final draftNotifier = ref.read(draftMessagesProvider.notifier);
         final text = _messageController.text;
-        draftNotifier.saveDraft(widget.group.conversationId, text);
+        draftNotifier.saveDraft(widget.group.chatId, text);
       }
     });
   }
@@ -525,10 +530,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   void _handleAudioFinished(String finishedAudioKey) {
     try {
       // Extract message ID from audioKey (format: messageId_url)
-      final messageIdStr = finishedAudioKey.split('_').first;
-      final messageId = int.tryParse(messageIdStr);
+      final messageId = finishedAudioKey.split('_').first;
 
-      if (messageId == null) return;
+      if (messageId.isEmpty) return;
 
       // Find the current message index
       final currentIndex = _messages.indexWhere((msg) => msg.id == messageId);
@@ -593,9 +597,47 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   /// Returns true only if the pinned message is real and displayable.
   bool _isValidPinnedMessage(MessageModel msg) {
-    if (msg.id == 0) return false;
+    if (msg.id.isEmpty) return false;
     return (msg.body != null && msg.body!.isNotEmpty) ||
         msg.type != MessageType.text;
+  }
+
+  /// Load pinned message from database
+  Future<void> _loadPinnedMessage() async {
+    final conversation = await _conversationRepo.getConversationById(
+      widget.group.chatId,
+    );
+    final currentPinnedMessageId = conversation?.pinnedMsgId;
+
+    if (currentPinnedMessageId != null) {
+      final pinnedMessage = await _messagesRepo.getMessageById(
+        currentPinnedMessageId,
+      );
+      if (pinnedMessage != null && _isValidPinnedMessage(pinnedMessage)) {
+        setState(() {
+          _pinnedMessage = pinnedMessage;
+          final isInMessages = _messages.any(
+            (msg) => msg.id == pinnedMessage.id,
+          );
+          if (!isInMessages) {
+            _messages.add(pinnedMessage);
+            _sortMessagesBySentAt();
+          }
+        });
+      } else {
+        await _conversationRepo.updatePinnedMessage(
+          widget.group.chatId,
+          null,
+        );
+        setState(() {
+          _pinnedMessage = null;
+        });
+      }
+    } else {
+      setState(() {
+        _pinnedMessage = null;
+      });
+    }
   }
 
   Future<void> _initializeChat() async {
@@ -609,20 +651,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     ref
         .read(chatProvider.notifier)
-        .setActiveConversation(widget.group.conversationId, ChatType.group);
+        .setActiveConversation(widget.group.chatId, ChatType.group);
 
-    // Clear unread count when entering conversation (important for notification navigation)
-    await _conversationRepo.updateUnreadCount(widget.group.conversationId, 0);
-    // Also clear via provider to update UI state
-    ref
-        .read(chatProvider.notifier)
-        .clearUnreadCount(widget.group.conversationId, ChatType.group);
-
-    // Subscribe to the Drift reactive stream so the UI auto-updates whenever
-    // any write path (WS, polling, FCM background) inserts into SQLite.
+    // --- Parallel: independent reads that don't depend on each other ---
+    // Start message stream (synchronous subscription setup)
     _messagesStreamSub?.cancel();
     _messagesStreamSub = _messagesRepo
-        .watchMessages(widget.group.conversationId)
+        .watchMessages(widget.group.chatId)
         .listen(
           (msgs) {
             if (!mounted) return;
@@ -633,68 +668,58 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             });
           },
           onError: (e) {
-            debugPrint('❌ Group messages stream error: $e');
+            debugPrint('Group messages stream error: $e');
           },
         );
 
+    // Start reactions stream (synchronous subscription setup)
     _reactionsSubscription?.cancel();
     _reactionsSubscription = _messageStatusRepo
-        .watchReactionsByConversation(widget.group.conversationId)
+        .watchReactionsByConversation(widget.group.chatId)
         .listen(
           (reactions) {
             if (!mounted) return;
             setState(() => _reactionsByMessage = reactions);
           },
           onError: (e) {
-            debugPrint('❌ Reactions stream error: $e');
+            debugPrint('Reactions stream error: $e');
           },
         );
 
-    // Load pinned message ID directly from database (not from widget.group which may be stale)
-    final conversation = await _conversationRepo.getConversationById(
-      widget.group.conversationId,
-    );
-    final currentPinnedMessageId = conversation?.pinnedMessageId;
-
-    if (currentPinnedMessageId != null) {
-      final pinnedMessage = await _messagesRepo.getMessageById(
-        currentPinnedMessageId,
-      );
-      if (pinnedMessage != null && _isValidPinnedMessage(pinnedMessage)) {
-        setState(() {
-          _pinnedMessage = pinnedMessage;
-          // Ensure pinned message is in _messages list if not already present
-          final isInMessages = _messages.any(
-            (msg) => msg.id == pinnedMessage.id,
-          );
-          if (!isInMessages) {
-            _messages.add(pinnedMessage);
-            _sortMessagesBySentAt();
-          }
-        });
-      } else {
-        // Pinned message not found or invalid — clear stale ID from DB
-        await _conversationRepo.updatePinnedMessage(
-          widget.group.conversationId,
-          null,
+    // Start delivery/read status stream
+    _deliveryStatusSubscription?.cancel();
+    _deliveryStatusSubscription = _messageStatusRepo
+        .watchDeliveryStatusByConversation(widget.group.chatId)
+        .listen(
+          (statuses) {
+            if (!mounted) return;
+            setState(() => _deliveryStatusByMessage = statuses);
+          },
+          onError: (e) {
+            debugPrint('Delivery status stream error: $e');
+          },
         );
-        setState(() {
-          _pinnedMessage = null;
-        });
-      }
-    } else {
-      // Ensure _pinnedMessage is null when there's no pinned message
-      setState(() {
-        _pinnedMessage = null;
-      });
-    }
 
-    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    await _sendConversationJoin();
-    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    // Run independent async operations in parallel:
+    // - clear unread count
+    // - load pinned message
+    await Future.wait([
+      _conversationRepo.updateUnreadCount(widget.group.chatId, 0),
+      _loadPinnedMessage(),
+    ]);
 
-    // start silent message sync (from server to local DB)
-    await _syncMessagesFromServer();
+    // Clear via provider to update UI state (synchronous, no await needed)
+    ref
+        .read(chatProvider.notifier)
+        .clearUnreadCount(widget.group.chatId, ChatType.group);
+
+    // Fire-and-forget: don't block chat opening for these
+    unawaited(_sendConversationJoin().catchError(
+      (e) => debugPrint('Error joining conversation: $e'),
+    ));
+    unawaited(_syncMessagesFromServer().catchError(
+      (e) => debugPrint('Error syncing messages: $e'),
+    ));
 
     // resend any failed messages
     // final failedMessages = messaagesFromLocal
@@ -747,7 +772,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     //
     //   // Reload messages from DB to ensure UI reflects latest state
     //   final updatedMessages = await _messagesRepo.getMessagesByConversation(
-    //     widget.group.conversationId,
+    //     widget.group.chatId,
     //     limit: 100,
     //     offset: 0,
     //   );
@@ -778,12 +803,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     });
 
     try {
-      // Derive next page from how many messages are already in the DB.
-      // floor(N / 100) gives the number of complete pages fetched; +1 is the next.
-      final nextPage = (_messages.length / 100).floor() + 1;
+      // Use cursor-based pagination: fetch messages older than the oldest we have.
+      final oldestMsgId = _messages.isNotEmpty ? _messages.first.id : null;
       final result = await apiService.chat.getConversationHistory(
-        conversationId: widget.group.conversationId,
-        page: nextPage,
+        conversationId: widget.group.chatId,
+        beforeMessageId: oldestMsgId,
         limit: 100,
       );
 
@@ -792,7 +816,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         if (history.messages.isNotEmpty) {
           await _messagesRepo.insertMessages(history.messages);
           // Drift stream fires automatically — no setState for _messages needed
-          _hasMoreOnServer = history.hasNextPage;
+          _hasMoreOnServer = history.hasMore;
         } else {
           _hasMoreOnServer = false;
         }
@@ -814,14 +838,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   Future<void> _syncMessagesFromServer() async {
     // Check if sync is needed
     final needSync = await _conversationRepo.getNeedSyncStatus(
-      widget.group.conversationId,
+      widget.group.chatId,
     );
 
     if (needSync == false) {
-      // Subsequent open: gap-fill with page 1 only
+      // Subsequent open: gap-fill with latest messages
       final firstPageResult = await apiService.chat.getConversationHistory(
-        conversationId: widget.group.conversationId,
-        page: 1,
+        conversationId: widget.group.chatId,
         limit: 100,
       );
 
@@ -835,12 +858,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             firstPageHistory.members
                 .map(
                   (e) => ConversationMemberModel(
-                    conversationId: widget.group.conversationId,
-                    userId: e['user_id'],
-                    role: e['group_role'],
-                    unreadCount: e['unread_count'] ?? 0,
-                    joinedAt: e['joined_at'],
-                    removedAt: e['removed_at'],
+                    chatId: widget.group.chatId,
+                    userId: (e['user_id'] ?? '').toString(),
+                    role: (e['group_role'] ?? 'member').toString(),
+                    joinedAt: e['joined_at']?.toString(),
+                    removedAt: e['removed_at']?.toString(),
                   ),
                 )
                 .toList();
@@ -875,11 +897,12 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       return;
     }
 
-    // First open: fetch up to 3 pages of 100 = 300 messages
-    const int firstOpenMaxPages = 3;
+    // First open: fetch up to 3 batches of 100 = 300 messages using cursor pagination
+    const int firstOpenMaxBatches = 3;
     const int limit = 100;
-    int page = 1;
+    int batch = 0;
     bool hasMore = true;
+    String? beforeCursor;
 
     if (mounted)
       setState(() {
@@ -887,10 +910,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       });
 
     try {
-      while (page <= firstOpenMaxPages && hasMore && mounted && !_isDisposed) {
+      while (batch < firstOpenMaxBatches && hasMore && mounted && !_isDisposed) {
         final result = await apiService.chat.getConversationHistory(
-          conversationId: widget.group.conversationId,
-          page: page,
+          conversationId: widget.group.chatId,
+          beforeMessageId: beforeCursor,
           limit: limit,
         );
 
@@ -898,18 +921,19 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
         final history = ConversationHistoryResponse.fromJson(result.data!);
 
-        // Insert members/users on page 1
-        if (page == 1) {
+        if (history.messages.isEmpty) break;
+
+        // Insert members/users on first batch
+        if (batch == 0) {
           final List<ConversationMemberModel> membersOfConversation = history
               .members
               .map(
                 (e) => ConversationMemberModel(
-                  conversationId: widget.group.conversationId,
-                  userId: e['user_id'],
-                  role: e['group_role'],
-                  unreadCount: e['unread_count'] ?? 0,
-                  joinedAt: e['joined_at'],
-                  removedAt: e['removed_at'],
+                  chatId: widget.group.chatId,
+                  userId: (e['user_id'] ?? '').toString(),
+                  role: (e['group_role'] ?? 'member').toString(),
+                  joinedAt: e['joined_at']?.toString(),
+                  removedAt: e['removed_at']?.toString(),
                 ),
               )
               .toList();
@@ -934,8 +958,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
         await _messagesRepo.insertMessages(history.messages);
 
-        hasMore = history.hasNextPage;
-        page++;
+        // Use the oldest message from this batch as the cursor for the next
+        beforeCursor = history.messages.first.id;
+        hasMore = history.hasMore;
+        batch++;
         await Future.delayed(const Duration(milliseconds: 30));
       }
 
@@ -950,7 +976,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       // Sync statuses and mark synced silently in background
       await _syncMessageStatuses();
       await _conversationRepo.updateNeedSyncStatus(
-        widget.group.conversationId,
+        widget.group.chatId,
         false,
       );
     } catch (e) {
@@ -971,7 +997,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
       while (hasMorePages && mounted && !_isDisposed) {
         final result = await apiService.chat.getMessageStatuses(
-          conversationId: widget.group.conversationId,
+          conversationId: widget.group.chatId,
           page: page,
           limit: limit,
         );
@@ -1043,7 +1069,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   // /// The above code snippet contains commented-out functions related to loading, validating, and
   /// cleaning up pinned and starred messages in a chat application.
   // Future<void> _loadPinnedMessageFromStorage() async {
-  //   final conversationId = widget.group.conversationId;
+  //   final conversationId = widget.group.chatId;
 
   //   // First check if group metadata has pinned message
   //   if (widget.group.metadata?.pinnedMessage != null) {
@@ -1071,7 +1097,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   // /// Load starred messages from storage
   // Future<void> _loadStarredMessagesFromStorage() async {
-  //   final conversationId = widget.group.conversationId;
+  //   final conversationId = widget.group.chatId;
   //   final starredMessages =
   //       await MessageStorageHelpers.loadStarredMessagesFromStorage(
   //         conversationId,
@@ -1121,7 +1147,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   //       // Update storage with cleaned up starred messages
   //       _messagesRepo.saveStarredMessages(
-  //         conversationId: widget.group.conversationId,
+  //         conversationId: widget.group.chatId,
   //         starredMessageIds: _starredMessages,
   //       );
   //     }
@@ -1176,7 +1202,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   //       // Validate storage
   //       await _messagesRepo.validateReplyMessageStorage(
-  //         widget.group.conversationId,
+  //         widget.group.chatId,
   //       );
   //     } catch (e) {
   //       debugPrint('❌ Error validating group reply messages: $e');
@@ -1210,7 +1236,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   //           joinedAt: null,
   //         );
   //         await _groupMembersRepo.insertOrUpdateGroupMember(
-  //           widget.group.conversationId,
+  //           widget.group.chatId,
   //           memberInfo,
   //         );
   //       }
@@ -1341,7 +1367,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   // Future<void> _loadInitialMessages() async {
-  //   final conversationId = widget.group.conversationId;
+  //   final conversationId = widget.group.chatId;
 
   //   await loadInitialMessages(
   //     LoadInitialMessagesConfig(
@@ -1419,7 +1445,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   // }
 
   // Future<void> _loadMoreMessages() async {
-  //   final conversationId = widget.group.conversationId;
+  //   final conversationId = widget.group.chatId;
 
   //   await loadMoreMessages(
   //     LoadMoreMessagesConfig(
@@ -1446,7 +1472,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   /// Set up WebSocket message listener for real-time group messages
   void _setupWebSocketListener() {
-    final convId = widget.group.conversationId;
+    final convId = widget.group.chatId;
 
     // Listen to messages filtered for this conversation
     _messageSubscription = _wsMessageHandler
@@ -1460,12 +1486,12 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           },
         );
 
-    // Listen to ack messages filtered for this conversation
+    // Listen to sent-ack messages filtered for this conversation
     _messageAckSubscription = _wsMessageHandler
-        .messagesAckForConversation(convId)
+        .sentAckForConversation(convId)
         .listen(
           (payload) {
-            _handleMessageAck(payload);
+            _handleSentAck(payload);
           },
           onError: (error) {
             debugPrint('❌ Message stream error: $error');
@@ -1518,49 +1544,53 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   /// Send conversation:join to server (idempotent — safe to call multiple times).
+  /// If offline, stores the event in MissedWsMessages for replay on reconnect.
   Future<void> _sendConversationJoin() async {
     if (_currentUserDetails == null) return;
-    final joinConvPayload = JoinLeavePayload(
-      convId: widget.group.conversationId,
-      convType: ChatType.group,
+    final latestMsgId = _messages.isNotEmpty ? _messages.last.id : '';
+    if (latestMsgId.isEmpty || latestMsgId == _lastSentReadMsgId) return;
+    _lastSentReadMsgId = latestMsgId;
+    final joinConvPayload = ConvJoinPayload(
+      convId: widget.group.chatId,
       userId: _currentUserDetails!.id,
-      userName: _currentUserDetails!.name,
-    ).toJson();
+      lastReadMsgId: latestMsgId,
+    );
     final wsmsg = WSMessage(
       type: WSMessageType.conversationJoin,
-      payload: joinConvPayload,
+      payload: joinConvPayload.toJson(),
       wsTimestamp: DateTime.now(),
     ).toJson();
-    await _transportManager.sendMessage(wsmsg);
+    if (_transportManager.isConnected) {
+      await _transportManager.sendMessage(wsmsg);
+    } else {
+      MissedWsMessagesRepository()
+          .storeEvent('conversation:join', joinConvPayload.toJson());
+    }
   }
 
   /// Handle incoming message from WebSocket
   void _handleMessageNew(ChatMessagePayload payload) async {
     try {
-      UserModel? senderDetails;
-      if (payload.senderName == null) {
-        senderDetails = await _userRepo.getUserById(payload.senderId);
-      }
+      final senderDetails = await UserInfoCache.instance.getUser(payload.senderId);
 
       // create message model from payload
       final message = MessageModel(
-        // canonicalId: payload.canonicalId,
         id: payload.id,
-        conversationId: payload.convId,
+        chatId: payload.convId,
         senderId: payload.senderId,
-        attachments: payload.attachments,
+        attachments: payload.attachments is Map<String, dynamic>
+            ? payload.attachments as Map<String, dynamic>
+            : null,
         body: payload.body,
-        metadata: payload.metadata,
-        senderName: payload.senderName ?? senderDetails?.name ?? '',
+        senderName: senderDetails?.name ?? '',
         senderProfilePic: senderDetails?.profilePic ?? '',
-        isReplied: payload.replyToMessageId != null,
+        repliedTo: payload.repliedTo,
         type: payload.msgType,
-        status: MessageStatusType.read,
         sentAt: payload.sentAt.toIso8601String(),
       );
 
-      // If this is a message from the current user, check if we have an optimistic message
-      // that matches by optimisticId and update it instead of adding a duplicate
+      // If this is a message from the current user, check if we already have
+      // the optimistic row (same UUIDv7 id) and update it instead of duplicating.
       int existingIndex = -1;
       if (payload.senderId == _currentUserDetails?.id) {
         existingIndex = _messages.indexWhere(
@@ -1571,16 +1601,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           // Update existing message with server response
           if (mounted) {
             setState(() {
-              // Clear uploading state and update with server message
-              final updatedMetadata = Map<String, dynamic>.from(
-                message.metadata ?? {},
-              );
-              updatedMetadata['is_uploading'] = false;
-              updatedMetadata.remove('upload_failed');
-
               final updatedMessage = message.copyWith(
                 id: _messages[existingIndex].id,
-                metadata: updatedMetadata,
               );
               _messages[existingIndex] = updatedMessage;
               _sortMessagesBySentAt();
@@ -1640,43 +1662,25 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
   }
 
-  void _handleMessageAck(ChatMessageAckPayload payload) async {
+  void _handleSentAck(MessageSentAckPayload payload) async {
     try {
-      // Find the message with matching optimisticId or canonicalId
-      final messageIndex = _messages.indexWhere((msg) => msg.id == payload.id);
+      // Find the message with matching UUIDv7 id — no reconciliation needed.
+      final messageIndex = _messages.indexWhere((msg) => msg.id == payload.msgId);
 
       if (messageIndex == -1) {
-        debugPrint('⚠️ Message with id ${payload.id} not found in _messages');
+        debugPrint('⚠️ Message with id ${payload.msgId} not found in _messages');
         return;
       }
 
       final currentMessage = _messages[messageIndex];
 
-      // Clear uploading state and update status
-      final updatedMetadata = Map<String, dynamic>.from(
-        currentMessage.metadata ?? {},
-      );
-      updatedMetadata['is_uploading'] = false;
-      updatedMetadata.remove('upload_failed');
+      // If the server assigned a new ID, use it
+      final effectiveId = payload.newId ?? payload.msgId;
 
-      // For groups, messages.status only tracks server acceptance (unsent → sent).
-      // Per-member read/delivered is tracked in the message_status table by
-      // chat.provider. Never set read/delivered here based on a partial ack.
-      final currentStatus = currentMessage.status;
-      MessageStatusType status = currentStatus;
-      if (currentStatus == MessageStatusType.unsent ||
-          currentStatus == MessageStatusType.uploading) {
-        status = MessageStatusType.sent;
-      }
-
-      // If the backend assigned a new ID due to collision, use it; otherwise
-      // keep the original. Applied to both in-memory list and DB.
-      final canonicalId = payload.newId ?? payload.id;
-
+      // Clear isFailed on successful ack.
       final updatedMessage = currentMessage.copyWith(
-        id: canonicalId,
-        status: status,
-        metadata: updatedMetadata,
+        id: effectiveId,
+        isFailed: !payload.isSent,
       );
 
       // Update in UI and DB
@@ -1686,48 +1690,40 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         });
       }
 
-      // Save to DB — pass newId whenever present so the repo renames the row.
       try {
         await _messagesRepo.updateMessageFields(
-          payload.id,
-          newId: payload.newId,
-          status: status,
-          metadata: updatedMetadata,
+          payload.msgId,
+          isFailed: !payload.isSent,
         );
       } catch (e) {
         debugPrint('❌ Error updating message in DB: $e');
       }
     } catch (e) {
-      debugPrint('❌ Error processing message_ack: $e');
+      debugPrint('❌ Error processing message_sent_ack: $e');
     }
   }
 
   void _receiveTyping(TypingPayload payload) {
-    final isTyping = payload.isTyping;
+    // Receiving a TypingPayload means the sender is typing.
+    // The typing indicator auto-hides via a safety timeout.
 
     // Cancel any existing timeout
     _typingTimeout?.cancel();
 
     // Update the ValueNotifier directly without setState
-    _isOtherTypingNotifier.value = isTyping;
+    _isOtherTypingNotifier.value = true;
 
     // Control the typing animation
-    if (isTyping) {
-      _typingAnimationController.repeat(reverse: true);
+    _typingAnimationController.repeat(reverse: true);
 
-      // Set a safety timeout to hide typing indicator after x seconds
-      _typingTimeout = Timer(const Duration(seconds: 3), () {
-        if (mounted) {
-          _isOtherTypingNotifier.value = false;
-          _typingAnimationController.stop();
-          _typingAnimationController.reset();
-        }
-      });
-    } else {
-      // Immediately stop typing indicator
-      _typingAnimationController.stop();
-      _typingAnimationController.reset();
-    }
+    // Set a safety timeout to hide typing indicator after x seconds
+    _typingTimeout = Timer(const Duration(seconds: 3), () {
+      if (mounted) {
+        _isOtherTypingNotifier.value = false;
+        _typingAnimationController.stop();
+        _typingAnimationController.reset();
+      }
+    });
   }
 
   /// Handle incoming message pin from WebSocket
@@ -1755,7 +1751,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   //       mounted: () => mounted,
   //       setState: setState,
   //       messages: _messages,
-  //       conversationId: widget.group.conversationId,
+  //       conversationId: widget.group.chatId,
   //       messagesRepo: _messagesRepo,
   //     ),
   //   );
@@ -1796,7 +1792,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   //   // Clear draft when message is sent
   //   final draftNotifier = ref.read(draftMessagesProvider.notifier);
-  //   await draftNotifier.removeDraft(widget.group.conversationId);
+  //   await draftNotifier.removeDraft(widget.group.chatId);
 
   //   // Create optimistic message for immediate display with current UTC time
   //   final nowUTC = DateTime.now().toUtc();
@@ -1805,7 +1801,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   //     body: messageText,
   //     type: 'text',
   //     senderId: _currentUserId ?? 0,
-  //     conversationId: widget.group.conversationId,
+  //     conversationId: widget.group.chatId,
   //     createdAt: nowUTC
   //         .toIso8601String(), // Store as UTC, convert to IST when displaying
   //     deleted: false,
@@ -1849,7 +1845,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   //           'new_message': messageText,
   //           'optimistic_id': _optimisticMessageId,
   //         },
-  //         'conversation_id': widget.group.conversationId,
+  //         'conversation_id': widget.group.chatId,
   //         'message_ids': [
   //           replyMessageId,
   //         ], // Array of message IDs being replied to
@@ -1865,7 +1861,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   //       await _websocketService.sendMessage({
   //         'type': 'message',
   //         'data': messageData,
-  //         'conversation_id': widget.group.conversationId,
+  //         'conversation_id': widget.group.chatId,
   //         'sender_name': currentUserName,
   //       });
   //     }
@@ -1882,45 +1878,33 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   Future<void> _sendMediaMessageToServer(
     File mediaFile,
     MessageType messageType, {
-    int? existingMessageId,
+    String? existingMessageId,
   }) async {
     final messageId =
         existingMessageId ??
-        await Snowflake.generateMessageId(widget.group.conversationId);
+        newMessageId();
 
     final nowUTC = DateTime.now().toUtc();
 
-    // Structure metadata properly for reply messages and upload status
-    Map<String, dynamic> metadata = {
-      'is_uploading': true, // UI widgets check for this to show loading state
-      'upload_progress': 0, // Initialize progress to 0
-    };
-    if (_replyToMessageData != null) {
-      metadata['reply_to'] = {
-        'message_id': _replyToMessageData!.id,
-        'sender_id': _replyToMessageData!.senderId,
-        'sender_name': _replyToMessageData!.senderName,
-      };
-    }
-
     // Build attachments with local_path for UI to display during upload
     final fileName = mediaFile.path.split('/').last;
-    final attachments = {
+    final attachments = <String, dynamic>{
       'file_name': fileName,
       'local_path': mediaFile.path, // Required for UI to display local file
+      'is_uploading': true,
+      'upload_progress': 0,
     };
 
     final newMsg = MessageModel(
       id: messageId,
-      conversationId: widget.group.conversationId,
+      chatId: widget.group.chatId,
       senderId: _currentUserDetails!.id,
       senderName: _currentUserDetails!.name,
       senderProfilePic: _currentUserDetails!.profilePic,
-      metadata: metadata,
       attachments: attachments,
+      localMediaPath: mediaFile.path,
       type: messageType,
-      isReplied: _replyToMessageData != null,
-      status: MessageStatusType.uploading,
+      repliedTo: _replyToMessageData?.id,
       sentAt: nowUTC.toIso8601String(),
     );
 
@@ -1966,14 +1950,14 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
           if (index != -1) {
             final currentMsg = _messages[index];
-            final updatedMetadata = Map<String, dynamic>.from(
-              currentMsg.metadata ?? {},
+            final updatedAttachments = Map<String, dynamic>.from(
+              currentMsg.attachments ?? {},
             );
-            updatedMetadata['upload_progress'] = progress;
-            updatedMetadata['is_uploading'] = true;
+            updatedAttachments['upload_progress'] = progress;
+            updatedAttachments['is_uploading'] = true;
 
             final updatedMessage = currentMsg.copyWith(
-              metadata: updatedMetadata,
+              attachments: updatedAttachments,
             );
 
             setState(() {
@@ -1993,13 +1977,15 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
         if (index != -1) {
           final currentMsg = _messages[index];
-          final updatedMetadata = Map<String, dynamic>.from(
-            currentMsg.metadata ?? {},
+          final updatedAttachments = Map<String, dynamic>.from(
+            currentMsg.attachments ?? {},
           );
-          updatedMetadata.remove('is_uploading');
-          updatedMetadata.remove('upload_progress');
+          updatedAttachments.remove('is_uploading');
+          updatedAttachments.remove('upload_progress');
 
-          final updatedMessage = currentMsg.copyWith(metadata: updatedMetadata);
+          final updatedMessage = currentMsg.copyWith(
+            attachments: updatedAttachments,
+          );
 
           setState(() {
             _messages[index] = updatedMessage;
@@ -2022,7 +2008,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   /// Mark a message as failed in both UI and DB
-  Future<void> _markMessageAsFailed(int messageId) async {
+  Future<void> _markMessageAsFailed(String messageId) async {
     if (!mounted) return;
 
     final index = _messages.indexWhere((msg) => msg.id == messageId);
@@ -2030,13 +2016,15 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     if (index == -1) return;
 
     final failedMsg = _messages[index];
-    final updatedMetadata = Map<String, dynamic>.from(failedMsg.metadata ?? {});
-    updatedMetadata['is_uploading'] = false;
-    updatedMetadata['upload_failed'] = true;
+    final updatedAttachments = Map<String, dynamic>.from(
+      failedMsg.attachments ?? {},
+    );
+    updatedAttachments['is_uploading'] = false;
+    updatedAttachments['upload_failed'] = true;
 
     final updatedMessage = failedMsg.copyWith(
-      status: MessageStatusType.failed,
-      metadata: updatedMetadata,
+      isFailed: true,
+      attachments: updatedAttachments,
     );
 
     // Update in UI
@@ -2049,11 +2037,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // Save to DB with failed status
     await _messagesRepo.updateMessageFields(
       messageId,
-      status: MessageStatusType.failed,
-      metadata: updatedMetadata,
+      isFailed: true,
+      attachments: updatedAttachments,
     );
-
-    // print("🎐 🎐 🎐  set states to failed in UI state and DB");
   }
 
   /// Resend a failed message
@@ -2289,7 +2275,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   // }
 
   /// Check if a specific message is currently being resent
-  bool _isResendingFailedMessage(int messageId) {
+  bool _isResendingFailedMessage(String messageId) {
     return _resendingFailedMessages[messageId] == true;
   }
 
@@ -2299,7 +2285,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     final failedMessages = _messages
         .where(
           (msg) =>
-              msg.status == MessageStatusType.failed &&
+              msg.isFailed &&
               msg.senderId == _currentUserDetails?.id &&
               !_isResendingFailedMessage(msg.id),
         )
@@ -2319,7 +2305,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   /// Resend a failed message
-  Future<void> resendFailedMessage(int messageId) async {
+  Future<void> resendFailedMessage(String messageId) async {
     // Skip if already resending this message
     if (_isResendingFailedMessage(messageId)) return;
 
@@ -2337,25 +2323,20 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         return;
       }
 
-      // Check if message status is failed
-      if (message.status != MessageStatusType.failed) {
-        debugPrint('Message is not in failed status: ${message.status}');
+      // Check if message is failed
+      if (!message.isFailed) {
+        debugPrint('Message is not in failed status');
         return;
       }
 
-      // Preserve reply metadata if the failed message was a reply
+      // Preserve reply target if the failed message was a reply
       MessageModel? originalReplyToMessageData = _replyToMessageData;
-      final replyMetadata =
-          message.metadata?['reply_to'] as Map<String, dynamic>?;
-      if (replyMetadata != null) {
-        final replyToMessageId = replyMetadata['message_id'] as int?;
-        if (replyToMessageId != null) {
-          final replyToMessage = await _messagesRepo.getMessageById(
-            replyToMessageId,
-          );
-          if (replyToMessage != null) {
-            _replyToMessageData = replyToMessage;
-          }
+      if (message.repliedTo != null) {
+        final replyToMessage = await _messagesRepo.getMessageById(
+          message.repliedTo!,
+        );
+        if (replyToMessage != null) {
+          _replyToMessageData = replyToMessage;
         }
       }
 
@@ -2417,7 +2398,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   void _sendMessage(
     MessageType messageType, {
     MediaResponse? mediaResponse,
-    int? messageId,
+    String? messageId,
     int? retryCount = 0,
     String? body,
   }) async {
@@ -2439,54 +2420,42 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // Skip if resending (body is provided)
     if (!isResend) {
       final draftNotifier = ref.read(draftMessagesProvider.notifier);
-      await draftNotifier.removeDraft(widget.group.conversationId);
+      await draftNotifier.removeDraft(widget.group.chatId);
     }
 
     final id =
         messageId ??
-        await Snowflake.generateMessageId(widget.group.conversationId);
+        newMessageId();
 
     // Create optimistic message for immediate display with current UTC time
     final nowUTC = DateTime.now().toUtc();
 
-    // Structure metadata properly for reply messages and contact messages
-    Map<String, dynamic>? combinedMetadata;
-    if (_replyToMessageData != null) {
-      combinedMetadata = {
-        'reply_to': {
-          'message_id': _replyToMessageData!.id,
-          'sender_id': _replyToMessageData!.senderId,
-          'sender_name': _replyToMessageData!.senderName,
-        },
-        'is_loading': false,
-      };
-    }
-
-    // Merge contact metadata if present
+    // Merge contact metadata into attachments if present (there is no longer
+    // a top-level metadata field; we stash pending contact info inside
+    // attachments so it survives the round-trip).
+    Map<String, dynamic>? combinedAttachments = mediaResponse?.toJson();
     if (!isResend && _pendingContactMetadata != null) {
-      combinedMetadata ??= {};
-      combinedMetadata.addAll(_pendingContactMetadata!);
+      combinedAttachments = Map<String, dynamic>.from(combinedAttachments ?? {})
+        ..addAll(_pendingContactMetadata!);
     }
 
     final newMsg = MessageModel(
       id: id,
-      conversationId: widget.group.conversationId,
+      chatId: widget.group.chatId,
       senderId: _currentUserDetails!.id,
       senderName: _currentUserDetails!.name,
       senderProfilePic: _currentUserDetails!.profilePic,
-      metadata: combinedMetadata,
-      attachments: mediaResponse?.toJson(),
+      attachments: combinedAttachments,
       type: messageType,
       body: messageText,
-      isReplied: _replyToMessageData != null,
-      status: MessageStatusType.unsent,
+      repliedTo: _replyToMessageData?.id,
       sentAt: nowUTC.toIso8601String(),
     );
 
     if (messageId == null && mediaResponse == null) {
       // storing the message into the local database
       final result = await _messagesRepo.insertMessage(newMsg);
-      // retry logic for handling unique constraint violation on message ID (snowflake collision)
+      // retry logic for handling unique constraint violation on message ID
       if (result["success"] == false && result["errorCode"] == 1555) {
         debugPrint("result : $result");
         if (retryCount! > 5) return;
@@ -2502,8 +2471,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       final result = await _messagesRepo.updateMessageFields(
         id,
         attachments: mediaResponse.toJson(),
-        metadata: combinedMetadata,
-        status: MessageStatusType.unsent,
+        isFailed: false,
       );
       if (result.isError) {
         debugPrint(
@@ -2547,70 +2515,73 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       _handleScrollToBottomTap();
     }
 
-    try {
-      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    // >>>>>-- sending to ws (fire-and-forget) -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    final messagePayload = ChatMessagePayload(
+      id: id,
+      convId: widget.group.chatId,
+      senderId: _currentUserDetails!.id,
+      attachments: mediaResponse,
+      msgType: messageType,
+      body: messageText,
+      repliedTo: _replyToMessageData?.id,
+      sentAt: nowUTC,
+    );
 
-      final messagePayload = ChatMessagePayload(
-        id: id,
-        convId: widget.group.conversationId,
-        senderId: _currentUserDetails!.id,
-        senderName: _currentUserDetails!.name,
-        attachments: mediaResponse,
-        convType: ChatType.group,
-        msgType: messageType,
-        body: messageText,
-        metadata: combinedMetadata,
-        replyToMessageId: _replyToMessageData?.id,
-        sentAt: nowUTC,
-      );
+    final wsmsg = WSMessage(
+      type: WSMessageType.messageNew,
+      payload: messagePayload,
+      wsTimestamp: DateTime.now(),
+    ).toJson();
 
-      final wsmsg = WSMessage(
-        type: WSMessageType.messageNew,
-        payload: messagePayload,
-        wsTimestamp: DateTime.now(),
-      ).toJson();
-
-      final sendResult = await _transportManager.sendMessage(wsmsg);
-      print("-----------------------------------------------------------");
-      print("sendResult : ${sendResult}");
-      print("-----------------------------------------------------------");
-      // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-      // updating the last message on sending own message
-      ref
-          .read(chatProvider.notifier)
-          .updateLastMessageOnSendingOwnMessage(
-            widget.group.conversationId,
-            newMsg,
-          );
-
-      // Check if message was sent successfully
-      if (sendResult == true) {
-        // Message sent successfully - store message statuses for group members
-        await _messageStatusRepo.insertMessageStatusesWithMultipleUserIds(
-          messageId: newMsg.id,
-          conversationId: widget.group.conversationId,
-          userIds: _conversationMembers
-              .where((member) => member.id != _currentUserDetails?.id)
-              .map((member) => member.id)
-              .toList(),
+    // updating the last message on sending own message
+    ref
+        .read(chatProvider.notifier)
+        .updateLastMessageOnSendingOwnMessage(
+          widget.group.chatId,
+          newMsg,
         );
+
+    _cancelReply();
+
+    // Fire-and-forget: send via transport without blocking UI.
+    // The MessageSentAckPayload handler marks as "sent" on success or "failed" on failure.
+    try {
+      // Synchronous check: if transport is not connected, mark failed immediately
+      if (!_transportManager.isConnected) {
+        debugPrint('Transport not connected, marking message as failed');
+        _markMessageAsFailed(newMsg.id);
       } else {
-        debugPrint('Failed to send message (offline or error)');
-        // Mark message as failed in DB and UI
-        await _markMessageAsFailed(newMsg.id);
+        unawaited(
+          _transportManager.sendMessage(wsmsg).then((sendResult) async {
+            if (sendResult == true) {
+              await _messageStatusRepo.insertMessageStatusesWithMultipleUserIds(
+                messageId: newMsg.id,
+                chatId: widget.group.chatId,
+                userIds: _conversationMembers
+                    .where((member) => member.id != _currentUserDetails?.id)
+                    .map((member) => member.id)
+                    .toList(),
+              );
+            } else {
+              debugPrint('Failed to send message (offline or error)');
+              await _markMessageAsFailed(newMsg.id);
+            }
+          }).catchError((e) {
+            debugPrint('Error sending message: $e');
+            _markMessageAsFailed(newMsg.id);
+          }),
+        );
       }
-      _cancelReply();
     } catch (e) {
       debugPrint('Error sending message: $e');
-      // Mark message as failed in DB and UI
-      await _markMessageAsFailed(newMsg.id);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSendingMessage = false;
-        });
-      }
+      _markMessageAsFailed(newMsg.id);
+    }
+    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    if (mounted) {
+      setState(() {
+        _isSendingMessage = false;
+      });
     }
   }
 
@@ -2675,7 +2646,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   /// Create and start animation for a new message
-  void _animateNewMessage(int messageId) {
+  void _animateNewMessage(String messageId) {
     if (_animatedMessages.contains(messageId)) return; // Already animated
 
     final controller = AnimationController(
@@ -2737,11 +2708,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       if (shouldSend) {
         // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         final typingPayload = TypingPayload(
-          convId: widget.group.conversationId,
-          isTyping: true,
+          convId: widget.group.chatId,
           senderId: _currentUserDetails!.id,
-          senderName: _currentUserDetails!.name,
-          senderPfp: _currentUserDetails!.profilePic,
         ).toJson();
 
         final wsmsg = WSMessage(
@@ -2752,6 +2720,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
         await _transportManager.sendMessage(wsmsg).catchError((e) {
           debugPrint('Error sending conversation:typing message');
+          return false;
         });
 
         // Update last sent time
@@ -2830,7 +2799,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
 
     // Search in loaded messages
-    final matches = <int>[];
+    final matches = <String>[];
     for (final message in _messages) {
       if (message.isDeleted == true) continue;
 
@@ -3115,15 +3084,15 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             Column(
               children: [
                 // Pinned Message Section
-                if (_pinnedMessage != null && _pinnedMessage!.id != 0)
+                if (_pinnedMessage != null && _pinnedMessage!.id.isNotEmpty)
                   PinnedMessageSection(
                     pinnedMessage: _messages.firstWhere(
                       (message) => message.id == _pinnedMessage?.id,
                       orElse: () => _pinnedMessage!,
                     ),
-                    currentUserId: _currentUserDetails?.id ?? 0,
+                    currentUserId: _currentUserDetails?.id ?? '',
                     // isGroupChat: widget.group.type == ChatType.group,
-                    onTap: () => _scrollToMessage(_pinnedMessage?.id ?? 0),
+                    onTap: () => _scrollToMessage(_pinnedMessage?.id ?? ''),
                     onUnpin: () => _togglePinMessage(_pinnedMessage!),
                   ),
 
@@ -3530,15 +3499,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       mounted: mounted,
       isMyMessage: isMyMessage,
       buildMessageStatusTicks: (message) {
-        // For group chats, show delivery status based on status
-        if (message.status == MessageStatusType.delivered ||
-            message.status == MessageStatusType.read) {
-          // Double tick - message is delivered or read
-          return const Icon(Icons.done_all, size: 16, color: Colors.white70);
-        } else {
-          // Single tick - message is sent but not delivered
-          return const Icon(Icons.done, size: 16, color: Colors.white70);
+        // Status enum is gone; show generic double tick for non-failed messages.
+        if (message.isFailed) {
+          return const Icon(Icons.error_outline, size: 16, color: Colors.red);
         }
+        return const Icon(Icons.done_all, size: 16, color: Colors.white70);
       },
       onRetryImage: (file, source, {MessageModel? failedMessage}) {
         // if (failedMessage != null) {
@@ -3808,9 +3773,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // Check if this message is currently highlighted
     final isHighlighted = _highlightedMessageId == message.id;
 
-    final messageWithReactions = _reactionsByMessage.containsKey(message.id)
-        ? message.copyWith(reactions: _reactionsByMessage[message.id])
-        : message;
+    // Reactions are tracked in _reactionsByMessage; MessageModel no longer has
+    // a reactions field. Downstream widgets read reactions via callbacks.
+    final messageWithReactions = message;
 
     return MessageBubble(
       config: MessageBubbleConfig(
@@ -4041,7 +4006,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       for (final entry in msgReactions.entries) {
         final users = (entry.value as List?) ?? [];
         if (users.any(
-          (u) => (u['user_id'] as int?) == _currentUserDetails!.id,
+          (u) => u['user_id']?.toString() == _currentUserDetails!.id,
         )) {
           myReactions.add(entry.key);
         }
@@ -4218,20 +4183,16 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   /// Build message status ticks for group messages
-  /// Shows different icons based on message status and read/delivered status
+  /// Shows different icons based on isFailed / in-flight state
   Widget _buildMessageStatusTicks(MessageModel message) {
-    // For failed messages, don't show ticks (red info icon is shown separately)
-    if (message.status == MessageStatusType.failed) {
+    // For failed messages, show error icon
+    if (message.isFailed) {
       return Icon(Icons.error_outline_rounded, size: 16, color: Colors.red);
     }
 
-    // For unsent messages, show clock icon
-    if (message.status == MessageStatusType.unsent) {
-      return Icon(Icons.access_time_rounded, size: 16, color: Colors.grey[500]);
-    }
-
-    // For uploading messages, show cloud icon
-    if (message.status == MessageStatusType.uploading) {
+    // If attachments indicate an in-flight upload, show cloud icon
+    final atts = message.attachments;
+    if (atts is Map<String, dynamic> && atts['is_uploading'] == true) {
       return Icon(
         Icons.cloud_upload_outlined,
         size: 16,
@@ -4239,17 +4200,15 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       );
     }
 
-    // For sent/delivered/read messages, use FutureBuilder to check read/delivered status
-    return FutureBuilder<Widget>(
-      future: _getStatusTickIcon(message),
-      builder: (context, snapshot) {
-        if (snapshot.hasData) {
-          return snapshot.data!;
-        }
-        // Default to single tick while loading
+    final status = _deliveryStatusByMessage[message.id] ?? MessageStatusType.sent;
+    switch (status) {
+      case MessageStatusType.read:
+        return Icon(Icons.done_all_rounded, size: 16, color: Colors.blue);
+      case MessageStatusType.delivered:
+        return Icon(Icons.done_all_rounded, size: 16, color: Colors.grey[500]);
+      default:
         return Icon(Icons.done_rounded, size: 16, color: Colors.grey[500]);
-      },
-    );
+    }
   }
 
   /// Get the appropriate status tick icon based on read/delivered status
@@ -4417,7 +4376,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   //   await sendImageMessage(
   //     SendMediaMessageConfig(
   //       mediaFile: imageFile,
-  //       conversationId: widget.group.conversationId,
+  //       conversationId: widget.group.chatId,
   //       currentUserId: _currentUserId,
   //       optimisticMessageId: _optimisticMessageId,
   //       replyToMessage: _replyToMessageData,
@@ -4454,7 +4413,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   //   await sendVideoMessage(
   //     SendMediaMessageConfig(
   //       mediaFile: videoFile,
-  //       conversationId: widget.group.conversationId,
+  //       conversationId: widget.group.chatId,
   //       currentUserId: _currentUserId,
   //       optimisticMessageId: _optimisticMessageId,
   //       replyToMessage: _replyToMessageData,
@@ -4492,7 +4451,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   //   await sendDocumentMessage(
   //     SendMediaMessageConfig(
   //       mediaFile: documentFile,
-  //       conversationId: widget.group.conversationId,
+  //       conversationId: widget.group.chatId,
   //       currentUserId: _currentUserId,
   //       optimisticMessageId: _optimisticMessageId,
   //       replyToMessage: _replyToMessageData,
@@ -4524,7 +4483,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   // }
 
   // Message action methods
-  void _toggleMessageSelection(int messageId) {
+  void _toggleMessageSelection(String messageId) {
     setState(() {
       if (_selectedMessages.contains(messageId)) {
         _selectedMessages.remove(messageId);
@@ -4572,7 +4531,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     });
   }
 
-  void _enterSelectionMode(int messageId) {
+  void _enterSelectionMode(String messageId) {
     setState(() {
       _selectedMessages.add(messageId);
     });
@@ -4592,7 +4551,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     await ChatHelpers.togglePinMessage(
       message: message,
-      conversationId: widget.group.conversationId,
+      conversationId: widget.group.chatId,
       currentPinnedMessageId: pinnedMessageId,
       setPinnedMessageId: (value) {
         // This is called inside togglePinMessage's setState, but we already updated above
@@ -4607,19 +4566,18 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     ref
         .read(chatProvider.notifier)
         .updatePinnedMessageInState(
-          widget.group.conversationId,
+          widget.group.chatId,
           newPinnedMessageId,
         );
   }
 
-  void _toggleStarMessage(int messageId) async {
-    await ChatHelpers.toggleStarMessage(
-      messageId: messageId,
-      conversationId: widget.group.conversationId,
-      starredMessages: _starredMessages,
-      currentUserId: _currentUserDetails?.id,
-      setState: setState,
-    );
+  // Starring is temporarily disabled during the UUIDv7 migration.
+  static const bool _starEnabled = false;
+
+  void _toggleStarMessage(String messageId) async {
+    if (_starEnabled) {
+      /* star disabled */
+    }
   }
 
   /// React to a message with an emoji (toggle: add if not reacted, remove if already reacted)
@@ -4633,21 +4591,21 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             .toList() ??
         [];
     final alreadyReacted = emojiUsers.any(
-      (u) => (u['user_id'] as int?) == _currentUserDetails!.id,
+      (u) => u['user_id']?.toString() == _currentUserDetails!.id,
     );
     final action = alreadyReacted ? 'remove' : 'add';
 
     await _messageStatusRepo.upsertReaction(
       messageId: message.id,
       userId: _currentUserDetails!.id,
-      conversationId: widget.group.conversationId,
+      chatId: widget.group.chatId,
       emoji: action == 'add' ? emoji : null,
     );
 
     try {
       await apiService.chat.reactToMessage(
         messageId: message.id,
-        conversationId: widget.group.conversationId,
+        conversationId: widget.group.chatId,
         emoji: emoji,
         action: action,
         senderName: _currentUserDetails!.name,
@@ -4658,8 +4616,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   void _bulkDeleteMessages() async {
+    final selectedIds = _selectedMessages.toList();
     final result = await apiService.chat.deleteMessage(
-      _selectedMessages.map((id) => id).toList(),
+      selectedIds,
       isAdminOrStaff: _isAdminOrStaff,
     );
 
@@ -4674,20 +4633,21 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           .read(chatProvider.notifier)
           .handleMessageDelete(
             DeleteMessagePayload(
-              messageIds: _selectedMessages.map((id) => id).toList(),
-              convId: widget.group.conversationId,
-              senderId: _currentUserDetails?.id ?? 0,
+              messageIds: selectedIds,
+              convId: widget.group.chatId,
+              senderId: _currentUserDetails?.id ?? '',
             ),
           )
           .catchError((e) {
             debugPrint('❌ Error deleting messages: $e');
+            return;
           });
 
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
       final deleteMessagePayload = DeleteMessagePayload(
-        messageIds: _selectedMessages.map((id) => id).toList(),
-        convId: widget.group.conversationId,
-        senderId: _currentUserDetails?.id ?? 0,
+        messageIds: selectedIds,
+        convId: widget.group.chatId,
+        senderId: _currentUserDetails?.id ?? '',
       ).toJson();
 
       final wsmsg = WSMessage(
@@ -4698,6 +4658,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
       _transportManager.sendMessage(wsmsg).catchError((e) {
         debugPrint('❌ Error sending message delete: $e');
+        return false;
       });
       // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
       _exitSelectionMode();
@@ -4705,7 +4666,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   /// Scroll to a specific message (reply-tap or pinned message tap)
-  Future<void> _scrollToMessage(int messageId) async {
+  Future<void> _scrollToMessage(String messageId) async {
     if (!mounted || !_scrollController.hasClients) return;
 
     // Fast path: only if message is within 100 items of the bottom (visible or near-visible).
@@ -4732,7 +4693,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   /// Apply a timed highlight effect on the target message row
-  void _highlightMessage(int messageId) {
+  void _highlightMessage(String messageId) {
     if (!mounted) return;
     setState(() => _highlightedMessageId = messageId);
     _highlightTimer?.cancel();
@@ -4741,12 +4702,12 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     });
   }
 
-  Future<void> _jumpToMessage(int messageId) async {
+  Future<void> _jumpToMessage(String messageId) async {
     if (!mounted) return;
     setState(() => _isLoadingTargetMessage = true);
     try {
       final result = await apiService.chat.getMessagesAround(
-        conversationId: widget.group.conversationId,
+        conversationId: widget.group.chatId,
         messageId: messageId,
         before: 50,
         after: 50,
@@ -4772,7 +4733,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             }
           });
         // Deduplicate by message ID
-        final seen = <int>{};
+        final seen = <String>{};
         _jumpMessages = sorted.where((m) => seen.add(m.id)).toList();
         _jumpHasOlderMessages = around.hasOlder;
         _jumpHasNewerMessages = around.hasNewer;
@@ -4806,7 +4767,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     setState(() => _isLoadingJumpOlder = true);
     try {
       final result = await apiService.chat.getConversationHistory(
-        conversationId: widget.group.conversationId,
+        conversationId: widget.group.chatId,
         beforeMessageId: _jumpMessages.first.id,
         limit: 50,
       );
@@ -4830,7 +4791,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
               );
               _jumpHasNewerMessages = true;
             }
-            _jumpHasOlderMessages = history.hasNextPage;
+            _jumpHasOlderMessages = history.hasMore;
           });
         } else {
           setState(() => _jumpHasOlderMessages = false);
@@ -4849,7 +4810,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     setState(() => _isLoadingJumpNewer = true);
     try {
       final result = await apiService.chat.getConversationHistory(
-        conversationId: widget.group.conversationId,
+        conversationId: widget.group.chatId,
         afterMessageId: _jumpMessages.last.id,
         limit: 50,
       );
@@ -4858,7 +4819,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         final history = ConversationHistoryResponse.fromJson(
           result.data as Map<String, dynamic>,
         );
-        if (history.messages.isEmpty || !history.hasNextPage) {
+        if (history.messages.isEmpty || !history.hasMore) {
           setState(() => _isLoadingJumpNewer = false);
           _exitJumpMode();
           return;
@@ -4874,7 +4835,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             _jumpMessages = _jumpMessages.sublist(excess);
             _jumpHasOlderMessages = true;
           }
-          _jumpHasNewerMessages = history.hasNextPage;
+          _jumpHasNewerMessages = history.hasMore;
         });
       }
     } catch (e) {
@@ -4921,20 +4882,20 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         groupList: groupList,
         isLoading: _isLoadingConversations,
         onForward: _handleForwardToConversations,
-        currentConversationId: widget.group.conversationId,
+        currentConversationId: widget.group.chatId,
       ),
     );
   }
 
   Future<void> _handleForwardToConversations(
-    List<int> selectedConversationIds,
+    List<String> selectedConversationIds,
   ) async {
     await handleForwardToConversations(
       HandleForwardToConversationsConfig(
         messagesToForward: _messagesToForward,
         selectedConversationIds: selectedConversationIds,
-        currentUserId: _currentUserDetails?.id ?? 0,
-        sourceConversationId: widget.group.conversationId,
+        currentUserId: _currentUserDetails?.id ?? '',
+        sourceConversationId: widget.group.chatId,
         context: context,
         mounted: mounted,
         clearMessagesToForward: (messages) {
@@ -4962,7 +4923,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     await _showForwardModal();
   }
 
-  void _deleteMessage(int messageId) async {
+  void _deleteMessage(String messageId) async {
     setState(() {
       _messages.removeWhere((message) => message.id == messageId);
     });
@@ -4972,23 +4933,24 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         .handleMessageDelete(
           DeleteMessagePayload(
             messageIds: [messageId],
-            convId: widget.group.conversationId,
-            senderId: _currentUserDetails?.id ?? 0,
+            convId: widget.group.chatId,
+            senderId: _currentUserDetails?.id ?? '',
           ),
         )
         .catchError((e) {
           debugPrint('❌ Error deleting messages: $e');
+          return;
         });
 
-    final deleteResult = await apiService.chat.deleteMessage([
+    await apiService.chat.deleteMessage([
       messageId,
     ], isAdminOrStaff: _isAdminOrStaff);
 
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     final deleteMessagePayload = DeleteMessagePayload(
       messageIds: [messageId],
-      convId: widget.group.conversationId,
-      senderId: _currentUserDetails?.id ?? 0,
+      convId: widget.group.chatId,
+      senderId: _currentUserDetails?.id ?? '',
     ).toJson();
 
     final wsmsg = WSMessage(
@@ -4999,19 +4961,15 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     _transportManager.sendMessage(wsmsg).catchError((e) {
       debugPrint('❌ Error sending message delete: $e');
+      return false;
     });
     // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
   }
 
   void _bulkStarMessages() async {
-    await ChatHelpers.bulkStarMessages(
-      conversationId: widget.group.conversationId,
-      selectedMessages: _selectedMessages,
-      starredMessages: _starredMessages,
-      currentUserId: _currentUserDetails?.id ?? 0,
-      setState: setState,
-      exitSelectionMode: _exitSelectionMode,
-    );
+    if (_starEnabled) {
+      /* star disabled */
+    }
   }
 
   void _bulkForwardMessages() async {
@@ -5032,7 +4990,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       isReplying: _replyToMessageData != null,
       isSending: _isSendingMessage,
       replyToMessageData: _replyToMessageData,
-      currentUserId: _currentUserDetails?.id ?? 0,
+      currentUserId: _currentUserDetails?.id ?? '',
       onSendMessage: (messageType) => _sendMessage(messageType),
       onSendVoiceNote: _sendVoiceNote,
       onAttachmentTap: _showAttachmentModal,
@@ -5050,7 +5008,6 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       recommendations: ValueListenableBuilder<TextEditingValue>(
         valueListenable: _messageController,
         builder: (context, value, child) {
-          final text = value.text.trim();
           // Show recommendations if text is empty OR if it matches one of the recommendations
           // if (text.isEmpty || _messageRecommendations.contains(text)) {
           return MessageRecommendations(
@@ -5175,6 +5132,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   Future<void> _sendRecordedVoice({MessageModel? failedMessage}) async {
     try {
       File? voiceFile;
+      // ignore: unused_local_variable
       int? duration;
 
       if (failedMessage != null) {
@@ -5228,7 +5186,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       // await sendRecordedVoice(
       //   SendMediaMessageConfig(
       //     mediaFile: voiceFile,
-      //     conversationId: widget.group.conversationId,
+      //     conversationId: widget.group.chatId,
       //     currentUserId: _currentUserId,
       //     optimisticMessageId: _optimisticMessageId,
       //     replyToMessage: _replyToMessageData,
@@ -5267,26 +5225,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   @override
   void deactivate() {
-    // Send inactive message when user navigates away from the page
-    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    final joinConvPayload = JoinLeavePayload(
-      convId: widget.group.conversationId,
-      convType: ChatType.group,
-      userId: _currentUserDetails?.id ?? 0,
-      userName: _currentUserDetails?.name ?? '',
-    ).toJson();
-
-    final wsmsg = WSMessage(
-      type: WSMessageType.conversationLeave,
-      payload: joinConvPayload,
-      wsTimestamp: DateTime.now(),
-    ).toJson();
-
-    _transportManager.sendMessage(wsmsg).catchError((e) {
-      debugPrint('❌ Error sending conversation:leave in deactivate: $e');
-    });
-    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
+    // Deactivate is called when user navigates away from the page.
+    // conversationLeave was removed; the server now infers leave from
+    // the absence of heartbeat / next join.
     super.deactivate();
   }
 
@@ -5296,7 +5237,6 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     _isDisposed = true;
     _jumpMessages = [];
     _isInJumpMode = false;
-    _messagesRepo.deleteAllMessagesLessThanOrEqualTo0();
 
     _scrollController.dispose();
     _messageController.dispose();
@@ -5306,6 +5246,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     _searchDebounceTimer?.cancel();
     _messagesStreamSub?.cancel();
     _reactionsSubscription?.cancel();
+    _deliveryStatusSubscription?.cancel();
     _transportConnectionSubscription?.cancel();
     _messageAckSubscription?.cancel();
     _messageSubscription?.cancel();
@@ -5325,7 +5266,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     if (_messageController.text.isNotEmpty) {
       final draftNotifier = ref.read(draftMessagesProvider.notifier);
       draftNotifier.saveDraft(
-        widget.group.conversationId,
+        widget.group.chatId,
         _messageController.text,
       );
     }
@@ -5363,25 +5304,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // Clear active conversation when leaving the messaging screen
     ref.read(chatProvider.notifier).setActiveConversation(null, null);
 
-    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    // Send inactive message when user navigates away from the page
-    final joinConvPayload = JoinLeavePayload(
-      convId: widget.group.conversationId,
-      convType: ChatType.group,
-      userId: _currentUserDetails?.id ?? 0,
-      userName: _currentUserDetails?.name ?? '',
-    ).toJson();
-
-    final wsmsg = WSMessage(
-      type: WSMessageType.conversationLeave,
-      payload: joinConvPayload,
-      wsTimestamp: DateTime.now(),
-    ).toJson();
-
-    _transportManager.sendMessage(wsmsg).catchError((e) {
-      debugPrint('❌ Error sending conversation:leave in dispose: $e');
-    });
-    // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    // conversationLeave was removed; the server infers leave from
+    // the absence of heartbeat / next join.
 
     super.dispose();
   }

@@ -35,65 +35,35 @@ class MessageRepository {
     final messageType =
         MessageType.fromString(message.type) ?? MessageType.text;
 
-    // Parse status
-    final messageStatus =
-        MessageStatusType.fromString(message.status) ?? MessageStatusType.sent;
-
-    // Extract localMediaPath from metadata if present
-    String? localMediaPath;
-    if (message.metadata != null &&
-        message.metadata!.containsKey('localMediaPath')) {
-      localMediaPath = message.metadata!['localMediaPath']?.toString();
-    }
-
     return MessageModel(
-      id: message.id.toInt(),
-      conversationId: message.conversationId,
+      id: message.id,
+      chatId: message.chatId,
       senderId: message.senderId,
       senderName: null, // Not stored in Messages table
       senderProfilePic: null, // Not stored in Messages table
+      repliedTo: message.repliedTo,
       type: messageType,
       body: message.body,
-      status: messageStatus,
       attachments: message.attachments,
-      metadata: message.metadata,
-      isFailed: message.isFailed ? true : null,
-      isStarred: message.isStarred ? true : null,
-      isReplied: message.isReplied ? true : null,
-      isForwarded: message.isForwarded ? true : null,
-      isDeleted: message.isDeleted ? true : null,
+      isFailed: message.isFailed,
       sentAt: message.sentAt,
-      localMediaPath: localMediaPath,
+      deletedAt: message.deletedAt,
     );
   }
 
   /// Helper method to convert MessageModel to MessagesCompanion for insertion
   MessagesCompanion _modelToCompanion(MessageModel message) {
-    // Use canonicalId if available, otherwise optimisticId
-    final messageId = message.id;
-
-    // Prepare metadata with localMediaPath if present
-    Map<String, dynamic>? metadata = message.metadata;
-    if (message.localMediaPath != null) {
-      metadata = Map<String, dynamic>.from(metadata ?? {});
-      metadata['localMediaPath'] = message.localMediaPath;
-    }
-
     return MessagesCompanion.insert(
-      id: Value(BigInt.from(messageId)),
-      conversationId: message.conversationId,
-      senderId: message.senderId,
+      id: message.id,
+      chatId: message.chatId,
+      senderId: Value(message.senderId),
+      repliedTo: Value(message.repliedTo),
       type: message.type.value,
       body: Value(message.body),
-      status: message.status.value,
       attachments: Value(message.attachments),
-      metadata: Value(metadata),
-      isFailed: Value(message.isFailed ?? false),
-      isStarred: Value(message.isStarred ?? false),
-      isReplied: Value(message.isReplied ?? false),
-      isForwarded: Value(message.isForwarded ?? false),
-      isDeleted: Value(message.isDeleted ?? false),
+      isFailed: Value(message.isFailed),
       sentAt: message.sentAt,
+      deletedAt: Value(message.deletedAt),
     );
   }
 
@@ -171,7 +141,7 @@ class MessageRepository {
   /// Get messages by conversation ID with sender details
   /// This method uses SQL JOIN with the Users table to populate senderName and senderProfilePic
   Future<List<MessageModel>> getMessagesByConversation(
-    int conversationId, {
+    String conversationId, {
     int? limit,
     int? offset,
     bool includeDeleted = false,
@@ -181,10 +151,10 @@ class MessageRepository {
     // Create query with LEFT JOIN to Users table
     final query = db.select(db.messages).join([
       leftOuterJoin(db.users, db.users.id.equalsExp(db.messages.senderId)),
-    ])..where(db.messages.conversationId.equals(conversationId));
+    ])..where(db.messages.chatId.equals(conversationId));
 
     if (!includeDeleted) {
-      query.where(db.messages.isDeleted.equals(false));
+      query.where(db.messages.deletedAt.isNull());
     }
 
     query.orderBy([
@@ -214,15 +184,15 @@ class MessageRepository {
   /// Watch messages for a conversation as a reactive Drift stream.
   /// The stream emits a new list whenever any message in this conversation
   /// is inserted, updated, or deleted in SQLite — including from FCM handlers.
-  Stream<List<MessageModel>> watchMessages(int conversationId) {
+  Stream<List<MessageModel>> watchMessages(String conversationId) {
     final db = sqliteDatabase.database;
 
     final query = db.select(db.messages).join([
       leftOuterJoin(db.users, db.users.id.equalsExp(db.messages.senderId)),
     ])
       ..where(
-        db.messages.conversationId.equals(conversationId) &
-            db.messages.isDeleted.equals(false),
+        db.messages.chatId.equals(conversationId) &
+            db.messages.deletedAt.isNull(),
       )
       ..orderBy([
         OrderingTerm(expression: db.messages.sentAt, mode: OrderingMode.asc),
@@ -241,11 +211,11 @@ class MessageRepository {
   }
 
   /// Get a single message by ID
-  Future<MessageModel?> getMessageById(int messageId) async {
+  Future<MessageModel?> getMessageById(String messageId) async {
     final db = sqliteDatabase.database;
     final message = await (db.select(
       db.messages,
-    )..where((t) => t.id.equals(BigInt.from(messageId)))).getSingleOrNull();
+    )..where((t) => t.id.equals(messageId))).getSingleOrNull();
 
     if (message == null) return null;
     return _messageToModel(message);
@@ -253,17 +223,17 @@ class MessageRepository {
 
   /// Get message count for a conversation
   Future<int> getMessageCount(
-    int conversationId, {
+    String conversationId, {
     bool includeDeleted = false,
   }) async {
     final db = sqliteDatabase.database;
 
     final query = db.selectOnly(db.messages)
       ..addColumns([db.messages.id.count()])
-      ..where(db.messages.conversationId.equals(conversationId));
+      ..where(db.messages.chatId.equals(conversationId));
 
     if (!includeDeleted) {
-      query.where(db.messages.isDeleted.equals(false));
+      query.where(db.messages.deletedAt.isNull());
     }
 
     final result = await query.getSingle();
@@ -271,13 +241,13 @@ class MessageRepository {
   }
 
   /// Get messages by IDs
-  Future<List<MessageModel>> getMessagesByIds(List<int> messageIds) async {
+  Future<List<MessageModel>> getMessagesByIds(List<String> messageIds) async {
     if (messageIds.isEmpty) return [];
 
     final db = sqliteDatabase.database;
     final messages = await (db.select(
       db.messages,
-    )..where((t) => t.id.isIn(messageIds.map((id) => BigInt.from(id))))).get();
+    )..where((t) => t.id.isIn(messageIds))).get();
 
     return messages.map((msg) => _messageToModel(msg)).toList();
   }
@@ -285,7 +255,7 @@ class MessageRepository {
   /// Get messages by type
   Future<List<MessageModel>> getMessagesByType(
     MessageType type, {
-    int? conversationId,
+    String? conversationId,
   }) async {
     final db = sqliteDatabase.database;
 
@@ -293,7 +263,7 @@ class MessageRepository {
       ..where((t) => t.type.equals(type.value));
 
     if (conversationId != null) {
-      query.where((t) => t.conversationId.equals(conversationId));
+      query.where((t) => t.chatId.equals(conversationId));
     }
 
     query.orderBy([
@@ -304,44 +274,15 @@ class MessageRepository {
     return messages.map((msg) => _messageToModel(msg)).toList();
   }
 
-  /// Get starred messages for a conversation
-  Future<Set<int>> getStarredMessages(int conversationId) async {
-    final db = sqliteDatabase.database;
-    final messages =
-        await (db.select(db.messages)..where(
-              (t) =>
-                  t.conversationId.equals(conversationId) &
-                  t.isStarred.equals(true),
-            ))
-            .get();
-
-    return messages.map((msg) => msg.id.toInt()).toSet();
-  }
-
-  /// Get all starred messages across all conversations
-  Future<List<MessageModel>> getAllStarredMessages() async {
-    final db = sqliteDatabase.database;
-    final messages =
-        await (db.select(db.messages)
-              ..where((t) => t.isStarred.equals(true))
-              ..orderBy([
-                (t) =>
-                    OrderingTerm(expression: t.sentAt, mode: OrderingMode.desc),
-              ]))
-            .get();
-
-    return messages.map((msg) => _messageToModel(msg)).toList();
-  }
-
   /// Get deleted messages for a conversation
-  Future<List<MessageModel>> getDeletedMessages(int conversationId) async {
+  Future<List<MessageModel>> getDeletedMessages(String conversationId) async {
     final db = sqliteDatabase.database;
     final messages =
         await (db.select(db.messages)
               ..where(
                 (t) =>
-                    t.conversationId.equals(conversationId) &
-                    t.isDeleted.equals(true),
+                    t.chatId.equals(conversationId) &
+                    t.deletedAt.isNotNull(),
               )
               ..orderBy([
                 (t) =>
@@ -352,48 +293,10 @@ class MessageRepository {
     return messages.map((msg) => _messageToModel(msg)).toList();
   }
 
-  /// Get forwarded messages
-  Future<List<MessageModel>> getForwardedMessages({int? conversationId}) async {
-    final db = sqliteDatabase.database;
-
-    final query = db.select(db.messages)
-      ..where((t) => t.isForwarded.equals(true));
-
-    if (conversationId != null) {
-      query.where((t) => t.conversationId.equals(conversationId));
-    }
-
-    query.orderBy([
-      (t) => OrderingTerm(expression: t.sentAt, mode: OrderingMode.desc),
-    ]);
-
-    final messages = await query.get();
-    return messages.map((msg) => _messageToModel(msg)).toList();
-  }
-
-  /// Get replied messages
-  Future<List<MessageModel>> getRepliedMessages({int? conversationId}) async {
-    final db = sqliteDatabase.database;
-
-    final query = db.select(db.messages)
-      ..where((t) => t.isReplied.equals(true));
-
-    if (conversationId != null) {
-      query.where((t) => t.conversationId.equals(conversationId));
-    }
-
-    query.orderBy([
-      (t) => OrderingTerm(expression: t.sentAt, mode: OrderingMode.desc),
-    ]);
-
-    final messages = await query.get();
-    return messages.map((msg) => _messageToModel(msg)).toList();
-  }
-
   /// Search messages by body text
   Future<List<MessageModel>> searchMessages(
     String searchQuery, {
-    int? conversationId,
+    String? conversationId,
     int? limit,
   }) async {
     final db = sqliteDatabase.database;
@@ -402,11 +305,11 @@ class MessageRepository {
       ..where((t) => t.body.like('%$searchQuery%'));
 
     if (conversationId != null) {
-      query.where((t) => t.conversationId.equals(conversationId));
+      query.where((t) => t.chatId.equals(conversationId));
     }
 
     query
-      ..where((t) => t.isDeleted.equals(false))
+      ..where((t) => t.deletedAt.isNull())
       ..orderBy([
         (t) => OrderingTerm(expression: t.sentAt, mode: OrderingMode.desc),
       ]);
@@ -420,14 +323,14 @@ class MessageRepository {
   }
 
   /// Get last message for a conversation
-  Future<MessageModel?> getLastMessage(int conversationId) async {
+  Future<MessageModel?> getLastMessage(String conversationId) async {
     final db = sqliteDatabase.database;
     final message =
         await (db.select(db.messages)
               ..where(
                 (t) =>
-                    t.conversationId.equals(conversationId) &
-                    t.isDeleted.equals(false),
+                    t.chatId.equals(conversationId) &
+                    t.deletedAt.isNull(),
               )
               ..orderBy([
                 (t) =>
@@ -440,45 +343,6 @@ class MessageRepository {
     return _messageToModel(message);
   }
 
-  /// Update message status
-  Future<SqliteResult<void>> updateMessageStatus(
-    int messageId,
-    MessageStatusType status,
-  ) async {
-    try {
-      final db = sqliteDatabase.database;
-      // Priority order: read=3, delivered=2, sent=1, anything else=0
-      // Never downgrade: only write if new priority is strictly higher than current
-      final int newPriority = switch (status) {
-        MessageStatusType.read => 3,
-        MessageStatusType.delivered => 2,
-        MessageStatusType.sent => 1,
-        _ => 0,
-      };
-      if (newPriority == 0) {
-        return SqliteResult.success(message: 'No status update needed');
-      }
-      await db.customUpdate(
-        "UPDATE messages SET status = ? WHERE id = ? "
-        "AND CASE status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 ELSE 0 END < ?",
-        variables: [
-          Variable<String>(status.value),
-          Variable<BigInt>(BigInt.from(messageId)),
-          Variable<int>(newPriority),
-        ],
-        updates: {db.messages},
-      );
-      return SqliteResult.success(message: 'Message status updated');
-    } catch (e) {
-      final errorCode = _extractSqliteErrorCode(e);
-      debugPrint("Error updating message status: $e");
-      return SqliteResult.error(
-        message: 'Failed to update message status',
-        errorCode: errorCode,
-      );
-    }
-  }
-
   /// Partially update a message by ID.
   ///
   /// Only the non-null fields you pass will be updated in the database.
@@ -487,32 +351,19 @@ class MessageRepository {
   /// Example:
   ///   await updateMessageFields(
   ///     messageId,
-  ///     status: MessageStatusType.delivered,
-  ///     metadata: updatedMetadata,
+  ///     body: 'new body',
   ///   );
   Future<SqliteResult> updateMessageFields(
-    int messageId, {
-    MessageStatusType? status,
-    int? newId,
-    Map<String, dynamic>? metadata,
+    String messageId, {
     Map<String, dynamic>? attachments,
     String? body,
     bool? isFailed,
-    bool? isStarred,
-    bool? isReplied,
-    bool? isForwarded,
     bool? isDeleted,
   }) async {
     // If nothing was provided, there is nothing to do
-    if (status == null &&
-        metadata == null &&
-        attachments == null &&
+    if (attachments == null &&
         body == null &&
         isFailed == null &&
-        isStarred == null &&
-        isReplied == null &&
-        isForwarded == null &&
-        newId == null &&
         isDeleted == null) {
       return SqliteResult.error(message: 'No fields provided to update');
     }
@@ -522,25 +373,19 @@ class MessageRepository {
 
       // Drift only updates the columns where the Value is present.
       final companion = MessagesCompanion(
-        status: status != null ? Value(status.value) : const Value.absent(),
-        id: newId != null ? Value(BigInt.from(newId)) : const Value.absent(),
-        metadata: metadata != null ? Value(metadata) : const Value.absent(),
         attachments: attachments != null
             ? Value(attachments)
             : const Value.absent(),
         body: body != null ? Value(body) : const Value.absent(),
         isFailed: isFailed != null ? Value(isFailed) : const Value.absent(),
-        isStarred: isStarred != null ? Value(isStarred) : const Value.absent(),
-        isReplied: isReplied != null ? Value(isReplied) : const Value.absent(),
-        isForwarded: isForwarded != null
-            ? Value(isForwarded)
+        deletedAt: isDeleted != null
+            ? Value(isDeleted ? DateTime.now().toIso8601String() : null)
             : const Value.absent(),
-        isDeleted: isDeleted != null ? Value(isDeleted) : const Value.absent(),
       );
 
       await (db.update(
         db.messages,
-      )..where((t) => t.id.equals(BigInt.from(messageId)))).write(companion);
+      )..where((t) => t.id.equals(messageId))).write(companion);
 
       return SqliteResult.success(message: 'Message fields updated');
     } catch (e) {
@@ -554,242 +399,17 @@ class MessageRepository {
     }
   }
 
-  /// Update all messages status for a conversation
-  Future<SqliteResult<void>> updateAllMessagesAsReadForDM(
-    int conversationId,
-  ) async {
-    try {
-      final db = sqliteDatabase.database;
-      await (db.update(db.messages)..where(
-            (t) =>
-                t.conversationId.equals(conversationId) &
-                t.status.equals(MessageStatusType.read.value).not(),
-          ))
-          .write(
-            MessagesCompanion(status: Value(MessageStatusType.read.value)),
-          );
-      return SqliteResult.success(message: 'All messages marked as read');
-    } catch (e) {
-      final errorCode = _extractSqliteErrorCode(e);
-      debugPrint("Error updating all messages status for DMs: $e");
-      return SqliteResult.error(
-        message: 'Failed to update all messages status',
-        errorCode: errorCode,
-      );
-    }
-  }
-
-  /// update message status for all conversation for user id
-  Future<SqliteResult<void>> updateAllMessagesAsDeliveredForUserId(
-    int userId,
-  ) async {
-    try {
-      final db = sqliteDatabase.database;
-
-      // Update messages in those conversations
-      await (db.update(db.messages)..where(
-            (t) =>
-                t.senderId.equals(userId) &
-                t.status.equals(MessageStatusType.sent.value),
-          ))
-          .write(
-            MessagesCompanion(status: Value(MessageStatusType.delivered.value)),
-          );
-      return SqliteResult.success(message: 'All messages marked as delivered');
-    } catch (e) {
-      final errorCode = _extractSqliteErrorCode(e);
-      debugPrint("Error updating all messages status for user ID: $e");
-      return SqliteResult.error(
-        message: 'Failed to update all messages status',
-        errorCode: errorCode,
-      );
-    }
-  }
-
-  /// Update message ID (for optimistic updates)
-  Future<SqliteResult<void>> updateMessageId(
-    int optimisticId,
-    int canonicalId,
-  ) async {
-    try {
-      final db = sqliteDatabase.database;
-
-      // Check if canonical message already exists
-      final canonicalMsg = await (db.select(
-        db.messages,
-      )..where((t) => t.id.equals(BigInt.from(canonicalId)))).getSingleOrNull();
-
-      if (canonicalMsg != null) {
-        // Canonical message exists, delete optimistic one
-        await deleteMessage(optimisticId);
-        return SqliteResult.success(
-          message: 'Optimistic message deleted, canonical exists',
-        );
-      } else {
-        // Update optimistic message ID to canonical
-        await (db.update(db.messages)
-              ..where((t) => t.id.equals(BigInt.from(optimisticId))))
-            .write(MessagesCompanion(id: Value(BigInt.from(canonicalId))));
-        return SqliteResult.success(message: 'Message ID updated');
-      }
-    } catch (e) {
-      final errorCode = _extractSqliteErrorCode(e);
-      debugPrint("Error updating message ID: $e");
-      return SqliteResult.error(
-        message: 'Failed to update message ID',
-        errorCode: errorCode,
-      );
-    }
-  }
-
-  /// Update optimistic message with server data
-  Future<MessageModel?> updateOptimisticMessage(
-    int conversationId,
-    int optimisticId,
-    int canonicalId,
-    Map<String, dynamic> messageData,
-  ) async {
-    final db = sqliteDatabase.database;
-
-    // Parse the message data
-    final updatedMessage = MessageModel.fromJson(messageData);
-
-    // Check if canonical message already exists
-    final existingCanonical = await (db.select(
-      db.messages,
-    )..where((t) => t.id.equals(BigInt.from(canonicalId)))).getSingleOrNull();
-
-    if (existingCanonical != null) {
-      // Canonical message exists, delete optimistic one
-      await deleteMessage(optimisticId);
-      return _messageToModel(existingCanonical);
-    }
-
-    // Prepare metadata with localMediaPath if present
-    Map<String, dynamic>? metadata = updatedMessage.metadata;
-    if (updatedMessage.localMediaPath != null) {
-      metadata = Map<String, dynamic>.from(metadata ?? {});
-      metadata['localMediaPath'] = updatedMessage.localMediaPath;
-    }
-
-    // Update optimistic message with canonical data
-    final companion = MessagesCompanion(
-      id: Value(BigInt.from(canonicalId)),
-      conversationId: Value(updatedMessage.conversationId),
-      senderId: Value(updatedMessage.senderId),
-      type: Value(updatedMessage.type.value),
-      body: Value(updatedMessage.body),
-      status: Value(updatedMessage.status.value),
-      attachments: Value(updatedMessage.attachments),
-      metadata: Value(metadata),
-      isFailed: Value(updatedMessage.isFailed ?? false),
-      isStarred: Value(updatedMessage.isStarred ?? false),
-      isReplied: Value(updatedMessage.isReplied ?? false),
-      isForwarded: Value(updatedMessage.isForwarded ?? false),
-      isDeleted: Value(updatedMessage.isDeleted ?? false),
-      sentAt: Value(updatedMessage.sentAt),
-    );
-
-    await (db.update(
-      db.messages,
-    )..where((t) => t.id.equals(BigInt.from(optimisticId)))).write(companion);
-
-    // Return updated message
-    final updated = await getMessageById(canonicalId);
-    return updated;
-  }
-
-  /// Star a message
-  Future<SqliteResult<void>> starMessage(int messageId) async {
-    try {
-      final db = sqliteDatabase.database;
-      await (db.update(db.messages)
-            ..where((t) => t.id.equals(BigInt.from(messageId))))
-          .write(MessagesCompanion(isStarred: Value(true)));
-      return SqliteResult.success(message: 'Message starred');
-    } catch (e) {
-      final errorCode = _extractSqliteErrorCode(e);
-      debugPrint("Error starring message: $e");
-      return SqliteResult.error(
-        message: 'Failed to star message',
-        errorCode: errorCode,
-      );
-    }
-  }
-
-  /// Unstar a message
-  Future<SqliteResult<void>> unstarMessage(int messageId) async {
-    try {
-      final db = sqliteDatabase.database;
-      await (db.update(db.messages)
-            ..where((t) => t.id.equals(BigInt.from(messageId))))
-          .write(MessagesCompanion(isStarred: Value(false)));
-      return SqliteResult.success(message: 'Message unstarred');
-    } catch (e) {
-      final errorCode = _extractSqliteErrorCode(e);
-      debugPrint("Error unstarring message: $e");
-      return SqliteResult.error(
-        message: 'Failed to unstar message',
-        errorCode: errorCode,
-      );
-    }
-  }
-
-  /// Toggle star status of a message
-  Future<void> toggleStarMessage(int messageId) async {
-    final message = await getMessageById(messageId);
-    if (message != null) {
-      if (message.isStarred == true) {
-        await unstarMessage(messageId);
-      } else {
-        await starMessage(messageId);
-      }
-    }
-  }
-
-  /// Save starred messages (bulk star)
-  Future<void> saveStarredMessages(
-    int conversationId,
-    Set<int> messageIds,
-  ) async {
-    final db = sqliteDatabase.database;
-
-    // First, unstar all messages in the conversation
-    await (db.update(db.messages)
-          ..where((t) => t.conversationId.equals(conversationId)))
-        .write(MessagesCompanion(isStarred: Value(false)));
-
-    // Then star the specified messages
-    if (messageIds.isNotEmpty) {
-      await (db.update(db.messages)
-            ..where((t) => t.id.isIn(messageIds.map((id) => BigInt.from(id)))))
-          .write(MessagesCompanion(isStarred: Value(true)));
-    }
-  }
-
-  /// Mark message as replied
-  Future<void> markAsReplied(int messageId) async {
-    final db = sqliteDatabase.database;
-    await (db.update(db.messages)
-          ..where((t) => t.id.equals(BigInt.from(messageId))))
-        .write(MessagesCompanion(isReplied: Value(true)));
-  }
-
-  /// Mark message as forwarded
-  Future<void> markAsForwarded(int messageId) async {
-    final db = sqliteDatabase.database;
-    await (db.update(db.messages)
-          ..where((t) => t.id.equals(BigInt.from(messageId))))
-        .write(MessagesCompanion(isForwarded: Value(true)));
-  }
-
   /// Delete a message (soft delete)
-  Future<SqliteResult<void>> deleteMessage(int messageId) async {
+  Future<SqliteResult<void>> deleteMessage(String messageId) async {
     try {
       final db = sqliteDatabase.database;
       await (db.update(db.messages)
-            ..where((t) => t.id.equals(BigInt.from(messageId))))
-          .write(MessagesCompanion(isDeleted: Value(true)));
+            ..where((t) => t.id.equals(messageId)))
+          .write(
+            MessagesCompanion(
+              deletedAt: Value(DateTime.now().toIso8601String()),
+            ),
+          );
       return SqliteResult.success(message: 'Message deleted');
     } catch (e) {
       final errorCode = _extractSqliteErrorCode(e);
@@ -802,7 +422,7 @@ class MessageRepository {
   }
 
   /// Delete multiple messages (soft delete)
-  Future<SqliteResult<void>> deleteMessages(List<int> messageIds) async {
+  Future<SqliteResult<void>> deleteMessages(List<String> messageIds) async {
     if (messageIds.isEmpty) {
       return SqliteResult.success(message: 'No messages to delete');
     }
@@ -810,8 +430,12 @@ class MessageRepository {
     try {
       final db = sqliteDatabase.database;
       await (db.update(db.messages)
-            ..where((t) => t.id.isIn(messageIds.map((id) => BigInt.from(id)))))
-          .write(MessagesCompanion(isDeleted: Value(true)));
+            ..where((t) => t.id.isIn(messageIds)))
+          .write(
+            MessagesCompanion(
+              deletedAt: Value(DateTime.now().toIso8601String()),
+            ),
+          );
       return SqliteResult.success(message: 'Messages deleted');
     } catch (e) {
       final errorCode = _extractSqliteErrorCode(e);
@@ -824,97 +448,74 @@ class MessageRepository {
   }
 
   /// Permanently delete a message
-  Future<bool> permanentlyDeleteMessage(int messageId) async {
+  Future<bool> permanentlyDeleteMessage(String messageId) async {
     final db = sqliteDatabase.database;
     final deleted = await (db.delete(
       db.messages,
-    )..where((t) => t.id.equals(BigInt.from(messageId)))).go();
+    )..where((t) => t.id.equals(messageId))).go();
     return deleted > 0;
   }
 
   /// Permanently delete multiple messages
-  Future<int> permanentlyDeleteMessages(List<int> messageIds) async {
+  Future<int> permanentlyDeleteMessages(List<String> messageIds) async {
     if (messageIds.isEmpty) return 0;
 
     final db = sqliteDatabase.database;
     final deleted = await (db.delete(
       db.messages,
-    )..where((t) => t.id.isIn(messageIds.map((id) => BigInt.from(id))))).go();
+    )..where((t) => t.id.isIn(messageIds))).go();
     return deleted;
   }
 
   /// Delete all messages in a conversation
-  Future<void> deleteConversationMessages(int conversationId) async {
+  Future<void> deleteConversationMessages(String conversationId) async {
     final db = sqliteDatabase.database;
     await (db.update(db.messages)
-          ..where((t) => t.conversationId.equals(conversationId)))
-        .write(MessagesCompanion(isDeleted: Value(true)));
+          ..where((t) => t.chatId.equals(conversationId)))
+        .write(
+          MessagesCompanion(
+            deletedAt: Value(DateTime.now().toIso8601String()),
+          ),
+        );
   }
 
   /// Restore a deleted message
-  Future<void> restoreMessage(int messageId) async {
+  Future<void> restoreMessage(String messageId) async {
     final db = sqliteDatabase.database;
     await (db.update(db.messages)
-          ..where((t) => t.id.equals(BigInt.from(messageId))))
-        .write(MessagesCompanion(isDeleted: Value(false)));
+          ..where((t) => t.id.equals(messageId)))
+        .write(const MessagesCompanion(deletedAt: Value(null)));
   }
 
   /// Update message body
-  Future<void> updateMessageBody(int messageId, String body) async {
+  Future<void> updateMessageBody(String messageId, String body) async {
     final db = sqliteDatabase.database;
     await (db.update(db.messages)
-          ..where((t) => t.id.equals(BigInt.from(messageId))))
+          ..where((t) => t.id.equals(messageId)))
         .write(MessagesCompanion(body: Value(body)));
   }
 
   /// Update message attachments
   Future<void> updateMessageAttachments(
-    int messageId,
+    String messageId,
     Map<String, dynamic>? attachments,
   ) async {
     final db = sqliteDatabase.database;
     await (db.update(db.messages)
-          ..where((t) => t.id.equals(BigInt.from(messageId))))
+          ..where((t) => t.id.equals(messageId)))
         .write(MessagesCompanion(attachments: Value(attachments)));
   }
 
-  /// Update message metadata
-  Future<void> updateMessageMetadata(
-    int messageId,
-    Map<String, dynamic>? metadata,
+  /// Update local media path for a message after caching/downloading.
+  /// NOTE: localMediaPath is not persisted in SQLite — this is a no-op stub
+  /// kept so callers compile. The in-memory MessageModel should be updated
+  /// via copyWith() at the call site.
+  Future<void> updateLocalMediaPath(
+    String messageId,
+    String? localMediaPath,
   ) async {
-    final db = sqliteDatabase.database;
-    await (db.update(db.messages)
-          ..where((t) => t.id.equals(BigInt.from(messageId))))
-        .write(MessagesCompanion(metadata: Value(metadata)));
-  }
-
-
-  /// Check if message has local media (checks metadata for localMediaPath)
-  Future<bool> hasLocalMedia(int messageId) async {
-    final message = await getMessageById(messageId);
-    if (message == null) return false;
-
-    final metadata = message.metadata;
-    if (metadata == null) return false;
-
-    return metadata.containsKey('localMediaPath') &&
-        metadata['localMediaPath'] != null;
-  }
-
-  /// Update local media path in message metadata
-  Future<void> updateLocalMediaPath(int messageId, String? localPath) async {
-    final message = await getMessageById(messageId);
-    if (message == null) return;
-
-    final metadata = Map<String, dynamic>.from(message.metadata ?? {});
-    if (localPath != null) {
-      metadata['localMediaPath'] = localPath;
-    } else {
-      metadata.remove('localMediaPath');
-    }
-
-    await updateMessageMetadata(messageId, metadata);
+    // no-op: schema does not store localMediaPath
+    return;
   }
 
   /// Add message to cache (alias for insertMessage)
@@ -928,37 +529,13 @@ class MessageRepository {
   }
 
   /// Remove message from cache (delete message)
-  Future<void> removeMessageFromCache(int messageId) async {
+  Future<void> removeMessageFromCache(String messageId) async {
     await deleteMessage(messageId);
-  }
-
-  /// Validate reply message storage (check if replied-to messages exist)
-  Future<void> validateReplyMessageStorage(int conversationId) async {
-    final db = sqliteDatabase.database;
-    final messages = await getMessagesByConversation(conversationId);
-
-    for (final message in messages) {
-      if (message.isReplied == true && message.metadata != null) {
-        final replyTo = message.metadata!['reply_to'];
-        if (replyTo != null && replyTo['message_id'] != null) {
-          final replyToId = replyTo['message_id'] as int;
-          final repliedMessage = await getMessageById(replyToId);
-
-          // message.id is a getter that returns canonicalId ?? optimisticId ?? 0, so it's never null
-          if (repliedMessage == null && message.id > 0) {
-            // Reply target doesn't exist, mark as not replied
-            await (db.update(db.messages)
-                  ..where((t) => t.id.equals(BigInt.from(message.id))))
-                .write(MessagesCompanion(isReplied: Value(false)));
-          }
-        }
-      }
-    }
   }
 
   /// Get messages in date range
   Future<List<MessageModel>> getMessagesInDateRange(
-    int conversationId,
+    String conversationId,
     DateTime startDate,
     DateTime endDate,
   ) async {
@@ -970,10 +547,10 @@ class MessageRepository {
         await (db.select(db.messages)
               ..where(
                 (t) =>
-                    t.conversationId.equals(conversationId) &
+                    t.chatId.equals(conversationId) &
                     t.sentAt.isBiggerOrEqualValue(startStr) &
                     t.sentAt.isSmallerOrEqualValue(endStr) &
-                    t.isDeleted.equals(false),
+                    t.deletedAt.isNull(),
               )
               ..orderBy([
                 (t) =>
@@ -986,17 +563,17 @@ class MessageRepository {
 
   /// Get unread message count for a conversation
   Future<int> getUnreadMessageCount(
-    int conversationId,
-    int lastReadMessageId,
+    String conversationId,
+    String lastReadMessageId,
   ) async {
     final db = sqliteDatabase.database;
 
     final query = db.selectOnly(db.messages)
       ..addColumns([db.messages.id.count()])
       ..where(
-        db.messages.conversationId.equals(conversationId) &
-            db.messages.id.isBiggerThanValue(BigInt.from(lastReadMessageId)) &
-            db.messages.isDeleted.equals(false),
+        db.messages.chatId.equals(conversationId) &
+            db.messages.id.isBiggerThanValue(lastReadMessageId) &
+            db.messages.deletedAt.isNull(),
       );
 
     final result = await query.getSingle();
@@ -1010,16 +587,16 @@ class MessageRepository {
   }
 
   /// Clear messages for a conversation (permanently delete)
-  Future<void> clearConversationMessages(int conversationId) async {
+  Future<void> clearConversationMessages(String conversationId) async {
     final db = sqliteDatabase.database;
     await (db.delete(
       db.messages,
-    )..where((t) => t.conversationId.equals(conversationId))).go();
+    )..where((t) => t.chatId.equals(conversationId))).go();
   }
 
   /// Get messages with media attachments
   Future<List<MessageModel>> getMediaMessages({
-    int? conversationId,
+    String? conversationId,
     MessageType? mediaType,
   }) async {
     final db = sqliteDatabase.database;
@@ -1028,7 +605,7 @@ class MessageRepository {
       ..where((t) => t.attachments.isNotNull());
 
     if (conversationId != null) {
-      query.where((t) => t.conversationId.equals(conversationId));
+      query.where((t) => t.chatId.equals(conversationId));
     }
 
     if (mediaType != null) {
@@ -1036,7 +613,7 @@ class MessageRepository {
     }
 
     query
-      ..where((t) => t.isDeleted.equals(false))
+      ..where((t) => t.deletedAt.isNull())
       ..orderBy([
         (t) => OrderingTerm(expression: t.sentAt, mode: OrderingMode.desc),
       ]);
@@ -1046,21 +623,23 @@ class MessageRepository {
   }
 
   /// Check if message exists
-  Future<bool> messageExists(int messageId) async {
+  Future<bool> messageExists(String messageId) async {
     final db = sqliteDatabase.database;
     final message = await (db.select(
       db.messages,
-    )..where((t) => t.id.equals(BigInt.from(messageId)))).getSingleOrNull();
+    )..where((t) => t.id.equals(messageId))).getSingleOrNull();
     return message != null;
   }
 
   /// Get message statistics for a conversation
-  Future<Map<String, dynamic>> getMessageStatistics(int conversationId) async {
+  Future<Map<String, dynamic>> getMessageStatistics(
+    String conversationId,
+  ) async {
     final db = sqliteDatabase.database;
 
     final totalQuery = db.selectOnly(db.messages)
       ..addColumns([db.messages.id.count()])
-      ..where(db.messages.conversationId.equals(conversationId));
+      ..where(db.messages.chatId.equals(conversationId));
 
     final totalResult = await totalQuery.getSingle();
     final total = totalResult.read(db.messages.id.count()) ?? 0;
@@ -1068,53 +647,18 @@ class MessageRepository {
     final mediaQuery = db.selectOnly(db.messages)
       ..addColumns([db.messages.id.count()])
       ..where(
-        db.messages.conversationId.equals(conversationId) &
+        db.messages.chatId.equals(conversationId) &
             db.messages.attachments.isNotNull(),
       );
 
     final mediaResult = await mediaQuery.getSingle();
     final mediaCount = mediaResult.read(db.messages.id.count()) ?? 0;
 
-    final starredQuery = db.selectOnly(db.messages)
-      ..addColumns([db.messages.id.count()])
-      ..where(
-        db.messages.conversationId.equals(conversationId) &
-            db.messages.isStarred.equals(true),
-      );
-
-    final starredResult = await starredQuery.getSingle();
-    final starredCount = starredResult.read(db.messages.id.count()) ?? 0;
-
     return {
       'total': total,
       'media': mediaCount,
-      'starred': starredCount,
       'text': total - mediaCount,
     };
-  }
-
-  // function to delete all message of id less than or eual to 0
-  Future<void> deleteAllMessagesLessThanOrEqualTo0() async {
-    final db = sqliteDatabase.database;
-    await (db.delete(
-      db.messages,
-    )..where((t) => t.id.isSmallerOrEqualValue(BigInt.zero))).go();
-  }
-
-  // function to delete all message of id less than or equal to 0 and sentAt is more than 10 seconds ago
-  Future<void> removeoptimisticmessagesentatmorethan10sec() async {
-    final db = sqliteDatabase.database;
-
-    // Calculate timestamp 10 seconds ago
-    final tenSecondsAgo = DateTime.now().subtract(const Duration(seconds: 10));
-    final tenSecondsAgoStr = tenSecondsAgo.toIso8601String();
-
-    await (db.delete(db.messages)..where(
-          (t) =>
-              t.id.isSmallerOrEqualValue(BigInt.zero) &
-              t.sentAt.isSmallerOrEqualValue(tenSecondsAgoStr),
-        ))
-        .go();
   }
 
   /// Start the automatic cleanup timer that runs every 10 seconds
@@ -1122,9 +666,8 @@ class MessageRepository {
     _stopCleanupTimer(); // Stop any existing timer first
 
     _cleanupTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-      removeoptimisticmessagesentatmorethan10sec().catchError((error) {
-        debugPrint('❌ Error in optimistic message cleanup: $error');
-      });
+      // No-op cleanup; optimistic-ID reconciliation is no longer needed with
+      // monotonic UUIDv7 client-generated ids.
     });
 
     debugPrint('✅ Optimistic message cleanup timer started (every 10 seconds)');
@@ -1140,26 +683,19 @@ class MessageRepository {
     _cleanupTimer = null;
   }
 
-  /// Messages stuck as 'unsent' for longer than [unsentThreshold],
-  /// or any 'failed' message — for the given sender only.
+  /// Failed messages for the given sender only.
   Future<List<MessageModel>> getStalledMessages({
-    required int userId,
+    required String userId,
     required Duration unsentThreshold,
   }) async {
     final db = sqliteDatabase.database;
-    final threshold = DateTime.now()
-        .toUtc()
-        .subtract(unsentThreshold)
-        .toIso8601String();
 
     final query = db.select(db.messages)
       ..where(
         (t) =>
             t.senderId.equals(userId) &
-            t.isDeleted.equals(false) &
-            (t.status.equals('failed') |
-                (t.status.equals('unsent') &
-                    t.sentAt.isSmallerThanValue(threshold))),
+            t.deletedAt.isNull() &
+            t.isFailed.equals(true),
       )
       ..orderBy([(t) => OrderingTerm(expression: t.sentAt)]);
 
@@ -1172,141 +708,3 @@ class MessageRepository {
     _stopCleanupTimer();
   }
 }
-
-// OLD: Extension method to convert MessageModel to MessagesCompanion for inserts/updates
-// // Wrap in transaction to prevent database locks
-//     final trx_result = await db.transaction<Map<String, dynamic>>(() async {
-//       // final existingMessage = await (db.select(
-//       //   db.messages,
-//       // )..where((t) => t.id.equals(BigInt.from(message.id)))).getSingleOrNull();
-//       //
-//       // if (existingMessage != null) {
-//       //   return;
-//       // } else {
-//       try {
-//         final companion = _modelToCompanion(message);
-//         final result = await db.into(db.messages).insert(companion);
-//         // print("------------------message id ${message.id}-----------");
-//         // print("-----------message insertion result $result---------------");
-//         return {"success": true, "result": result};
-//       } catch (e) {
-//         // it returns 1555 for duplicate insertions
-//         final error = e as DriftRemoteException;
-//         final error2 = error.remoteCause as SqliteException;
-//         return {
-//           "success": false,
-//           "errorCode": error2.extendedResultCode,
-//           "message": "failed to insert message ",
-//         };
-//       }
-//       // }
-//       // If we have both canonicalId and optimisticId, we need to replace the optimistic message
-//       // with the canonical one to prevent duplicates
-//       // if (message.canonicalId != null && message.optimisticId != null) {
-//       //   // Check if optimistic message exists
-//       //   final optimisticMsg =
-//       //       await (db.select(db.messages)..where(
-//       //             (t) => t.id.equals(BigInt.from(message.optimisticId!)),
-//       //           ))
-//       //           .getSingleOrNull();
-//       //
-//       //   if (optimisticMsg != null) {
-//       //     // Check if canonical message already exists
-//       //     final canonicalMsg =
-//       //         await (db.select(db.messages)..where(
-//       //               (t) => t.id.equals(BigInt.from(message.canonicalId!)),
-//       //             ))
-//       //             .getSingleOrNull();
-//       //
-//       //     if (canonicalMsg == null) {
-//       //       // Canonical message doesn't exist, delete optimistic one
-//       //       await (db.delete(db.messages)..where(
-//       //             (t) => t.id.equals(BigInt.from(message.optimisticId!)),
-//       //           ))
-//       //           .go();
-//       //     } else {
-//       //       // Canonical message already exists, just delete optimistic one
-//       //       await (db.delete(db.messages)..where(
-//       //             (t) => t.id.equals(BigInt.from(message.optimisticId!)),
-//       //           ))
-//       //           .go();
-//       //       // Use existing canonical message data for merge
-//       //       final existingMessage = _messageToModel(canonicalMsg);
-//       //
-//       //       // Preserve existing body if new body is null/empty and existing has value
-//       //       final bodyValue = (message.body != null && message.body!.isNotEmpty)
-//       //           ? message.body
-//       //           : (existingMessage.body);
-//       //
-//       //       // Preserve existing attachments if new attachments are null/empty and existing has value
-//       //       final attachmentsValue =
-//       //           (message.attachments != null && message.attachments!.isNotEmpty)
-//       //           ? message.attachments
-//       //           : (existingMessage.attachments);
-//       //
-//       //       // Preserve existing metadata if new metadata is null/empty and existing has value
-//       //       final metadataValue =
-//       //           (message.metadata != null && message.metadata!.isNotEmpty)
-//       //           ? message.metadata
-//       //           : (existingMessage.metadata);
-//       //
-//       //       // Preserve existing isReplied flag if new one is false/null but existing is true
-//       //       final isRepliedValue = message.isReplied == true
-//       //           ? true
-//       //           : (existingMessage.isReplied ?? false);
-//       //
-//       //       // Create updated message with preserved values
-//       //       final updatedMessage = message.copyWith(
-//       //         body: bodyValue,
-//       //         attachments: attachmentsValue,
-//       //         metadata: metadataValue,
-//       //         isReplied: isRepliedValue ? true : null,
-//       //       );
-//       //
-//       //       final companion = _modelToCompanion(updatedMessage);
-//       //       await db.into(db.messages).insertOnConflictUpdate(companion);
-//       //       return; // Exit early since we've handled the update
-//       //     }
-//       //   }
-//       // }
-//
-//       // Check if message already exists to preserve body and metadata
-//       // final messageId = message.canonicalId ?? message.optimisticId;
-//       // MessageModel? existingMessage;
-//       // if (messageId != null) {
-//       //   existingMessage = await getMessageById(messageId);
-//       // }
-//       //
-//       // // Preserve existing body if new body is null/empty and existing has value
-//       // final bodyValue = (message.body != null && message.body!.isNotEmpty)
-//       //     ? message.body
-//       //     : (existingMessage?.body);
-//       //
-//       // // Preserve existing attachments if new attachments are null/empty and existing has value
-//       // final attachmentsValue =
-//       //     (message.attachments != null && message.attachments!.isNotEmpty)
-//       //     ? message.attachments
-//       //     : (existingMessage?.attachments);
-//       //
-//       // // Preserve existing metadata if new metadata is null/empty and existing has value
-//       // final metadataValue =
-//       //     (message.metadata != null && message.metadata!.isNotEmpty)
-//       //     ? message.metadata
-//       //     : (existingMessage?.metadata);
-//       //
-//       // // Preserve existing isReplied flag if new one is false/null but existing is true
-//       // final isRepliedValue = message.isReplied == true
-//       //     ? true
-//       //     : (existingMessage?.isReplied ?? false);
-//       //
-//       // // Create updated message with preserved values
-//       // final updatedMessage = message.copyWith(
-//       //   body: bodyValue,
-//       //   attachments: attachmentsValue,
-//       //   metadata: metadataValue,
-//       //   isReplied: isRepliedValue ? true : null,
-//       // );
-//       //
-//       // final companion = _modelToCompanion(updatedMessage);
-//       // await db.into(db.messages).insertOnConflictUpdate(companion);
-//     });

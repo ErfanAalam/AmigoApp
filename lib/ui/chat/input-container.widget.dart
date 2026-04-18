@@ -14,7 +14,7 @@ class MessageInputContainer extends ConsumerStatefulWidget {
   final bool isReplying;
   final bool isSending;
   final MessageModel? replyToMessageData;
-  final int? currentUserId;
+  final String? currentUserId;
   final Function(MessageType)? onSendMessage;
   final VoidCallback? onSendVoiceNote;
   final VoidCallback? onAttachmentTap;

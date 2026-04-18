@@ -19,6 +19,7 @@ import 'package:amigo/models/message.model.dart';
 import '../../api/api_service.dart';
 import '../../types/socket.types.dart';
 import '../../utils/user.utils.dart';
+import '../user-info-cache.service.dart';
 
 // import 'package:amigo/firebase_options.dart';
 
@@ -60,7 +61,7 @@ class NotificationService {
 
   // Track notifications by conversation for grouped notifications
   // Key: conversationId, Value: List of {title, body, messageId}
-  final Map<int, List<ChatMessagePayload>> _conversationNotifications = {};
+  final Map<String, List<ChatMessagePayload>> _conversationNotifications = {};
 
   // Summary notification ID (fixed ID for the summary)
   static const int _summaryNotificationId = -1;
@@ -403,10 +404,15 @@ class NotificationService {
   void _handleMessageNotification(
     RemoteNotification? notification,
     ChatMessagePayload chatPayload,
-  ) {
+  ) async {
+    // Look up sender name from local DB since ChatMessagePayload
+    // no longer carries senderName.
+    final sender = await UserInfoCache.instance.getUser(chatPayload.senderId);
+    final senderName = sender?.name ?? chatPayload.senderId;
+
     // Show local notification for new message
     showMessageNotification(
-      title: notification?.title ?? chatPayload.senderName ?? 'New Message',
+      title: notification?.title ?? senderName,
       body: notification?.body ?? chatPayload.body ?? 'You have a new message',
       chatPayload: chatPayload,
     );
@@ -418,22 +424,21 @@ class NotificationService {
   /// Store message from ChatMessagePayload to local database
   Future<void> _storeMessageFromPayload(ChatMessagePayload chatPayload) async {
     try {
+      // Look up sender name from local DB
+      final sender = await UserInfoCache.instance.getUser(chatPayload.senderId);
+
       // Convert to MessageModel and store in local DB
       final messageModel = MessageModel(
         id: chatPayload.id,
-        conversationId: chatPayload.convId,
+        chatId: chatPayload.convId,
         senderId: chatPayload.senderId,
-        senderName: chatPayload.senderName,
+        senderName: sender?.name ?? '',
         type: chatPayload.msgType,
         body: chatPayload.body,
-        status: MessageStatusType
-            .delivered, // Messages from notifications are delivered
-        attachments: chatPayload.attachments,
-        metadata: chatPayload.metadata,
-        isStarred: false,
-        isReplied: chatPayload.replyToMessageId != null,
-        isForwarded: false,
-        isDeleted: false,
+        attachments: chatPayload.attachments is Map<String, dynamic>
+            ? chatPayload.attachments as Map<String, dynamic>
+            : null,
+        repliedTo: chatPayload.repliedTo,
         sentAt: chatPayload.sentAt.toIso8601String(),
       );
 
@@ -597,22 +602,31 @@ class NotificationService {
     }
 
     final convId = chatPayload.convId;
-    final isGroup = chatPayload.convType == ChatType.group ||
-        chatPayload.convType == ChatType.communityGroup;
+
+    // Look up conversation type from local DB since ChatMessagePayload
+    // no longer carries convType.
+    final convRecord = await _conversationRepo.getConversationById(convId);
+    final convType = convRecord?.type != null
+        ? ChatType.fromString(convRecord!.type)
+        : null;
+    final isGroup = convType == ChatType.group ||
+        convType == ChatType.communityGroup;
 
     // 1. Accumulate messages (persisted via SharedPreferences for cross-isolate support)
     final messages = await _accumulateMessage(convId, chatPayload);
+
+    // Look up sender name from local DB
+    final senderUser = await UserInfoCache.instance.getUser(chatPayload.senderId);
+    final senderName = senderUser?.name;
 
     // 2. Resolve conversation title
     String conversationTitle;
     if (isGroup) {
       try {
-        final conversation =
-            await _conversationRepo.getConversationById(convId);
         conversationTitle =
-            conversation?.title ?? chatPayload.senderName ?? 'Group Chat';
+            convRecord?.title ?? senderName ?? 'Group Chat';
       } catch (_) {
-        conversationTitle = chatPayload.senderName ?? 'Group Chat';
+        conversationTitle = senderName ?? 'Group Chat';
       }
     } else {
       // For DMs, try to get display name from users table
@@ -620,18 +634,18 @@ class NotificationService {
         final sender =
             await UserRepository().getUserById(chatPayload.senderId);
         conversationTitle =
-            sender?.displayName ?? chatPayload.senderName ?? 'Unknown';
+            sender?.displayName ?? senderName ?? 'Unknown';
       } catch (_) {
-        conversationTitle = chatPayload.senderName ?? 'Unknown';
+        conversationTitle = senderName ?? 'Unknown';
       }
     }
 
     // 3. Download sender profile pictures for Person icons
     //    Cache downloaded avatars by senderId to avoid duplicate downloads
-    final avatarCache = <int, Uint8List?>{};
+    final avatarCache = <String, Uint8List?>{};
     final userRepo = UserRepository();
 
-    Future<Uint8List?> getAvatar(int senderId) async {
+    Future<Uint8List?> getAvatar(String senderId) async {
       if (avatarCache.containsKey(senderId)) return avatarCache[senderId];
       Uint8List? bytes;
       try {
@@ -645,11 +659,22 @@ class NotificationService {
     }
 
     // 4. Build Person + Message list for MessagingStyle
+    // Cache sender names by userId to avoid repeated lookups
+    final nameCache = <String, String>{};
+    Future<String> getSenderName(String senderId) async {
+      if (nameCache.containsKey(senderId)) return nameCache[senderId]!;
+      final u = await UserInfoCache.instance.getUser(senderId);
+      final name = u?.name ?? 'Unknown';
+      nameCache[senderId] = name;
+      return name;
+    }
+
     final messagingMessages = <Message>[];
     for (final msg in messages) {
       final senderAvatar = await getAvatar(msg.senderId);
+      final msgSenderName = await getSenderName(msg.senderId);
       final person = Person(
-        name: msg.senderName ?? 'Unknown',
+        name: msgSenderName,
         key: msg.senderId.toString(),
         icon: senderAvatar != null
             ? ByteArrayAndroidIcon(senderAvatar)
@@ -709,7 +734,7 @@ class NotificationService {
   /// Accumulate messages per conversation using SharedPreferences
   /// Returns the list of accumulated messages (max 5) for the conversation
   Future<List<ChatMessagePayload>> _accumulateMessage(
-    int convId,
+    String convId,
     ChatMessagePayload newMessage,
   ) async {
     final prefs = await SharedPreferences.getInstance();
@@ -839,22 +864,30 @@ class NotificationService {
 
         if (messages.isNotEmpty) {
           final latest = messages.last;
-          final convId = int.tryParse(convIdStr);
-          final isGroup = latest.convType == ChatType.group ||
-              latest.convType == ChatType.communityGroup;
+          final convId = convIdStr;
+
+          // Look up conversation type from local DB
+          final convRec = await _conversationRepo.getConversationById(convId);
+          final cType = convRec?.type != null
+              ? ChatType.fromString(convRec!.type)
+              : null;
+          final isGroup = cType == ChatType.group ||
+              cType == ChatType.communityGroup;
+
+          // Look up sender name from local DB
+          final latestSender = await UserInfoCache.instance.getUser(latest.senderId);
+          final latestSenderName = latestSender?.name;
 
           // Resolve conversation title
           String convTitle;
-          if (isGroup && convId != null) {
+          if (isGroup && convId.isNotEmpty) {
             try {
-              final conv =
-                  await _conversationRepo.getConversationById(convId);
-              convTitle = conv?.title ?? latest.senderName ?? 'Group';
+              convTitle = convRec?.title ?? latestSenderName ?? 'Group';
             } catch (_) {
-              convTitle = latest.senderName ?? 'Group';
+              convTitle = latestSenderName ?? 'Group';
             }
           } else {
-            convTitle = latest.senderName ?? 'Unknown';
+            convTitle = latestSenderName ?? 'Unknown';
           }
 
           final msgBody =
@@ -864,7 +897,7 @@ class NotificationService {
 
           if (isGroup) {
             inboxLines
-                .add('<b>$convTitle</b>  ${latest.senderName}: $preview');
+                .add('<b>$convTitle</b>  ${latestSenderName ?? 'Unknown'}: $preview');
           } else {
             inboxLines.add('<b>$convTitle</b>  $preview');
           }
@@ -908,12 +941,8 @@ class NotificationService {
 
   /// Clear notifications for a specific conversation
   Future<void> clearConversationNotifications(String conversationId) async {
-    final convIdInt = int.tryParse(conversationId);
-
     // Remove from in-memory tracking
-    if (convIdInt != null) {
-      _conversationNotifications.remove(convIdInt);
-    }
+    _conversationNotifications.remove(conversationId);
 
     // Remove from SharedPreferences
     final prefs = await SharedPreferences.getInstance();
@@ -924,10 +953,7 @@ class NotificationService {
     await prefs.setStringList('active_notification_convs', activeConvs);
 
     // Cancel the individual notification for this conversation
-    // IMPORTANT: must use int.hashCode since showMessageNotification uses convId (int).hashCode
-    if (convIdInt != null) {
-      await _localNotifications.cancel(convIdInt.hashCode);
-    }
+    await _localNotifications.cancel(conversationId.hashCode);
 
     // Update summary notification
     await _updateSummaryNotification();

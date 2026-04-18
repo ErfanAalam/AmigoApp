@@ -1,157 +1,57 @@
-import 'package:amigo/utils/chat/chat-helpers.utils.dart';
 import 'package:amigo/types/socket.types.dart';
+import 'package:freezed_annotation/freezed_annotation.dart';
 
-class MessageModel {
-  final int id;
-  final int conversationId;
-  final int senderId;
-  final String? senderName;
-  final String? senderProfilePic;
-  final MessageType type;
-  final String? body;
-  final MessageStatusType status;
-  final Map<String, dynamic>? attachments;
-  final Map<String, dynamic>? metadata;
-  // Emoji reactions: { emoji: [{user_id, user_name, reacted_at}] }
-  final Map<String, dynamic>? reactions;
-  final String? localMediaPath;
-  final bool? isFailed;
-  final bool? isStarred;
-  final bool? isReplied;
-  final bool? isForwarded;
-  final bool? isDeleted;
-  final String sentAt;
+part 'message.model.freezed.dart';
+part 'message.model.g.dart';
 
-  MessageModel({
-    required this.id,
-    required this.conversationId,
-    required this.senderId,
-    this.senderName,
-    this.senderProfilePic,
-    required this.type,
-    this.body,
-    required this.status,
-    this.isFailed,
-    this.attachments,
-    this.metadata,
-    this.reactions,
-    this.localMediaPath,
-    this.isStarred,
-    this.isReplied,
-    this.isForwarded,
-    this.isDeleted,
-    required this.sentAt,
-  });
+MessageType _messageTypeFromJson(dynamic v) =>
+    MessageType.fromString(v?.toString()) ?? MessageType.text;
+String _messageTypeToJson(MessageType t) => t.value;
 
-  factory MessageModel.fromJson(Map<String, dynamic> json) {
-    final metadata = json['metadata'] as Map<String, dynamic>?;
+@freezed
+abstract class MessageModel with _$MessageModel {
+  const MessageModel._();
 
-    // Parse message type
-    final messageType =
-        MessageType.fromString(
-          json['type']?.toString() ?? json['msg_type']?.toString(),
-        ) ??
-        MessageType.text;
+  const factory MessageModel({
+    required String id,
+    @JsonKey(name: 'chat_id') required String chatId,
+    @JsonKey(name: 'sender_id') String? senderId,
+    @JsonKey(name: 'sender_name') String? senderName,
+    @JsonKey(name: 'sender_profile_pic') String? senderProfilePic,
+    @JsonKey(name: 'replied_to') String? repliedTo,
+    @JsonKey(
+      fromJson: _messageTypeFromJson,
+      toJson: _messageTypeToJson,
+    )
+    @Default(MessageType.text)
+    MessageType type,
+    String? body,
+    Map<String, dynamic>? attachments,
+    @JsonKey(name: 'local_media_path') String? localMediaPath,
+    @JsonKey(name: 'is_failed') @Default(false) bool isFailed,
+    @JsonKey(name: 'sent_at') required String sentAt,
+    @JsonKey(name: 'deleted_at') String? deletedAt,
+  }) = _MessageModel;
 
-    // Parse status - check status field first, then is_delivered for backward compatibility
-    MessageStatusType messageStatus;
-    if (json['status'] != null) {
-      messageStatus =
-          MessageStatusType.fromString(json['status']?.toString()) ??
-          MessageStatusType.sent;
-    } else if (json['is_delivered'] == true || json['is_delivered'] == 'true') {
-      messageStatus = MessageStatusType.delivered;
-    } else {
-      messageStatus = MessageStatusType.sent;
-    }
-    // Parse IDs - canonical_id takes precedence, then id, then optimistic_id
-    // final canonicalId = json['canonical_id'] != null
-    //     ? ChatHelpers.parseToInt(json['canonical_id'])
-    //     : (json['id'] != null ? ChatHelpers.parseToInt(json['id']) : null);
-    // final optimisticId = json['optimistic_id'] != null
-    //     ? ChatHelpers.parseToInt(json['optimistic_id'])
-    //     : null;
+  factory MessageModel.fromJson(Map<String, dynamic> json) =>
+      _$MessageModelFromJson(_normalize(json));
 
-    // Parse sentAt - check sent_at first, then created_at for backward compatibility
-    final sentAt =
-        json['sent_at']?.toString() ??
-        json['created_at']?.toString() ??
-        DateTime.now().toIso8601String();
-
-    // Parse boolean flags from metadata or direct fields
-    final isStarred =
-        json['is_starred'] == true ||
-        json['is_starred'] == 'true' ||
-        metadata?['is_starred'] == true;
-    final isReplied =
-        json['is_replied'] == true ||
-        json['is_replied'] == 'true' ||
-        metadata?['is_replied'] == true ||
-        metadata?['reply_to'] != null;
-    final isForwarded =
-        json['is_forwarded'] == true ||
-        json['is_forwarded'] == 'true' ||
-        metadata?['forwarded_from'] != null;
-    final isDeleted =
-        json['deleted'] == true ||
-        json['deleted'] == 'true' ||
-        json['is_deleted'] == true ||
-        json['is_deleted'] == 'true';
-    final isFailed =
-        json['is_failed'] == true ||
-        json['is_failed'] == 'true' ||
-        json['failed'] == true ||
-        json['failed'] == 'true' ||
-        metadata?['is_failed'] == true;
-
-    return MessageModel(
-      id: ChatHelpers.parseToInt(json['id']),
-      conversationId: ChatHelpers.parseToInt(
-        json['conversation_id'] ?? json['conv_id'],
-      ),
-      senderId: ChatHelpers.parseToInt(json['sender_id']),
-      senderName: json['sender_name']?.toString(),
-      senderProfilePic:
-          json['sender_profile_pic']?.toString() ??
-          json['sender_pfp']?.toString(),
-      type: messageType,
-      body: json['body']?.toString(),
-      status: messageStatus,
-      attachments: json['attachments'] as Map<String, dynamic>?,
-      metadata: metadata,
-      reactions: json['reactions'] as Map<String, dynamic>?,
-      isFailed: isFailed ? true : null,
-      isStarred: isStarred ? true : null,
-      isReplied: isReplied ? true : null,
-      isForwarded: isForwarded ? true : null,
-      isDeleted: isDeleted ? true : null,
-      sentAt: sentAt,
-      localMediaPath: json['local_media_path']?.toString(),
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      "id": id,
-      'conversation_id': conversationId,
-      'sender_id': senderId,
-      if (senderName != null) 'sender_name': senderName,
-      if (senderProfilePic != null) 'sender_profile_pic': senderProfilePic,
-      'type': type.value,
-      'msg_type': type.value, // For backward compatibility
-      if (body != null) 'body': body,
-      'status': status.value,
-      if (attachments != null) 'attachments': attachments,
-      if (metadata != null) 'metadata': metadata,
-      if (isFailed == true) 'is_failed': isFailed,
-      if (isStarred == true) 'is_starred': isStarred,
-      if (isReplied == true) 'is_replied': isReplied,
-      if (isForwarded == true) 'is_forwarded': isForwarded,
-      if (isDeleted == true) 'deleted': isDeleted,
-      if (isDeleted == true) 'is_deleted': isDeleted,
-      if (localMediaPath != null) 'local_media_path': localMediaPath,
+  /// Tolerate legacy / alternate keys from various server paths.
+  static Map<String, dynamic> _normalize(Map<String, dynamic> json) {
+    final id = (json['id'] ?? json['message_id'] ?? '').toString();
+    final chatId =
+        (json['chat_id'] ?? json['conv_id'] ?? json['conversation_id'] ?? '')
+            .toString();
+    final sentAt = (json['sent_at'] ??
+            json['created_at'] ??
+            DateTime.now().toIso8601String())
+        .toString();
+    return <String, dynamic>{
+      ...json,
+      'id': id,
+      'chat_id': chatId,
+      'sender_id': json['sender_id']?.toString(),
       'sent_at': sentAt,
-      'created_at': sentAt, // For backward compatibility
     };
   }
 
@@ -160,128 +60,32 @@ class MessageModel {
   bool get isFile => type == MessageType.document;
   bool get isVideo => type == MessageType.video;
   bool get isAudio => type == MessageType.audio;
-  bool get isReply => type == MessageType.reply || isReplied == true;
-  bool get isForwardedMessage =>
-      type == MessageType.forwarded || isForwarded == true;
-
-  /// Get the message ID (canonical if available, otherwise optimistic)
-  // int get id => canonicalId ?? optimisticId ?? 0;
-
-  /// Create a copy of this message with updated fields
-  MessageModel copyWith({
-    int? id,
-    int? conversationId,
-    int? senderId,
-    String? senderName,
-    String? senderProfilePic,
-    MessageType? type,
-    String? body,
-    MessageStatusType? status,
-    Map<String, dynamic>? metadata,
-    Map<String, dynamic>? attachments,
-    Map<String, dynamic>? reactions,
-    bool? isFailed,
-    bool? isStarred,
-    bool? isReplied,
-    bool? isForwarded,
-    bool? isDeleted,
-    String? sentAt,
-    String? localMediaPath,
-  }) {
-    return MessageModel(
-      id: id ?? this.id,
-      conversationId: conversationId ?? this.conversationId,
-      senderId: senderId ?? this.senderId,
-      senderName: senderName ?? this.senderName,
-      senderProfilePic: senderProfilePic ?? this.senderProfilePic,
-      type: type ?? this.type,
-      body: body ?? this.body,
-      status: status ?? this.status,
-      metadata: metadata ?? this.metadata,
-      attachments: attachments ?? this.attachments,
-      reactions: reactions ?? this.reactions,
-      isFailed: isFailed ?? this.isFailed,
-      isStarred: isStarred ?? this.isStarred,
-      isReplied: isReplied ?? this.isReplied,
-      isForwarded: isForwarded ?? this.isForwarded,
-      isDeleted: isDeleted ?? this.isDeleted,
-      sentAt: sentAt ?? this.sentAt,
-      localMediaPath: localMediaPath ?? this.localMediaPath,
-    );
-  }
+  bool get isReply => repliedTo != null;
+  bool get isForwardedMessage => type == MessageType.forwarded;
+  bool get isDeleted => deletedAt != null;
 }
 
-class MessagesAroundResponse {
-  final List<MessageModel> messages;
-  final List<Map<String, dynamic>> members;
-  final bool hasOlder;
-  final bool hasNewer;
+@freezed
+abstract class MessagesAroundResponse with _$MessagesAroundResponse {
+  const factory MessagesAroundResponse({
+    required List<MessageModel> messages,
+    @Default(<Map<String, dynamic>>[]) List<Map<String, dynamic>> members,
+    @JsonKey(name: 'has_older') @Default(false) bool hasOlder,
+    @JsonKey(name: 'has_newer') @Default(false) bool hasNewer,
+  }) = _MessagesAroundResponse;
 
-  MessagesAroundResponse({
-    required this.messages,
-    required this.members,
-    required this.hasOlder,
-    required this.hasNewer,
-  });
-
-  factory MessagesAroundResponse.fromJson(Map<String, dynamic> json) {
-    final messagesData = json['messages'] ?? [];
-    final membersData  = json['members']  ?? [];
-    return MessagesAroundResponse(
-      messages: (messagesData as List)
-          .map((m) => MessageModel.fromJson(m as Map<String, dynamic>))
-          .toList(),
-      members:  (membersData as List).cast<Map<String, dynamic>>(),
-      hasOlder: json['hasOlder'] == true,
-      hasNewer: json['hasNewer'] == true,
-    );
-  }
+  factory MessagesAroundResponse.fromJson(Map<String, dynamic> json) =>
+      _$MessagesAroundResponseFromJson(json);
 }
 
-class ConversationHistoryResponse {
-  final List<MessageModel> messages;
-  final int totalCount;
-  final int currentPage;
-  final int totalPages;
-  final bool hasNextPage;
-  final bool hasPreviousPage;
-  final List<Map<String, dynamic>>
-  members; // Store members data for sender names
+@freezed
+abstract class ConversationHistoryResponse with _$ConversationHistoryResponse {
+  const factory ConversationHistoryResponse({
+    required List<MessageModel> messages,
+    @JsonKey(name: 'has_more') @Default(false) bool hasMore,
+    @Default(<Map<String, dynamic>>[]) List<Map<String, dynamic>> members,
+  }) = _ConversationHistoryResponse;
 
-  ConversationHistoryResponse({
-    required this.messages,
-    required this.totalCount,
-    required this.currentPage,
-    required this.totalPages,
-    required this.hasNextPage,
-    required this.hasPreviousPage,
-    this.members = const [],
-  });
-
-  factory ConversationHistoryResponse.fromJson(Map<String, dynamic> json) {
-    // Handle the nested structure: data.data.messages and data.data.pagination
-    final data = json;
-    final messagesData = data['messages'] ?? [];
-    final pagination = data['pagination'] ?? {};
-    final membersData = data['members'] ?? [];
-
-    return ConversationHistoryResponse(
-      messages: (messagesData as List).map((messageJson) {
-        final message = MessageModel.fromJson(
-          messageJson as Map<String, dynamic>,
-        );
-        return message;
-      }).toList(),
-      totalCount: ChatHelpers.parseToInt(pagination['totalCount']),
-      currentPage: ChatHelpers.parseToInt(pagination['currentPage']),
-      totalPages: ChatHelpers.parseToInt(pagination['totalPages']),
-      hasNextPage:
-          pagination['hasNextPage'] == true ||
-          pagination['hasNextPage'] == 'true',
-      hasPreviousPage:
-          pagination['hasPreviousPage'] == true ||
-          pagination['hasPreviousPage'] == 'true',
-      members: (membersData as List).cast<Map<String, dynamic>>(),
-    );
-  }
+  factory ConversationHistoryResponse.fromJson(Map<String, dynamic> json) =>
+      _$ConversationHistoryResponseFromJson(json);
 }

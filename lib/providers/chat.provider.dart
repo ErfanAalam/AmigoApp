@@ -5,7 +5,6 @@ import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/chat.types.dart';
-import 'package:amigo/utils/chat/chat-helpers.utils.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/api_service.dart';
@@ -15,8 +14,10 @@ import '../models/community.model.dart';
 import '../models/group.model.dart';
 import '../models/user.model.dart';
 import '../services/message/message_gc.service.dart';
+import '../services/message/status-ack.service.dart';
 import '../services/socket/ws-message.handler.dart';
 import '../services/socket/transport.manager.dart';
+import '../services/user-info-cache.service.dart';
 import '../services/user-status.service.dart';
 import '../types/socket.types.dart';
 import '../utils/user.utils.dart';
@@ -31,10 +32,10 @@ class ChatState {
   final List<CommunityModel> communities;
   final List<CommunityGroupModel>? commGroupList;
   final bool isLoading;
-  final int? activeConvId;
+  final String? activeConvId;
   final ChatType? activeConvType;
-  final Map<int, Set<TypingUser>> typingConvUsers; // convId -> userIds[]
-  final Map<int, int>? mediaUploadProgress; // messageId -> upload progress %
+  final Map<String, Set<TypingUser>> typingConvUsers; // convId -> userIds[]
+  final Map<String, int>? mediaUploadProgress; // messageId -> upload progress %
   final String searchQuery;
   final TransportStatus transportStatus;
   final DateTime? lastSyncedAt;
@@ -60,10 +61,10 @@ class ChatState {
     List<CommunityModel>? communities,
     List<CommunityGroupModel>? commGroupList,
     bool? isLoading,
-    int? activeConvId,
+    String? activeConvId,
     ChatType? activeConvType,
-    Map<int, Set<TypingUser>>? typingConvUsers,
-    Map<int, int>? mediaUploadProgress,
+    Map<String, Set<TypingUser>>? typingConvUsers,
+    Map<String, int>? mediaUploadProgress,
     String? searchQuery,
     TransportStatus? transportStatus,
     DateTime? lastSyncedAt,
@@ -100,7 +101,7 @@ class ChatState {
     final query = searchQuery.toLowerCase();
     return dmList.where((conversation) {
       final recipientName = conversation.recipientName.toLowerCase();
-      final lastMessageBody = conversation.lastMessageBody?.toLowerCase() ?? '';
+      final lastMessageBody = conversation.lastMsgBody?.toLowerCase() ?? '';
       final recipientPhone = conversation.recipientPhone.toLowerCase();
       return recipientName.contains(query) ||
           lastMessageBody.contains(query) ||
@@ -138,9 +139,9 @@ class ChatState {
     return groupList.where((group) => (group.unreadCount) > 0).length;
   }
 
-  bool isUserOnline(int recipientId, int convId) {
+  bool isUserOnline(String recipientId, String convId) {
     final dm = dmList.firstWhere(
-      (dm) => dm.conversationId == convId && dm.recipientId == recipientId,
+      (dm) => dm.chatId == convId && dm.recipientId == recipientId,
     );
     return dm.isRecipientOnline;
   }
@@ -163,19 +164,20 @@ class ChatNotifier extends Notifier<ChatState> {
   final MessageStatusRepository _messageStatusRepo = MessageStatusRepository();
   final TransportManager _transportManager = TransportManager();
 
-  StreamSubscription<ConnectionStatus>? _onlineStatusSubscription;
+  StreamSubscription<ConnectionStatusPayload>? _onlineStatusSubscription;
   StreamSubscription<TypingPayload>? _typingSubscription;
   StreamSubscription<ChatMessagePayload>? _messageSubscription;
-  StreamSubscription<ChatMessageAckPayload>? _messageAckSubscription;
+  StreamSubscription<MessageSentAckPayload>? _messageSentAckSubscription;
+  StreamSubscription<MessageStatusAckPayload>? _messageStatusAckSubscription;
   StreamSubscription<MessagePinPayload>? _pinSubscription;
   StreamSubscription<NewConversationPayload>? _conversationAddedSubscription;
   StreamSubscription<DeleteMessagePayload>? _messageDeleteSubscription;
   StreamSubscription<MessageReactPayload>? _messageReactSubscription;
-  StreamSubscription<JoinLeavePayload>? _joinConvSubscription;
+  StreamSubscription<ConvJoinPayload>? _joinConvSubscription;
   StreamSubscription<ConversationActionPayload>?
   _conversationActionSubscription;
 
-  final Map<int, Timer?> _typingTimers = {};
+  final Map<String, Timer?> _typingTimers = {};
   bool _listenersSetup = false;
   bool _isDisposed = false;
 
@@ -190,8 +192,13 @@ class ChatNotifier extends Notifier<ChatState> {
     // Start the optimistic message cleanup timer
     // _messageRepo.startCleanupTimer();
 
-    // Load conversations from local DB and then from server
+    // Set current user for StatusAckService
     Future.microtask(() async {
+      final user = await UserUtils().getUserDetails();
+      if (user != null) {
+        StatusAckService.instance.setCurrentUserId(user.id);
+        debugPrint('[ChatProvider] StatusAckService userId set: ${user.id}');
+      }
       await loadConvsFromLocal();
       await loadConvsFromServer();
     });
@@ -274,7 +281,7 @@ class ChatNotifier extends Notifier<ChatState> {
           final existingMembers = await _conversationsMemberRepo
               .getAllConversationMembers();
           final existingMemberPairs = existingMembers
-              .map((m) => '${m.conversationId}_${m.userId}')
+              .map((m) => '${m.chatId}_${m.userId}')
               .toSet();
           // debugPrint('Existing member pairs: ${existingMemberPairs.length}');
 
@@ -294,7 +301,9 @@ class ChatNotifier extends Notifier<ChatState> {
               .where((id) => !serverConvIds.contains(id))
               .toList();
           if (deletedDmIds.isNotEmpty) {
-            debugPrint('🗑️ Removing ${deletedDmIds.length} deleted DMs from local DB');
+            debugPrint(
+              '🗑️ Removing ${deletedDmIds.length} deleted DMs from local DB',
+            );
             for (final id in deletedDmIds) {
               await _conversationsRepo.deleteConversation(id);
             }
@@ -322,10 +331,9 @@ class ChatNotifier extends Notifier<ChatState> {
           final convMembers = dmList
               .map(
                 (dm) => ConversationMemberModel(
-                  conversationId: dm.conversationId,
+                  chatId: dm.chatId,
                   userId: dm.recipientId,
                   role: 'member',
-                  unreadCount: dm.unreadCount ?? 0,
                   joinedAt: dm.createdAt,
                 ),
               )
@@ -335,7 +343,7 @@ class ChatNotifier extends Notifier<ChatState> {
           final newMembers = convMembers
               .where(
                 (member) => !existingMemberPairs.contains(
-                  '${member.conversationId}_${member.userId}',
+                  '${member.chatId}_${member.userId}',
                 ),
               )
               .toList();
@@ -389,7 +397,7 @@ class ChatNotifier extends Notifier<ChatState> {
           final localConvs = await _conversationsRepo.getConversationsByType(
             ChatType.dm,
           );
-          final convStatusMap = <int, ConversationModel>{};
+          final convStatusMap = <String, ConversationModel>{};
           for (final conv in localConvs) {
             convStatusMap[conv.id] = conv;
           }
@@ -417,8 +425,7 @@ class ChatNotifier extends Notifier<ChatState> {
       final groupResponse = await apiService.user.getChatList('group');
 
       if (groupResponse.isSuccess) {
-        final List<dynamic> groupsList =
-            groupResponse.data as List<dynamic> ?? [];
+        final List<dynamic> groupsList = groupResponse.data as List<dynamic>;
 
         List<GroupModel> groups = [];
         List<ConversationModel> convs = [];
@@ -426,45 +433,27 @@ class ChatNotifier extends Notifier<ChatState> {
         for (final group in groupsList) {
           try {
             if (group is Map<String, dynamic>) {
-              final groupModel = GroupModel.fromJson(group);
-              groups.add(groupModel);
-
-              if (groupModel.lastMessageId != null) {
-                final metadataLastMsg = groupModel.metadata?.lastMessage!;
-                // ------------------------------------------------------------------------------------
-                // TODO: temporary type casting going on in here
-                // ------------------------------------------------------------------------------------
-                final msg = MessageModel(
-                  conversationId: metadataLastMsg?.conversationId ?? 0,
-                  id: metadataLastMsg != null ? metadataLastMsg.id : 0,
-                  senderId: metadataLastMsg?.senderId ?? 0,
-                  senderName: metadataLastMsg?.senderName,
-                  type:
-                      MessageType.fromString(metadataLastMsg?.type) ??
-                      MessageType.text,
-                  body: metadataLastMsg?.body ?? '',
-                  attachments: metadataLastMsg?.attachmentData,
-                  status: MessageStatusType.sent, // temp default value
-                  sentAt:
-                      metadataLastMsg?.createdAt ??
-                      groupModel.joinedAt, // temp fall back
-                );
-                _messageRepo
-                    .insertMessage(msg)
-                    .catchError(
-                      (e) => debugPrint('❌ Error inserting last message: $e'),
-                    );
-              }
+              final groupModel = GroupModel.fromJson(
+                GroupModel.normalizeApiResponse(group),
+              );
+              // Redis-enriched last message for groups
+              final lastMsg = group['lastMessage'] as Map<String, dynamic>?;
+              final enrichedGroup = groupModel.copyWith(
+                lastMsgId: lastMsg?['id']?.toString() ?? groupModel.lastMsgId,
+                lastMsgBody: lastMsg?['body']?.toString() ?? groupModel.lastMsgBody,
+                lastMsgType: lastMsg?['type']?.toString() ?? groupModel.lastMsgType,
+                lastMsgAt: lastMsg?['sent_at']?.toString() ?? groupModel.lastMsgAt,
+              );
+              groups.add(enrichedGroup);
 
               final convModel = ConversationModel(
-                id: groupModel.conversationId,
+                id: enrichedGroup.chatId,
                 type: "group",
-                title: groupModel.title,
-                createrId: group['createrId'] ?? 0,
-                unreadCount: groupModel.unreadCount,
-                lastMessageId: groupModel.lastMessageId,
-                pinnedMessageId: groupModel.pinnedMessageId,
-                isDeleted: false,
+                title: enrichedGroup.title,
+                createrId: group['createrId']?.toString(),
+                unreadCount: enrichedGroup.unreadCount,
+                lastMsgId: enrichedGroup.lastMsgId,
+                pinnedMsgId: enrichedGroup.pinnedMsgId,
                 isPinned: false,
                 isFavorite: false,
                 isMuted: false,
@@ -488,7 +477,9 @@ class ChatNotifier extends Notifier<ChatState> {
             .where((id) => !serverGroupConvIds.contains(id))
             .toList();
         if (deletedGroupIds.isNotEmpty) {
-          debugPrint('🗑️ Removing ${deletedGroupIds.length} deleted groups from local DB');
+          debugPrint(
+            '🗑️ Removing ${deletedGroupIds.length} deleted groups from local DB',
+          );
           for (final id in deletedGroupIds) {
             await _conversationsRepo.deleteConversation(id);
           }
@@ -513,14 +504,14 @@ class ChatNotifier extends Notifier<ChatState> {
         final localGroupConvs = await _conversationsRepo.getConversationsByType(
           ChatType.group,
         );
-        final groupConvStatusMap = <int, ConversationModel>{};
+        final groupConvStatusMap = <String, ConversationModel>{};
         for (final conv in localGroupConvs) {
           groupConvStatusMap[conv.id] = conv;
         }
 
         // Update groups with local status (pinned, muted, favorite)
         groups = groups.map((group) {
-          final conv = groupConvStatusMap[group.conversationId];
+          final conv = groupConvStatusMap[group.chatId];
           if (conv != null) {
             return group.copyWith(
               isPinned: conv.isPinned,
@@ -555,9 +546,9 @@ class ChatNotifier extends Notifier<ChatState> {
     }
   }
 
-  void removeGroupFromState(int conversationId) {
+  void removeGroupFromState(String conversationId) {
     final updatedGroupList = state.groupList
-        .where((group) => group.conversationId != conversationId)
+        .where((group) => group.chatId != conversationId)
         .toList();
     state = state.copyWith(groupList: updatedGroupList);
   }
@@ -588,34 +579,24 @@ class ChatNotifier extends Notifier<ChatState> {
                   return null;
                 }
 
-                if (json['lastMessageId'] != null) {
-                  final metadataLastMsg = json['metadata']['last_message'];
-                  final msg = MessageModel.fromJson(metadataLastMsg);
-                  _messageRepo
-                      .insertMessage(msg)
-                      .catchError(
-                        (e) => debugPrint('❌ Error inserting last message: $e'),
-                      );
-                }
+                // Redis-enriched last message data
+                final lastMsg = json['lastMessage'] as Map<String, dynamic>?;
 
                 // mapping backend response to DmListModel
-                // Note: isPinned, isMuted, isFavorite are local-only and not from server
                 return DmModel(
-                  conversationId: json['conversationId'],
-                  recipientId: json['userId'],
-                  recipientName: json['userName'],
-                  recipientPhone: json['userPhone'],
-                  recipientProfilePic: json['userProfilePic'],
-                  pinnedMessageId: ChatHelpers.parseToInt(
-                    json['pinnedMessageId'],
-                  ),
-                  lastMessageId: ChatHelpers.parseToInt(json['lastMessageId']),
-                  lastMessageType: json['lastMessageType'],
-                  lastMessageBody: json['lastMessageBody'],
-                  lastMessageAt: json['lastMessageAt'],
-                  unreadCount: json['unreadCount'],
-                  isRecipientOnline: json['onlineStatus'],
-                  createdAt: json['joinedAt'],
+                  chatId: json['conversationId']?.toString() ?? '',
+                  recipientId: json['userId']?.toString() ?? '',
+                  recipientName: json['userName']?.toString() ?? '',
+                  recipientPhone: json['userPhone']?.toString() ?? '',
+                  recipientProfilePic: json['userProfilePic']?.toString(),
+                  pinnedMsgId: json['pinnedMsgId']?.toString(),
+                  lastMsgId: lastMsg?['id']?.toString() ?? json['lastMsgId']?.toString(),
+                  lastMsgType: lastMsg?['type']?.toString(),
+                  lastMsgBody: lastMsg?['body']?.toString(),
+                  lastMsgAt: lastMsg?['sent_at']?.toString() ?? json['lastMsgAt']?.toString(),
+                  unreadCount: json['unreadCount'] is int ? json['unreadCount'] : 0,
+                  isRecipientOnline: false,
+                  createdAt: json['joinedAt']?.toString() ?? '',
                 );
               }
               return null;
@@ -674,20 +655,20 @@ class ChatNotifier extends Notifier<ChatState> {
 
                 // mapping backend response to DmListModel
                 return ConversationModel(
-                  id: convId,
-                  type: json['type'],
-                  title: json['title'],
-                  createrId: json['createrId'],
+                  id: convId.toString(),
+                  type: json['type']?.toString() ?? 'dm',
+                  title: json['title']?.toString(),
+                  createrId: json['createrId']?.toString(),
                   unreadCount: json['unreadCount'],
-                  lastMessageId: ChatHelpers.parseToInt(json['lastMessageId']),
-                  pinnedMessageId: ChatHelpers.parseToInt(
-                    json['pinnedMessageId'],
-                  ),
-                  isDeleted: json['isDeleted'],
-                  isPinned: json['isPinned'],
-                  isFavorite: json['isFavorite'],
-                  isMuted: json['isMuted'],
-                  createdAt: json['joinedAt'],
+                  lastMsgId: json['lastMessageId']?.toString(),
+                  pinnedMsgId: json['pinnedMessageId']?.toString(),
+                  deletedAt: json['isDeleted'] == true
+                      ? DateTime.now().toIso8601String()
+                      : null,
+                  isPinned: json['isPinned'] == true,
+                  isFavorite: json['isFavorite'] == true,
+                  isMuted: json['isMuted'] == true,
+                  createdAt: json['joinedAt']?.toString(),
                 );
               }
               return null;
@@ -719,20 +700,18 @@ class ChatNotifier extends Notifier<ChatState> {
     List<DmModel> conversations,
   ) async {
     final filteredConversations = conversations
-        .where((conv) => !(conv.isDeleted ?? false))
+        .where((conv) => conv.deletedAt == null)
         .toList();
 
     filteredConversations.sort((a, b) {
-      final aPinned = a.isPinned ?? false;
-      final bPinned = b.isPinned ?? false;
+      final aPinned = a.isPinned;
+      final bPinned = b.isPinned;
 
       if (aPinned && !bPinned) return -1;
       if (!aPinned && bPinned) return 1;
 
-      final aHasMessage =
-          a.lastMessageAt != null && a.lastMessageAt!.isNotEmpty;
-      final bHasMessage =
-          b.lastMessageAt != null && b.lastMessageAt!.isNotEmpty;
+      final aHasMessage = a.lastMsgAt != null && a.lastMsgAt!.isNotEmpty;
+      final bHasMessage = b.lastMsgAt != null && b.lastMsgAt!.isNotEmpty;
 
       // Chats with messages should come before chats without messages
       if (aHasMessage && !bHasMessage) return -1;
@@ -741,8 +720,8 @@ class ChatNotifier extends Notifier<ChatState> {
       // Both have messages: sort by lastMessageAt (newest first)
       if (aHasMessage && bHasMessage) {
         return DateTime.parse(
-          b.lastMessageAt!,
-        ).compareTo(DateTime.parse(a.lastMessageAt!));
+          b.lastMsgAt!,
+        ).compareTo(DateTime.parse(a.lastMsgAt!));
       }
 
       // Neither has messages: sort by createdAt (newest first)
@@ -761,24 +740,22 @@ class ChatNotifier extends Notifier<ChatState> {
     // .toList();
 
     filteredGroups.sort((a, b) {
-      final aPinned = a.isPinned ?? false;
-      final bPinned = b.isPinned ?? false;
+      final aPinned = a.isPinned;
+      final bPinned = b.isPinned;
 
       if (aPinned && !bPinned) return -1;
       if (!aPinned && bPinned) return 1;
 
-      final aHasMessage =
-          a.lastMessageAt != null && a.lastMessageAt!.isNotEmpty;
-      final bHasMessage =
-          b.lastMessageAt != null && b.lastMessageAt!.isNotEmpty;
+      final aHasMessage = a.lastMsgAt != null && a.lastMsgAt!.isNotEmpty;
+      final bHasMessage = b.lastMsgAt != null && b.lastMsgAt!.isNotEmpty;
 
       if (aHasMessage && !bHasMessage) return -1;
       if (!aHasMessage && bHasMessage) return 1;
 
       if (aHasMessage && bHasMessage) {
         return DateTime.parse(
-          b.lastMessageAt!,
-        ).compareTo(DateTime.parse(a.lastMessageAt!));
+          b.lastMsgAt!,
+        ).compareTo(DateTime.parse(a.lastMsgAt!));
       }
 
       return DateTime.parse(b.joinedAt).compareTo(DateTime.parse(a.joinedAt));
@@ -787,17 +764,19 @@ class ChatNotifier extends Notifier<ChatState> {
     return filteredGroups;
   }
 
-  void toggleDeleteChat(int conversationId, ChatType convType) async {
+  void toggleDeleteChat(String conversationId, ChatType convType) async {
     if (convType == ChatType.dm) {
       final convIndex = state.dmList.indexWhere(
-        (conv) => conv.conversationId == conversationId,
+        (conv) => conv.chatId == conversationId,
       );
       if (convIndex == -1) return;
 
       final conv = state.dmList[convIndex];
 
       final updatedConv = conv.copyWith(
-        isDeleted: conv.isDeleted != null ? !conv.isDeleted! : true,
+        deletedAt: conv.deletedAt == null
+            ? DateTime.now().toIso8601String()
+            : null,
       );
       // print(
       //   "--------------------------------------------------------------------------------",
@@ -837,7 +816,7 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   /// Set active conversation
-  void setActiveConversation(int? conversationId, ChatType? convType) {
+  void setActiveConversation(String? conversationId, ChatType? convType) {
     final shouldClear = conversationId == null;
     state = state.copyWith(
       activeConvId: conversationId,
@@ -850,10 +829,10 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   /// Clear unread count for a conversation
-  void clearUnreadCount(int convId, ChatType? convType) async {
+  void clearUnreadCount(String convId, ChatType? convType) async {
     if (convType == ChatType.dm) {
       final convIndex = state.dmList.indexWhere(
-        (conv) => conv.conversationId == convId,
+        (conv) => conv.chatId == convId,
       );
 
       if (convIndex != -1) {
@@ -869,7 +848,7 @@ class ChatNotifier extends Notifier<ChatState> {
       }
     } else if (convType == ChatType.group) {
       final convIndex = state.groupList.indexWhere(
-        (group) => group.conversationId == convId,
+        (group) => group.chatId == convId,
       );
 
       if (convIndex != -1) {
@@ -896,7 +875,7 @@ class ChatNotifier extends Notifier<ChatState> {
     try {
       // Check if group already exists
       final existingIndex = state.groupList.indexWhere(
-        (g) => g.conversationId == group.conversationId,
+        (g) => g.chatId == group.chatId,
       );
       if (existingIndex != -1) {
         // Group already exists, update it instead
@@ -923,7 +902,7 @@ class ChatNotifier extends Notifier<ChatState> {
     try {
       // Check if DM already exists
       final existingIndex = state.dmList.indexWhere(
-        (d) => d.conversationId == dm.conversationId,
+        (d) => d.chatId == dm.chatId,
       );
       if (existingIndex != -1) {
         // DM already exists, update it instead
@@ -946,13 +925,13 @@ class ChatNotifier extends Notifier<ChatState> {
   /// Handle chat action (pin, mute, favorite, delete)
   Future<void> handleChatAction(
     String action,
-    int conversationId,
+    String conversationId,
     ChatType convType,
   ) async {
     try {
       if (convType == ChatType.dm) {
         final convIndex = state.dmList.indexWhere(
-          (conv) => conv.conversationId == conversationId,
+          (conv) => conv.chatId == conversationId,
         );
         if (convIndex == -1) return;
         final conv = state.dmList[convIndex];
@@ -963,64 +942,31 @@ class ChatNotifier extends Notifier<ChatState> {
           case 'pin':
             await _conversationsRepo.togglePin(conversationId, true);
 
-            updatedConversation = conv.copyWith(
-              isPinned: conv.isPinned != null ? !conv.isPinned! : true,
-            );
-
-            // state = state.copyWith(
-            //   pinnedChats: {...state.pinnedChats, conversationId},
-            // );
+            updatedConversation = conv.copyWith(isPinned: !conv.isPinned);
             break;
           case 'unpin':
             await _conversationsRepo.togglePin(conversationId, false);
-            updatedConversation = conv.copyWith(
-              isPinned: conv.isPinned != null ? !conv.isPinned! : true,
-            );
-
-            // final newPinned = Set<int>.from(state.pinnedChats);
-            // newPinned.remove(conversationId);
-            // state = state.copyWith(pinnedChats: newPinned);
+            updatedConversation = conv.copyWith(isPinned: !conv.isPinned);
             break;
           case 'mute':
             await _conversationsRepo.toggleMute(conversationId, true);
 
-            updatedConversation = conv.copyWith(
-              isMuted: conv.isMuted != null ? !conv.isMuted! : true,
-            );
-            // state = state.copyWith(
-            //   mutedChats: {...state.mutedChats, conversationId},
-            // );
+            updatedConversation = conv.copyWith(isMuted: !conv.isMuted);
             break;
           case 'unmute':
             await _conversationsRepo.toggleMute(conversationId, false);
 
-            updatedConversation = conv.copyWith(
-              isMuted: conv.isMuted != null ? !conv.isMuted! : true,
-            );
-
-            // final newMuted = Set<int>.from(state.mutedChats);
-            // newMuted.remove(conversationId);
-            // state = state.copyWith(mutedChats: newMuted);
+            updatedConversation = conv.copyWith(isMuted: !conv.isMuted);
             break;
           case 'favorite':
             await _conversationsRepo.toggleFavorite(conversationId, true);
 
-            updatedConversation = conv.copyWith(
-              isFavorite: conv.isFavorite != null ? !conv.isFavorite! : true,
-            );
-            // state = state.copyWith(
-            //   favoriteChats: {...state.favoriteChats, conversationId},
-            // );
+            updatedConversation = conv.copyWith(isFavorite: !conv.isFavorite);
             break;
           case 'unfavorite':
             await _conversationsRepo.toggleFavorite(conversationId, false);
 
-            updatedConversation = conv.copyWith(
-              isFavorite: conv.isFavorite != null ? !conv.isFavorite! : true,
-            );
-            // final newFavorite = Set<int>.from(state.favoriteChats);
-            // newFavorite.remove(conversationId);
-            // state = state.copyWith(favoriteChats: newFavorite);
+            updatedConversation = conv.copyWith(isFavorite: !conv.isFavorite);
             break;
           case 'delete':
             final response = await apiService.chat.deleteDm(conversationId);
@@ -1052,7 +998,7 @@ class ChatNotifier extends Notifier<ChatState> {
         }
       } else if (convType == ChatType.group) {
         final convIndex = state.groupList.indexWhere(
-          (group) => group.conversationId == conversationId,
+          (group) => group.chatId == conversationId,
         );
         if (convIndex == -1) return;
         final group = state.groupList[convIndex];
@@ -1063,43 +1009,31 @@ class ChatNotifier extends Notifier<ChatState> {
           case 'pin':
             await _conversationsRepo.togglePin(conversationId, true);
 
-            updatedGroup = group.copyWith(
-              isPinned: group.isPinned != null ? !group.isPinned! : true,
-            );
+            updatedGroup = group.copyWith(isPinned: !group.isPinned);
             break;
           case 'unpin':
             await _conversationsRepo.togglePin(conversationId, false);
-            updatedGroup = group.copyWith(
-              isPinned: group.isPinned != null ? !group.isPinned! : true,
-            );
+            updatedGroup = group.copyWith(isPinned: !group.isPinned);
             break;
           case 'mute':
             await _conversationsRepo.toggleMute(conversationId, true);
 
-            updatedGroup = group.copyWith(
-              isMuted: group.isMuted != null ? !group.isMuted! : true,
-            );
+            updatedGroup = group.copyWith(isMuted: !group.isMuted);
             break;
           case 'unmute':
             await _conversationsRepo.toggleMute(conversationId, false);
 
-            updatedGroup = group.copyWith(
-              isMuted: group.isMuted != null ? !group.isMuted! : true,
-            );
+            updatedGroup = group.copyWith(isMuted: !group.isMuted);
             break;
           case 'favorite':
             await _conversationsRepo.toggleFavorite(conversationId, true);
 
-            updatedGroup = group.copyWith(
-              isFavorite: group.isFavorite != null ? !group.isFavorite! : true,
-            );
+            updatedGroup = group.copyWith(isFavorite: !group.isFavorite);
             break;
           case 'unfavorite':
             await _conversationsRepo.toggleFavorite(conversationId, false);
 
-            updatedGroup = group.copyWith(
-              isFavorite: group.isFavorite != null ? !group.isFavorite! : true,
-            );
+            updatedGroup = group.copyWith(isFavorite: !group.isFavorite);
             break;
           case 'delete':
             final response = await apiService.group.deleteGroup(conversationId);
@@ -1158,10 +1092,17 @@ class ChatNotifier extends Notifier<ChatState> {
       },
     );
 
-    _messageAckSubscription = _messageHandler.messageAckStream.listen(
-      _handleAckMessage,
+    _messageSentAckSubscription = _messageHandler.messageSentAckStream.listen(
+      _handleSentAck,
       onError: (error) {
-        debugPrint('❌ Message Ack stream error: $error');
+        debugPrint('❌ Message Sent Ack stream error: $error');
+      },
+    );
+
+    _messageStatusAckSubscription = _messageHandler.messageStatusAckStream.listen(
+      _handleStatusAck,
+      onError: (error) {
+        debugPrint('❌ Message Status Ack stream error: $error');
       },
     );
 
@@ -1203,108 +1144,65 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   /// Handle typing message
-  void _handleTypingMessage(TypingPayload message) {
+  void _handleTypingMessage(TypingPayload message) async {
     try {
       final conversationId = message.convId;
 
-      if (message.isTyping) {
-        // Cancel existing timer for this conversation
-        _typingTimers[conversationId]?.cancel();
+      // Every typing event means "is typing" — cancel existing timer and reset
+      _typingTimers[conversationId]?.cancel();
 
-        // Get the currently typing users
-        final typingUsers = Map<int, Set<TypingUser>>.from(
-          state.typingConvUsers,
+      // Look up sender info from cache
+      final user = await UserInfoCache.instance.getUser(message.senderId);
+
+      // Get the currently typing users
+      final typingUsers = Map<String, Set<TypingUser>>.from(
+        state.typingConvUsers,
+      );
+
+      // Create a new typing user
+      final newtu = TypingUser(
+        userId: message.senderId,
+        userName: user?.name ?? '',
+        userPfp: user?.profilePic,
+        convId: message.convId,
+      );
+
+      // Add it to the typing map
+      if (typingUsers.containsKey(conversationId)) {
+        // Remove existing entry for this user if present (to avoid duplicates)
+        typingUsers[conversationId]!.removeWhere(
+          (u) => u.userId == message.senderId,
         );
-
-        // Create a new typing user
-        final newtu = TypingUser(
-          userId: message.senderId,
-          userName: message.senderName,
-          userPfp: message.senderPfp,
-          convId: message.convId,
-        );
-
-        // Add it to the typing map
-        if (typingUsers.containsKey(conversationId)) {
-          // Remove existing entry for this user if present (to avoid duplicates)
-          typingUsers[conversationId]!.removeWhere(
-            (u) => u.userId == message.senderId,
-          );
-          typingUsers[conversationId]!.add(newtu);
-        } else {
-          typingUsers[conversationId] = {newtu};
-        }
-
-        // Immediately update state to show typing indicator
-        state = state.copyWith(typingConvUsers: typingUsers);
-
-        // Set timer to remove user after 2 seconds of inactivity
-        _typingTimers[conversationId] = Timer(const Duration(seconds: 3), () {
-          final updatedTypingUsers = Map<int, Set<TypingUser>>.from(
-            state.typingConvUsers,
-          );
-
-          if (updatedTypingUsers.containsKey(conversationId)) {
-            updatedTypingUsers[conversationId]!.removeWhere(
-              (u) => u.userId == message.senderId,
-            );
-
-            // Remove the conversation entry if no one is typing
-            if (updatedTypingUsers[conversationId]!.isEmpty) {
-              updatedTypingUsers.remove(conversationId);
-            }
-          }
-
-          state = state.copyWith(typingConvUsers: updatedTypingUsers);
-          _typingTimers[conversationId] = null;
-        });
+        typingUsers[conversationId]!.add(newtu);
       } else {
-        // User stopped typing - remove immediately
-        _typingTimers[conversationId]?.cancel();
-        _typingTimers[conversationId] = null;
+        typingUsers[conversationId] = {newtu};
+      }
 
-        final typingUsers = Map<int, Set<TypingUser>>.from(
+      // Immediately update state to show typing indicator
+      state = state.copyWith(typingConvUsers: typingUsers);
+
+      // Set timer to remove user after 3 seconds of inactivity
+      _typingTimers[conversationId] = Timer(const Duration(seconds: 3), () {
+        final updatedTypingUsers = Map<String, Set<TypingUser>>.from(
           state.typingConvUsers,
         );
 
-        if (typingUsers.containsKey(conversationId)) {
-          typingUsers[conversationId]!.removeWhere(
+        if (updatedTypingUsers.containsKey(conversationId)) {
+          updatedTypingUsers[conversationId]!.removeWhere(
             (u) => u.userId == message.senderId,
           );
 
           // Remove the conversation entry if no one is typing
-          if (typingUsers[conversationId]!.isEmpty) {
-            typingUsers.remove(conversationId);
+          if (updatedTypingUsers[conversationId]!.isEmpty) {
+            updatedTypingUsers.remove(conversationId);
           }
-
-          state = state.copyWith(typingConvUsers: typingUsers);
         }
-      }
+
+        state = state.copyWith(typingConvUsers: updatedTypingUsers);
+        _typingTimers[conversationId] = null;
+      });
     } catch (e) {
       debugPrint('❌ Error handling typing message: $e');
-    }
-  }
-
-  /// Handle new message
-  /// Send a real delivery receipt to the server when we receive a message from another user.
-  /// The server will forward a message:ack to the original sender so their UI can update.
-  void _sendDeliveryReceipt(ChatMessagePayload payload, int currentUserId) {
-    try {
-      final receipt = MessageDeliveredPayload(
-        messageId: payload.id,
-        convId: payload.convId,
-        senderId: payload.senderId,
-        recipientId: currentUserId,
-        deliveredAt: DateTime.now(),
-      );
-      final wsmsg = WSMessage(
-        type: WSMessageType.messageDelivered,
-        payload: receipt.toJson(),
-        wsTimestamp: DateTime.now(),
-      ).toJson();
-      _transportManager.sendMessage(wsmsg);
-    } catch (e) {
-      debugPrint('⚠️ Error sending delivery receipt: $e');
     }
   }
 
@@ -1312,31 +1210,34 @@ class ChatNotifier extends Notifier<ChatState> {
     debugPrint('✅ recieved new message at chat provider');
     try {
       final convId = payload.convId;
-      final convType = payload.convType;
 
-      // Send real delivery receipt so sender's UI corrects the optimistic pre-fill
+      // Ack delivery (and read if this chat is active) via StatusAckService
       final currentUser = await UserUtils().getUserDetails();
-      if (currentUser != null && payload.senderId != currentUser.id) {
-        _sendDeliveryReceipt(payload, currentUser.id);
+      if (currentUser != null) {
+        StatusAckService.instance.setCurrentUserId(currentUser.id);
       }
+      if (currentUser != null && payload.senderId != currentUser.id) {
+        StatusAckService.instance.ackMessage(
+          convId,
+          payload.id,
+          isRead: convId == state.activeConvId,
+        );
+      }
+
+      // Resolve convType from DB since it's no longer on the payload
+      final convTypeStr = await _conversationsRepo.getConversationTypeById(convId);
+      final convType = ChatType.fromString(convTypeStr) ?? ChatType.dm;
 
       // Insert message into local DB
       await _messageRepo.insertMessage(
         MessageModel(
-          // optimisticId: payload.optimisticId,
-          // canonicalId: payload.canonicalId,
           id: payload.id,
-          conversationId: payload.convId,
+          chatId: payload.convId,
           senderId: payload.senderId,
           type: payload.msgType,
           body: payload.body,
-          status: MessageStatusType.delivered,
           attachments: payload.attachments,
-          metadata: payload.metadata,
-          isStarred: false,
-          isReplied: payload.replyToMessageId != null,
-          isForwarded: false,
-          isDeleted: false,
+          repliedTo: payload.repliedTo,
           sentAt: payload.sentAt.toIso8601String(),
         ),
       );
@@ -1346,7 +1247,7 @@ class ChatNotifier extends Notifier<ChatState> {
       // Handle DM messages
       if (convType == ChatType.dm) {
         final convIndex = state.dmList.indexWhere(
-          (conv) => conv.conversationId == convId,
+          (conv) => conv.chatId == convId,
         );
 
         if (convIndex == -1) return;
@@ -1360,10 +1261,10 @@ class ChatNotifier extends Notifier<ChatState> {
             : (dm.unreadCount ?? 0) + 1;
 
         final updatedConversation = dm.copyWith(
-          lastMessageId: payload.id,
-          lastMessageType: payload.msgType.value,
-          lastMessageBody: payload.body,
-          lastMessageAt: payload.sentAt.toIso8601String(),
+          lastMsgId: payload.id,
+          lastMsgType: payload.msgType.value,
+          lastMsgBody: payload.body,
+          lastMsgAt: payload.sentAt.toIso8601String(),
           unreadCount: newDmUnreadCount,
         );
 
@@ -1380,7 +1281,7 @@ class ChatNotifier extends Notifier<ChatState> {
       // Handle group messages
       else if (convType == ChatType.group) {
         final convIndex = state.groupList.indexWhere(
-          (group) => group.conversationId == convId,
+          (group) => group.chatId == convId,
         );
 
         if (convIndex == -1) return;
@@ -1395,10 +1296,10 @@ class ChatNotifier extends Notifier<ChatState> {
             : (group.unreadCount) + 1;
 
         final updatedGroup = group.copyWith(
-          lastMessageId: payload.id,
-          lastMessageType: payload.msgType.value,
-          lastMessageBody: payload.body,
-          lastMessageAt: payload.sentAt.toIso8601String(),
+          lastMsgId: payload.id,
+          lastMsgType: payload.msgType.value,
+          lastMsgBody: payload.body,
+          lastMsgAt: payload.sentAt.toIso8601String(),
           unreadCount: newGrpUnreadCount,
         );
 
@@ -1431,108 +1332,69 @@ class ChatNotifier extends Notifier<ChatState> {
     }
   }
 
-  /// Handle ack message
-  Future<void> _handleAckMessage(ChatMessageAckPayload payload) async {
-    debugPrint('✅ recieved ack message at chat provider');
-    if (payload.isFailed == true) {
-      return;
-    }
+  /// Handle sent ack (server confirms our message was persisted)
+  Future<void> _handleSentAck(MessageSentAckPayload payload) async {
+    debugPrint('✅ received sent ack at chat provider');
     try {
-      // CRITICAL: Update message IDs FIRST to avoid UNIQUE constraint violations
-      // This must happen before any status updates that use the canonical ID
-      // await _messageRepo.updateMessageId(
-      //   payload.optimisticId,
-      //   payload.canonicalId,
-      // );
+      if (payload.isSent) {
+        // Mark as sent (clear failed flag)
+        await _messageRepo.updateMessageFields(payload.msgId, isFailed: false);
 
-      // await _messageStatusRepo.updateMessageId(
-      //   payload.optimisticId,
-      //   payload.canonicalId,
-      // );
-
-      // Now safe to update message status in the status table based on delivered_to and read_by
-      // First, handle users who have read the message (they should have both deliveredAt and readAt)
-      if (payload.readBy != null && payload.readBy!.isNotEmpty) {
-        debugPrint('✅ updating readAt for users: ${payload.readBy}');
-        for (final userId in payload.readBy!) {
-          // Users who read must have been delivered first, so set both timestamps
-          await _messageStatusRepo.updateDeliveredAtForUser(
-            messageId: payload.id,
-            userId: userId,
-            conversationId: payload.convId,
-            deliveredAt: payload.deliveredAt.toIso8601String(),
-          );
-          await _messageStatusRepo.updateReadAtForUser(
-            messageId: payload.id,
-            userId: userId,
-            conversationId: payload.convId,
-            readAt: payload.deliveredAt.toIso8601String(),
-          );
-        }
+        // Keep the conversation last-message pointer in sync
+        await _conversationsRepo.updateLastMessageId(
+          payload.convId,
+          payload.newId ?? payload.msgId,
+        );
+      } else {
+        // Message failed to send on server
+        await _messageRepo.updateMessageFields(payload.msgId, isFailed: true);
       }
+    } catch (e) {
+      debugPrint('❌ Error handling sent ack: $e');
+    }
+  }
 
-      // Then, handle users who are only delivered (not in readBy)
-      if (payload.deliveredTo != null && payload.deliveredTo!.isNotEmpty) {
-        // Filter out users who are already in readBy
-        final onlyDeliveredUsers = payload.deliveredTo!
-            .where(
-              (userId) =>
-                  payload.readBy == null || !payload.readBy!.contains(userId),
-            )
-            .toList();
+  /// Handle status ack (delivery/read receipts from other users)
+  Future<void> _handleStatusAck(MessageStatusAckPayload payload) async {
+    debugPrint('✅ received status ack at chat provider');
+    try {
+      final recipientId = payload.recipientId;
+      final atStr = payload.at.toIso8601String();
 
-        if (onlyDeliveredUsers.isNotEmpty) {
-          debugPrint('✅ updating deliveredAt for users: $onlyDeliveredUsers');
-          for (final userId in onlyDeliveredUsers) {
+      for (final ack in payload.acks) {
+        for (final msgId in ack.msgIds) {
+          if (ack.status.contains('read')) {
+            // Read implies delivered
             await _messageStatusRepo.updateDeliveredAtForUser(
-              messageId: payload.id,
-              userId: userId,
-              conversationId: payload.convId,
-              deliveredAt: payload.deliveredAt.toIso8601String(),
+              messageId: msgId,
+              userId: recipientId,
+              chatId: ack.chatId,
+              deliveredAt: atStr,
+            );
+            await _messageStatusRepo.updateReadAtForUser(
+              messageId: msgId,
+              userId: recipientId,
+              chatId: ack.chatId,
+              readAt: atStr,
+            );
+          } else if (ack.status.contains('delivered')) {
+            await _messageStatusRepo.updateDeliveredAtForUser(
+              messageId: msgId,
+              userId: recipientId,
+              chatId: ack.chatId,
+              deliveredAt: atStr,
             );
           }
         }
       }
-
-      // For groups, messages.status only reflects server acceptance (sent).
-      // Per-member read/delivered is in message_status, already written above.
-      // For DMs, we can infer the single-recipient aggregate from deliveredTo/readBy.
-      final bool isGroup = state.groupList.any(
-        (g) => g.conversationId == payload.convId,
-      );
-      final MessageStatusType status;
-      if (isGroup) {
-        status = MessageStatusType.sent;
-      } else if (payload.readBy != null && payload.readBy!.isNotEmpty) {
-        status = MessageStatusType.read;
-      } else if (payload.deliveredTo != null &&
-          payload.deliveredTo!.isNotEmpty) {
-        status = MessageStatusType.delivered;
-      } else {
-        status = MessageStatusType.sent;
-      }
-
-      // The conversation's last-message pointer should use the final canonical ID
-      // (newId when the backend reassigned due to snowflake collision, else original).
-      final canonicalId = payload.newId ?? payload.id;
-
-      // Always update status on the ORIGINAL id.
-      // The message row always starts with payload.id; updateMessageFields in
-      // the messaging screen renames it to newId and writes status atomically.
-      // If that rename wins the race first, this call is a silent no-op — the
-      // status was already written correctly. Never use canonicalId here or we
-      // risk updating a row that doesn't exist yet.
-      await _messageRepo.updateMessageStatus(payload.id, status);
-
-      await _conversationsRepo.updateLastMessageId(payload.convId, canonicalId);
     } catch (e) {
-      debugPrint('❌ Error handling ack message: $e');
+      debugPrint('❌ Error handling status ack: $e');
     }
   }
 
   // updateLast messge on sending own message from messaging page
   void updateLastMessageOnSendingOwnMessage(
-    int conversationId,
+    String conversationId,
     MessageModel lastMessage,
   ) async {
     try {
@@ -1551,15 +1413,15 @@ class ChatNotifier extends Notifier<ChatState> {
 
       if (convType == ChatType.dm.value) {
         final convIndex = state.dmList.indexWhere(
-          (conv) => conv.conversationId == conversationId,
+          (conv) => conv.chatId == conversationId,
         );
         if (convIndex != -1) {
           final dm = state.dmList[convIndex];
           final updatedDm = dm.copyWith(
-            lastMessageId: messageId,
-            lastMessageType: lastMessage.type.value,
-            lastMessageBody: lastMessage.body,
-            lastMessageAt: lastMessage.sentAt,
+            lastMsgId: messageId,
+            lastMsgType: lastMessage.type.value,
+            lastMsgBody: lastMessage.body,
+            lastMsgAt: lastMessage.sentAt,
           );
           final updatedDmList = List<DmModel>.from(state.dmList);
           updatedDmList[convIndex] = updatedDm;
@@ -1581,7 +1443,7 @@ class ChatNotifier extends Notifier<ChatState> {
         }
       } else if (convType == ChatType.group.value) {
         final convIndex = state.groupList.indexWhere(
-          (group) => group.conversationId == conversationId,
+          (group) => group.chatId == conversationId,
         );
         if (convIndex != -1) {
           final group = state.groupList[convIndex];
@@ -1595,7 +1457,7 @@ class ChatNotifier extends Notifier<ChatState> {
             senderId: lastMessage.senderId,
             senderName: lastMessage.senderName ?? 'You',
             createdAt: lastMessage.sentAt,
-            conversationId: conversationId,
+            chatId: conversationId,
             attachmentData: lastMessage.attachments,
           );
 
@@ -1609,15 +1471,15 @@ class ChatNotifier extends Notifier<ChatState> {
             updatedMetadata = GroupMetadata(
               lastMessage: updatedLastMessage,
               totalMessages: 0,
-              createdBy: 0,
+              createdBy: group.metadata?.createdBy ?? '',
             );
           }
 
           final updatedGroup = group.copyWith(
-            lastMessageId: messageId,
-            lastMessageType: lastMessage.type.value,
-            lastMessageBody: lastMessage.body ?? '',
-            lastMessageAt: lastMessage.sentAt,
+            lastMsgId: messageId,
+            lastMsgType: lastMessage.type.value,
+            lastMsgBody: lastMessage.body ?? '',
+            lastMsgAt: lastMessage.sentAt,
             metadata: updatedMetadata,
           );
 
@@ -1647,8 +1509,8 @@ class ChatNotifier extends Notifier<ChatState> {
 
   /// Update pinned message in provider state when pinning/unpinning locally
   void updatePinnedMessageInState(
-    int conversationId,
-    int? pinnedMessageId,
+    String conversationId,
+    String? pinnedMessageId,
   ) async {
     try {
       // Update database
@@ -1667,22 +1529,22 @@ class ChatNotifier extends Notifier<ChatState> {
 
       if (convType == ChatType.dm.value) {
         final convIndex = state.dmList.indexWhere(
-          (conv) => conv.conversationId == conversationId,
+          (conv) => conv.chatId == conversationId,
         );
         if (convIndex != -1) {
           final dm = state.dmList[convIndex];
-          final updatedDm = dm.copyWith(pinnedMessageId: pinnedMessageId);
+          final updatedDm = dm.copyWith(pinnedMsgId: pinnedMessageId);
           final updatedDmList = List<DmModel>.from(state.dmList);
           updatedDmList[convIndex] = updatedDm;
           state = state.copyWith(dmList: updatedDmList);
         }
       } else if (convType == ChatType.group.value) {
         final convIndex = state.groupList.indexWhere(
-          (group) => group.conversationId == conversationId,
+          (group) => group.chatId == conversationId,
         );
         if (convIndex != -1) {
           final group = state.groupList[convIndex];
-          final updatedGroup = group.copyWith(pinnedMessageId: pinnedMessageId);
+          final updatedGroup = group.copyWith(pinnedMsgId: pinnedMessageId);
           final updatedGroupList = List<GroupModel>.from(state.groupList);
           updatedGroupList[convIndex] = updatedGroup;
           state = state.copyWith(groupList: updatedGroupList);
@@ -1705,12 +1567,10 @@ class ChatNotifier extends Notifier<ChatState> {
       await _conversationsRepo.updatePinnedMessage(convId, pinnedMessageId);
 
       // Update in Provider state - Check DM list first
-      final dmIndex = state.dmList.indexWhere(
-        (dm) => dm.conversationId == convId,
-      );
+      final dmIndex = state.dmList.indexWhere((dm) => dm.chatId == convId);
       if (dmIndex != -1) {
         final dm = state.dmList[dmIndex];
-        final updatedDm = dm.copyWith(pinnedMessageId: pinnedMessageId);
+        final updatedDm = dm.copyWith(pinnedMsgId: pinnedMessageId);
         final updatedDmList = List<DmModel>.from(state.dmList);
         updatedDmList[dmIndex] = updatedDm;
         state = state.copyWith(dmList: updatedDmList);
@@ -1719,11 +1579,11 @@ class ChatNotifier extends Notifier<ChatState> {
 
       // Check Group list if not found in DM list
       final groupIndex = state.groupList.indexWhere(
-        (group) => group.conversationId == convId,
+        (group) => group.chatId == convId,
       );
       if (groupIndex != -1) {
         final group = state.groupList[groupIndex];
-        final updatedGroup = group.copyWith(pinnedMessageId: pinnedMessageId);
+        final updatedGroup = group.copyWith(pinnedMsgId: pinnedMessageId);
         final updatedGroupList = List<GroupModel>.from(state.groupList);
         updatedGroupList[groupIndex] = updatedGroup;
         state = state.copyWith(groupList: updatedGroupList);
@@ -1739,7 +1599,7 @@ class ChatNotifier extends Notifier<ChatState> {
       await _messageStatusRepo.upsertReaction(
         messageId: payload.messageId,
         userId: payload.senderId,
-        conversationId: payload.convId,
+        chatId: payload.convId,
         emoji: payload.action == 'add' ? payload.emoji : null,
       );
     } catch (e) {
@@ -1756,7 +1616,7 @@ class ChatNotifier extends Notifier<ChatState> {
       if (message.convType.value == 'dm') {
         // Check if conversation already exists
         final existingIndex = state.dmList.indexWhere(
-          (conv) => conv.conversationId == convId,
+          (conv) => conv.chatId == convId,
         );
         if (existingIndex != -1) return;
 
@@ -1766,13 +1626,12 @@ class ChatNotifier extends Notifier<ChatState> {
             message.createrName;
 
         final newDM = DmModel(
-          conversationId: convId,
+          chatId: convId,
           recipientId: message.createrId,
           recipientName: displayName,
           recipientPhone: message.createrPhone,
           isRecipientOnline: true,
           unreadCount: 0,
-          isDeleted: false,
           isPinned: false,
           isFavorite: false,
           isMuted: false,
@@ -1784,8 +1643,7 @@ class ChatNotifier extends Notifier<ChatState> {
           type: 'dm',
           createrId: message.createrId,
           unreadCount: 0,
-          pinnedMessageId: null,
-          isDeleted: false,
+          pinnedMsgId: null,
           isPinned: false,
           isFavorite: false,
           isMuted: false,
@@ -1796,10 +1654,9 @@ class ChatNotifier extends Notifier<ChatState> {
         await _conversationsRepo.insertConversations([newConv]);
 
         final convMember = ConversationMemberModel(
-          conversationId: newDM.conversationId,
+          chatId: newDM.chatId,
           userId: newDM.recipientId,
           role: 'member',
-          unreadCount: newDM.unreadCount ?? 0,
           joinedAt: newDM.createdAt,
         );
         await _conversationsMemberRepo.insertConversationMembers([convMember]);
@@ -1820,12 +1677,12 @@ class ChatNotifier extends Notifier<ChatState> {
 
       if (message.convType.value == 'group') {
         final existingIndex = state.groupList.indexWhere(
-          (conv) => conv.conversationId == convId,
+          (conv) => conv.chatId == convId,
         );
         if (existingIndex != -1) return;
 
         final newGroup = GroupModel(
-          conversationId: convId,
+          chatId: convId,
           title: message.title ?? 'New Group',
           unreadCount: 0,
           isPinned: false,
@@ -1840,8 +1697,7 @@ class ChatNotifier extends Notifier<ChatState> {
           title: message.title,
           createrId: message.createrId,
           unreadCount: 0,
-          pinnedMessageId: null,
-          isDeleted: false,
+          pinnedMsgId: null,
           isPinned: false,
           isFavorite: false,
           isMuted: false,
@@ -1856,10 +1712,9 @@ class ChatNotifier extends Notifier<ChatState> {
           final convMembers = message.members!
               .map(
                 (member) => ConversationMemberModel(
-                  conversationId: newGroup.conversationId,
+                  chatId: newGroup.chatId,
                   userId: member.userId,
                   role: member.role.value,
-                  unreadCount: 0,
                   joinedAt: member.joinedAt.toIso8601String(),
                 ),
               )
@@ -1880,7 +1735,7 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   /// Handle online status update
-  Future<void> _handleOnlineStatus(ConnectionStatus payload) async {
+  Future<void> _handleOnlineStatus(ConnectionStatusPayload payload) async {
     try {
       final userId = payload.senderId;
       final isOnline = payload.status == 'foreground';
@@ -1906,12 +1761,11 @@ class ChatNotifier extends Notifier<ChatState> {
         state = state.copyWith(dmList: updatedDmList);
       }
 
-      // mark as delivered all undelivered messages from this user in both messages table and message_status table
+      // mark as delivered all undelivered messages from this user in message_status table
       await _messageStatusRepo.markAllAsDeliveredForUser(
         userId: userId,
         deliveredAt: DateTime.now().toIso8601String(),
       );
-      await _messageRepo.updateAllMessagesAsDeliveredForUserId(userId);
     } catch (e) {
       debugPrint('❌ Error handling online status: $e');
     }
@@ -1972,7 +1826,7 @@ class ChatNotifier extends Notifier<ChatState> {
 
       if (convType == ChatType.dm) {
         final convIndex = state.dmList.indexWhere(
-          (conv) => conv.conversationId == conversationId,
+          (conv) => conv.chatId == conversationId,
         );
         if (convIndex == -1) return;
         final conversation = state.dmList[convIndex];
@@ -1986,10 +1840,10 @@ class ChatNotifier extends Notifier<ChatState> {
             : 0;
 
         final updatedConversation = conversation.copyWith(
-          lastMessageId: lastMessage?.id,
-          lastMessageType: lastMessage?.type.value,
-          lastMessageBody: lastMessage?.body,
-          lastMessageAt: lastMessage?.sentAt,
+          lastMsgId: lastMessage?.id,
+          lastMsgType: lastMessage?.type.value,
+          lastMsgBody: lastMessage?.body,
+          lastMsgAt: lastMessage?.sentAt,
           unreadCount: newUnreadCount,
         );
 
@@ -2007,7 +1861,7 @@ class ChatNotifier extends Notifier<ChatState> {
       // Update for group conversations can be added here in future
       else if (convType == ChatType.group) {
         final convIndex = state.groupList.indexWhere(
-          (conv) => conv.conversationId == conversationId,
+          (conv) => conv.chatId == conversationId,
         );
         if (convIndex == -1) return;
         final conversation = state.groupList[convIndex];
@@ -2021,10 +1875,10 @@ class ChatNotifier extends Notifier<ChatState> {
             : 0;
 
         final updatedConversation = conversation.copyWith(
-          lastMessageId: lastMessage?.id,
-          lastMessageType: lastMessage?.type.value,
-          lastMessageBody: lastMessage?.body,
-          lastMessageAt: lastMessage?.sentAt,
+          lastMsgId: lastMessage?.id,
+          lastMsgType: lastMessage?.type.value,
+          lastMsgBody: lastMessage?.body,
+          lastMsgAt: lastMessage?.sentAt,
           unreadCount: newUnreadCount,
         );
 
@@ -2045,17 +1899,13 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   /// Handle conversation join/leave events
-  Future<void> _handleConversationJoin(JoinLeavePayload payload) async {
+  Future<void> _handleConversationJoin(ConvJoinPayload payload) async {
+    debugPrint('[ConvJoin] user=${payload.userId} conv=${payload.convId} lastRead=${payload.lastReadMsgId}');
     try {
       await _messageStatusRepo.markAllAsReadByConversationAndUser(
-        conversationId: payload.convId,
+        chatId: payload.convId,
         userId: payload.userId,
       );
-
-      // update message table message status for DMs
-      if (payload.convType == ChatType.dm) {
-        await _messageRepo.updateAllMessagesAsReadForDM(payload.convId);
-      }
     } catch (e) {
       debugPrint('❌ Error handling conversation join/leave event: $e');
     }
@@ -2071,7 +1921,7 @@ class ChatNotifier extends Notifier<ChatState> {
           final members = payload.members
               .map(
                 (member) => ConversationMemberModel(
-                  conversationId: payload.convId,
+                  chatId: payload.convId,
                   userId: member.userId,
                   role: member.role.value,
                   joinedAt: member.joinedAt.toIso8601String(),
@@ -2104,33 +1954,27 @@ class ChatNotifier extends Notifier<ChatState> {
           break;
       }
 
+      // Look up actor info from cache
+      final actor = payload.actorId != null
+          ? await UserInfoCache.instance.getUser(payload.actorId!)
+          : null;
+
       final systemMessage = MessageModel(
-        // canonicalId: payload.eventId,
-        // optimisticId: null,
         id: payload.eventId,
-        conversationId: payload.convId,
-        senderId: payload.actorId ?? 0,
-        senderName: payload.actorName,
-        senderProfilePic: payload.actorPfp,
+        chatId: payload.convId,
+        senderId: payload.actorId,
+        senderName: actor?.name,
+        senderProfilePic: actor?.profilePic,
         type: MessageType.system,
         body: payload.message,
-        status: MessageStatusType.delivered,
         attachments: null,
-        metadata: {
-          'action': payload.action.value,
-          'members': payload.members.map((m) => m.toJson()).toList(),
-        },
-        isStarred: false,
-        isReplied: false,
-        isForwarded: false,
-        isDeleted: false,
         sentAt: payload.actionAt.toIso8601String(),
       );
 
       await _messageRepo.insertMessage(systemMessage);
 
       final convIndex = state.groupList.indexWhere(
-        (group) => group.conversationId == payload.convId,
+        (group) => group.chatId == payload.convId,
       );
 
       if (convIndex != -1) {
@@ -2140,10 +1984,10 @@ class ChatNotifier extends Notifier<ChatState> {
             : group.unreadCount + 1;
 
         final updatedGroup = group.copyWith(
-          lastMessageId: payload.eventId,
-          lastMessageType: MessageType.system.value,
-          lastMessageBody: payload.message,
-          lastMessageAt: payload.actionAt.toIso8601String(),
+          lastMsgId: payload.eventId,
+          lastMsgType: MessageType.system.value,
+          lastMsgBody: payload.message,
+          lastMsgAt: payload.actionAt.toIso8601String(),
           unreadCount: newUnread,
         );
 
@@ -2193,14 +2037,14 @@ class ChatNotifier extends Notifier<ChatState> {
 
     _typingSubscription?.cancel();
     _messageSubscription?.cancel();
-    _messageAckSubscription?.cancel();
+    _messageSentAckSubscription?.cancel();
+    _messageStatusAckSubscription?.cancel();
     _pinSubscription?.cancel();
     _joinConvSubscription?.cancel();
     _conversationAddedSubscription?.cancel();
     _messageDeleteSubscription?.cancel();
     _messageReactSubscription?.cancel();
     _onlineStatusSubscription?.cancel();
-    _joinConvSubscription?.cancel();
     _conversationActionSubscription?.cancel();
 
     for (final timer in _typingTimers.values) {

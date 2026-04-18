@@ -8,7 +8,7 @@ import '../../utils/chat/chat-helpers.utils.dart';
 /// Displays a pinned message with ability to scroll to it or unpin it
 class PinnedMessageSection extends StatelessWidget {
   final MessageModel? pinnedMessage;
-  final int? currentUserId;
+  final String? currentUserId;
   final VoidCallback onTap;
   final VoidCallback onUnpin;
 

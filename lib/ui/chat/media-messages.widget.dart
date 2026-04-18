@@ -77,7 +77,7 @@ class MediaMessageConfig {
   // Image-specific
   final void Function(String, String?) onImagePreview;
   final void Function(File, String, {MessageModel? failedMessage}) onRetryImage;
-  final void Function(String, int) onCacheImage;
+  final void Function(String, String) onCacheImage;
 
   // Video-specific
   final void Function(String, String?, String?) onVideoPreview;
@@ -95,8 +95,8 @@ class MediaMessageConfig {
   final void Function({MessageModel? failedMessage}) onRetryAudio;
 
   // Common callbacks for failed messages
-  final void Function(int messageId)? onResendFailedMessage;
-  final void Function(int messageId)? onDeleteFailedMessage;
+  final void Function(String messageId)? onResendFailedMessage;
+  final void Function(String messageId)? onDeleteFailedMessage;
 
   MediaMessageConfig({
     required this.message,
@@ -140,12 +140,12 @@ Widget buildImageMessage(MediaMessageConfig config, WidgetRef ref) {
   final imageUrl = imageData['url'] as String?;
   final localPath = imageData['local_path'] as String?;
 
-  // Check upload status from metadata
-  final metadata = config.message.metadata ?? {};
+  // Check upload status: uploading = has local media path but no URL yet
   final isUploading =
-      config.message.status == MessageStatusType.uploading ||
-      metadata['is_uploading'] == true;
-  final isFailed = config.message.status == MessageStatusType.failed;
+      (config.message.localMediaPath != null &&
+          config.message.localMediaPath!.isNotEmpty) &&
+      (imageUrl == null || imageUrl.isEmpty);
+  final isFailed = config.message.isFailed;
   // || metadata['upload_failed'] == true;
 
   // Use local path if available (for uploading/failed messages)
@@ -370,12 +370,12 @@ Widget buildVideoMessage(MediaMessageConfig config, WidgetRef ref) {
   final videoUrl = videoData['url'] as String?;
   final localPath = videoData['local_path'] as String?;
 
-  // Check upload status from metadata
-  final metadata = config.message.metadata ?? {};
+  // Check upload status: uploading = has local media path but no URL yet
   final isUploading =
-      config.message.status == MessageStatusType.uploading ||
-      metadata['is_uploading'] == true;
-  final isFailed = config.message.status == MessageStatusType.failed;
+      (config.message.localMediaPath != null &&
+          config.message.localMediaPath!.isNotEmpty) &&
+      (videoUrl == null || videoUrl.isEmpty);
+  final isFailed = config.message.isFailed;
   // metadata['upload_failed'] == true;
 
   // Use local path if available (for uploading/failed messages)
@@ -665,12 +665,12 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
   final mimeType = documentData['mime_type'] as String?;
   final localPath = documentData['local_path'] as String?;
 
-  // Check upload status from metadata
-  final metadata = config.message.metadata ?? {};
+  // Check upload status: uploading = has local media path but no URL yet
   final isUploading =
-      config.message.status == MessageStatusType.uploading ||
-      metadata['is_uploading'] == true;
-  final isFailed = config.message.status == MessageStatusType.failed;
+      (config.message.localMediaPath != null &&
+          config.message.localMediaPath!.isNotEmpty) &&
+      (documentUrl == null || documentUrl.isEmpty);
+  final isFailed = config.message.isFailed;
   // metadata['upload_failed'] == true;
 
   // Use local path if available (for uploading/failed messages)
@@ -704,7 +704,7 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
   }
 
   // Check if message is failed
-  final isFailedStatus = config.message.status == MessageStatusType.failed;
+  final isFailedStatus = config.message.isFailed;
 
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
@@ -984,12 +984,12 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
   final fileSize = audioData['file_size'] as int?;
   final localPath = audioData['local_path'] as String?;
 
-  // Check upload status from metadata
-  final metadata = config.message.metadata ?? {};
+  // Check upload status: uploading = has local media path but no URL yet
   final isUploading =
-      config.message.status == MessageStatusType.uploading ||
-      metadata['is_uploading'] == true;
-  final isFailed = config.message.status == MessageStatusType.failed;
+      (config.message.localMediaPath != null &&
+          config.message.localMediaPath!.isNotEmpty) &&
+      (audioUrl == null || audioUrl.isEmpty);
+  final isFailed = config.message.isFailed;
   // || metadata['upload_failed'] == true;
 
   // Use local path if available (for uploading/failed messages)
@@ -1040,7 +1040,7 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
   }
 
   // Check if message is failed
-  final isFailedStatus = config.message.status == MessageStatusType.failed;
+  final isFailedStatus = config.message.isFailed;
 
   return AnimatedBuilder(
     animation: animation,

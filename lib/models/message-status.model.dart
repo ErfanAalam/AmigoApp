@@ -1,63 +1,25 @@
-class MessageStatusModel {
-  final BigInt id;
-  final int conversationId;
-  final int messageId;
-  final int userId;
-  final String? deliveredAt;
-  final String? readAt;
-  final String? reaction;
+import 'package:freezed_annotation/freezed_annotation.dart';
 
-  MessageStatusModel({
-    required this.id,
-    required this.conversationId,
-    required this.messageId,
-    required this.userId,
-    this.deliveredAt,
-    this.readAt,
-    this.reaction,
-  });
+part 'message-status.model.freezed.dart';
+part 'message-status.model.g.dart';
 
-  factory MessageStatusModel.fromJson(Map<String, dynamic> json) {
-    return MessageStatusModel(
-      id: json['id'],
-      conversationId: json['conversation_id'],
-      messageId: json['message_id'],
-      userId: json['user_id'],
-      deliveredAt: json['delivered_at'],
-      readAt: json['read_at'],
-      reaction: json['reaction'],
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'conversation_id': conversationId,
-      'message_id': messageId,
-      'user_id': userId,
-      'delivered_at': deliveredAt,
-      'read_at': readAt,
-      'reaction': reaction,
-    };
-  }
-
-  MessageStatusModel copyWith({
-    BigInt? id,
-    int? conversationId,
-    int? messageId,
-    int? userId,
-    String? deliveredAt,
-    String? readAt,
+/// Per-user message state: delivery, read, reaction, "delete for me".
+/// Mirrors the backend `message_info` table.
+@freezed
+abstract class MessageInfoModel with _$MessageInfoModel {
+  const factory MessageInfoModel({
+    required String id,
+    @JsonKey(name: 'chat_id') required String chatId,
+    @JsonKey(name: 'message_id') required String messageId,
+    @JsonKey(name: 'user_id') required String userId,
+    @JsonKey(name: 'delivered_at') String? deliveredAt,
+    @JsonKey(name: 'read_at') String? readAt,
     String? reaction,
-  }) {
-    return MessageStatusModel(
-      id: id ?? this.id,
-      conversationId: conversationId ?? this.conversationId,
-      messageId: messageId ?? this.messageId,
-      userId: userId ?? this.userId,
-      deliveredAt: deliveredAt ?? this.deliveredAt,
-      readAt: readAt ?? this.readAt,
-      reaction: reaction ?? this.reaction,
-    );
-  }
+    @JsonKey(name: 'deleted_at') String? deletedAt,
+  }) = _MessageInfoModel;
+
+  factory MessageInfoModel.fromJson(Map<String, dynamic> json) =>
+      _$MessageInfoModelFromJson(json);
 }
+
+typedef MessageStatusModel = MessageInfoModel;

@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'group.model.dart';
 
 class CommunityModel {
-  final int id;
+  final String id;
   final String name;
-  final List<int> groupIds;
+  final List<String> groupIds;
   final Map<String, dynamic> metadata;
   final String createdAt;
   final String updatedAt;
@@ -20,9 +20,11 @@ class CommunityModel {
 
   factory CommunityModel.fromJson(Map<String, dynamic> json) {
     return CommunityModel(
-      id: json['id'] ?? 0,
+      id: json['id']?.toString() ?? '',
       name: json['name'] ?? '',
-      groupIds: List<int>.from(json['group_ids'] ?? []),
+      groupIds: (json['group_ids'] as List<dynamic>? ?? const [])
+          .map((e) => e.toString())
+          .toList(),
       metadata: Map<String, dynamic>.from(json['metadata'] ?? {}),
       createdAt: json['created_at'] ?? '',
       updatedAt: json['updated_at'] ?? '',
@@ -46,7 +48,7 @@ class CommunityModel {
 
 // Model for community inner groups (groups within a community)
 class CommunityGroupModel {
-  final int conversationId;
+  final String chatId;
   final String title;
   final String type;
   final List<GroupMember> members;
@@ -56,7 +58,7 @@ class CommunityGroupModel {
   final String joinedAt;
 
   CommunityGroupModel({
-    required this.conversationId,
+    required this.chatId,
     required this.title,
     required this.type,
     required this.members,
@@ -68,7 +70,9 @@ class CommunityGroupModel {
 
   factory CommunityGroupModel.fromJson(Map<String, dynamic> json) {
     return CommunityGroupModel(
-      conversationId: json['conversationId'] ?? json['conversation_id'] ?? 0,
+      chatId:
+          (json['chatId'] ?? json['chat_id'] ?? json['conversationId'] ?? json['conversation_id'] ?? '')
+              .toString(),
       title: json['title'] ?? '',
       type: json['type'] ?? 'community_group',
       members:
@@ -90,7 +94,7 @@ class CommunityGroupModel {
 
   Map<String, dynamic> toJson() {
     return {
-      'conversationId': conversationId,
+      'chat_id': chatId,
       'title': title,
       'type': type,
       'members': members.map((member) => member.toJson()).toList(),
@@ -145,12 +149,12 @@ class CommunityGroupModel {
 class CommunityGroupMetadata {
   final String timezone;
   final List<int> activeDays;
-  final int communityId;
+  final String communityId;
   final List<ActiveTimeSlot> activeTimeSlots;
   final GroupLastMessage? lastMessage;
   final int totalMessages;
   final String? createdAt;
-  final int createdBy;
+  final String createdBy;
 
   CommunityGroupMetadata({
     required this.timezone,
@@ -167,7 +171,7 @@ class CommunityGroupMetadata {
     return CommunityGroupMetadata(
       timezone: json['timezone'] ?? 'UTC',
       activeDays: List<int>.from(json['active_days'] ?? []),
-      communityId: json['community_id'] ?? 0,
+      communityId: json['community_id']?.toString() ?? '',
       activeTimeSlots:
           (json['active_time_slots'] as List<dynamic>?)
               ?.map((slot) => ActiveTimeSlot.fromJson(slot))
@@ -178,7 +182,7 @@ class CommunityGroupMetadata {
           : null,
       totalMessages: json['total_messages'] ?? json['totalMessages'] ?? 0,
       createdAt: json['created_at'] ?? json['createdAt'],
-      createdBy: json['created_by'] ?? json['createdBy'] ?? 0,
+      createdBy: (json['created_by'] ?? json['createdBy'] ?? '').toString(),
     );
   }
 

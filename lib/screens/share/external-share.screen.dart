@@ -3,7 +3,7 @@ import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/message.model.dart';
-import 'package:amigo/utils/snowflake.util.dart';
+import 'package:amigo/utils/id.utils.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,7 +22,7 @@ import '../../ui/snackbar.dart';
 
 /// Unified model for displaying conversations (both DMs and Groups)
 class ShareableConversation {
-  final int id;
+  final String id;
   final String displayName;
   final String? displayAvatar;
   final bool isGroup;
@@ -44,26 +44,26 @@ class ShareableConversation {
 
   factory ShareableConversation.fromDm(DmModel dm) {
     return ShareableConversation(
-      id: dm.conversationId,
+      id: dm.chatId,
       displayName: dm.recipientName,
       displayAvatar: dm.recipientProfilePic,
       isGroup: false,
-      lastMessageBody: dm.lastMessageBody,
-      lastMessageType: dm.lastMessageType,
-      lastMessageAt: dm.lastMessageAt,
+      lastMessageBody: dm.lastMsgBody,
+      lastMessageType: dm.lastMsgType,
+      lastMessageAt: dm.lastMsgAt,
       unreadCount: dm.unreadCount,
     );
   }
 
   factory ShareableConversation.fromGroup(GroupModel group) {
     return ShareableConversation(
-      id: group.conversationId,
+      id: group.chatId,
       displayName: group.title,
       displayAvatar: null, // Groups don't have avatars in this model
       isGroup: true,
-      lastMessageBody: group.lastMessageBody,
-      lastMessageType: group.lastMessageType,
-      lastMessageAt: group.lastMessageAt,
+      lastMessageBody: group.lastMsgBody,
+      lastMessageType: group.lastMsgType,
+      lastMessageAt: group.lastMsgAt,
       unreadCount: group.unreadCount,
     );
   }
@@ -97,7 +97,7 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
   late TabController _tabController;
 
   // Selected conversations to send media to
-  final Set<int> _selectedConversations = {};
+  final Set<String> _selectedConversations = {};
 
   // Search functionality
   final TextEditingController _searchController = TextEditingController();
@@ -226,7 +226,7 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
   }
 
   /// Toggle conversation selection
-  void _toggleConversationSelection(int conversationId) {
+  void _toggleConversationSelection(String conversationId) {
     setState(() {
       if (_selectedConversations.contains(conversationId)) {
         _selectedConversations.remove(conversationId);
@@ -289,7 +289,7 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
             for (final conversationId in _selectedConversations) {
               // Each conversation gets its own unique message ID to avoid
               // primary key conflicts in the local database
-              final messageId = await Snowflake.generateMessageId();
+              final messageId = newMessageId();
 
               // Determine conversation type by looking up in the loaded lists
               final isGroupConv = _availableGroups.any(
@@ -298,18 +298,15 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
 
               final newMsg = MessageModel(
                 id: messageId,
-                conversationId: conversationId,
+                chatId: conversationId,
                 senderId: _currentUserDetails!.id,
                 senderName: _currentUserDetails!.name,
                 senderProfilePic: _currentUserDetails!.profilePic,
-                metadata: {},
                 attachments: mediaData,
                 type: file.type == SharedMediaType.image
                     ? MessageType.image
                     : MessageType.video,
                 body: '',
-                isReplied: false,
-                status: MessageStatusType.sent,
                 sentAt: DateTime.now().toUtc().toIso8601String(),
               );
 
@@ -322,14 +319,12 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
                 id: messageId,
                 convId: conversationId,
                 senderId: _currentUserDetails!.id,
-                senderName: _currentUserDetails!.name,
                 attachments: mediaData,
-                convType: isGroupConv ? ChatType.group : ChatType.dm,
                 msgType: file.type == SharedMediaType.image
                     ? MessageType.image
                     : MessageType.video,
                 body: '',
-                replyToMessageId: null,
+                repliedTo: null,
                 sentAt: DateTime.now().toUtc(),
               );
 
@@ -342,6 +337,7 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
               await _transportManager.sendMessage(wsmsg).catchError((e) async {
                 debugPrint('Error sending message: $e');
                 // Mark message as failed in DB and UI
+                return false;
               });
 
               // >>>>>-- sending to ws -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -353,14 +349,14 @@ class _ShareHandlerScreenState extends ConsumerState<ShareHandlerScreen>
               final List<ConversationMemberModel> conversationMembers =
                   await ConversationMemberRepository()
                       .getMembersByConversationId(conversationId);
-              final List<int> userIds = conversationMembers
+              final List<String> userIds = conversationMembers
                   .map((member) => member.userId)
                   .toList();
 
               // // store that message in the message status table
               await _messageStatusRepo.insertMessageStatusesWithMultipleUserIds(
                 messageId: newMsg.id,
-                conversationId: conversationId,
+                chatId: conversationId,
                 userIds: userIds,
               );
             }

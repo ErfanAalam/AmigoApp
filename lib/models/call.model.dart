@@ -1,148 +1,7 @@
-class CallModel {
-  final int id;
-  final int callerId;
-  final int calleeId;
-  final int contactId;
-  final String contactName;
-  final String? contactProfilePic;
-  final DateTime startedAt;
-  final DateTime? answeredAt;
-  final DateTime? endedAt;
-  final int durationSeconds;
-  final CallStatus status;
-  final String? reason;
-  final CallType callType;
-  final DateTime createdAt;
+import 'package:freezed_annotation/freezed_annotation.dart';
 
-  CallModel({
-    required this.id,
-    required this.callerId,
-    required this.calleeId,
-    required this.contactId,
-    required this.contactName,
-    this.contactProfilePic,
-    required this.startedAt,
-    this.answeredAt,
-    this.endedAt,
-    required this.durationSeconds,
-    required this.status,
-    this.reason,
-    required this.callType,
-    required this.createdAt,
-  });
-
-  static int _parseInt(dynamic value) {
-    if (value == null) return 0;
-    if (value is int) return value;
-    if (value is String) return int.tryParse(value) ?? 0;
-    if (value is double) return value.toInt();
-    return 0;
-  }
-
-  factory CallModel.fromJson(Map<String, dynamic> json, {int? currentUserId}) {
-    DateTime? tryParseDate(dynamic value) {
-      if (value == null) return null;
-      final s = value.toString();
-      if (s.isEmpty) return null;
-      try {
-        return DateTime.parse(s);
-      } catch (_) {
-        return null;
-      }
-    }
-
-    final callerId = _parseInt(json['caller_id']);
-    final calleeId = _parseInt(json['callee_id']);
-    
-    // Determine call_type from caller_id/callee_id if currentUserId is provided
-    // Otherwise, try to get it from JSON (for backward compatibility)
-    CallType callType;
-    if (currentUserId != null) {
-      callType = calleeId == currentUserId ? CallType.incoming : CallType.outgoing;
-    } else {
-      final String callTypeStr =
-          (json['call_type'] ?? json['callType'] ?? 'outgoing').toString();
-      callType = callTypeStr == 'incoming' ? CallType.incoming : CallType.outgoing;
-    }
-    
-    // Determine contact info - if not provided in JSON, use the other user's ID
-    final contactId = _parseInt(json['contact_id']);
-    final otherUserId = contactId > 0 ? contactId : (callerId == currentUserId ? calleeId : callerId);
-
-    return CallModel(
-      id: _parseInt(json['id']),
-      callerId: callerId,
-      calleeId: calleeId,
-      contactId: contactId > 0 ? contactId : otherUserId,
-      contactName: json['contact_name']?.toString() ?? 'Unknown',
-      contactProfilePic: json['contact_profile_pic']?.toString(),
-      startedAt: tryParseDate(json['started_at']) ?? DateTime.now(),
-      answeredAt: tryParseDate(json['answered_at']),
-      endedAt: tryParseDate(json['ended_at']),
-      durationSeconds: _parseInt(json['duration_seconds']),
-      status: CallStatus.fromString(json['status']?.toString()),
-      reason: json['reason']?.toString(),
-      callType: callType,
-      createdAt:
-          tryParseDate(json['created_at']) ??
-          tryParseDate(json['started_at']) ??
-          DateTime.now(),
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'caller_id': callerId,
-      'callee_id': calleeId,
-      'contact_id': contactId,
-      'contact_name': contactName,
-      'contact_profile_pic': contactProfilePic,
-      'started_at': startedAt.toIso8601String(),
-      'answered_at': answeredAt?.toIso8601String(),
-      'ended_at': endedAt?.toIso8601String(),
-      'duration_seconds': durationSeconds,
-      'status': status.value,
-      'reason': reason,
-      'call_type': callType == CallType.incoming ? 'incoming' : 'outgoing',
-      'created_at': createdAt.toIso8601String(),
-    };
-  }
-
-  CallModel copyWith({
-    int? id,
-    int? callerId,
-    int? calleeId,
-    int? contactId,
-    String? contactName,
-    String? contactProfilePic,
-    DateTime? startedAt,
-    DateTime? answeredAt,
-    DateTime? endedAt,
-    int? durationSeconds,
-    CallStatus? status,
-    String? reason,
-    CallType? callType,
-    DateTime? createdAt,
-  }) {
-    return CallModel(
-      id: id ?? this.id,
-      callerId: callerId ?? this.callerId,
-      calleeId: calleeId ?? this.calleeId,
-      contactId: contactId ?? this.contactId,
-      contactName: contactName ?? this.contactName,
-      contactProfilePic: contactProfilePic ?? this.contactProfilePic,
-      startedAt: startedAt ?? this.startedAt,
-      answeredAt: answeredAt ?? this.answeredAt,
-      endedAt: endedAt ?? this.endedAt,
-      durationSeconds: durationSeconds ?? this.durationSeconds,
-      status: status ?? this.status,
-      reason: reason ?? this.reason,
-      callType: callType ?? this.callType,
-      createdAt: createdAt ?? this.createdAt,
-    );
-  }
-}
+part 'call.model.freezed.dart';
+part 'call.model.g.dart';
 
 enum CallStatus {
   initiated('initiated'),
@@ -157,8 +16,8 @@ enum CallStatus {
   final String value;
 
   static CallStatus fromString(String? status) {
-    final String value = status ?? 'ended';
-    for (final CallStatus s in CallStatus.values) {
+    final value = status ?? 'ended';
+    for (final s in CallStatus.values) {
       if (s.value == value) return s;
     }
     return CallStatus.ended;
@@ -167,11 +26,91 @@ enum CallStatus {
 
 enum CallType { outgoing, incoming }
 
+DateTime? _parseDate(dynamic v) {
+  if (v == null) return null;
+  final s = v.toString();
+  if (s.isEmpty) return null;
+  try {
+    return DateTime.parse(s);
+  } catch (_) {
+    return null;
+  }
+}
+
+@freezed
+abstract class CallModel with _$CallModel {
+  const CallModel._();
+
+  const factory CallModel({
+    required String id,
+    @JsonKey(name: 'caller_id') required String callerId,
+    @JsonKey(name: 'callee_id') required String calleeId,
+    @JsonKey(name: 'contact_id') required String contactId,
+    @JsonKey(name: 'contact_name') @Default('Unknown') String contactName,
+    @JsonKey(name: 'contact_profile_pic') String? contactProfilePic,
+    @JsonKey(name: 'started_at') required DateTime startedAt,
+    @JsonKey(name: 'answered_at') DateTime? answeredAt,
+    @JsonKey(name: 'ended_at') DateTime? endedAt,
+    @JsonKey(name: 'duration_seconds') @Default(0) int durationSeconds,
+    @Default(CallStatus.ended) CallStatus status,
+    String? reason,
+    @JsonKey(name: 'call_type') @Default(CallType.outgoing) CallType callType,
+    @JsonKey(name: 'created_at') required DateTime createdAt,
+  }) = _CallModel;
+
+  factory CallModel.fromJson(Map<String, dynamic> json) =>
+      _$CallModelFromJson(json);
+
+  /// Build a CallModel from a backend JSON blob, deriving [callType] from
+  /// [currentUserId] when present.
+  factory CallModel.fromBackend(
+    Map<String, dynamic> json, {
+    String? currentUserId,
+  }) {
+    final callerId = json['caller_id']?.toString() ?? '';
+    final calleeId = json['callee_id']?.toString() ?? '';
+    final CallType callType;
+    if (currentUserId != null) {
+      callType = calleeId == currentUserId
+          ? CallType.incoming
+          : CallType.outgoing;
+    } else {
+      final s = (json['call_type'] ?? 'outgoing').toString();
+      callType = s == 'incoming' ? CallType.incoming : CallType.outgoing;
+    }
+    final contactIdRaw = json['contact_id']?.toString();
+    final contactId = (contactIdRaw != null && contactIdRaw.isNotEmpty)
+        ? contactIdRaw
+        : (callerId == currentUserId ? calleeId : callerId);
+    final statusStr = json['status']?.toString();
+    return CallModel(
+      id: json['id']?.toString() ?? '',
+      callerId: callerId,
+      calleeId: calleeId,
+      contactId: contactId,
+      contactName: json['contact_name']?.toString() ?? 'Unknown',
+      contactProfilePic: json['contact_profile_pic']?.toString(),
+      startedAt: _parseDate(json['started_at']) ?? DateTime.now(),
+      answeredAt: _parseDate(json['answered_at']),
+      endedAt: _parseDate(json['ended_at']),
+      durationSeconds: (json['duration_seconds'] is int)
+          ? json['duration_seconds'] as int
+          : int.tryParse(json['duration_seconds']?.toString() ?? '0') ?? 0,
+      status: CallStatus.fromString(statusStr),
+      reason: json['reason']?.toString(),
+      callType: callType,
+      createdAt: _parseDate(json['created_at']) ??
+          _parseDate(json['started_at']) ??
+          DateTime.now(),
+    );
+  }
+}
+
 class CallSignalingMessage {
   final String type;
-  final int? callId;
-  final int? from;
-  final int? to;
+  final String? callId;
+  final String? from;
+  final String? to;
   final Map<String, dynamic>? payload;
   final String? timestamp;
 
@@ -186,12 +125,12 @@ class CallSignalingMessage {
 
   factory CallSignalingMessage.fromJson(Map<String, dynamic> json) {
     return CallSignalingMessage(
-      type: json['type'],
-      callId: json['callId'],
-      from: json['from'],
-      to: json['to'],
-      payload: json['payload'],
-      timestamp: json['timestamp'],
+      type: json['type']?.toString() ?? '',
+      callId: json['callId']?.toString(),
+      from: json['from']?.toString(),
+      to: json['to']?.toString(),
+      payload: json['payload'] as Map<String, dynamic>?,
+      timestamp: json['timestamp']?.toString(),
     );
   }
 
@@ -208,8 +147,8 @@ class CallSignalingMessage {
 }
 
 class ActiveCallState {
-  final int callId;
-  final int userId;
+  final String callId;
+  final String userId;
   final String userName;
   final String? userProfilePic;
   final CallType callType;
@@ -235,8 +174,8 @@ class ActiveCallState {
   });
 
   ActiveCallState copyWith({
-    int? callId,
-    int? userId,
+    String? callId,
+    String? userId,
     String? userName,
     String? userProfilePic,
     CallType? callType,
@@ -264,12 +203,11 @@ class ActiveCallState {
 }
 
 class CallDetails {
-  final int? callId;
-  final int? callerId;
+  final String? callId;
+  final String? callerId;
   final String? callerName;
   final String? callerProfilePic;
-  final String?
-  callStatus; // Stored as string: 'ringing', 'answered', 'declined', 'missed', 'ended'
+  final String? callStatus;
 
   CallDetails({
     this.callId,
@@ -281,35 +219,25 @@ class CallDetails {
 
   factory CallDetails.fromJson(Map<String, dynamic> json) {
     return CallDetails(
-      callId: json['call_id'] != null
-          ? (json['call_id'] is int
-                ? json['call_id']
-                : int.tryParse(json['call_id'].toString()))
-          : null,
-      callerId: json['caller_id'] != null
-          ? (json['caller_id'] is int
-                ? json['caller_id']
-                : int.tryParse(json['caller_id'].toString()))
-          : null,
+      callId: json['call_id']?.toString(),
+      callerId: json['caller_id']?.toString(),
       callerName: json['caller_name']?.toString(),
       callerProfilePic: json['caller_profile_pic']?.toString(),
       callStatus: json['call_status']?.toString(),
     );
   }
 
-  Map<String, dynamic> toJson() {
-    return {
-      'call_id': callId,
-      'caller_id': callerId,
-      'caller_name': callerName,
-      'caller_profile_pic': callerProfilePic,
-      'call_status': callStatus,
-    };
-  }
+  Map<String, dynamic> toJson() => {
+        'call_id': callId,
+        'caller_id': callerId,
+        'caller_name': callerName,
+        'caller_profile_pic': callerProfilePic,
+        'call_status': callStatus,
+      };
 
   CallDetails copyWith({
-    int? callId,
-    int? callerId,
+    String? callId,
+    String? callerId,
     String? callerName,
     String? callerProfilePic,
     String? callStatus,
@@ -323,19 +251,8 @@ class CallDetails {
     );
   }
 
-  // Helper method to convert callStatus string to CallStatus enum
-  CallStatus? get statusEnum {
-    if (callStatus == null) return null;
-    return CallStatus.fromString(callStatus);
-  }
+  CallStatus? get statusEnum =>
+      callStatus == null ? null : CallStatus.fromString(callStatus);
 
-  // Helper method to check if call is active
-  bool get isActive {
-    return callStatus == 'ringing' || callStatus == 'answered';
-  }
-
-  @override
-  String toString() {
-    return 'CallDetails(callId: $callId, callerId: $callerId, callerName: $callerName, callerProfilePic: $callerProfilePic, callStatus: $callStatus)';
-  }
+  bool get isActive => callStatus == 'ringing' || callStatus == 'answered';
 }

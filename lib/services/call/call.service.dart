@@ -59,7 +59,7 @@ class CallService {
   Timer? _statusPollingTimer;
   Timer? _offerRetryTimer;
   Map<String, dynamic>? _lastOfferMsg;
-  int? _pollingCallId;
+  String? _pollingCallId;
 
   final TransportManager _transportManager = TransportManager();
   final CookieService _cookieService = CookieService();
@@ -80,7 +80,7 @@ class CallService {
   StreamSubscription<CallPayload>? _callMissedSubscription;
 
   // Call-ID deduplication to prevent WS + FCM double-processing the same call
-  final Set<int> _recentCallIds = {};
+  final Set<String> _recentCallIds = {};
 
   // Proximity control for global screen lock
   StreamSubscription<dynamic>? _proximitySubscription;
@@ -273,8 +273,8 @@ class CallService {
   }
 
   /// Query the backend for the current call status.
-  Future<String?> _getCallStatusFromServer(int? callId) async {
-    if (callId == null) return null;
+  Future<String?> _getCallStatusFromServer(String? callId) async {
+    if (callId == null || callId.isEmpty) return null;
     try {
       final dio = Dio();
       final response = await dio.get(
@@ -291,7 +291,7 @@ class CallService {
   }
 
   /// Accept via HTTP as a fallback when WS send fails.
-  Future<bool> _acceptViaHttp(int callId) async {
+  Future<bool> _acceptViaHttp(String callId) async {
     try {
       final dio = Dio();
       final response = await dio.post(
@@ -346,7 +346,7 @@ class CallService {
 
   /// Set up event handlers from native call screen
   void _setupNativeCallScreenEvents() {
-    NativeCallScreen.onCallAccepted = (int callId) async {
+    NativeCallScreen.onCallAccepted = (String callId) async {
       debugPrint('[CALL] Native call screen: call accepted (callId=$callId)');
       final callDetails = await CallUtils().getCallDetails();
       await acceptCall(
@@ -357,12 +357,12 @@ class CallService {
       );
     };
 
-    NativeCallScreen.onCallDeclined = (int callId) async {
+    NativeCallScreen.onCallDeclined = (String callId) async {
       debugPrint('[CALL] Native call screen: call declined (callId=$callId)');
-      await declineCall(callId: callId != 0 ? callId : null);
+      await declineCall(callId: callId.isNotEmpty ? callId : null);
     };
 
-    NativeCallScreen.onCallEnded = (int callId) async {
+    NativeCallScreen.onCallEnded = (String callId) async {
       debugPrint('[CALL] Native call screen: call ended (callId=$callId)');
       if (!_isTerminating) {
         await endCall();
@@ -388,7 +388,7 @@ class CallService {
 
   /// Initiate an outgoing call
   Future<void> initiateCall(
-    int calleeId,
+    String calleeId,
     String calleeName,
     String? calleeProfilePic,
   ) async {
@@ -498,7 +498,7 @@ class CallService {
       }
       
       _activeCall = ActiveCallState(
-        callId: 0, // Will be updated from backend response
+        callId: '', // Will be updated from backend response
         userId: calleeId,
         userName: calleeName,
         userProfilePic: calleeProfilePic,
@@ -539,8 +539,8 @@ class CallService {
 
   /// Restore call state from SharedPreferences
   Future<void> restoreCallState(
-    int callId,
-    int callerId,
+    String callId,
+    String callerId,
     String callerName,
     String? callerProfilePic,
   ) async {
@@ -561,8 +561,8 @@ class CallService {
 
   /// Accept an incoming call
   Future<void> acceptCall({
-    int? callId,
-    int? callerId,
+    String? callId,
+    String? callerId,
     String? callerName,
     String? callerProfilePic,
     bool skipWsAccept = false,
@@ -623,7 +623,7 @@ class CallService {
         final wsSent = await _transportManager.sendMessage(wsmsg);
         if (!wsSent) {
           debugPrint('[CALL] WS accept failed (returned false), trying HTTP fallback');
-          if (_activeCall?.callId != null) {
+          if (_activeCall != null && _activeCall!.callId.isNotEmpty) {
             await _acceptViaHttp(_activeCall!.callId);
           }
         }
@@ -673,20 +673,20 @@ class CallService {
   }
 
   /// Decline an incoming call or cancel an outgoing call
-  Future<void> declineCall({String? reason, int? callId}) async {
+  Future<void> declineCall({String? reason, String? callId}) async {
     try {
       // Get callId from parameter, active call, or SharedPreferences
-      int? actualCallId = callId;
+      String? actualCallId = callId;
 
-      if (actualCallId == null && _activeCall != null) {
+      if ((actualCallId == null || actualCallId.isEmpty) && _activeCall != null) {
         actualCallId = _activeCall!.callId;
       }
 
-      if (actualCallId == null) {
+      if (actualCallId == null || actualCallId.isEmpty) {
         actualCallId = await CallUtils().getCallId();
       }
 
-      if (actualCallId == null) {
+      if (actualCallId == null || actualCallId.isEmpty) {
         debugPrint('[CALL] No callId available to decline');
         await _cleanup();
         return;
@@ -728,8 +728,8 @@ class CallService {
       // For outgoing calls: we are the caller, other user is callee
       // For incoming calls: other user is caller, we are the callee
       final isOutgoing = _activeCall?.callType == CallType.outgoing;
-      int? actualCallerId;
-      int? actualCalleeId;
+      String? actualCallerId;
+      String? actualCalleeId;
 
       if (_activeCall != null) {
         if (isOutgoing) {
@@ -946,7 +946,7 @@ class CallService {
     debugPrint('[CALL] Missed call from callerId=${payload.callerId}');
     final callerName = payload.callerName ?? 'Unknown';
     await NativeCallScreen.showMissedCallNotification(
-      callId: payload.callId ?? 0,
+      callId: payload.callId ?? '',
       callerName: callerName,
     );
   }
@@ -1231,7 +1231,7 @@ class CallService {
     final payloadMap = _payloadDataToMap(payload);
     if (payloadMap?['success'] == true || payload.data?['success'] == true) {
       final callId = payload.callId;
-      if (callId != null) {
+      if (callId != null && callId.isNotEmpty) {
         _activeCall = _activeCall?.copyWith(callId: callId);
 
         // Start status polling as fallback when WebSocket might not be reliable
@@ -1246,7 +1246,7 @@ class CallService {
   void _handleCallInitAck(CallPayload payload) async {
     // Similar to call init, handle acknowledgment
     final callId = payload.callId;
-    if (callId != null) {
+    if (callId != null && callId.isNotEmpty) {
       _activeCall = _activeCall?.copyWith(callId: callId);
       _startStatusPolling(callId);
     }
@@ -1262,11 +1262,11 @@ class CallService {
     }
 
     // For outgoing calls, be more lenient with callId matching
-    // The callId might be 0 initially and get updated later
+    // The callId might be empty initially and get updated later
     final isOutgoingCall = _activeCall!.callType == CallType.outgoing;
-    final callIdMatches = payload.callId == null || 
-                         _activeCall!.callId == payload.callId || 
-                         _activeCall!.callId == 0;
+    final callIdMatches = payload.callId == null ||
+                         _activeCall!.callId == payload.callId ||
+                         _activeCall!.callId.isEmpty;
 
     if (!callIdMatches && !isOutgoingCall) {
       debugPrint('[CALL] Ignoring call:accept - callId mismatch. Active: ${_activeCall!.callId}, Payload: ${payload.callId}');
@@ -1275,8 +1275,8 @@ class CallService {
 
     debugPrint('[CALL] Handling call:accept for callId=${payload.callId ?? _activeCall!.callId}, ActiveCallId: ${_activeCall!.callId}');
 
-    // Update callId if provided and different (or if it was 0)
-    if (payload.callId != null && (_activeCall!.callId != payload.callId || _activeCall!.callId == 0)) {
+    // Update callId if provided and different (or if it was empty)
+    if (payload.callId != null && (_activeCall!.callId != payload.callId || _activeCall!.callId.isEmpty)) {
       debugPrint('[CALL] Updating callId from ${_activeCall!.callId} to ${payload.callId}');
       _activeCall = _activeCall!.copyWith(callId: payload.callId);
     }
@@ -1400,9 +1400,9 @@ class CallService {
     _isTerminating = true;
 
     final isOutgoingCall = _activeCall!.callType == CallType.outgoing;
-    final callIdMatches = payload.callId == null || 
-                         _activeCall!.callId == payload.callId || 
-                         _activeCall!.callId == 0;
+    final callIdMatches = payload.callId == null ||
+                         _activeCall!.callId == payload.callId ||
+                         _activeCall!.callId.isEmpty;
 
     if (!callIdMatches && !isOutgoingCall) {
       debugPrint('[CALL] Ignoring call:terminate for callId=${payload.callId} - callId mismatch. Active: ${_activeCall!.callId}');
@@ -1419,12 +1419,12 @@ class CallService {
     
     FlutterRingtonePlayer().stop();
     
-    // Update callId if provided and different (or if it was 0)
-    if (payload.callId != null && (_activeCall!.callId != payload.callId || _activeCall!.callId == 0)) {
+    // Update callId if provided and different (or if it was empty)
+    if (payload.callId != null && (_activeCall!.callId != payload.callId || _activeCall!.callId.isEmpty)) {
       debugPrint('[CALL] Updating callId from ${_activeCall!.callId} to ${payload.callId}');
       _activeCall = _activeCall!.copyWith(callId: payload.callId);
     }
-    
+
     // Cancel the call started timer
     _callStartedTimer?.cancel();
     _callStartedTimer = null;
@@ -1778,7 +1778,7 @@ class CallService {
   }
 
   /// Fetch call status from unprotected endpoint
-  Future<Map<String, dynamic>?> _fetchCallStatus(int callId) async {
+  Future<Map<String, dynamic>?> _fetchCallStatus(String callId) async {
     try {
       final dio = Dio();
       final response = await dio.get(
@@ -1811,7 +1811,7 @@ class CallService {
   }
 
   /// Start polling for call status as fallback when WebSocket is not connected
-  void _startStatusPolling(int callId) {
+  void _startStatusPolling(String callId) {
     if (_statusPollingTimer != null) {
       _statusPollingTimer?.cancel();
     }

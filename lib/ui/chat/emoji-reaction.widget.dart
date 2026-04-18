@@ -464,7 +464,7 @@ class _AllReactorsSheetState extends State<AllReactorsSheet> {
         } else {
           final userId = map['user_id'];
           if (userId != null) {
-            final dbUser = await _userRepo.getUserById(userId as int);
+            final dbUser = await _userRepo.getUserById(userId.toString());
             name = dbUser?.name ?? 'Unknown User';
           } else {
             name = 'Unknown User';

@@ -1,4 +1,10 @@
-/// Chat type enum
+import 'package:freezed_annotation/freezed_annotation.dart';
+
+part 'socket.types.freezed.dart';
+part 'socket.types.g.dart';
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
 enum ChatType {
   dm('dm'),
   group('group'),
@@ -16,11 +22,9 @@ enum ChatType {
   }
 }
 
-/// Connection status enum
 enum ConnectionStatusType {
-  forground('foreground'),
-  background('background'),
-  disconnected('disconnected'),
+  online('online'),
+  offline('offline'),
   stale('stale');
 
   final String value;
@@ -30,18 +34,18 @@ enum ConnectionStatusType {
     if (value == null) return null;
     return ConnectionStatusType.values.firstWhere(
       (e) => e.value == value,
-      orElse: () => ConnectionStatusType.background,
+      orElse: () => ConnectionStatusType.offline,
     );
   }
 }
 
-/// Message type enum
 enum MessageType {
   text('text'),
   image('image'),
   video('video'),
   audio('audio'),
   document('document'),
+  media('media'),
   reply('reply'),
   forwarded('forwarded'),
   system('system'),
@@ -60,7 +64,6 @@ enum MessageType {
   }
 }
 
-/// Message status type enum
 enum MessageStatusType {
   unsent('unsent'),
   sent('sent'),
@@ -81,7 +84,6 @@ enum MessageStatusType {
   }
 }
 
-/// Chat role type enum
 enum ChatRoleType {
   member('member'),
   admin('admin');
@@ -98,7 +100,6 @@ enum ChatRoleType {
   }
 }
 
-/// Conversation action type enum
 enum ConversationActionType {
   memberAdded('member_added'),
   memberRemoved('member_removed'),
@@ -117,22 +118,19 @@ enum ConversationActionType {
   }
 }
 
-/// WebSocket message type enum
 enum WSMessageType {
   connectionStatus('connection:status'),
   conversationJoin('conversation:join'),
-  conversationLeave('conversation:leave'),
   conversationNew('conversation:new'),
   conversationTyping('conversation:typing'),
   conversationAction('conversation:action'),
   messageNew('message:new'),
-  messageAck('message:ack'),
+  messageSentAck('message:sent:ack'),
+  messageStatusAck('message:status:ack'),
   messagePin('message:pin'),
   messageForward('message:forward'),
   messageDelete('message:delete'),
   messageReact('message:react'),
-  messageSync('message:sync'),
-  messageDelivered('message:delivered'),
   callInit('call:init'),
   callInitAck('call:init:ack'),
   callOffer('call:offer'),
@@ -163,17 +161,17 @@ enum WSMessageType {
   }
 }
 
-/// Vital WebSocket message type enum - critical events that must be processed
-/// even if client misses some messages (e.g., due to reconnection)
 enum VitalWSMessageType {
+  conversationJoin('conversation:join'),
   conversationNew('conversation:new'),
   conversationAction('conversation:action'),
+  messageNew('message:new'),
+  messageSentAck('message:sent:ack'),
+  messageStatusAck('message:status:ack'),
   messagePin('message:pin'),
   messageForward('message:forward'),
   messageDelete('message:delete'),
-  messageReact('message:react'),
-  messageNew('message:new'),
-  messageDelivered('message:delivered');
+  messageReact('message:react');
 
   final String value;
   const VitalWSMessageType(this.value);
@@ -187,1017 +185,281 @@ enum VitalWSMessageType {
     }
   }
 
-  /// Check if a WSMessageType is a vital message type
   static bool isVital(WSMessageType type) {
     return VitalWSMessageType.values.any((v) => v.value == type.value);
   }
 }
 
-/// Online status payload
-class ConnectionStatus {
-  final int senderId;
-  final String status;
+// ─── JSON converters for enums ───────────────────────────────────────────────
 
-  ConnectionStatus({required this.senderId, required this.status});
-
-  factory ConnectionStatus.fromJson(Map<String, dynamic> json) {
-    return ConnectionStatus(
-      senderId: json['sender_id'] as int,
-      status: json['status'] as String,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {'sender_id': senderId, 'status': status};
-  }
+class ChatTypeConverter implements JsonConverter<ChatType, String> {
+  const ChatTypeConverter();
+  @override
+  ChatType fromJson(String json) => ChatType.fromString(json) ?? ChatType.dm;
+  @override
+  String toJson(ChatType object) => object.value;
 }
 
-/// Join/Leave payload
-class JoinLeavePayload {
-  final int convId;
-  final ChatType convType;
-  final int userId;
-  final String? userName;
-
-  JoinLeavePayload({
-    required this.convId,
-    required this.convType,
-    required this.userId,
-    this.userName,
-  });
-
-  factory JoinLeavePayload.fromJson(Map<String, dynamic> json) {
-    return JoinLeavePayload(
-      convId: json['conv_id'] as int,
-      convType:
-          ChatType.fromString(json['conv_type'] as String?) ?? ChatType.dm,
-      userId: json['user_id'] as int,
-      userName: json['user_name'] as String?,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'conv_id': convId,
-      'conv_type': convType.value,
-      'user_id': userId,
-      if (userName != null) 'user_name': userName,
-    };
-  }
+class MessageTypeConverter implements JsonConverter<MessageType, String> {
+  const MessageTypeConverter();
+  @override
+  MessageType fromJson(String json) =>
+      MessageType.fromString(json) ?? MessageType.text;
+  @override
+  String toJson(MessageType object) => object.value;
 }
 
-/// Chat message payload
-class ChatMessagePayload {
-  final int id;
-  final int senderId;
-  final String? senderName;
-  final int convId;
-  final ChatType convType;
-  final MessageType msgType;
-  final String? body;
-  final dynamic attachments;
-  final dynamic metadata;
-  final int? replyToMessageId;
-  final DateTime sentAt;
-
-  ChatMessagePayload({
-    required this.id,
-    required this.senderId,
-    this.senderName,
-    required this.convId,
-    required this.convType,
-    required this.msgType,
-    this.body,
-    this.attachments,
-    this.metadata,
-    this.replyToMessageId,
-    required this.sentAt,
-  });
-
-  factory ChatMessagePayload.fromJson(Map<String, dynamic> json) {
-    DateTime sentAt;
-    try {
-      final sentAtData = json['sent_at'];
-      if (sentAtData is String) {
-        sentAt = DateTime.parse(sentAtData);
-      } else if (sentAtData is DateTime) {
-        sentAt = sentAtData;
-      } else {
-        sentAt = DateTime.now();
-      }
-    } catch (e) {
-      sentAt = DateTime.now();
-    }
-
-    // Handle both string and int IDs (server sends bigint as string in JSON)
-    final idValue = json['id'];
-    final id = idValue is String ? int.parse(idValue) : (idValue as int);
-
-    final replyToMessageIdValue = json['reply_to_message_id'];
-    final replyToMessageId = replyToMessageIdValue != null
-        ? (replyToMessageIdValue is String
-              ? int.parse(replyToMessageIdValue)
-              : (replyToMessageIdValue as int?))
-        : null;
-
-    return ChatMessagePayload(
-      id: id,
-      senderId: json['sender_id'] as int,
-      senderName: json['sender_name'] as String?,
-      convId: json['conv_id'] as int,
-      convType:
-          ChatType.fromString(json['conv_type'] as String?) ?? ChatType.dm,
-      msgType:
-          MessageType.fromString(json['msg_type'] as String?) ??
-          MessageType.text,
-      body: json['body'] as String?,
-      attachments: json['attachments'],
-      metadata: json['metadata'],
-      replyToMessageId: replyToMessageId,
-      sentAt: sentAt,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id
-          .toString(), // Convert bigint to string for WebSocket transmission
-      'sender_id': senderId,
-      if (senderName != null) 'sender_name': senderName,
-      'conv_id': convId,
-      'conv_type': convType.value,
-      'msg_type': msgType.value,
-      if (body != null) 'body': body,
-      if (attachments != null) 'attachments': attachments,
-      if (metadata != null) 'metadata': metadata,
-      if (replyToMessageId != null)
-        'reply_to_message_id': replyToMessageId
-            .toString(), // Convert bigint to string
-      'sent_at': sentAt.toUtc().toIso8601String(),
-    };
-  }
+class ChatRoleTypeConverter implements JsonConverter<ChatRoleType, String> {
+  const ChatRoleTypeConverter();
+  @override
+  ChatRoleType fromJson(String json) =>
+      ChatRoleType.fromString(json) ?? ChatRoleType.member;
+  @override
+  String toJson(ChatRoleType object) => object.value;
 }
 
-/// Chat message acknowledgment payload
-class ChatMessageAckPayload {
-  final int id;
-  final int? newId;
-  final int convId;
-  final int senderId;
-  final bool? isFailed;
-  final int? errorCode;
-  final DateTime deliveredAt;
-  final List<int>? deliveredTo;
-  final List<int>? readBy;
-  final List<int>? offlineUsers;
-
-  ChatMessageAckPayload({
-    required this.id,
-    this.newId,
-    required this.convId,
-    required this.senderId,
-    required this.deliveredAt,
-    this.isFailed,
-    this.errorCode,
-    this.deliveredTo,
-    this.readBy,
-    this.offlineUsers,
-  });
-
-  factory ChatMessageAckPayload.fromJson(Map<String, dynamic> json) {
-    DateTime deliveredAt;
-    try {
-      // Try delivered_at first, then sent_at as fallback, then use current time
-      final deliveredAtData = json['delivered_at'] ?? json['sent_at'];
-      if (deliveredAtData is String) {
-        deliveredAt = DateTime.parse(deliveredAtData);
-      } else if (deliveredAtData is DateTime) {
-        deliveredAt = deliveredAtData;
-      } else {
-        deliveredAt = DateTime.now();
-      }
-    } catch (e) {
-      deliveredAt = DateTime.now();
-    }
-
-    // Handle both string and int IDs (server sends bigint as string in JSON)
-    final idValue = json['id'];
-    final id = idValue is String ? int.parse(idValue) : (idValue as int);
-
-    final newIdValue = json['new_id'];
-    final newId = newIdValue != null
-        ? (newIdValue is String ? int.parse(newIdValue) : (newIdValue as int?))
-        : null;
-
-    return ChatMessageAckPayload(
-      id: id,
-      newId: newId,
-      convId: json['conv_id'] as int,
-      senderId: json['sender_id'] as int,
-      deliveredAt: deliveredAt,
-      isFailed: json["is_failed"] != null ? json["is_failed"] as bool : null,
-      errorCode: json["error_code"] != null ? json["error_code"] as int : null,
-      deliveredTo: json['delivered_to'] != null
-          ? (json['delivered_to'] as List<dynamic>)
-                .map((e) => e as int)
-                .toList()
-          : null,
-      readBy: json['read_by'] != null
-          ? (json['read_by'] as List<dynamic>).map((e) => e as int).toList()
-          : null,
-      offlineUsers: json['offline_users'] != null
-          ? (json['offline_users'] as List<dynamic>)
-                .map((e) => e as int)
-                .toList()
-          : null,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id
-          .toString(), // Convert bigint to string for WebSocket transmission
-      if (newId != null) 'new_id': newId.toString(), // Convert bigint to string
-      'conv_id': convId,
-      'sender_id': senderId,
-      'error_code': errorCode,
-      'is_failed': isFailed,
-      'delivered_at': deliveredAt.toUtc().toIso8601String(),
-      if (deliveredTo != null) 'delivered_to': deliveredTo,
-      if (readBy != null) 'read_by': readBy,
-      if (offlineUsers != null) 'offline_users': offlineUsers,
-    };
-  }
+class ConversationActionTypeConverter
+    implements JsonConverter<ConversationActionType, String> {
+  const ConversationActionTypeConverter();
+  @override
+  ConversationActionType fromJson(String json) =>
+      ConversationActionType.fromString(json) ??
+      ConversationActionType.memberAdded;
+  @override
+  String toJson(ConversationActionType object) => object.value;
 }
 
-/// Typing payload for conversation typing indicators
-class TypingPayload {
-  final int convId;
-  final int senderId;
-  final String? senderName;
-  final String? senderPfp;
-  final bool isTyping;
+// ─── Freezed payload classes ─────────────────────────────────────────────────
 
-  TypingPayload({
-    required this.convId,
-    required this.senderId,
-    this.senderName,
-    this.senderPfp,
-    required this.isTyping,
-  });
-
-  /// Create TypingPayload from JSON/Map
-  factory TypingPayload.fromJson(Map<String, dynamic> json) {
-    return TypingPayload(
-      convId: json['conv_id'] as int,
-      senderId: json['sender_id'] as int,
-      senderName: json['sender_name'] as String?,
-      senderPfp: json['sender_pfp'] as String?,
-      isTyping: json['is_typing'] as bool,
-    );
-  }
-
-  /// Convert TypingPayload to JSON/Map
-  Map<String, dynamic> toJson() {
-    return {
-      'conv_id': convId,
-      'sender_id': senderId,
-      if (senderName != null) 'sender_name': senderName,
-      if (senderPfp != null) 'sender_pfp': senderPfp,
-      'is_typing': isTyping,
-    };
-  }
+@freezed
+abstract class ConnectionStatusPayload with _$ConnectionStatusPayload {
+  const factory ConnectionStatusPayload({
+    @JsonKey(name: 'sender_id') required String senderId,
+    required String status,
+  }) = _ConnectionStatusPayload;
+  factory ConnectionStatusPayload.fromJson(Map<String, dynamic> json) =>
+      _$ConnectionStatusPayloadFromJson(json);
 }
 
-/// Delete message payload
-class DeleteMessagePayload {
-  final int convId;
-  final int senderId;
-  final List<int> messageIds;
-
-  DeleteMessagePayload({
-    required this.convId,
-    required this.senderId,
-    required this.messageIds,
-  });
-
-  factory DeleteMessagePayload.fromJson(Map<String, dynamic> json) {
-    // Handle both string and int IDs (server sends bigint as string in JSON)
-    final messageIds = (json['message_ids'] as List<dynamic>)
-        .map((e) => e is String ? int.parse(e) : (e as int))
-        .toList();
-
-    return DeleteMessagePayload(
-      convId: json['conv_id'] as int,
-      senderId: json['sender_id'] as int,
-      messageIds: messageIds,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'conv_id': convId,
-      'sender_id': senderId,
-      'message_ids': messageIds
-          .map((id) => id.toString())
-          .toList(), // Convert bigint IDs to strings
-    };
-  }
+@freezed
+abstract class ConvJoinPayload with _$ConvJoinPayload {
+  const factory ConvJoinPayload({
+    @JsonKey(name: 'conv_id') required String convId,
+    @JsonKey(name: 'user_id') required String userId,
+    @JsonKey(name: 'last_read_msg_id') required String lastReadMsgId,
+  }) = _ConvJoinPayload;
+  factory ConvJoinPayload.fromJson(Map<String, dynamic> json) =>
+      _$ConvJoinPayloadFromJson(json);
 }
 
-/// Member type for conversation members
-class MembersType {
-  final int userId;
-  final String userName;
-  final String? userPfp;
-  final ChatRoleType role;
-  final DateTime joinedAt;
-
-  MembersType({
-    required this.userId,
-    required this.userName,
-    this.userPfp,
-    required this.role,
-    required this.joinedAt,
-  });
-
-  factory MembersType.fromJson(Map<String, dynamic> json) {
-    DateTime joinedAt;
-    try {
-      final joinedAtData = json['joined_at'];
-      if (joinedAtData is String) {
-        joinedAt = DateTime.parse(joinedAtData);
-      } else if (joinedAtData is DateTime) {
-        joinedAt = joinedAtData;
-      } else {
-        joinedAt = DateTime.now();
-      }
-    } catch (e) {
-      joinedAt = DateTime.now();
-    }
-
-    return MembersType(
-      userId: json['user_id'] as int,
-      userName: json['user_name'] as String,
-      userPfp: json['user_pfp'] as String?,
-      role:
-          ChatRoleType.fromString(json['role'] as String?) ??
-          ChatRoleType.member,
-      joinedAt: joinedAt,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'user_id': userId,
-      'user_name': userName,
-      if (userPfp != null) 'user_pfp': userPfp,
-      'role': role.value,
-      'joined_at': joinedAt.toUtc().toIso8601String(),
-    };
-  }
+@freezed
+abstract class ChatMessagePayload with _$ChatMessagePayload {
+  const factory ChatMessagePayload({
+    required String id,
+    @JsonKey(name: 'conv_id') required String convId,
+    @JsonKey(name: 'sender_id') required String senderId,
+    @JsonKey(name: 'msg_type') @MessageTypeConverter() required MessageType msgType,
+    String? body,
+    dynamic attachments,
+    @JsonKey(name: 'replied_to') String? repliedTo,
+    @JsonKey(name: 'sent_at') required DateTime sentAt,
+  }) = _ChatMessagePayload;
+  factory ChatMessagePayload.fromJson(Map<String, dynamic> json) =>
+      _$ChatMessagePayloadFromJson(json);
 }
 
-/// Conversation action payload
-class ConversationActionPayload {
-  final int eventId;
-  final int convId;
-  final ChatType convType;
-  final ConversationActionType action;
-  final List<MembersType> members;
-  final int? actorId;
-  final String? actorName;
-  final String? actorPfp;
-  final String message;
-  final DateTime actionAt;
-
-  ConversationActionPayload({
-    required this.eventId,
-    required this.convId,
-    required this.convType,
-    required this.action,
-    required this.members,
-    this.actorId,
-    this.actorName,
-    this.actorPfp,
-    required this.message,
-    required this.actionAt,
-  });
-
-  factory ConversationActionPayload.fromJson(Map<String, dynamic> json) {
-    DateTime actionAt;
-    try {
-      final actionAtData = json['action_at'];
-      if (actionAtData is String) {
-        actionAt = DateTime.parse(actionAtData);
-      } else if (actionAtData is DateTime) {
-        actionAt = actionAtData;
-      } else {
-        actionAt = DateTime.now();
-      }
-    } catch (_) {
-      actionAt = DateTime.now();
-    }
-
-    return ConversationActionPayload(
-      eventId: json['event_id'] as int,
-      convId: json['conv_id'] as int,
-      convType:
-          ChatType.fromString(json['conv_type'] as String?) ?? ChatType.group,
-      action:
-          ConversationActionType.fromString(json['action'] as String?) ??
-          ConversationActionType.memberAdded,
-      members: (json['members'] as List<dynamic>? ?? [])
-          .map((e) => MembersType.fromJson(e as Map<String, dynamic>))
-          .toList(),
-      actorId: json['actor_id'] as int?,
-      actorName: json['actor_name'] as String?,
-      actorPfp: json['actor_pfp'] as String?,
-      message: json['message'] as String? ?? '',
-      actionAt: actionAt,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'event_id': eventId,
-      'conv_id': convId,
-      'conv_type': convType.value,
-      'action': action.value,
-      'members': members.map((e) => e.toJson()).toList(),
-      if (actorId != null) 'actor_id': actorId,
-      if (actorName != null) 'actor_name': actorName,
-      if (actorPfp != null) 'actor_pfp': actorPfp,
-      'message': message,
-      'action_at': actionAt.toUtc().toIso8601String(),
-    };
-  }
+@freezed
+abstract class MessageSentAckPayload with _$MessageSentAckPayload {
+  const factory MessageSentAckPayload({
+    @JsonKey(name: 'msg_id') required String msgId,
+    @JsonKey(name: 'conv_id') required String convId,
+    @JsonKey(name: 'is_sent') required bool isSent,
+    @JsonKey(name: 'error_code') int? errorCode,
+    @JsonKey(name: 'new_id') String? newId,
+  }) = _MessageSentAckPayload;
+  factory MessageSentAckPayload.fromJson(Map<String, dynamic> json) =>
+      _$MessageSentAckPayloadFromJson(json);
 }
 
-/// New conversation payload
-class NewConversationPayload {
-  final int convId;
-  final ChatType convType;
-  final String? title;
-  final int createrId;
-  final String createrName;
-  final String createrPhone;
-  final String? createrPfp;
-  final List<MembersType>? members;
-  final DateTime joinedAt;
-
-  NewConversationPayload({
-    required this.convId,
-    required this.convType,
-    this.title,
-    required this.createrId,
-    required this.createrName,
-    required this.createrPhone,
-    this.createrPfp,
-    this.members,
-    required this.joinedAt,
-  });
-
-  factory NewConversationPayload.fromJson(Map<String, dynamic> json) {
-    DateTime joinedAt;
-    try {
-      final joinedAtData = json['joined_at'];
-      if (joinedAtData is String) {
-        joinedAt = DateTime.parse(joinedAtData);
-      } else if (joinedAtData is DateTime) {
-        joinedAt = joinedAtData;
-      } else {
-        joinedAt = DateTime.now();
-      }
-    } catch (e) {
-      joinedAt = DateTime.now();
-    }
-
-    return NewConversationPayload(
-      convId: json['conv_id'] as int,
-      convType:
-          ChatType.fromString(json['conv_type'] as String?) ?? ChatType.dm,
-      title: json['title'] as String?,
-      createrId: json['creater_id'] as int,
-      createrName: json['creater_name'] as String,
-      createrPhone: json['creater_phone'] as String,
-      createrPfp: json['creater_pfp'] as String?,
-      members: json['members'] != null
-          ? (json['members'] as List<dynamic>)
-                .map((e) => MembersType.fromJson(e as Map<String, dynamic>))
-                .toList()
-          : null,
-      joinedAt: joinedAt,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'conv_id': convId,
-      'conv_type': convType.value,
-      if (title != null) 'title': title,
-      'creater_id': createrId,
-      'creater_name': createrName,
-      'creater_phone': createrPhone,
-      if (createrPfp != null) 'creater_pfp': createrPfp,
-      if (members != null) 'members': members!.map((e) => e.toJson()).toList(),
-      'joined_at': joinedAt.toUtc().toIso8601String(),
-    };
-  }
+@freezed
+abstract class StatusAck with _$StatusAck {
+  const factory StatusAck({
+    @JsonKey(name: 'chat_id') required String chatId,
+    @JsonKey(name: 'msg_ids') required List<String> msgIds,
+    required List<String> status,
+  }) = _StatusAck;
+  factory StatusAck.fromJson(Map<String, dynamic> json) =>
+      _$StatusAckFromJson(json);
 }
 
-/// Miscellaneous payload
-class MiscPayload {
-  final String? message;
-  final dynamic data;
-  final int? code;
-  final dynamic error;
-
-  MiscPayload({this.message, this.data, this.code, this.error});
-
-  factory MiscPayload.fromJson(Map<String, dynamic> json) {
-    return MiscPayload(
-      message: json['message'] as String,
-      data: json['data'],
-      code: json['code'] as int?,
-      error: json['error'],
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'message': message,
-      if (data != null) 'data': data,
-      if (code != null) 'code': code,
-      if (error != null) 'error': error,
-    };
-  }
+@freezed
+abstract class MessageStatusAckPayload with _$MessageStatusAckPayload {
+  const factory MessageStatusAckPayload({
+    @JsonKey(name: 'recipient_id') required String recipientId,
+    required DateTime at,
+    required List<StatusAck> acks,
+  }) = _MessageStatusAckPayload;
+  factory MessageStatusAckPayload.fromJson(Map<String, dynamic> json) =>
+      _$MessageStatusAckPayloadFromJson(json);
 }
 
-/// Message pin payload
-class MessagePinPayload {
-  final int convId;
-  final int messageId;
-  final MessageType messageType;
-  final int senderId;
-  final String? senderName;
-  final String? senderPfp;
-  final bool pin;
-
-  MessagePinPayload({
-    required this.convId,
-    required this.messageId,
-    required this.messageType,
-    required this.senderId,
-    this.senderName,
-    this.senderPfp,
-    required this.pin,
-  });
-
-  factory MessagePinPayload.fromJson(Map<String, dynamic> json) {
-    // Handle both string and int IDs (server sends bigint as string in JSON)
-    final messageIdValue = json['message_id'];
-    final messageId = messageIdValue is String
-        ? int.parse(messageIdValue)
-        : (messageIdValue as int);
-
-    return MessagePinPayload(
-      convId: json['conv_id'] as int,
-      messageId: messageId,
-      messageType:
-          MessageType.fromString(json['message_type'] as String?) ??
-          MessageType.text,
-      senderId: json['sender_id'] as int,
-      senderName: json['sender_name'] as String?,
-      senderPfp: json['sender_pfp'] as String?,
-      pin: json['pin'] as bool,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'conv_id': convId,
-      'message_id': messageId
-          .toString(), // Convert bigint to string for WebSocket transmission
-      'message_type': messageType.value,
-      'sender_id': senderId,
-      if (senderName != null) 'sender_name': senderName,
-      if (senderPfp != null) 'sender_pfp': senderPfp,
-      'pin': pin,
-    };
-  }
+@freezed
+abstract class TypingPayload with _$TypingPayload {
+  const factory TypingPayload({
+    @JsonKey(name: 'conv_id') required String convId,
+    @JsonKey(name: 'sender_id') required String senderId,
+  }) = _TypingPayload;
+  factory TypingPayload.fromJson(Map<String, dynamic> json) =>
+      _$TypingPayloadFromJson(json);
 }
 
-/// Message forward payload
-class MessageForwardPayload {
-  final int sourceConvId;
-  final int forwarderId;
-  final String? forwarderName;
-  final List<int> forwardedMessageIds;
-  final List<int> targetConvIds;
-
-  MessageForwardPayload({
-    required this.sourceConvId,
-    required this.forwarderId,
-    this.forwarderName,
-    required this.forwardedMessageIds,
-    required this.targetConvIds,
-  });
-
-  factory MessageForwardPayload.fromJson(Map<String, dynamic> json) {
-    // Handle both string and int IDs (server sends bigint as string in JSON)
-    final forwardedMessageIds = (json['forwarded_message_ids'] as List<dynamic>)
-        .map((e) => e is String ? int.parse(e) : (e as int))
-        .toList();
-
-    return MessageForwardPayload(
-      sourceConvId: json['source_conv_id'] as int,
-      forwarderId: json['forwarder_id'] as int,
-      forwarderName: json['forwarder_name'] as String?,
-      forwardedMessageIds: forwardedMessageIds,
-      targetConvIds: (json['target_conv_ids'] as List<dynamic>)
-          .map((e) => e as int)
-          .toList(),
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'source_conv_id': sourceConvId,
-      'forwarder_id': forwarderId,
-      if (forwarderName != null) 'forwarder_name': forwarderName,
-      'forwarded_message_ids': forwardedMessageIds
-          .map((id) => id.toString())
-          .toList(), // Convert bigint IDs to strings
-      'target_conv_ids': targetConvIds,
-    };
-  }
+@freezed
+abstract class DeleteMessagePayload with _$DeleteMessagePayload {
+  const factory DeleteMessagePayload({
+    @JsonKey(name: 'conv_id') required String convId,
+    @JsonKey(name: 'sender_id') required String senderId,
+    @JsonKey(name: 'message_ids') required List<String> messageIds,
+  }) = _DeleteMessagePayload;
+  factory DeleteMessagePayload.fromJson(Map<String, dynamic> json) =>
+      _$DeleteMessagePayloadFromJson(json);
 }
 
-/// Emoji reaction on a message payload
-class MessageReactPayload {
-  final int messageId;
-  final int convId;
-  final int senderId;
-  final String? senderName;
-  final String emoji;
-  final String action; // 'add' | 'remove'
-  /// Updated full reactions map after this action:
-  /// { emoji: [{user_id, user_name, reacted_at}] }
-  final Map<String, dynamic> reactions;
-
-  MessageReactPayload({
-    required this.messageId,
-    required this.convId,
-    required this.senderId,
-    this.senderName,
-    required this.emoji,
-    required this.action,
-    required this.reactions,
-  });
-
-  factory MessageReactPayload.fromJson(Map<String, dynamic> json) {
-    final idValue = json['message_id'];
-    final messageId =
-        idValue is String ? int.parse(idValue) : (idValue as int);
-    return MessageReactPayload(
-      messageId: messageId,
-      convId: json['conv_id'] as int,
-      senderId: json['sender_id'] as int,
-      senderName: json['sender_name'] as String?,
-      emoji: json['emoji'] as String,
-      action: json['action'] as String,
-      reactions: (json['reactions'] as Map<String, dynamic>?) ?? {},
-    );
-  }
-
-  Map<String, dynamic> toJson() => {
-        'message_id': messageId.toString(),
-        'conv_id': convId,
-        'sender_id': senderId,
-        if (senderName != null) 'sender_name': senderName,
-        'emoji': emoji,
-        'action': action,
-        'reactions': reactions,
-      };
+@freezed
+abstract class MembersType with _$MembersType {
+  const factory MembersType({
+    @JsonKey(name: 'user_id') required String userId,
+    @JsonKey(name: 'user_name') required String userName,
+    @JsonKey(name: 'user_pfp') String? userPfp,
+    @ChatRoleTypeConverter() required ChatRoleType role,
+    @JsonKey(name: 'joined_at') required DateTime joinedAt,
+  }) = _MembersType;
+  factory MembersType.fromJson(Map<String, dynamic> json) =>
+      _$MembersTypeFromJson(json);
 }
 
-// /// Single synced message item
-// class SyncMessageItem {
-//   final int id;
-//   final int convId;
-//   final ChatType convType;
-//   final int senderId;
-//   final String? senderName;
-//   final String? senderPfp;
-//   final MessageType msgType;
-//   final String? body;
-//   final dynamic attachments;
-//   final dynamic metadata;
-//   final DateTime sentAt;
-//   final DateTime createdAt;
-//
-//   SyncMessageItem({
-//     required this.id,
-//     required this.convId,
-//     required this.convType,
-//     required this.senderId,
-//     this.senderName,
-//     this.senderPfp,
-//     required this.msgType,
-//     this.body,
-//     this.attachments,
-//     this.metadata,
-//     required this.sentAt,
-//     required this.createdAt,
-//   });
-//
-//   factory SyncMessageItem.fromJson(Map<String, dynamic> json) {
-//     DateTime sentAt;
-//     try {
-//       final sentAtData = json['sent_at'];
-//       if (sentAtData is String) {
-//         sentAt = DateTime.parse(sentAtData);
-//       } else if (sentAtData is DateTime) {
-//         sentAt = sentAtData;
-//       } else {
-//         sentAt = DateTime.now();
-//       }
-//     } catch (e) {
-//       sentAt = DateTime.now();
-//     }
-//
-//     DateTime createdAt;
-//     try {
-//       final createdAtData = json['created_at'];
-//       if (createdAtData is String) {
-//         createdAt = DateTime.parse(createdAtData);
-//       } else if (createdAtData is DateTime) {
-//         createdAt = createdAtData;
-//       } else {
-//         createdAt = DateTime.now();
-//       }
-//     } catch (e) {
-//       createdAt = DateTime.now();
-//     }
-//
-//     return SyncMessageItem(
-//       id: json['id'] as int,
-//       convId: json['conv_id'] as int,
-//       convType:
-//           ChatType.fromString(json['conv_type'] as String?) ?? ChatType.dm,
-//       senderId: json['sender_id'] as int,
-//       senderName: json['sender_name'] as String?,
-//       senderPfp: json['sender_pfp'] as String?,
-//       msgType:
-//           MessageType.fromString(json['msg_type'] as String?) ??
-//           MessageType.text,
-//       body: json['body'] as String?,
-//       attachments: json['attachments'],
-//       metadata: json['metadata'],
-//       sentAt: sentAt,
-//       createdAt: createdAt,
-//     );
-//   }
-//
-//   Map<String, dynamic> toJson() {
-//     return {
-//       'id': id,
-//       'conv_id': convId,
-//       'conv_type': convType.value,
-//       'sender_id': senderId,
-//       if (senderName != null) 'sender_name': senderName,
-//       if (senderPfp != null) 'sender_pfp': senderPfp,
-//       'msg_type': msgType.value,
-//       if (body != null) 'body': body,
-//       if (attachments != null) 'attachments': attachments,
-//       if (metadata != null) 'metadata': metadata,
-//       'sent_at': sentAt.toUtc().toIso8601String(),
-//       'created_at': createdAt.toUtc().toIso8601String(),
-//     };
-//   }
-// }
-
-/// Sync messages payload - sent on reconnection with missed messages
-class SyncMessagesPayload {
-  final List<ChatMessagePayload> messages;
-  final DateTime syncTimestamp;
-  final int totalCount;
-
-  SyncMessagesPayload({
-    required this.messages,
-    required this.syncTimestamp,
-    required this.totalCount,
-  });
-
-  factory SyncMessagesPayload.fromJson(Map<String, dynamic> json) {
-    DateTime syncTimestamp;
-    try {
-      final timestampData = json['sync_timestamp'];
-      if (timestampData is String) {
-        syncTimestamp = DateTime.parse(timestampData);
-      } else if (timestampData is DateTime) {
-        syncTimestamp = timestampData;
-      } else {
-        syncTimestamp = DateTime.now();
-      }
-    } catch (e) {
-      syncTimestamp = DateTime.now();
-    }
-
-    return SyncMessagesPayload(
-      messages: (json['messages'] as List<dynamic>? ?? [])
-          .map((e) => ChatMessagePayload.fromJson(e as Map<String, dynamic>))
-          .toList(),
-      syncTimestamp: syncTimestamp,
-      totalCount: json['total_count'] as int? ?? 0,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'messages': messages.map((e) => e.toJson()).toList(),
-      'sync_timestamp': syncTimestamp.toUtc().toIso8601String(),
-      'total_count': totalCount,
-    };
-  }
+@freezed
+abstract class NewConversationPayload with _$NewConversationPayload {
+  const factory NewConversationPayload({
+    @JsonKey(name: 'conv_id') required String convId,
+    @JsonKey(name: 'conv_type') @ChatTypeConverter() required ChatType convType,
+    String? title,
+    @JsonKey(name: 'creater_id') required String createrId,
+    @JsonKey(name: 'creater_name') required String createrName,
+    @JsonKey(name: 'creater_phone') required String createrPhone,
+    @JsonKey(name: 'creater_pfp') String? createrPfp,
+    List<MembersType>? members,
+    @JsonKey(name: 'joined_at') required DateTime joinedAt,
+  }) = _NewConversationPayload;
+  factory NewConversationPayload.fromJson(Map<String, dynamic> json) =>
+      _$NewConversationPayloadFromJson(json);
 }
 
-/// Message delivered payload - delivery receipt for FCM messages
-class MessageDeliveredPayload {
-  final int messageId;
-  final int convId;
-  final int senderId;
-  final int recipientId;
-  final DateTime deliveredAt;
-
-  MessageDeliveredPayload({
-    required this.messageId,
-    required this.convId,
-    required this.senderId,
-    required this.recipientId,
-    required this.deliveredAt,
-  });
-
-  factory MessageDeliveredPayload.fromJson(Map<String, dynamic> json) {
-    DateTime deliveredAt;
-    try {
-      final deliveredAtData = json['delivered_at'];
-      if (deliveredAtData is String) {
-        deliveredAt = DateTime.parse(deliveredAtData);
-      } else if (deliveredAtData is DateTime) {
-        deliveredAt = deliveredAtData;
-      } else {
-        deliveredAt = DateTime.now();
-      }
-    } catch (e) {
-      deliveredAt = DateTime.now();
-    }
-
-    // Handle both string and int IDs (server sends bigint as string in JSON)
-    final messageIdValue = json['message_id'];
-    final messageId = messageIdValue is String
-        ? int.parse(messageIdValue)
-        : (messageIdValue as int);
-
-    return MessageDeliveredPayload(
-      messageId: messageId,
-      convId: json['conv_id'] as int,
-      senderId: json['sender_id'] as int,
-      recipientId: json['recipient_id'] as int,
-      deliveredAt: deliveredAt,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'message_id': messageId
-          .toString(), // Convert bigint to string for WebSocket transmission
-      'conv_id': convId,
-      'sender_id': senderId,
-      'recipient_id': recipientId,
-      'delivered_at': deliveredAt.toUtc().toIso8601String(),
-    };
-  }
+@freezed
+abstract class ConversationActionPayload with _$ConversationActionPayload {
+  const factory ConversationActionPayload({
+    @JsonKey(name: 'event_id') required String eventId,
+    @JsonKey(name: 'conv_id') required String convId,
+    @JsonKey(name: 'conv_type') @ChatTypeConverter() required ChatType convType,
+    @ConversationActionTypeConverter() required ConversationActionType action,
+    required List<MembersType> members,
+    @JsonKey(name: 'actor_id') String? actorId,
+    required String message,
+    @JsonKey(name: 'action_at') required DateTime actionAt,
+  }) = _ConversationActionPayload;
+  factory ConversationActionPayload.fromJson(Map<String, dynamic> json) =>
+      _$ConversationActionPayloadFromJson(json);
 }
 
-/// Call payload
-class CallPayload {
-  final int? callId;
-  final int callerId;
-  final String? callerName;
-  final String? callerPfp;
-  final int calleeId;
-  final String? calleeName;
-  final String? calleePfp;
-  final dynamic data;
-  final dynamic error;
-  final DateTime? timestamp;
-
-  CallPayload({
-    this.callId,
-    required this.callerId,
-    this.callerName,
-    this.callerPfp,
-    required this.calleeId,
-    this.calleeName,
-    this.calleePfp,
-    this.data,
-    this.error,
-    this.timestamp,
-  });
-
-  factory CallPayload.fromJson(Map<String, dynamic> json) {
-    DateTime? timestamp;
-    try {
-      final timestampData = json['timestamp'];
-      if (timestampData != null) {
-        if (timestampData is String) {
-          timestamp = DateTime.parse(timestampData);
-        } else if (timestampData is DateTime) {
-          timestamp = timestampData;
-        }
-      }
-    } catch (e) {
-      // Ignore timestamp parsing errors
-    }
-
-    return CallPayload(
-      callId: json['call_id'] as int?,
-      callerId: json['caller_id'] as int,
-      callerName: json['caller_name'] as String?,
-      callerPfp: json['caller_pfp'] as String?,
-      calleeId: json['callee_id'] as int,
-      calleeName: json['callee_name'] as String?,
-      calleePfp: json['callee_pfp'] as String?,
-      data: json['data'],
-      error: json['error'],
-      timestamp: timestamp,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      if (callId != null) 'call_id': callId,
-      'caller_id': callerId,
-      if (callerName != null) 'caller_name': callerName,
-      if (callerPfp != null) 'caller_pfp': callerPfp,
-      'callee_id': calleeId,
-      if (calleeName != null) 'callee_name': calleeName,
-      if (calleePfp != null) 'callee_pfp': calleePfp,
-      if (data != null) 'data': data,
-      if (error != null) 'error': error,
-      if (timestamp != null) 'timestamp': timestamp!.toUtc().toIso8601String(),
-    };
-  }
+@freezed
+abstract class MiscPayload with _$MiscPayload {
+  const factory MiscPayload({
+    String? message,
+    dynamic data,
+    int? code,
+    dynamic error,
+  }) = _MiscPayload;
+  factory MiscPayload.fromJson(Map<String, dynamic> json) =>
+      _$MiscPayloadFromJson(json);
 }
 
-/// Media response type from the server
-
-class MediaResponse {
-  final String url;
-  final String key;
-  final String category;
-  final String fileName;
-  final int fileSize;
-  final String mimeType;
-
-  MediaResponse({
-    required this.url,
-    required this.key,
-    required this.category,
-    required this.fileName,
-    required this.fileSize,
-    required this.mimeType,
-  });
-
-  factory MediaResponse.fromJson(Map<String, dynamic> json) {
-    return MediaResponse(
-      url: json['url'] as String,
-      key: json['key'] as String,
-      category: json['category'] as String,
-      fileName: json['file_name'] as String,
-      fileSize: json['file_size'] as int,
-      mimeType: json['mime_type'] as String,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'url': url,
-      'key': key,
-      'category': category,
-      'file_name': fileName,
-      'file_size': fileSize,
-      'mime_type': mimeType,
-    };
-  }
+@freezed
+abstract class MessagePinPayload with _$MessagePinPayload {
+  const factory MessagePinPayload({
+    @JsonKey(name: 'conv_id') required String convId,
+    @JsonKey(name: 'message_id') required String messageId,
+    @JsonKey(name: 'message_type') @MessageTypeConverter() required MessageType messageType,
+    @JsonKey(name: 'sender_id') required String senderId,
+    required bool pin,
+  }) = _MessagePinPayload;
+  factory MessagePinPayload.fromJson(Map<String, dynamic> json) =>
+      _$MessagePinPayloadFromJson(json);
 }
 
-/// WebSocket message wrapper
+@freezed
+abstract class MessageForwardPayload with _$MessageForwardPayload {
+  const factory MessageForwardPayload({
+    @JsonKey(name: 'source_conv_id') required String sourceConvId,
+    @JsonKey(name: 'forwarder_id') required String forwarderId,
+    @JsonKey(name: 'forwarder_name') String? forwarderName,
+    @JsonKey(name: 'forwarded_message_ids') required List<String> forwardedMessageIds,
+    @JsonKey(name: 'target_conv_ids') required List<String> targetConvIds,
+  }) = _MessageForwardPayload;
+  factory MessageForwardPayload.fromJson(Map<String, dynamic> json) =>
+      _$MessageForwardPayloadFromJson(json);
+}
+
+@freezed
+abstract class MessageReactPayload with _$MessageReactPayload {
+  const factory MessageReactPayload({
+    @JsonKey(name: 'message_id') required String messageId,
+    @JsonKey(name: 'conv_id') required String convId,
+    @JsonKey(name: 'sender_id') required String senderId,
+    required String emoji,
+    required String action,
+  }) = _MessageReactPayload;
+  factory MessageReactPayload.fromJson(Map<String, dynamic> json) =>
+      _$MessageReactPayloadFromJson(json);
+}
+
+@freezed
+abstract class CallPayload with _$CallPayload {
+  const factory CallPayload({
+    @JsonKey(name: 'call_id') String? callId,
+    @JsonKey(name: 'caller_id') required String callerId,
+    @JsonKey(name: 'caller_name') String? callerName,
+    @JsonKey(name: 'caller_pfp') String? callerPfp,
+    @JsonKey(name: 'callee_id') required String calleeId,
+    @JsonKey(name: 'callee_name') String? calleeName,
+    @JsonKey(name: 'callee_pfp') String? calleePfp,
+    @JsonKey(name: 'callType') String? callType,
+    dynamic data,
+    dynamic error,
+    DateTime? timestamp,
+  }) = _CallPayload;
+  factory CallPayload.fromJson(Map<String, dynamic> json) =>
+      _$CallPayloadFromJson(json);
+}
+
+@freezed
+abstract class MediaResponse with _$MediaResponse {
+  const factory MediaResponse({
+    required String url,
+    required String key,
+    required String category,
+    @JsonKey(name: 'file_name') required String fileName,
+    @JsonKey(name: 'file_size') required int fileSize,
+    @JsonKey(name: 'mime_type') required String mimeType,
+  }) = _MediaResponse;
+  factory MediaResponse.fromJson(Map<String, dynamic> json) =>
+      _$MediaResponseFromJson(json);
+}
+
+// ─── WSMessage wrapper ───────────────────────────────────────────────────────
+// Manual class — the payload switch dispatch doesn't benefit from Freezed.
+
 class WSMessage {
   final WSMessageType type;
-  final dynamic payload; // Can be any of the payload types
+  final dynamic payload;
   final DateTime? wsTimestamp;
 
   WSMessage({required this.type, this.payload, this.wsTimestamp});
@@ -1212,65 +474,52 @@ class WSMessage {
 
     dynamic payload;
     final payloadData = json['payload'];
-    if (payloadData != null && payloadData is Map<String, dynamic>) {
+    if (payloadData is Map<String, dynamic>) {
       try {
         payload = _parsePayload(type, payloadData);
-      } catch (e) {
-        // If payload parsing fails, keep raw payload
+      } catch (_) {
         payload = payloadData;
       }
     }
 
-    DateTime? wsTimestamp;
-    final timestampData = json['ws_timestamp'];
-    if (timestampData != null) {
-      try {
-        if (timestampData is String) {
-          wsTimestamp = DateTime.parse(timestampData);
-        } else if (timestampData is DateTime) {
-          wsTimestamp = timestampData;
-        }
-      } catch (e) {
-        // Ignore timestamp parsing errors
-      }
-    }
-
-    return WSMessage(type: type, payload: payload, wsTimestamp: wsTimestamp);
+    return WSMessage(
+      type: type,
+      payload: payload,
+      wsTimestamp: json['ws_timestamp'] != null
+          ? DateTime.tryParse(json['ws_timestamp'].toString())
+          : null,
+    );
   }
 
   static dynamic _parsePayload(
     WSMessageType type,
-    Map<String, dynamic> payloadJson,
+    Map<String, dynamic> json,
   ) {
     switch (type) {
       case WSMessageType.connectionStatus:
-        return ConnectionStatus.fromJson(payloadJson);
+        return ConnectionStatusPayload.fromJson(json);
       case WSMessageType.conversationJoin:
-        return JoinLeavePayload.fromJson(payloadJson);
-      case WSMessageType.conversationLeave:
-        return JoinLeavePayload.fromJson(payloadJson);
+        return ConvJoinPayload.fromJson(json);
       case WSMessageType.conversationNew:
-        return NewConversationPayload.fromJson(payloadJson);
+        return NewConversationPayload.fromJson(json);
       case WSMessageType.conversationTyping:
-        return TypingPayload.fromJson(payloadJson);
+        return TypingPayload.fromJson(json);
       case WSMessageType.conversationAction:
-        return ConversationActionPayload.fromJson(payloadJson);
+        return ConversationActionPayload.fromJson(json);
       case WSMessageType.messageNew:
-        return ChatMessagePayload.fromJson(payloadJson);
-      case WSMessageType.messageAck:
-        return ChatMessageAckPayload.fromJson(payloadJson);
+        return ChatMessagePayload.fromJson(json);
+      case WSMessageType.messageSentAck:
+        return MessageSentAckPayload.fromJson(json);
+      case WSMessageType.messageStatusAck:
+        return MessageStatusAckPayload.fromJson(json);
       case WSMessageType.messagePin:
-        return MessagePinPayload.fromJson(payloadJson);
+        return MessagePinPayload.fromJson(json);
       case WSMessageType.messageForward:
-        return MessageForwardPayload.fromJson(payloadJson);
+        return MessageForwardPayload.fromJson(json);
       case WSMessageType.messageDelete:
-        return DeleteMessagePayload.fromJson(payloadJson);
+        return DeleteMessagePayload.fromJson(json);
       case WSMessageType.messageReact:
-        return MessageReactPayload.fromJson(payloadJson);
-      case WSMessageType.messageSync:
-        return SyncMessagesPayload.fromJson(payloadJson);
-      case WSMessageType.messageDelivered:
-        return MessageDeliveredPayload.fromJson(payloadJson);
+        return MessageReactPayload.fromJson(json);
       case WSMessageType.callInit:
       case WSMessageType.callInitAck:
       case WSMessageType.callOffer:
@@ -1283,35 +532,33 @@ class WSMessage {
       case WSMessageType.callMissed:
       case WSMessageType.callError:
         try {
-          return CallPayload.fromJson(payloadJson);
-        } catch (e) {
-          // If parsing fails, return raw payload
-          return payloadJson;
+          return CallPayload.fromJson(json);
+        } catch (_) {
+          return json;
         }
       case WSMessageType.socketPing:
       case WSMessageType.socketPong:
-        // Ping/pong messages have no payload
         return null;
       case WSMessageType.socketHealthCheck:
       case WSMessageType.socketError:
       case WSMessageType.authForceLogout:
-        return MiscPayload.fromJson(payloadJson);
+        return MiscPayload.fromJson(json);
     }
   }
 
-  Map<String, dynamic> toJson() {
-    return {
-      'type': type.value,
-      if (payload != null) 'payload': _payloadToJson(payload),
-      if (wsTimestamp != null) 'ws_timestamp': wsTimestamp!.toUtc().toIso8601String(),
-    };
-  }
+  Map<String, dynamic> toJson() => {
+    'type': type.value,
+    if (payload != null) 'payload': _payloadToJson(payload),
+    if (wsTimestamp != null)
+      'ws_timestamp': wsTimestamp!.toUtc().toIso8601String(),
+  };
 
   dynamic _payloadToJson(dynamic payload) {
-    if (payload is ConnectionStatus) return payload.toJson();
-    if (payload is JoinLeavePayload) return payload.toJson();
+    if (payload is ConnectionStatusPayload) return payload.toJson();
+    if (payload is ConvJoinPayload) return payload.toJson();
     if (payload is ChatMessagePayload) return payload.toJson();
-    if (payload is ChatMessageAckPayload) return payload.toJson();
+    if (payload is MessageSentAckPayload) return payload.toJson();
+    if (payload is MessageStatusAckPayload) return payload.toJson();
     if (payload is TypingPayload) return payload.toJson();
     if (payload is DeleteMessagePayload) return payload.toJson();
     if (payload is NewConversationPayload) return payload.toJson();
@@ -1319,53 +566,38 @@ class WSMessage {
     if (payload is MessagePinPayload) return payload.toJson();
     if (payload is MessageForwardPayload) return payload.toJson();
     if (payload is MessageReactPayload) return payload.toJson();
-    if (payload is SyncMessagesPayload) return payload.toJson();
-    if (payload is MessageDeliveredPayload) return payload.toJson();
     if (payload is CallPayload) return payload.toJson();
     if (payload is ConversationActionPayload) return payload.toJson();
     return payload;
   }
 
-  /// Type-safe getters for payloads
-  ConnectionStatus? get onlineStatusPayload =>
-      payload is ConnectionStatus ? payload : null;
-
-  JoinLeavePayload? get joinLeavePayload =>
-      payload is JoinLeavePayload ? payload : null;
-
+  // Typed payload accessors
+  ConnectionStatusPayload? get connectionStatusPayload =>
+      payload is ConnectionStatusPayload ? payload : null;
+  ConvJoinPayload? get convJoinPayload =>
+      payload is ConvJoinPayload ? payload : null;
   ChatMessagePayload? get chatMessagePayload =>
       payload is ChatMessagePayload ? payload : null;
-
-  ChatMessageAckPayload? get chatMessageAckPayload =>
-      payload is ChatMessageAckPayload ? payload : null;
-
-  TypingPayload? get typingPayload => payload is TypingPayload ? payload : null;
-
+  MessageSentAckPayload? get messageSentAckPayload =>
+      payload is MessageSentAckPayload ? payload : null;
+  MessageStatusAckPayload? get messageStatusAckPayload =>
+      payload is MessageStatusAckPayload ? payload : null;
+  TypingPayload? get typingPayload =>
+      payload is TypingPayload ? payload : null;
   DeleteMessagePayload? get deleteMessagePayload =>
       payload is DeleteMessagePayload ? payload : null;
-
   NewConversationPayload? get newConversationPayload =>
       payload is NewConversationPayload ? payload : null;
-
-  MiscPayload? get miscPayload => payload is MiscPayload ? payload : null;
-
+  MiscPayload? get miscPayload =>
+      payload is MiscPayload ? payload : null;
   MessagePinPayload? get messagePinPayload =>
       payload is MessagePinPayload ? payload : null;
-
   MessageForwardPayload? get messageForwardPayload =>
       payload is MessageForwardPayload ? payload : null;
-
-  SyncMessagesPayload? get syncMessagesPayload =>
-      payload is SyncMessagesPayload ? payload : null;
-
-  MessageDeliveredPayload? get messageDeliveredPayload =>
-      payload is MessageDeliveredPayload ? payload : null;
-
-  CallPayload? get callPayload => payload is CallPayload ? payload : null;
-
-  ConversationActionPayload? get conversationActionPayload =>
-      payload is ConversationActionPayload ? payload : null;
-
   MessageReactPayload? get messageReactPayload =>
       payload is MessageReactPayload ? payload : null;
+  CallPayload? get callPayload =>
+      payload is CallPayload ? payload : null;
+  ConversationActionPayload? get conversationActionPayload =>
+      payload is ConversationActionPayload ? payload : null;
 }

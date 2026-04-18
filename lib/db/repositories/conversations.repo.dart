@@ -62,41 +62,18 @@ String _getMessagePreviewText(
 class ConversationRepository {
   final sqliteDatabase = SqliteDatabase.instance;
 
-  /// Helper method to convert Conversations row to ConversationModel
-  /// Joins with Users table to get userName and userProfilePic when userId is present
-  Future<ConversationModel> _conversationToModel(Conversation conv) async {
-    // final db = sqliteDatabase.database;
-
-    // If userId is present, try to get user info from Users table
-    // if (conv.createrId != null) {
-    //   final user = await (db.select(
-    //     db.users,
-    //   )..where((t) => t.id.equals(conv.userId!))).getSingleOrNull();
-    //   if (user != null) {
-    //     userName = user.name;
-    //     userProfilePic = user.profilePic;
-    //   } else {
-    //     // If user not found, use title for groups or 'Unknown' for DMs
-    //     userName = conv.type.toLowerCase() == 'group'
-    //         ? (conv.title ?? 'Group Chat')
-    //         : 'Unknown';
-    //   }
-    // } else {
-    //   // For groups without userId, use title
-    //   userName = conv.type.toLowerCase() == 'group'
-    //       ? (conv.title ?? 'Group Chat')
-    //       : 'Unknown';
-    // }
-
+  /// Helper method to convert Chats row to ChatModel
+  Future<ConversationModel> _conversationToModel(Chat conv) async {
     return ConversationModel(
       id: conv.id,
       type: conv.type,
       title: conv.title,
       createrId: conv.createrId,
-      lastMessageId: conv.lastMessageId?.toInt(),
-      pinnedMessageId: conv.pinnedMessageId?.toInt(),
+      lastMsgId: conv.lastMsgId,
+      lastMsgAt: conv.lastMsgAt,
+      pinnedMsgId: conv.pinnedMsgId,
       unreadCount: conv.unreadCount,
-      isDeleted: conv.isDeleted,
+      deletedAt: conv.deletedAt,
       isPinned: conv.isPinned,
       isMuted: conv.isMuted,
       isFavorite: conv.isFavorite,
@@ -113,56 +90,39 @@ class ConversationRepository {
     final db = sqliteDatabase.database;
 
     for (final conv in conversations) {
-      // Check if conversation already exists to preserve needSync value
-      // final existingConv = await getConversationById(conv.id);
-
-      // Preserve existing needSync value if conversation exists, otherwise use provided value or default to true for new conversations
-      // final needSyncValue = existingConv != null
-      //     ? (conv.needSync ?? existingConv.needSync ?? true)
-      //     : (conv.needSync ?? true);
-      //
-      // final lastmessageidvalue = existingConv != null
-      //     ? (conv.lastMessageId ?? existingConv.lastMessageId)
-      //     : (conv.lastMessageId);
-      // final pinnedmessageidvalue = existingConv != null
-      //     ? (conv.pinnedMessageId ?? existingConv.pinnedMessageId)
-      //     : (conv.pinnedMessageId);
-
-      final convCompanion = ConversationsCompanion.insert(
-        id: Value(conv.id),
+      final convCompanion = ChatsCompanion.insert(
+        id: conv.id,
         type: conv.type,
         title: Value(conv.title),
-        createrId: conv.createrId,
-        lastMessageId: Value(conv.lastMessageId != null ? BigInt.from(conv.lastMessageId!) : null),
-        pinnedMessageId: Value(conv.pinnedMessageId != null ? BigInt.from(conv.pinnedMessageId!) : null),
+        createrId: Value(conv.createrId),
+        lastMsgId: Value(conv.lastMsgId),
+        lastMsgAt: Value(conv.lastMsgAt),
+        pinnedMsgId: Value(conv.pinnedMsgId),
         unreadCount: Value(conv.unreadCount ?? 0),
         createdAt: Value(conv.createdAt),
-        isDeleted: Value(conv.isDeleted ?? false),
-        isPinned: Value(conv.isPinned ?? false),
-        isMuted: Value(conv.isMuted ?? false),
-        isFavorite: Value(conv.isFavorite ?? false),
+        deletedAt: Value(conv.deletedAt),
+        isPinned: Value(conv.isPinned),
+        isMuted: Value(conv.isMuted),
+        isFavorite: Value(conv.isFavorite),
         updatedAt: Value(conv.updatedAt),
       );
-      await db.into(db.conversations).insert(convCompanion);
+      await db.into(db.chats).insert(convCompanion);
     }
   }
 
   // Get All members by conversation id with thier details from users table
 
   /// Get all conversations
-  /// Joins with Users table to get userName and userProfilePic when userId is present
   Future<List<ConversationModel>> getAllConversations() async {
     final db = sqliteDatabase.database;
 
-    // Query conversations with optional join to Users table
-    final query = db.select(db.conversations)
+    final query = db.select(db.chats)
       ..orderBy([
         (t) => OrderingTerm(expression: t.createdAt, mode: OrderingMode.desc),
       ]);
 
     final conversations = await query.get();
 
-    // Convert to ConversationModel, joining with Users when needed
     final result = <ConversationModel>[];
     for (final conv in conversations) {
       result.add(await _conversationToModel(conv));
@@ -174,10 +134,10 @@ class ConversationRepository {
   /// Get all conversation IDs
   /// If [type] is provided, returns only IDs for that conversation type
   /// If [type] is null, returns all conversation IDs
-  Future<List<int>> getAllConversationIds({ChatType? type}) async {
+  Future<List<String>> getAllConversationIds({ChatType? type}) async {
     final db = sqliteDatabase.database;
 
-    final query = db.select(db.conversations);
+    final query = db.select(db.chats);
 
     if (type != null) {
       query.where((t) => t.type.equals(type.value));
@@ -191,41 +151,42 @@ class ConversationRepository {
   /// Clear all conversations from the database
   Future<void> clearAllConversations() async {
     final db = sqliteDatabase.database;
-    await db.delete(db.conversations).go();
+    await db.delete(db.chats).go();
   }
 
   /// Update a conversation
   Future<void> updateConversation(ConversationModel conversation) async {
     final db = sqliteDatabase.database;
 
-    final companion = ConversationsCompanion(
+    final companion = ChatsCompanion(
       id: Value(conversation.id),
       type: Value(conversation.type),
       title: Value(conversation.title),
       createrId: Value(conversation.createrId),
-      lastMessageId: Value(conversation.lastMessageId != null ? BigInt.from(conversation.lastMessageId!) : null),
-      pinnedMessageId: Value(conversation.pinnedMessageId != null ? BigInt.from(conversation.pinnedMessageId!) : null),
+      lastMsgId: Value(conversation.lastMsgId),
+      lastMsgAt: Value(conversation.lastMsgAt),
+      pinnedMsgId: Value(conversation.pinnedMsgId),
       unreadCount: Value(conversation.unreadCount ?? 0),
       createdAt: Value(conversation.createdAt),
-      isDeleted: Value(conversation.isDeleted ?? false),
-      isPinned: Value(conversation.isPinned ?? false),
-      isMuted: Value(conversation.isMuted ?? false),
-      isFavorite: Value(conversation.isFavorite ?? false),
+      deletedAt: Value(conversation.deletedAt),
+      isPinned: Value(conversation.isPinned),
+      isMuted: Value(conversation.isMuted),
+      isFavorite: Value(conversation.isFavorite),
       updatedAt: Value(
         conversation.updatedAt ?? DateTime.now().toIso8601String(),
       ),
-      needSync: Value(conversation.needSync ?? false),
+      needSync: Value(conversation.needSync),
     );
 
-    await db.update(db.conversations).replace(companion);
+    await db.update(db.chats).replace(companion);
   }
 
   /// Get a conversation by ID
-  Future<ConversationModel?> getConversationById(int conversationId) async {
+  Future<ConversationModel?> getConversationById(String conversationId) async {
     final db = sqliteDatabase.database;
 
     final conv = await (db.select(
-      db.conversations,
+      db.chats,
     )..where((t) => t.id.equals(conversationId))).getSingleOrNull();
 
     if (conv == null) return null;
@@ -234,11 +195,11 @@ class ConversationRepository {
   }
 
   /// Get conversation type by ID
-  Future<String?> getConversationTypeById(int conversationId) async {
+  Future<String?> getConversationTypeById(String conversationId) async {
     final db = sqliteDatabase.database;
 
     final conv = await (db.select(
-      db.conversations,
+      db.chats,
     )..where((t) => t.id.equals(conversationId))).getSingleOrNull();
 
     return conv?.type;
@@ -248,7 +209,7 @@ class ConversationRepository {
   Future<List<ConversationModel>> getConversationsByType(ChatType type) async {
     final db = sqliteDatabase.database;
 
-    final query = db.select(db.conversations)
+    final query = db.select(db.chats)
       ..where((t) => t.type.equals(type.value))
       ..orderBy([
         (t) => OrderingTerm(expression: t.updatedAt, mode: OrderingMode.desc),
@@ -266,21 +227,21 @@ class ConversationRepository {
   }
 
   /// Delete a conversation by ID
-  Future<bool> deleteConversation(int conversationId) async {
+  Future<bool> deleteConversation(String conversationId) async {
     final db = sqliteDatabase.database;
     final deleted = await (db.delete(
-      db.conversations,
+      db.chats,
     )..where((t) => t.id.equals(conversationId))).go();
     return deleted > 0;
   }
 
   /// Update unread count for a conversation
-  Future<void> updateUnreadCount(int conversationId, int unreadCount) async {
+  Future<void> updateUnreadCount(String conversationId, int unreadCount) async {
     final db = sqliteDatabase.database;
     await (db.update(
-      db.conversations,
+      db.chats,
     )..where((t) => t.id.equals(conversationId))).write(
-      ConversationsCompanion(
+      ChatsCompanion(
         unreadCount: Value(unreadCount),
         // Do NOT touch updatedAt here — marking as read must not change
         // the list sort position. Only new-message writes should do that.
@@ -288,34 +249,34 @@ class ConversationRepository {
     );
   }
 
-  /// Update pinnedMessageId for a conversation
+  /// Update pinnedMsgId for a conversation
   Future<void> updatePinnedMessage(
-    int conversationId,
-    int? pinnedMessageId,
+    String conversationId,
+    String? pinnedMsgId,
   ) async {
     final db = sqliteDatabase.database;
     await (db.update(
-      db.conversations,
+      db.chats,
     )..where((t) => t.id.equals(conversationId))).write(
-      ConversationsCompanion(
-        pinnedMessageId: Value(pinnedMessageId != null ? BigInt.from(pinnedMessageId) : null),
+      ChatsCompanion(
+        pinnedMsgId: Value(pinnedMsgId),
         updatedAt: Value(DateTime.now().toIso8601String()),
       ),
     );
   }
 
   /// Mark conversation as read (set unread count to 0)
-  Future<void> markAsRead(int conversationId) async {
+  Future<void> markAsRead(String conversationId) async {
     await updateUnreadCount(conversationId, 0);
   }
 
   /// Toggle pin status of a conversation
-  Future<void> togglePin(int conversationId, bool isPinned) async {
+  Future<void> togglePin(String conversationId, bool isPinned) async {
     final db = sqliteDatabase.database;
     await (db.update(
-      db.conversations,
+      db.chats,
     )..where((t) => t.id.equals(conversationId))).write(
-      ConversationsCompanion(
+      ChatsCompanion(
         isPinned: Value(isPinned),
         updatedAt: Value(DateTime.now().toIso8601String()),
       ),
@@ -323,12 +284,12 @@ class ConversationRepository {
   }
 
   /// Toggle mute status of a conversation
-  Future<void> toggleMute(int conversationId, bool isMuted) async {
+  Future<void> toggleMute(String conversationId, bool isMuted) async {
     final db = sqliteDatabase.database;
     await (db.update(
-      db.conversations,
+      db.chats,
     )..where((t) => t.id.equals(conversationId))).write(
-      ConversationsCompanion(
+      ChatsCompanion(
         isMuted: Value(isMuted),
         updatedAt: Value(DateTime.now().toIso8601String()),
       ),
@@ -336,12 +297,12 @@ class ConversationRepository {
   }
 
   /// Toggle favorite status of a conversation
-  Future<void> toggleFavorite(int conversationId, bool isFavorite) async {
+  Future<void> toggleFavorite(String conversationId, bool isFavorite) async {
     final db = sqliteDatabase.database;
     await (db.update(
-      db.conversations,
+      db.chats,
     )..where((t) => t.id.equals(conversationId))).write(
-      ConversationsCompanion(
+      ChatsCompanion(
         isFavorite: Value(isFavorite),
         updatedAt: Value(DateTime.now().toIso8601String()),
       ),
@@ -352,7 +313,7 @@ class ConversationRepository {
   Future<List<ConversationModel>> getPinnedConversations() async {
     final db = sqliteDatabase.database;
 
-    final query = db.select(db.conversations)
+    final query = db.select(db.chats)
       ..where((t) => t.isPinned.equals(true))
       ..orderBy([
         (t) => OrderingTerm(expression: t.updatedAt, mode: OrderingMode.desc),
@@ -372,7 +333,7 @@ class ConversationRepository {
   Future<List<ConversationModel>> getFavoriteConversations() async {
     final db = sqliteDatabase.database;
 
-    final query = db.select(db.conversations)
+    final query = db.select(db.chats)
       ..where((t) => t.isFavorite.equals(true))
       ..orderBy([
         (t) => OrderingTerm(expression: t.updatedAt, mode: OrderingMode.desc),
@@ -389,13 +350,16 @@ class ConversationRepository {
   }
 
   /// Update last message info for a conversation
-  Future<void> updateLastMessage(int conversationId, int lastMessageId) async {
+  Future<void> updateLastMessage(
+    String conversationId,
+    String lastMsgId,
+  ) async {
     final db = sqliteDatabase.database;
     await (db.update(
-      db.conversations,
+      db.chats,
     )..where((t) => t.id.equals(conversationId))).write(
-      ConversationsCompanion(
-        lastMessageId: Value(BigInt.from(lastMessageId)),
+      ChatsCompanion(
+        lastMsgId: Value(lastMsgId),
         updatedAt: Value(DateTime.now().toIso8601String()),
       ),
     );
@@ -403,35 +367,37 @@ class ConversationRepository {
 
   // update last message id only
   Future<void> updateLastMessageId(
-    int conversationId,
-    int lastMessageId,
+    String conversationId,
+    String lastMsgId,
   ) async {
     final db = sqliteDatabase.database;
-    await (db.update(db.conversations)
+    await (db.update(db.chats)
           ..where((t) => t.id.equals(conversationId)))
-        .write(ConversationsCompanion(lastMessageId: Value(BigInt.from(lastMessageId))));
+        .write(ChatsCompanion(lastMsgId: Value(lastMsgId)));
   }
 
   /// Mark conversation as deleted (soft delete)
-  Future<void> markAsDeleted(int conversationId, bool isDeleted) async {
+  Future<void> markAsDeleted(String conversationId, bool isDeleted) async {
     final db = sqliteDatabase.database;
     await (db.update(
-      db.conversations,
+      db.chats,
     )..where((t) => t.id.equals(conversationId))).write(
-      ConversationsCompanion(
-        isDeleted: Value(isDeleted),
+      ChatsCompanion(
+        deletedAt: Value(
+          isDeleted ? DateTime.now().toIso8601String() : null,
+        ),
         updatedAt: Value(DateTime.now().toIso8601String()),
       ),
     );
   }
 
   /// Watch DM conversations as a reactive Drift stream ordered by last activity.
-  /// Emits whenever the conversations table changes (e.g. new message updates
-  /// lastMessageId). Joins users/members asynchronously per emission.
+  /// Emits whenever the chats table changes (e.g. new message updates
+  /// lastMsgId). Joins users/members asynchronously per emission.
   Stream<List<DmModel>> watchDmConversations() {
     final db = sqliteDatabase.database;
 
-    return (db.select(db.conversations)
+    return (db.select(db.chats)
           ..where((t) => t.type.equals('dm'))
           ..orderBy([
             (t) => OrderingTerm(
@@ -447,14 +413,14 @@ class ConversationRepository {
         .asyncMap((conversations) async {
           final result = <DmModel>[];
           for (final conv in conversations) {
-            final members = await (db.select(db.conversationMembers)
+            final members = await (db.select(db.chatMembers)
                   ..where(
                     (t) =>
-                        t.conversationId.equals(conv.id) &
+                        t.chatId.equals(conv.id) &
                         t.removedAt.isNull(),
                   ))
                 .get();
-            if (members.isEmpty || members[0].userId == 0) continue;
+            if (members.isEmpty) continue;
 
             final recipientUser = await (db.select(db.users)
                   ..where((t) => t.id.equals(members[0].userId)))
@@ -464,11 +430,11 @@ class ConversationRepository {
             String? lastMessageType;
             String? lastMessageBody;
             String? lastMessageAt;
-            int? lastMessageId = conv.lastMessageId?.toInt();
+            String? lastMsgId = conv.lastMsgId;
 
-            if (conv.lastMessageId != null) {
+            if (conv.lastMsgId != null) {
               final lastMessage = await (db.select(db.messages)
-                    ..where((t) => t.id.equals(conv.lastMessageId!)))
+                    ..where((t) => t.id.equals(conv.lastMsgId!)))
                   .getSingleOrNull();
               if (lastMessage != null) {
                 lastMessageType = lastMessage.type;
@@ -478,24 +444,24 @@ class ConversationRepository {
                   lastMessage.attachments,
                 );
                 lastMessageAt = lastMessage.sentAt;
-                lastMessageId = lastMessage.id.toInt();
+                lastMsgId = lastMessage.id;
               }
             }
 
             result.add(DmModel(
-              conversationId: conv.id,
+              chatId: conv.id,
               recipientId: recipientUser.id,
               recipientName: recipientUser.username ?? recipientUser.name,
               recipientPhone: recipientUser.phone,
               recipientProfilePic: recipientUser.profilePic,
-              pinnedMessageId: conv.pinnedMessageId?.toInt(),
-              lastMessageId: lastMessageId,
-              lastMessageType: lastMessageType,
-              lastMessageBody: lastMessageBody,
-              lastMessageAt: lastMessageAt,
+              pinnedMsgId: conv.pinnedMsgId,
+              lastMsgId: lastMsgId,
+              lastMsgType: lastMessageType,
+              lastMsgBody: lastMessageBody,
+              lastMsgAt: lastMessageAt,
               unreadCount: conv.unreadCount,
               isRecipientOnline: recipientUser.isOnline,
-              isDeleted: conv.isDeleted,
+              deletedAt: conv.deletedAt,
               isPinned: conv.isPinned,
               isMuted: conv.isMuted,
               isFavorite: conv.isFavorite,
@@ -510,7 +476,7 @@ class ConversationRepository {
   Stream<List<GroupModel>> watchGroupConversations() {
     final db = sqliteDatabase.database;
 
-    return (db.select(db.conversations)
+    return (db.select(db.chats)
           ..where((t) => t.type.equals('group'))
           ..orderBy([
             (t) => OrderingTerm(
@@ -531,11 +497,11 @@ class ConversationRepository {
             String? lastMessageType;
             String? lastMessageBody;
             String? lastMessageAt;
-            int? lastMessageId = conv.lastMessageId?.toInt();
+            String? lastMsgId = conv.lastMsgId;
 
-            if (conv.lastMessageId != null) {
+            if (conv.lastMsgId != null) {
               final lastMessage = await (db.select(db.messages)
-                    ..where((t) => t.id.equals(conv.lastMessageId!)))
+                    ..where((t) => t.id.equals(conv.lastMsgId!)))
                   .getSingleOrNull();
               if (lastMessage != null) {
                 lastMessageType = lastMessage.type;
@@ -545,7 +511,7 @@ class ConversationRepository {
                   lastMessage.attachments,
                 );
                 lastMessageAt = lastMessage.sentAt;
-                lastMessageId = lastMessage.id.toInt();
+                lastMsgId = lastMessage.id;
               }
             }
 
@@ -556,13 +522,13 @@ class ConversationRepository {
             }
 
             result.add(GroupModel(
-              conversationId: conv.id,
+              chatId: conv.id,
               title: conv.title ?? 'Group Chat',
-              pinnedMessageId: conv.pinnedMessageId?.toInt(),
-              lastMessageId: lastMessageId,
-              lastMessageType: lastMessageType,
-              lastMessageBody: lastMessageBody,
-              lastMessageAt: lastMessageAt,
+              pinnedMsgId: conv.pinnedMsgId,
+              lastMsgId: lastMsgId,
+              lastMsgType: lastMessageType,
+              lastMsgBody: lastMessageBody,
+              lastMsgAt: lastMessageAt,
               role: currentUserMemberInfo?.role,
               unreadCount: conv.unreadCount ?? 0,
               isPinned: conv.isPinned,
@@ -577,11 +543,11 @@ class ConversationRepository {
   }
 
   /// get need sync from conversation id
-  Future<bool> getNeedSyncStatus(int conversationId) async {
+  Future<bool> getNeedSyncStatus(String conversationId) async {
     final db = sqliteDatabase.database;
 
     final conv = await (db.select(
-      db.conversations,
+      db.chats,
     )..where((t) => t.id.equals(conversationId))).getSingleOrNull();
 
     if (conv == null) return false;
@@ -590,12 +556,15 @@ class ConversationRepository {
   }
 
   // update need sync status
-  Future<void> updateNeedSyncStatus(int conversationId, bool needSync) async {
+  Future<void> updateNeedSyncStatus(
+    String conversationId,
+    bool needSync,
+  ) async {
     final db = sqliteDatabase.database;
     await (db.update(
-      db.conversations,
+      db.chats,
     )..where((t) => t.id.equals(conversationId))).write(
-      ConversationsCompanion(
+      ChatsCompanion(
         needSync: Value(needSync),
         updatedAt: Value(DateTime.now().toIso8601String()),
       ),
@@ -606,10 +575,12 @@ class ConversationRepository {
   Future<List<DmModel>> getAllDeletedDms() async {
     final db = sqliteDatabase.database;
 
-    // Query conversations by type and isDeleted
+    // Query conversations by type and deletedAt
     final conversations =
-        await (db.select(db.conversations)
-              ..where((t) => t.type.equals('dm') & t.isDeleted.equals(true))
+        await (db.select(db.chats)
+              ..where(
+                (t) => t.type.equals('dm') & t.deletedAt.isNotNull(),
+              )
               ..orderBy([
                 (t) => OrderingTerm(
                   expression: t.updatedAt,
@@ -625,20 +596,15 @@ class ConversationRepository {
     final result = <DmModel>[];
 
     for (final conv in conversations) {
-      // Get conversation members
+      // Get chat members
       final members =
-          await (db.select(db.conversationMembers)..where(
-                (t) => t.conversationId.equals(conv.id) & t.removedAt.isNull(),
+          await (db.select(db.chatMembers)..where(
+                (t) => t.chatId.equals(conv.id) & t.removedAt.isNull(),
               ))
               .get();
 
       // Skip if no members found
       if (members.isEmpty) {
-        continue;
-      }
-
-      // Skip if no valid recipient found
-      if (members[0].userId == 0) {
         continue;
       }
 
@@ -654,16 +620,16 @@ class ConversationRepository {
 
       // Create DmListModel
       final dmModel = DmModel(
-        conversationId: conv.id,
+        chatId: conv.id,
         recipientId: recipientUser.id,
         recipientName: recipientUser.name,
         recipientPhone: recipientUser.phone,
         recipientProfilePic: recipientUser.profilePic,
-        pinnedMessageId: conv.pinnedMessageId?.toInt(),
-        lastMessageId: conv.lastMessageId?.toInt(),
+        pinnedMsgId: conv.pinnedMsgId,
+        lastMsgId: conv.lastMsgId,
         unreadCount: conv.unreadCount,
         isRecipientOnline: recipientUser.isOnline,
-        isDeleted: conv.isDeleted,
+        deletedAt: conv.deletedAt,
         isPinned: conv.isPinned,
         isMuted: conv.isMuted,
         isFavorite: conv.isFavorite,
@@ -682,7 +648,7 @@ class ConversationRepository {
 
     // Query conversations by type
     final conversations =
-        await (db.select(db.conversations)
+        await (db.select(db.chats)
               ..where((t) => t.type.equals('dm'))
               ..orderBy([
                 (t) => OrderingTerm(
@@ -699,20 +665,15 @@ class ConversationRepository {
     final result = <DmModel>[];
 
     for (final conv in conversations) {
-      // Get conversation members
+      // Get chat members
       final members =
-          await (db.select(db.conversationMembers)..where(
-                (t) => t.conversationId.equals(conv.id) & t.removedAt.isNull(),
+          await (db.select(db.chatMembers)..where(
+                (t) => t.chatId.equals(conv.id) & t.removedAt.isNull(),
               ))
               .get();
 
       // Skip if no members found
       if (members.isEmpty) {
-        continue;
-      }
-
-      // Skip if no valid recipient found
-      if (members[0].userId == 0) {
         continue;
       }
 
@@ -726,16 +687,16 @@ class ConversationRepository {
         continue;
       }
 
-      // Get last message details if lastMessageId exists
+      // Get last message details if lastMsgId exists
       String? lastMessageType;
       String? lastMessageBody;
       String? lastMessageAt;
-      int? lastMessageId = conv.lastMessageId?.toInt();
+      String? lastMsgId = conv.lastMsgId;
 
-      if (conv.lastMessageId != null) {
+      if (conv.lastMsgId != null) {
         final lastMessage =
             await (db.select(db.messages)
-                  ..where((t) => t.id.equals(conv.lastMessageId!)))
+                  ..where((t) => t.id.equals(conv.lastMsgId!)))
                 .getSingleOrNull();
 
         if (lastMessage != null) {
@@ -747,25 +708,25 @@ class ConversationRepository {
             lastMessage.attachments,
           );
           lastMessageAt = lastMessage.sentAt;
-          lastMessageId = lastMessage.id.toInt();
+          lastMsgId = lastMessage.id;
         }
       }
 
       // Create DmListModel
       final dmModel = DmModel(
-        conversationId: conv.id,
+        chatId: conv.id,
         recipientId: recipientUser.id,
         recipientName: recipientUser.username ?? recipientUser.name,
         recipientPhone: recipientUser.phone,
         recipientProfilePic: recipientUser.profilePic,
-        pinnedMessageId: conv.pinnedMessageId?.toInt(),
-        lastMessageId: lastMessageId,
-        lastMessageType: lastMessageType,
-        lastMessageBody: lastMessageBody,
-        lastMessageAt: lastMessageAt,
+        pinnedMsgId: conv.pinnedMsgId,
+        lastMsgId: lastMsgId,
+        lastMsgType: lastMessageType,
+        lastMsgBody: lastMessageBody,
+        lastMsgAt: lastMessageAt,
         unreadCount: conv.unreadCount,
         isRecipientOnline: recipientUser.isOnline,
-        isDeleted: conv.isDeleted,
+        deletedAt: conv.deletedAt,
         isPinned: conv.isPinned,
         isMuted: conv.isMuted,
         isFavorite: conv.isFavorite,
@@ -779,27 +740,27 @@ class ConversationRepository {
   }
 
   // Get DM by conversation ID with recipient info and last message details
-  Future<DmModel?> getDmByConversationId(int conversationId) async {
+  Future<DmModel?> getDmByConversationId(String conversationId) async {
     final db = sqliteDatabase.database;
 
     // Query conversation by ID
     final conv = await (db.select(
-      db.conversations,
+      db.chats,
     )..where((t) => t.id.equals(conversationId))).getSingleOrNull();
 
     if (conv == null || conv.type != 'dm') {
       return null;
     }
 
-    // Get conversation members
+    // Get chat members
     final members =
-        await (db.select(db.conversationMembers)..where(
-              (t) => t.conversationId.equals(conv.id) & t.removedAt.isNull(),
+        await (db.select(db.chatMembers)..where(
+              (t) => t.chatId.equals(conv.id) & t.removedAt.isNull(),
             ))
             .get();
 
     // Return null if no valid recipient found
-    if (members.isEmpty || members[0].userId == 0) {
+    if (members.isEmpty) {
       return null;
     }
 
@@ -812,16 +773,16 @@ class ConversationRepository {
       return null;
     }
 
-    // Get last message details if lastMessageId exists
+    // Get last message details if lastMsgId exists
     String? lastMessageType;
     String? lastMessageBody;
     String? lastMessageAt;
-    int? lastMessageId = conv.lastMessageId?.toInt();
+    String? lastMsgId = conv.lastMsgId;
 
-    if (conv.lastMessageId != null) {
+    if (conv.lastMsgId != null) {
       final lastMessage =
           await (db.select(db.messages)
-                ..where((t) => t.id.equals(conv.lastMessageId!)))
+                ..where((t) => t.id.equals(conv.lastMsgId!)))
               .getSingleOrNull();
 
       if (lastMessage != null) {
@@ -832,25 +793,25 @@ class ConversationRepository {
           lastMessage.attachments,
         );
         lastMessageAt = lastMessage.sentAt;
-        lastMessageId = lastMessage.id.toInt();
+        lastMsgId = lastMessage.id;
       }
     }
 
     // Create and return DmModel
     return DmModel(
-      conversationId: conv.id,
+      chatId: conv.id,
       recipientId: recipientUser.id,
       recipientName: recipientUser.username ?? recipientUser.name,
       recipientPhone: recipientUser.phone,
       recipientProfilePic: recipientUser.profilePic,
-      pinnedMessageId: conv.pinnedMessageId?.toInt(),
-      lastMessageId: lastMessageId,
-      lastMessageType: lastMessageType,
-      lastMessageBody: lastMessageBody,
-      lastMessageAt: lastMessageAt,
+      pinnedMsgId: conv.pinnedMsgId,
+      lastMsgId: lastMsgId,
+      lastMsgType: lastMessageType,
+      lastMsgBody: lastMessageBody,
+      lastMsgAt: lastMessageAt,
       unreadCount: conv.unreadCount,
       isRecipientOnline: recipientUser.isOnline,
-      isDeleted: conv.isDeleted,
+      deletedAt: conv.deletedAt,
       isPinned: conv.isPinned,
       isMuted: conv.isMuted,
       isFavorite: conv.isFavorite,
@@ -866,7 +827,7 @@ class ConversationRepository {
 
     // Query conversations by type
     final conversations =
-        await (db.select(db.conversations)
+        await (db.select(db.chats)
               ..where((t) => t.type.equals('group'))
               ..orderBy([
                 (t) => OrderingTerm(
@@ -883,16 +844,16 @@ class ConversationRepository {
     final result = <GroupModel>[];
 
     for (final conv in conversations) {
-      // Get last message details if lastMessageId exists
+      // Get last message details if lastMsgId exists
       String? lastMessageType;
       String? lastMessageBody;
       String? lastMessageAt;
-      int? lastMessageId = conv.lastMessageId?.toInt();
+      String? lastMsgId = conv.lastMsgId;
 
-      if (conv.lastMessageId != null) {
+      if (conv.lastMsgId != null) {
         final lastMessage =
             await (db.select(db.messages)
-                  ..where((t) => t.id.equals(conv.lastMessageId!)))
+                  ..where((t) => t.id.equals(conv.lastMsgId!)))
                 .getSingleOrNull();
 
         if (lastMessage != null) {
@@ -904,7 +865,7 @@ class ConversationRepository {
             lastMessage.attachments,
           );
           lastMessageAt = lastMessage.sentAt;
-          lastMessageId = lastMessage.id.toInt();
+          lastMsgId = lastMessage.id;
         }
       }
 
@@ -916,13 +877,13 @@ class ConversationRepository {
 
       // Create DmListModel
       final groupModel = GroupModel(
-        conversationId: conv.id,
+        chatId: conv.id,
         title: conv.title ?? 'Group Chat',
-        pinnedMessageId: conv.pinnedMessageId?.toInt(),
-        lastMessageId: lastMessageId,
-        lastMessageType: lastMessageType,
-        lastMessageBody: lastMessageBody,
-        lastMessageAt: lastMessageAt,
+        pinnedMsgId: conv.pinnedMsgId,
+        lastMsgId: lastMsgId,
+        lastMsgType: lastMessageType,
+        lastMsgBody: lastMessageBody,
+        lastMsgAt: lastMessageAt,
         role: currentUserMemberInfo?.role,
         unreadCount: conv.unreadCount ?? 0,
         isPinned: conv.isPinned,
@@ -939,30 +900,32 @@ class ConversationRepository {
   }
 
   // Get group by conversation ID without members
-  Future<GroupModel?> getGroupWithoutMembersByConvId(int conversationId) async {
+  Future<GroupModel?> getGroupWithoutMembersByConvId(
+    String conversationId,
+  ) async {
     final db = sqliteDatabase.database;
 
     final currentUserInfo = await UserUtils().getUserDetails();
 
     // Query conversation by ID
     final conv = await (db.select(
-      db.conversations,
+      db.chats,
     )..where((t) => t.id.equals(conversationId))).getSingleOrNull();
 
     if (conv == null || conv.type != 'group') {
       return null;
     }
 
-    // Get last message details if lastMessageId exists
+    // Get last message details if lastMsgId exists
     String? lastMessageType;
     String? lastMessageBody;
     String? lastMessageAt;
-    int? lastMessageId = conv.lastMessageId?.toInt();
+    String? lastMsgId = conv.lastMsgId;
 
-    if (conv.lastMessageId != null) {
+    if (conv.lastMsgId != null) {
       final lastMessage =
           await (db.select(db.messages)
-                ..where((t) => t.id.equals(conv.lastMessageId!)))
+                ..where((t) => t.id.equals(conv.lastMsgId!)))
               .getSingleOrNull();
 
       if (lastMessage != null) {
@@ -973,7 +936,7 @@ class ConversationRepository {
           lastMessage.attachments,
         );
         lastMessageAt = lastMessage.sentAt;
-        lastMessageId = lastMessage.id.toInt();
+        lastMsgId = lastMessage.id;
       }
     }
 
@@ -985,13 +948,13 @@ class ConversationRepository {
 
     // Create and return GroupModel
     return GroupModel(
-      conversationId: conv.id,
+      chatId: conv.id,
       title: conv.title ?? 'Group Chat',
-      pinnedMessageId: conv.pinnedMessageId?.toInt(),
-      lastMessageId: lastMessageId,
-      lastMessageType: lastMessageType,
-      lastMessageBody: lastMessageBody,
-      lastMessageAt: lastMessageAt,
+      pinnedMsgId: conv.pinnedMsgId,
+      lastMsgId: lastMsgId,
+      lastMsgType: lastMessageType,
+      lastMsgBody: lastMessageBody,
+      lastMsgAt: lastMessageAt,
       role: currentUserMemberInfo?.role,
       unreadCount: conv.unreadCount ?? 0,
       isPinned: conv.isPinned,
@@ -1003,27 +966,29 @@ class ConversationRepository {
   }
 
   // Get group by conversation ID with members
-  Future<GroupModel?> getGroupWithMembersByConvId(int conversationId) async {
+  Future<GroupModel?> getGroupWithMembersByConvId(
+    String conversationId,
+  ) async {
     final db = sqliteDatabase.database;
 
     final currentUserInfo = await UserUtils().getUserDetails();
 
     // Query conversation by ID
     final conv = await (db.select(
-      db.conversations,
+      db.chats,
     )..where((t) => t.id.equals(conversationId))).getSingleOrNull();
 
     if (conv == null || conv.type != 'group') {
       return null;
     }
 
-    // Get active conversation members
+    // Get active chat members
     final conversationMembers = await ConversationMemberRepository()
         .getActiveMembersByConversationId(conversationId);
 
     // Build GroupMember list with user details
     // Use a Map to deduplicate by userId (keep the first occurrence)
-    final membersMap = <int, GroupMember>{};
+    final membersMap = <String, GroupMember>{};
     for (final member in conversationMembers) {
       // Skip if we already have this user (deduplicate)
       if (membersMap.containsKey(member.userId)) {
@@ -1049,16 +1014,16 @@ class ConversationRepository {
     // Convert map values to list
     final members = membersMap.values.toList();
 
-    // Get last message details if lastMessageId exists
+    // Get last message details if lastMsgId exists
     String? lastMessageType;
     String? lastMessageBody;
     String? lastMessageAt;
-    int? lastMessageId = conv.lastMessageId?.toInt();
+    String? lastMsgId = conv.lastMsgId;
 
-    if (conv.lastMessageId != null) {
+    if (conv.lastMsgId != null) {
       final lastMessage =
           await (db.select(db.messages)
-                ..where((t) => t.id.equals(conv.lastMessageId!)))
+                ..where((t) => t.id.equals(conv.lastMsgId!)))
               .getSingleOrNull();
 
       if (lastMessage != null) {
@@ -1069,7 +1034,7 @@ class ConversationRepository {
           lastMessage.attachments,
         );
         lastMessageAt = lastMessage.sentAt;
-        lastMessageId = lastMessage.id.toInt();
+        lastMsgId = lastMessage.id;
       }
     }
 
@@ -1081,14 +1046,14 @@ class ConversationRepository {
 
     // Create and return GroupModel with members
     return GroupModel(
-      conversationId: conv.id,
+      chatId: conv.id,
       title: conv.title ?? 'Group Chat',
       members: members,
-      pinnedMessageId: conv.pinnedMessageId?.toInt(),
-      lastMessageId: lastMessageId,
-      lastMessageType: lastMessageType,
-      lastMessageBody: lastMessageBody,
-      lastMessageAt: lastMessageAt,
+      pinnedMsgId: conv.pinnedMsgId,
+      lastMsgId: lastMsgId,
+      lastMsgType: lastMessageType,
+      lastMsgBody: lastMessageBody,
+      lastMsgAt: lastMessageAt,
       role: currentUserMemberInfo?.role,
       unreadCount: conv.unreadCount ?? 0,
       isPinned: conv.isPinned,

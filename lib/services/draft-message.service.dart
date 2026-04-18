@@ -17,7 +17,7 @@ class DraftMessageService {
   }
 
   /// Save draft message for a conversation
-  Future<void> saveDraft(int conversationId, String draftText) async {
+  Future<void> saveDraft(String conversationId, String draftText) async {
     await _initPrefs();
     try {
       final existingData = _prefs!.getString(_draftMessagesKey);
@@ -29,9 +29,9 @@ class DraftMessageService {
 
       if (draftText.trim().isEmpty) {
         // Remove draft if text is empty
-        drafts.remove(conversationId.toString());
+        drafts.remove(conversationId);
       } else {
-        drafts[conversationId.toString()] = draftText;
+        drafts[conversationId] = draftText;
       }
 
       await _prefs!.setString(_draftMessagesKey, json.encode(drafts));
@@ -41,14 +41,14 @@ class DraftMessageService {
   }
 
   /// Get draft message for a conversation
-  Future<String?> getDraft(int conversationId) async {
+  Future<String?> getDraft(String conversationId) async {
     await _initPrefs();
     try {
       final data = _prefs!.getString(_draftMessagesKey);
       if (data == null) return null;
 
       final drafts = Map<String, String>.from(json.decode(data));
-      return drafts[conversationId.toString()];
+      return drafts[conversationId];
     } catch (e) {
       debugPrint('❌ Error getting draft');
       return null;
@@ -56,14 +56,14 @@ class DraftMessageService {
   }
 
   /// Remove draft for a conversation
-  Future<void> removeDraft(int conversationId) async {
+  Future<void> removeDraft(String conversationId) async {
     await _initPrefs();
     try {
       final existingData = _prefs!.getString(_draftMessagesKey);
       if (existingData == null) return;
 
       final drafts = Map<String, String>.from(json.decode(existingData));
-      drafts.remove(conversationId.toString());
+      drafts.remove(conversationId);
 
       await _prefs!.setString(_draftMessagesKey, json.encode(drafts));
     } catch (e) {
@@ -72,14 +72,13 @@ class DraftMessageService {
   }
 
   /// Get all drafts
-  Future<Map<int, String>> getAllDrafts() async {
+  Future<Map<String, String>> getAllDrafts() async {
     await _initPrefs();
     try {
       final data = _prefs!.getString(_draftMessagesKey);
       if (data == null) return {};
 
-      final draftsMap = Map<String, String>.from(json.decode(data));
-      return draftsMap.map((key, value) => MapEntry(int.parse(key), value));
+      return Map<String, String>.from(json.decode(data));
     } catch (e) {
       debugPrint('❌ Error getting all drafts');
       return {};

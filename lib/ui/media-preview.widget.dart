@@ -1207,7 +1207,7 @@ class UnifiedMediaPreviewScreen extends StatefulWidget {
   final Function(File, String, {MessageModel? failedMessage})? onRetryImage;
   final Function(File, String, {MessageModel? failedMessage})? onRetryVideo;
   final Function(String)? showErrorDialog;
-  final Set<int>? starredMessages;
+  final Set<String>? starredMessages;
 
   const UnifiedMediaPreviewScreen({
     super.key,
@@ -1484,13 +1484,12 @@ class _UnifiedMediaPreviewScreenState extends State<UnifiedMediaPreviewScreen> {
     String? localPath,
     bool isVideo,
   ) {
-    // Check upload status from metadata
-    final metadata = message.metadata ?? {};
+    // Check upload status: uploading = has local media path but no URL yet
     final isUploading =
-        message.status == MessageStatusType.uploading ||
-        metadata['is_uploading'] == true;
-    final isFailed = message.status == MessageStatusType.failed;
-    // metadata['upload_failed'] == true
+        (message.localMediaPath != null &&
+            message.localMediaPath!.isNotEmpty) &&
+        (mediaUrl == null || mediaUrl.isEmpty);
+    final isFailed = message.isFailed;
     final isStarred = widget.starredMessages?.contains(message.id) ?? false;
     final messageTime = ChatHelpers.formatMessageTime(message.sentAt);
 
@@ -1532,34 +1531,13 @@ class _UnifiedMediaPreviewScreenState extends State<UnifiedMediaPreviewScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (isUploading)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          value: (metadata['upload_progress'] as int?) != null
-                              ? (metadata['upload_progress'] as int) / 100.0
-                              : null,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Colors.white,
-                          ),
-                        ),
-                      ),
-                      if ((metadata['upload_progress'] as int?) != null) ...[
-                        const SizedBox(width: 4),
-                        Text(
-                          '${metadata['upload_progress']}%',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ],
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
                   )
                 else if (isFailed && widget.isMyMessage)
                   GestureDetector(

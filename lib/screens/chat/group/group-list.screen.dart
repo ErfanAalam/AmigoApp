@@ -77,7 +77,7 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
   Future<void> _handleGroupChatAction(String action, GroupModel group) async {
     await ref
         .read(chatProvider.notifier)
-        .handleChatAction(action, group.conversationId, ChatType.group);
+        .handleChatAction(action, group.chatId, ChatType.group);
   }
 
   // All state management and WebSocket handling is now done by groupListProvider
@@ -329,13 +329,13 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
 
           if (item is GroupModel) {
             final typingUsers =
-                chatState.typingConvUsers[item.conversationId] ??
+                chatState.typingConvUsers[item.chatId] ??
                 <TypingUser>{};
 
             return GroupListItem(
               group: item,
               typingUsers: typingUsers,
-              conversationId: item.conversationId,
+              conversationId: item.chatId,
               isPinned: item.isPinned ?? false,
               isMuted: item.isMuted ?? false,
               isFavorite: item.isFavorite ?? false,
@@ -344,7 +344,7 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
                 // Set this group as active and clear unread count
                 ref
                     .read(chatProvider.notifier)
-                    .setActiveConversation(item.conversationId, ChatType.group);
+                    .setActiveConversation(item.chatId, ChatType.group);
 
                 final result = await Navigator.push(
                   context,
@@ -361,7 +361,7 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
                 // Clear unread count again when returning from inner chat
                 ref
                     .read(chatProvider.notifier)
-                    .clearUnreadCount(item.conversationId, ChatType.group);
+                    .clearUnreadCount(item.chatId, ChatType.group);
 
                 // Clear active conversation when returning from inner chat
                 ref
@@ -395,7 +395,7 @@ class GroupListItem extends ConsumerWidget {
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
   final Set<TypingUser> typingUsers;
-  final int conversationId;
+  final String conversationId;
   final bool isPinned;
   final bool isMuted;
   final bool isFavorite;
@@ -524,18 +524,18 @@ class GroupListItem extends ConsumerWidget {
       lastMessageText = draft;
     } else {
       // lastMessageText = _formatLastMessageText(group.metadata?.lastMessage);
-      if (group.lastMessageId != null &&
-          group.lastMessageAt != null &&
-          group.lastMessageType != null) {
+      if (group.lastMsgId != null &&
+          group.lastMsgAt != null &&
+          group.lastMsgType != null) {
         lastMessageText = _formatLastMessageText(
-          group.lastMessageBody ?? '',
-          group.lastMessageType,
+          group.lastMsgBody ?? '',
+          group.lastMsgType,
           group.metadata?.lastMessage?.attachmentData,
         );
       }
     }
 
-    final timeText = _formatTime(group.lastMessageAt ?? group.joinedAt);
+    final timeText = _formatTime(group.lastMsgAt ?? group.joinedAt);
     final isTyping = typingUsers.isNotEmpty;
     final displayText = isTyping
         ? 'Typing...'

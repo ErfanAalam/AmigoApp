@@ -2,7 +2,6 @@ import 'dart:io';
 
 import '../core/api_result.dart';
 import '../core/base_api_client.dart';
-import '../../utils/serialization.utils.dart';
 
 /// Chat API client
 class ChatClient extends BaseApiClient {
@@ -17,15 +16,14 @@ class ChatClient extends BaseApiClient {
     return post('/chat/dm/create-dm/$receiverId');
   }
 
-  /// Get conversation history
+  /// Get conversation history (cursor-based pagination)
   Future<ApiResult<dynamic>> getConversationHistory({
-    required int conversationId,
-    int page = 1,
+    required String conversationId,
     int limit = 20,
-    int? beforeMessageId,
-    int? afterMessageId,
+    String? beforeMessageId,
+    String? afterMessageId,
   }) async {
-    var path = '/chat/get-conversation-history/$conversationId?page=$page&limit=$limit';
+    var path = '/chat/get-conversation-history/$conversationId?limit=$limit';
     if (beforeMessageId != null) path += '&before_message_id=$beforeMessageId';
     if (afterMessageId  != null) path += '&after_message_id=$afterMessageId';
     return get(path);
@@ -33,8 +31,8 @@ class ChatClient extends BaseApiClient {
 
   /// Get messages around a specific message (for jump-to-message)
   Future<ApiResult<dynamic>> getMessagesAround({
-    required int conversationId,
-    required int messageId,
+    required String conversationId,
+    required String messageId,
     int before = 50,
     int after  = 50,
   }) async {
@@ -45,7 +43,7 @@ class ChatClient extends BaseApiClient {
 
   /// Get message statuses
   Future<ApiResult<dynamic>> getMessageStatuses({
-    required int conversationId,
+    required String conversationId,
     int page = 1,
     int limit = 1000,
   }) async {
@@ -64,21 +62,20 @@ class ChatClient extends BaseApiClient {
 
   /// Delete messages
   Future<ApiResult<dynamic>> deleteMessage(
-    List<int> messageIds, {
+    List<String> messageIds, {
     bool? isAdminOrStaff,
   }) async {
     final body = <String, dynamic>{'message_ids': messageIds};
     if (isAdminOrStaff != null) {
       body['is_admin_or_staff'] = isAdminOrStaff;
     }
-    final idsWithString = convertBigIntIdsToString(body);
-    return delete('/message/soft-delete', data: idsWithString);
+    return delete('/message/soft-delete', data: body);
   }
 
   /// Delete message for me
   Future<ApiResult<dynamic>> deleteMessageForMe({
-    required List<int> messageIds,
-    required int conversationId,
+    required List<String> messageIds,
+    required String conversationId,
   }) async {
     return delete(
       '/message/delete-for-me',
@@ -87,27 +84,33 @@ class ChatClient extends BaseApiClient {
   }
 
   /// Delete DM conversation
-  Future<ApiResult<dynamic>> deleteDm(int conversationId) async {
+  Future<ApiResult<dynamic>> deleteDm(String conversationId) async {
     return delete('/chat/dm/soft-delete-dm/$conversationId');
   }
 
   /// Revive chat
-  Future<ApiResult<dynamic>> reviveChat(int conversationId) async {
+  Future<ApiResult<dynamic>> reviveChat(String conversationId) async {
     return post('/chat/revive-chat/$conversationId');
   }
 
   /// Mark message as delivered
   Future<ApiResult<dynamic>> markMessageDelivered({
-    required int messageId,
-    required int conversationId,
+    required String messageId,
+    required String conversationId,
   }) async {
     return post(
       '/message/delivered',
       data: {
-        'message_id': messageId.toString(),
+        'message_id': messageId,
         'conversation_id': conversationId,
       },
     );
+  }
+
+  /// Send batched status acknowledgements via HTTP fallback
+  Future<ApiResult<dynamic>> sendStatusAck(
+      Map<String, dynamic> payload) async {
+    return post('/message/status-ack', data: payload);
   }
 
   /// Sync messages via polling
@@ -133,7 +136,7 @@ class ChatClient extends BaseApiClient {
   /// Verify which of the given message IDs the server has (GC reconciliation).
   Future<ApiResult<dynamic>> verifyMessageIds({
     required List<String> messageIds,
-    required int conversationId,
+    required String conversationId,
   }) async {
     return post('/message/verify-ids', data: {
       'message_ids': messageIds,
@@ -143,14 +146,14 @@ class ChatClient extends BaseApiClient {
 
   /// React / un-react to a message with an emoji.
   Future<ApiResult<dynamic>> reactToMessage({
-    required int messageId,
-    required int conversationId,
+    required String messageId,
+    required String conversationId,
     required String emoji,
     required String action, // 'add' | 'remove'
     String? senderName,
   }) async {
     return post('/message/react', data: {
-      'message_id': messageId.toString(),
+      'message_id': messageId,
       'conversation_id': conversationId,
       'emoji': emoji,
       'action': action,

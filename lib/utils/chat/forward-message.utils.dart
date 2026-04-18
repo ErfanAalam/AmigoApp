@@ -6,14 +6,14 @@ import '../../ui/snackbar.dart';
 
 /// Configuration for handling forward to conversations
 class HandleForwardToConversationsConfig {
-  final Set<int> messagesToForward;
-  final List<int> selectedConversationIds;
+  final Set<String> messagesToForward;
+  final List<String> selectedConversationIds;
   // final WebSocketService websocketService;
-  final int currentUserId;
-  final int sourceConversationId;
+  final String currentUserId;
+  final String sourceConversationId;
   final BuildContext context;
   final bool mounted;
-  final Function(Set<int>) clearMessagesToForward;
+  final Function(Set<String>) clearMessagesToForward;
   final Function(String) showErrorDialog;
   final String? debugPrefix;
 

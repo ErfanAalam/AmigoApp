@@ -8,7 +8,7 @@ class CallRepository {
 
   /// Helper method to convert Calls row to CallModel
   /// Joins with Users/Contacts tables to get contact info
-  Future<CallModel> _callToModel(Call call, int currentUserId) async {
+  Future<CallModel> _callToModel(Call call, String currentUserId) async {
     final db = sqliteDatabase.database;
 
     // Determine if this is an incoming or outgoing call
@@ -18,7 +18,7 @@ class CallRepository {
     // Get contact info from Users table
     String contactName = 'Unknown';
     String? contactProfilePic;
-    int contactId = otherUserId;
+    String contactId = otherUserId;
 
     final user = await (db.select(
       db.users,
@@ -103,7 +103,7 @@ class CallRepository {
 
     // Preserve existing values if call exists and new values are not provided
     final companion = CallsCompanion.insert(
-      id: Value(call.id),
+      id: call.id,
       callerId: call.callerId,
       calleeId: call.calleeId,
       startedAt: call.startedAt.toIso8601String(),
@@ -131,7 +131,7 @@ class CallRepository {
 
         // Preserve existing values if call exists and new values are not provided
         final companion = CallsCompanion.insert(
-          id: Value(call.id),
+          id: call.id,
           callerId: call.callerId,
           calleeId: call.calleeId,
           startedAt: call.startedAt.toIso8601String(),
@@ -152,7 +152,7 @@ class CallRepository {
   }
 
   /// Get all calls for a user
-  Future<List<CallModel>> getAllCalls(int userId) async {
+  Future<List<CallModel>> getAllCalls(String userId) async {
     final db = sqliteDatabase.database;
     final calls =
         await (db.select(db.calls)
@@ -175,7 +175,7 @@ class CallRepository {
   }
 
   /// Get calls by ID
-  Future<CallModel?> getCallById(int callId, int currentUserId) async {
+  Future<CallModel?> getCallById(String callId, String currentUserId) async {
     final db = sqliteDatabase.database;
     final call = await (db.select(
       db.calls,
@@ -188,7 +188,7 @@ class CallRepository {
   /// Get calls by status
   Future<List<CallModel>> getCallsByStatus(
     CallStatus status,
-    int userId,
+    String userId,
   ) async {
     final db = sqliteDatabase.database;
     final calls =
@@ -214,7 +214,7 @@ class CallRepository {
   }
 
   /// Get calls by type (incoming/outgoing)
-  Future<List<CallModel>> getCallsByType(CallType type, int userId) async {
+  Future<List<CallModel>> getCallsByType(CallType type, String userId) async {
     final db = sqliteDatabase.database;
 
     final query = db.select(db.calls);
@@ -240,7 +240,7 @@ class CallRepository {
   }
 
   /// Get calls with a specific user
-  Future<List<CallModel>> getCallsWithUser(int userId, int otherUserId) async {
+  Future<List<CallModel>> getCallsWithUser(String userId, String otherUserId) async {
     final db = sqliteDatabase.database;
     final calls =
         await (db.select(db.calls)
@@ -267,17 +267,17 @@ class CallRepository {
   }
 
   /// Get missed calls
-  Future<List<CallModel>> getMissedCalls(int userId) async {
+  Future<List<CallModel>> getMissedCalls(String userId) async {
     return getCallsByStatus(CallStatus.missed, userId);
   }
 
   /// Get declined calls
-  Future<List<CallModel>> getDeclinedCalls(int userId) async {
+  Future<List<CallModel>> getDeclinedCalls(String userId) async {
     return getCallsByStatus(CallStatus.declined, userId);
   }
 
   /// Get recent calls (last N calls)
-  Future<List<CallModel>> getRecentCalls(int userId, {int limit = 20}) async {
+  Future<List<CallModel>> getRecentCalls(String userId, {int limit = 20}) async {
     final db = sqliteDatabase.database;
     final calls =
         await (db.select(db.calls)
@@ -302,7 +302,7 @@ class CallRepository {
 
   /// Get calls in date range
   Future<List<CallModel>> getCallsInDateRange(
-    int userId,
+    String userId,
     DateTime startDate,
     DateTime endDate,
   ) async {
@@ -334,7 +334,7 @@ class CallRepository {
   }
 
   /// Get calls for today
-  Future<List<CallModel>> getTodayCalls(int userId) async {
+  Future<List<CallModel>> getTodayCalls(String userId) async {
     final now = DateTime.now();
     final startOfDay = DateTime(now.year, now.month, now.day);
     final endOfDay = startOfDay.add(const Duration(days: 1));
@@ -343,7 +343,7 @@ class CallRepository {
   }
 
   /// Get calls for this week
-  Future<List<CallModel>> getThisWeekCalls(int userId) async {
+  Future<List<CallModel>> getThisWeekCalls(String userId) async {
     final now = DateTime.now();
     final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
     final startOfDay = DateTime(
@@ -357,7 +357,7 @@ class CallRepository {
   }
 
   /// Get calls for this month
-  Future<List<CallModel>> getThisMonthCalls(int userId) async {
+  Future<List<CallModel>> getThisMonthCalls(String userId) async {
     final now = DateTime.now();
     final startOfMonth = DateTime(now.year, now.month, 1);
     final endOfMonth = DateTime.now().add(const Duration(days: 1));
@@ -366,7 +366,7 @@ class CallRepository {
   }
 
   /// Update call status
-  Future<void> updateCallStatus(int callId, CallStatus status) async {
+  Future<void> updateCallStatus(String callId, CallStatus status) async {
     final db = sqliteDatabase.database;
     await (db.update(db.calls)..where((t) => t.id.equals(callId))).write(
       CallsCompanion(status: Value(status.value)),
@@ -374,12 +374,12 @@ class CallRepository {
   }
 
   /// Update call end time and status
-  Future<void> endCall(int callId, CallStatus status, DateTime? endedAt) async {
+  Future<void> endCall(String callId, CallStatus status, DateTime? endedAt) async {
     final db = sqliteDatabase.database;
     final call = await (db.select(
       db.calls,
     )..where((t) => t.id.equals(callId))).getSingleOrNull();
-    
+
     // Calculate duration if we have start and end times
     int? durationSeconds;
     if (endedAt != null && call != null) {
@@ -390,7 +390,7 @@ class CallRepository {
         // Keep existing duration if calculation fails
       }
     }
-    
+
     await (db.update(db.calls)..where((t) => t.id.equals(callId))).write(
       CallsCompanion(
         status: Value(status.value),
@@ -401,7 +401,7 @@ class CallRepository {
   }
 
   /// Get call count
-  Future<int> getCallCount(int userId) async {
+  Future<int> getCallCount(String userId) async {
     final db = sqliteDatabase.database;
     final query = db.selectOnly(db.calls)
       ..addColumns([db.calls.id.count()])
@@ -414,7 +414,7 @@ class CallRepository {
   }
 
   /// Get call count by status
-  Future<int> getCallCountByStatus(int userId, CallStatus status) async {
+  Future<int> getCallCountByStatus(String userId, CallStatus status) async {
     final db = sqliteDatabase.database;
     final query = db.selectOnly(db.calls)
       ..addColumns([db.calls.id.count()])
@@ -428,7 +428,7 @@ class CallRepository {
   }
 
   /// Get call count by type
-  Future<int> getCallCountByType(int userId, CallType type) async {
+  Future<int> getCallCountByType(String userId, CallType type) async {
     final db = sqliteDatabase.database;
 
     final query = db.selectOnly(db.calls)..addColumns([db.calls.id.count()]);
@@ -445,12 +445,12 @@ class CallRepository {
   }
 
   /// Get missed call count
-  Future<int> getMissedCallCount(int userId) async {
+  Future<int> getMissedCallCount(String userId) async {
     return getCallCountByStatus(userId, CallStatus.missed);
   }
 
   /// Delete a call
-  Future<bool> deleteCall(int callId) async {
+  Future<bool> deleteCall(String callId) async {
     final db = sqliteDatabase.database;
     final deleted = await (db.delete(
       db.calls,
@@ -459,7 +459,7 @@ class CallRepository {
   }
 
   /// Delete multiple calls
-  Future<int> deleteCalls(List<int> callIds) async {
+  Future<int> deleteCalls(List<String> callIds) async {
     if (callIds.isEmpty) return 0;
 
     final db = sqliteDatabase.database;
@@ -470,7 +470,7 @@ class CallRepository {
   }
 
   /// Delete all calls for a user
-  Future<void> deleteAllCalls(int userId) async {
+  Future<void> deleteAllCalls(String userId) async {
     final db = sqliteDatabase.database;
     await (db.delete(db.calls)
           ..where((t) => t.callerId.equals(userId) | t.calleeId.equals(userId)))
@@ -478,7 +478,7 @@ class CallRepository {
   }
 
   /// Delete calls by status
-  Future<int> deleteCallsByStatus(int userId, CallStatus status) async {
+  Future<int> deleteCallsByStatus(String userId, CallStatus status) async {
     final db = sqliteDatabase.database;
     final deleted =
         await (db.delete(db.calls)..where(
@@ -491,7 +491,7 @@ class CallRepository {
   }
 
   /// Delete old calls (older than specified days)
-  Future<int> deleteOldCalls(int userId, int daysOld) async {
+  Future<int> deleteOldCalls(String userId, int daysOld) async {
     final db = sqliteDatabase.database;
     final cutoffDate = DateTime.now().subtract(Duration(days: daysOld));
     final cutoffStr = cutoffDate.toIso8601String();
@@ -507,7 +507,7 @@ class CallRepository {
   }
 
   /// Check if call exists
-  Future<bool> callExists(int callId) async {
+  Future<bool> callExists(String callId) async {
     final db = sqliteDatabase.database;
     final call = await (db.select(
       db.calls,
@@ -516,7 +516,7 @@ class CallRepository {
   }
 
   /// Get last call with a user
-  Future<CallModel?> getLastCallWithUser(int userId, int otherUserId) async {
+  Future<CallModel?> getLastCallWithUser(String userId, String otherUserId) async {
     final db = sqliteDatabase.database;
     final call =
         await (db.select(db.calls)
@@ -541,7 +541,7 @@ class CallRepository {
   }
 
   /// Get call statistics for a user
-  Future<Map<String, dynamic>> getCallStatistics(int userId) async {
+  Future<Map<String, dynamic>> getCallStatistics(String userId) async {
     final db = sqliteDatabase.database;
 
     // Total calls
@@ -608,7 +608,7 @@ class CallRepository {
   }
 
   /// Get total call duration for a user (in seconds)
-  Future<int> getTotalCallDuration(int userId) async {
+  Future<int> getTotalCallDuration(String userId) async {
     final calls = await getAllCalls(userId);
     int totalDuration = 0;
 
@@ -622,7 +622,7 @@ class CallRepository {
   }
 
   /// Get total call duration with a specific user (in seconds)
-  Future<int> getTotalCallDurationWithUser(int userId, int otherUserId) async {
+  Future<int> getTotalCallDurationWithUser(String userId, String otherUserId) async {
     final calls = await getCallsWithUser(userId, otherUserId);
     int totalDuration = 0;
 
@@ -636,7 +636,7 @@ class CallRepository {
   }
 
   /// Get active/ongoing calls (calls without endedAt)
-  Future<List<CallModel>> getActiveCalls(int userId) async {
+  Future<List<CallModel>> getActiveCalls(String userId) async {
     final db = sqliteDatabase.database;
     final calls =
         await (db.select(db.calls)
@@ -667,7 +667,7 @@ class CallRepository {
   }
 
   /// Search calls by contact name
-  Future<List<CallModel>> searchCalls(int userId, String searchQuery) async {
+  Future<List<CallModel>> searchCalls(String userId, String searchQuery) async {
     final allCalls = await getAllCalls(userId);
 
     // Filter calls where contact name contains search query
@@ -681,9 +681,9 @@ class CallRepository {
   }
 
   /// Get calls grouped by contact
-  Future<Map<int, List<CallModel>>> getCallsGroupedByContact(int userId) async {
+  Future<Map<String, List<CallModel>>> getCallsGroupedByContact(String userId) async {
     final calls = await getAllCalls(userId);
-    final grouped = <int, List<CallModel>>{};
+    final grouped = <String, List<CallModel>>{};
 
     for (final call in calls) {
       final contactId = call.contactId;
@@ -698,7 +698,7 @@ class CallRepository {
 
   /// Get most called contacts (top N)
   Future<List<Map<String, dynamic>>> getMostCalledContacts(
-    int userId, {
+    String userId, {
     int limit = 10,
   }) async {
     final grouped = await getCallsGroupedByContact(userId);
