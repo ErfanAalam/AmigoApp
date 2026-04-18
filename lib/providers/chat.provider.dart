@@ -437,7 +437,22 @@ class ChatNotifier extends Notifier<ChatState> {
                 GroupModel.normalizeApiResponse(group),
               );
               // Redis-enriched last message for groups
-              final lastMsg = group['lastMessage'] as Map<String, dynamic>?;
+              final lastMsg = group['lastMessage'] is Map<String, dynamic>
+                  ? group['lastMessage'] as Map<String, dynamic>
+                  : null;
+
+              // Insert last message into messages table so the Drift stream can read it
+              if (lastMsg != null && lastMsg['id'] != null) {
+                _messageRepo.insertMessage(MessageModel(
+                  id: lastMsg['id'].toString(),
+                  chatId: groupModel.chatId,
+                  senderId: lastMsg['sender_id']?.toString() ?? '',
+                  type: MessageType.fromString(lastMsg['type']?.toString()) ?? MessageType.text,
+                  body: lastMsg['body']?.toString() ?? '',
+                  sentAt: lastMsg['sent_at']?.toString() ?? DateTime.now().toIso8601String(),
+                )).catchError((e) => debugPrint('❌ Error inserting group last message: $e'));
+              }
+
               final enrichedGroup = groupModel.copyWith(
                 lastMsgId: lastMsg?['id']?.toString() ?? groupModel.lastMsgId,
                 lastMsgBody: lastMsg?['body']?.toString() ?? groupModel.lastMsgBody,
@@ -580,9 +595,23 @@ class ChatNotifier extends Notifier<ChatState> {
                 }
 
                 // Redis-enriched last message data
-                final lastMsg = json['lastMessage'] as Map<String, dynamic>?;
+                final lastMsg = json['lastMessage'] is Map<String, dynamic>
+                    ? json['lastMessage'] as Map<String, dynamic>
+                    : null;
 
-                // mapping backend response to DmListModel
+                // Insert last message into messages table so the Drift stream can read it
+                if (lastMsg != null && lastMsg['id'] != null) {
+                  final convId = json['conversationId']?.toString() ?? '';
+                  _messageRepo.insertMessage(MessageModel(
+                    id: lastMsg['id'].toString(),
+                    chatId: convId,
+                    senderId: lastMsg['sender_id']?.toString() ?? '',
+                    type: MessageType.fromString(lastMsg['type']?.toString()) ?? MessageType.text,
+                    body: lastMsg['body']?.toString() ?? '',
+                    sentAt: lastMsg['sent_at']?.toString() ?? DateTime.now().toIso8601String(),
+                  )).catchError((e) => debugPrint('❌ Error inserting DM last message: $e'));
+                }
+
                 return DmModel(
                   chatId: json['conversationId']?.toString() ?? '',
                   recipientId: json['userId']?.toString() ?? '',
@@ -643,28 +672,21 @@ class ChatNotifier extends Notifier<ChatState> {
                   return null;
                 }
 
-                if (json['lastMessageId'] != null) {
-                  final metadataLastMsg = json['metadata']['last_message'];
-                  final msg = MessageModel.fromJson(metadataLastMsg);
-                  _messageRepo
-                      .insertMessage(msg)
-                      .catchError(
-                        (e) => debugPrint('❌ Error inserting last message: $e'),
-                      );
-                }
+                final lastMsg = json['lastMessage'] is Map<String, dynamic>
+                    ? json['lastMessage'] as Map<String, dynamic>
+                    : null;
+                final lastMsgId = lastMsg?['id']?.toString() ?? json['lastMsgId']?.toString();
 
-                // mapping backend response to DmListModel
                 return ConversationModel(
                   id: convId.toString(),
                   type: json['type']?.toString() ?? 'dm',
                   title: json['title']?.toString(),
                   createrId: json['createrId']?.toString(),
-                  unreadCount: json['unreadCount'],
-                  lastMsgId: json['lastMessageId']?.toString(),
-                  pinnedMsgId: json['pinnedMessageId']?.toString(),
-                  deletedAt: json['isDeleted'] == true
-                      ? DateTime.now().toIso8601String()
-                      : null,
+                  unreadCount: json['unreadCount'] is int ? json['unreadCount'] : 0,
+                  lastMsgId: lastMsgId,
+                  lastMsgAt: lastMsg?['sent_at']?.toString() ?? json['lastMsgAt']?.toString(),
+                  pinnedMsgId: json['pinnedMsgId']?.toString(),
+                  deletedAt: json['deletedAt']?.toString(),
                   isPinned: json['isPinned'] == true,
                   isFavorite: json['isFavorite'] == true,
                   isMuted: json['isMuted'] == true,

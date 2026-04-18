@@ -89,7 +89,8 @@ class MessageStatusRepository {
         try {
           final messageId = status['messageId'].toString();
           final userId = status['userId'].toString();
-          final chatId = (status['chatId'] ?? status['conversationId']).toString();
+          final chatId = (status['chatId'] ?? status['conversationId'])
+              .toString();
           final deliveredAt = status['deliveredAt'] as String?;
           final readAt = status['readAt'] as String?;
           final reaction = status['reaction'] as String?;
@@ -168,9 +169,9 @@ class MessageStatusRepository {
 
   Future<MessageInfoModel?> getMessageStatusById(String id) async {
     final db = sqliteDatabase.database;
-    final row = await (db.select(db.messageInfo)
-          ..where((t) => t.id.equals(id)))
-        .getSingleOrNull();
+    final row = await (db.select(
+      db.messageInfo,
+    )..where((t) => t.id.equals(id))).getSingleOrNull();
     if (row == null) return null;
     return _rowToModel(row);
   }
@@ -179,9 +180,9 @@ class MessageStatusRepository {
     String messageId,
   ) async {
     final db = sqliteDatabase.database;
-    final rows = await (db.select(db.messageInfo)
-          ..where((t) => t.messageId.equals(messageId)))
-        .get();
+    final rows = await (db.select(
+      db.messageInfo,
+    )..where((t) => t.messageId.equals(messageId))).get();
     return rows.map(_rowToModel).toList();
   }
 
@@ -189,9 +190,9 @@ class MessageStatusRepository {
     String chatId,
   ) async {
     final db = sqliteDatabase.database;
-    final rows = await (db.select(db.messageInfo)
-          ..where((t) => t.chatId.equals(chatId)))
-        .get();
+    final rows = await (db.select(
+      db.messageInfo,
+    )..where((t) => t.chatId.equals(chatId))).get();
     return rows.map(_rowToModel).toList();
   }
 
@@ -199,9 +200,9 @@ class MessageStatusRepository {
     String userId,
   ) async {
     final db = sqliteDatabase.database;
-    final rows = await (db.select(db.messageInfo)
-          ..where((t) => t.userId.equals(userId)))
-        .get();
+    final rows = await (db.select(
+      db.messageInfo,
+    )..where((t) => t.userId.equals(userId))).get();
     return rows.map(_rowToModel).toList();
   }
 
@@ -210,8 +211,7 @@ class MessageStatusRepository {
   ) async {
     final db = sqliteDatabase.database;
     return (db.select(db.messageInfo)
-          ..where((t) =>
-              t.messageId.equals(messageId) & t.readAt.isNotNull()))
+          ..where((t) => t.messageId.equals(messageId) & t.readAt.isNotNull()))
         .get();
   }
 
@@ -219,9 +219,9 @@ class MessageStatusRepository {
     String messageId,
   ) async {
     final db = sqliteDatabase.database;
-    return (db.select(db.messageInfo)
-          ..where((t) =>
-              t.messageId.equals(messageId) & t.deliveredAt.isNotNull()))
+    return (db.select(db.messageInfo)..where(
+          (t) => t.messageId.equals(messageId) & t.deliveredAt.isNotNull(),
+        ))
         .get();
   }
 
@@ -229,9 +229,9 @@ class MessageStatusRepository {
     String chatId,
   ) async {
     final db = sqliteDatabase.database;
-    return (db.select(db.messageInfo)
-          ..where((t) => t.chatId.equals(chatId)))
-        .get();
+    return (db.select(
+      db.messageInfo,
+    )..where((t) => t.chatId.equals(chatId))).get();
   }
 
   Future<MessageInfoModel?> getMessageStatusByMessageAndUser(
@@ -239,10 +239,11 @@ class MessageStatusRepository {
     String userId,
   ) async {
     final db = sqliteDatabase.database;
-    final rows = await (db.select(db.messageInfo)
-          ..where((t) =>
-              t.messageId.equals(messageId) & t.userId.equals(userId)))
-        .get();
+    final rows =
+        await (db.select(db.messageInfo)..where(
+              (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
+            ))
+            .get();
 
     if (rows.isEmpty) return null;
 
@@ -250,9 +251,9 @@ class MessageStatusRepository {
       final first = rows.first;
       await db.transaction(() async {
         for (int i = 1; i < rows.length; i++) {
-          await (db.delete(db.messageInfo)
-                ..where((t) => t.id.equals(rows[i].id)))
-              .go();
+          await (db.delete(
+            db.messageInfo,
+          )..where((t) => t.id.equals(rows[i].id))).go();
         }
       });
       return _rowToModel(first);
@@ -265,10 +266,11 @@ class MessageStatusRepository {
     String messageId,
   ) async {
     final db = sqliteDatabase.database;
-    final rows = await (db.select(db.messageInfo)
-          ..where((t) =>
-              t.messageId.equals(messageId) & t.readAt.isNotNull()))
-        .get();
+    final rows =
+        await (db.select(db.messageInfo)..where(
+              (t) => t.messageId.equals(messageId) & t.readAt.isNotNull(),
+            ))
+            .get();
     return rows.map(_rowToModel).toList();
   }
 
@@ -276,10 +278,11 @@ class MessageStatusRepository {
     String messageId,
   ) async {
     final db = sqliteDatabase.database;
-    final rows = await (db.select(db.messageInfo)
-          ..where((t) =>
-              t.messageId.equals(messageId) & t.deliveredAt.isNotNull()))
-        .get();
+    final rows =
+        await (db.select(db.messageInfo)..where(
+              (t) => t.messageId.equals(messageId) & t.deliveredAt.isNotNull(),
+            ))
+            .get();
     return rows.map(_rowToModel).toList();
   }
 
@@ -292,9 +295,9 @@ class MessageStatusRepository {
       final db = sqliteDatabase.database;
       final timestamp = deliveredAt ?? DateTime.now().toIso8601String();
 
-      final message = await (db.select(db.messages)
-            ..where((t) => t.id.equals(messageId)))
-          .getSingleOrNull();
+      final message = await (db.select(
+        db.messages,
+      )..where((t) => t.id.equals(messageId))).getSingleOrNull();
 
       if (message != null) {
         final deliveredAtSql = "'${timestamp.replaceAll("'", "''")}'";
@@ -332,9 +335,9 @@ class MessageStatusRepository {
       final db = sqliteDatabase.database;
       final timestamp = readAt ?? DateTime.now().toIso8601String();
 
-      final message = await (db.select(db.messages)
-            ..where((t) => t.id.equals(messageId)))
-          .getSingleOrNull();
+      final message = await (db.select(
+        db.messages,
+      )..where((t) => t.id.equals(messageId))).getSingleOrNull();
 
       if (message != null) {
         final timestampSql = "'${timestamp.replaceAll("'", "''")}'";
@@ -377,9 +380,9 @@ class MessageStatusRepository {
     await db.transaction(() async {
       for (final messageId in messageIds) {
         try {
-          final message = await (db.select(db.messages)
-                ..where((t) => t.id.equals(messageId)))
-              .getSingleOrNull();
+          final message = await (db.select(
+            db.messages,
+          )..where((t) => t.id.equals(messageId))).getSingleOrNull();
 
           if (message != null) {
             final deliveredAtSql = "'${timestamp.replaceAll("'", "''")}'";
@@ -418,9 +421,9 @@ class MessageStatusRepository {
     await db.transaction(() async {
       for (final messageId in messageIds) {
         try {
-          final message = await (db.select(db.messages)
-                ..where((t) => t.id.equals(messageId)))
-              .getSingleOrNull();
+          final message = await (db.select(
+            db.messages,
+          )..where((t) => t.id.equals(messageId))).getSingleOrNull();
 
           if (message != null) {
             final timestampSql = "'${timestamp.replaceAll("'", "''")}'";
@@ -475,7 +478,8 @@ class MessageStatusRepository {
         VALUES ('$id', '$chatId', '$messageId', '$userId', $deliveredAtSql)
         ON CONFLICT(message_id, user_id) DO UPDATE SET
           chat_id = excluded.chat_id,
-          delivered_at = excluded.delivered_at
+          delivered_at = excluded.delivered_at,
+          reaction = COALESCE(message_info.reaction, excluded.reaction)
         ''',
         updates: {db.messageInfo},
       );
@@ -510,7 +514,8 @@ class MessageStatusRepository {
         VALUES ('$id', '$chatId', '$messageId', '$userId', $readAtSql)
         ON CONFLICT(message_id, user_id) DO UPDATE SET
           chat_id = excluded.chat_id,
-          read_at = excluded.read_at
+          read_at = excluded.read_at,
+          reaction = COALESCE(message_info.reaction, excluded.reaction)
         ''',
         updates: {db.messageInfo},
       );
@@ -529,24 +534,24 @@ class MessageStatusRepository {
 
   Future<bool> deleteMessageStatus(String id) async {
     final db = sqliteDatabase.database;
-    final deleted = await (db.delete(db.messageInfo)
-          ..where((t) => t.id.equals(id)))
-        .go();
+    final deleted = await (db.delete(
+      db.messageInfo,
+    )..where((t) => t.id.equals(id))).go();
     return deleted > 0;
   }
 
   Future<void> deleteMessageStatusesByMessageId(String messageId) async {
     final db = sqliteDatabase.database;
-    await (db.delete(db.messageInfo)
-          ..where((t) => t.messageId.equals(messageId)))
-        .go();
+    await (db.delete(
+      db.messageInfo,
+    )..where((t) => t.messageId.equals(messageId))).go();
   }
 
   Future<void> deleteMessageStatusesByConversationId(String chatId) async {
     final db = sqliteDatabase.database;
-    await (db.delete(db.messageInfo)
-          ..where((t) => t.chatId.equals(chatId)))
-        .go();
+    await (db.delete(
+      db.messageInfo,
+    )..where((t) => t.chatId.equals(chatId))).go();
   }
 
   Future<bool> deleteMessageStatusByMessageAndUser(
@@ -554,10 +559,11 @@ class MessageStatusRepository {
     String userId,
   ) async {
     final db = sqliteDatabase.database;
-    final deleted = await (db.delete(db.messageInfo)
-          ..where((t) =>
-              t.messageId.equals(messageId) & t.userId.equals(userId)))
-        .go();
+    final deleted =
+        await (db.delete(db.messageInfo)..where(
+              (t) => t.messageId.equals(messageId) & t.userId.equals(userId),
+            ))
+            .go();
     return deleted > 0;
   }
 
@@ -568,44 +574,48 @@ class MessageStatusRepository {
 
   Future<int> getReadCountByMessageId(String messageId) async {
     final db = sqliteDatabase.database;
-    final count = await (db.selectOnly(db.messageInfo)
-          ..addColumns([db.messageInfo.id.count()])
-          ..where(
-            db.messageInfo.messageId.equals(messageId) &
-                db.messageInfo.readAt.isNotNull(),
-          ))
-        .getSingle();
+    final count =
+        await (db.selectOnly(db.messageInfo)
+              ..addColumns([db.messageInfo.id.count()])
+              ..where(
+                db.messageInfo.messageId.equals(messageId) &
+                    db.messageInfo.readAt.isNotNull(),
+              ))
+            .getSingle();
     return count.read(db.messageInfo.id.count()) ?? 0;
   }
 
   Future<int> getDeliveredCountByMessageId(String messageId) async {
     final db = sqliteDatabase.database;
-    final count = await (db.selectOnly(db.messageInfo)
-          ..addColumns([db.messageInfo.id.count()])
-          ..where(
-            db.messageInfo.messageId.equals(messageId) &
-                db.messageInfo.deliveredAt.isNotNull(),
-          ))
-        .getSingle();
+    final count =
+        await (db.selectOnly(db.messageInfo)
+              ..addColumns([db.messageInfo.id.count()])
+              ..where(
+                db.messageInfo.messageId.equals(messageId) &
+                    db.messageInfo.deliveredAt.isNotNull(),
+              ))
+            .getSingle();
     return count.read(db.messageInfo.id.count()) ?? 0;
   }
 
   Future<int> getUnreadCountByMessageId(String messageId) async {
     final db = sqliteDatabase.database;
-    final total = await (db.selectOnly(db.messageInfo)
-          ..addColumns([db.messageInfo.id.count()])
-          ..where(db.messageInfo.messageId.equals(messageId)))
-        .getSingle();
+    final total =
+        await (db.selectOnly(db.messageInfo)
+              ..addColumns([db.messageInfo.id.count()])
+              ..where(db.messageInfo.messageId.equals(messageId)))
+            .getSingle();
     final readCount = await getReadCountByMessageId(messageId);
     return (total.read(db.messageInfo.id.count()) ?? 0) - readCount;
   }
 
   Future<int> getUndeliveredCountByMessageId(String messageId) async {
     final db = sqliteDatabase.database;
-    final total = await (db.selectOnly(db.messageInfo)
-          ..addColumns([db.messageInfo.id.count()])
-          ..where(db.messageInfo.messageId.equals(messageId)))
-        .getSingle();
+    final total =
+        await (db.selectOnly(db.messageInfo)
+              ..addColumns([db.messageInfo.id.count()])
+              ..where(db.messageInfo.messageId.equals(messageId)))
+            .getSingle();
     final deliveredCount = await getDeliveredCountByMessageId(messageId);
     return (total.read(db.messageInfo.id.count()) ?? 0) - deliveredCount;
   }
@@ -630,11 +640,12 @@ class MessageStatusRepository {
       final db = sqliteDatabase.database;
       final timestamp = readAt ?? DateTime.now().toIso8601String();
 
-      await (db.update(db.messageInfo)
-            ..where((t) =>
+      await (db.update(db.messageInfo)..where(
+            (t) =>
                 t.chatId.equals(chatId) &
                 t.userId.equals(userId) &
-                t.readAt.isNull()))
+                t.readAt.isNull(),
+          ))
           .write(MessageInfoCompanion(readAt: Value(timestamp)));
       return SqliteResult.success(message: 'All messages marked as read');
     } catch (e) {
@@ -657,19 +668,26 @@ class MessageStatusRepository {
     required String chatId,
     String? emoji,
   }) async {
+    debugPrint(
+      '[upsertReaction] msgId=$messageId userId=$userId chatId=$chatId emoji=$emoji',
+    );
     final db = sqliteDatabase.database;
-    final emojiValue =
-        emoji != null ? "'${emoji.replaceAll("'", "''")}'" : 'NULL';
+    final emojiValue = emoji != null
+        ? "'${emoji.replaceAll("'", "''")}'"
+        : 'NULL';
     final id = _uuid.v4();
     await db.customInsert(
       '''
       INSERT INTO message_info (id, chat_id, message_id, user_id, reaction)
       VALUES ('$id', '$chatId', '$messageId', '$userId', $emojiValue)
       ON CONFLICT(message_id, user_id) DO UPDATE SET
-        reaction = $emojiValue
+        reaction = $emojiValue,
+        delivered_at = COALESCE(message_info.delivered_at, excluded.delivered_at),
+        read_at = COALESCE(message_info.read_at, excluded.read_at)
       ''',
       updates: {db.messageInfo},
     );
+    debugPrint('[upsertReaction] ✅ write complete for msgId=$messageId');
   }
 
   /// Watch all emoji reactions for messages in a chat.
@@ -694,7 +712,7 @@ class MessageStatusRepository {
         final msgId = row.read<String>('message_id');
         final userId = row.read<String>('user_id');
         final emoji = row.read<String?>('reaction');
-        final userName = row.read<String?>('user_name') ?? 'User $userId';
+        final userName = row.read<String?>('user_name') ?? 'You';
         if (emoji == null) continue;
         result.putIfAbsent(msgId, () => {});
         result[msgId]!.putIfAbsent(emoji, () => <Map<String, dynamic>>[]);
@@ -752,8 +770,7 @@ class MessageStatusRepository {
       final db = sqliteDatabase.database;
       final timestamp = deliveredAt ?? DateTime.now().toIso8601String();
       await (db.update(db.messageInfo)
-            ..where((t) =>
-                t.userId.equals(userId) & t.deliveredAt.isNull()))
+            ..where((t) => t.userId.equals(userId) & t.deliveredAt.isNull()))
           .write(MessageInfoCompanion(deliveredAt: Value(timestamp)));
       return SqliteResult.success(message: 'All messages marked as delivered');
     } catch (e) {

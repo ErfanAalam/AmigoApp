@@ -62,6 +62,7 @@ class MessageBubbleConfig {
   // Reaction callbacks
   final void Function(String emoji)? onReact;
   final void Function(Map<String, dynamic> reactions)? onShowReactionUsers;
+  final Map<String, dynamic> reactions;
 
   MessageBubbleConfig({
     required this.message,
@@ -94,6 +95,7 @@ class MessageBubbleConfig {
     this.userRepo,
     this.onReact,
     this.onShowReactionUsers,
+    this.reactions = const {},
   });
 }
 
@@ -210,8 +212,22 @@ class MessageBubble extends ConsumerWidget {
 
   /// Build the emoji reaction row (shown below the bubble)
   Widget _buildReactionRow() {
-    // Reactions disabled — MessageModel no longer carries reactions.
-    return const SizedBox.shrink();
+    final reactions = config.reactions;
+    if (reactions.isEmpty) return const SizedBox.shrink();
+    debugPrint('[ReactionRow] Rendering for msg=${config.message.id} isMyMsg=${config.isMyMessage} emojis=${reactions.keys.toList()}');
+    return Transform.translate(
+      offset: const Offset(0, -5),
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: config.isMyMessage ? 0 : 2,
+          right: config.isMyMessage ? 2 : 0,
+        ),
+        child: MessageReactionRow(
+          reactions: reactions,
+          onTap: () => config.onShowReactionUsers?.call(reactions),
+        ),
+      ),
+    );
   }
 
   /// Build container using Stack (for DM)

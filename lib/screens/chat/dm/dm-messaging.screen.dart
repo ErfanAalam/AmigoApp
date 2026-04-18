@@ -611,6 +611,14 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         .watchReactionsByConversation(widget.dm.chatId)
         .listen(
           (reactions) {
+            debugPrint(
+              '[Reactions] Stream fired: ${reactions.length} messages with reactions',
+            );
+            for (final entry in reactions.entries) {
+              debugPrint(
+                '[Reactions]   msg=${entry.key} emojis=${(entry.value as Map).keys.toList()}',
+              );
+            }
             if (!_canSetState) return;
             _safeSetState(() => _reactionsByMessage = reactions);
           },
@@ -765,46 +773,61 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     } catch (e) {
       debugPrint('[DM] Error loading more messages: $e');
     } finally {
-      if (mounted)
+      if (mounted) {
         _safeSetState(() {
           _isLoadingMore = false;
         });
+      }
     }
   }
 
-  /// Sync all messages from server to local DB
-  /// This is called when user visits the conversation for the first time
+  /// Sync messages from server — lightweight gap detection.
+  /// First open: bulk fetch up to 300 messages.
+  /// Subsequent opens: only fetch if local is behind server's lastMsgId.
   Future<void> _syncMessagesFromServer() async {
-    // Check if sync is needed
     final needSync = await _conversationsRepo.getNeedSyncStatus(
       widget.dm.chatId,
     );
 
     if (needSync == false) {
-      // Subsequent open: gap-fill with latest messages
-      final firstPageResponse = await apiService.chat.getConversationHistory(
+      // Subsequent open: gap-check only
+      final localLatestId = _messages.isNotEmpty ? _messages.last.id : null;
+      final serverLatestId = widget.dm.lastMsgId;
+
+      if (localLatestId == null ||
+          localLatestId == serverLatestId ||
+          serverLatestId == null) {
+        _hasMoreOnServer = true;
+        return;
+      }
+
+      // Local is behind — fetch only the gap
+      debugPrint(
+        '[Sync] Gap detected: local=$localLatestId server=$serverLatestId',
+      );
+      final gapResponse = await apiService.chat.getConversationHistory(
         conversationId: widget.dm.chatId,
+        afterMessageId: localLatestId,
         limit: 100,
       );
 
-      if (firstPageResponse.data != null) {
-        final firstPageHistory = ConversationHistoryResponse.fromJson(
-          firstPageResponse.data as Map<String, dynamic>,
+      if (gapResponse.data != null) {
+        final gapHistory = ConversationHistoryResponse.fromJson(
+          gapResponse.data as Map<String, dynamic>,
         );
-        if (firstPageHistory.messages.isNotEmpty) {
-          await _messagesRepo.insertMessages(firstPageHistory.messages);
+        if (gapHistory.messages.isNotEmpty) {
+          await _messagesRepo.insertMessages(gapHistory.messages);
+          debugPrint(
+            '[Sync] Gap filled: ${gapHistory.messages.length} messages',
+          );
         }
       }
 
-      // Sync message statuses silently in background
-      await _syncMessageStatuses();
-
-      _hasMoreOnServer = true; // assume more exist on server
-
+      _hasMoreOnServer = true;
       return;
     }
 
-    // First open: fetch up to 3 batches of 100 = 300 messages using cursor pagination
+    // First open: fetch up to 3 batches of 100 = 300 messages
     const int firstOpenMaxBatches = 3;
     const int limit = 100;
     int batch = 0;
@@ -838,7 +861,6 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
         await _messagesRepo.insertMessages(history.messages);
 
-        // Use the oldest message from this batch as the cursor for the next
         beforeCursor = history.messages.first.id;
         hasMore = history.hasMore;
         batch++;
@@ -847,26 +869,30 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
       _hasMoreOnServer = hasMore;
 
-      // Messages are in DB — hide spinner immediately, chat is usable
-      if (mounted)
+      if (mounted) {
         _safeSetState(() {
           _isSyncingMessages = false;
         });
+      }
 
-      // Sync statuses and mark synced silently in background
+      // First open only: sync statuses from server (no local data to overwrite)
       await _syncMessageStatuses();
       await _conversationsRepo.updateNeedSyncStatus(widget.dm.chatId, false);
     } catch (e) {
       debugPrint('❌ Error syncing messages: $e');
-      if (mounted)
+      if (mounted) {
         _safeSetState(() {
           _isSyncingMessages = false;
         });
+      }
     }
   }
 
   /// Sync message statuses from server to local DB
   Future<void> _syncMessageStatuses() async {
+    print("-----------------------------------------------------------");
+    print("_syncMessageStatuses");
+    print("-----------------------------------------------------------");
     try {
       int page = 1;
       const int limit = 1000; // Fetch up to 1000 statuses per page
@@ -890,17 +916,21 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           break; // No more statuses
         }
 
-        // Convert to format expected by repository
+        if (statuses.isNotEmpty) {
+          debugPrint('[StatusSync] Sample status: ${statuses.first}');
+        }
+
+        // Convert to format expected by repository (Drizzle returns camelCase)
         final List<Map<String, dynamic>> statusesToInsert = statuses.map((
           status,
         ) {
           return {
             'id': status['id'],
-            'conversationId': status['conv_id'],
-            'messageId': status['message_id'],
-            'userId': status['user_id'],
-            'deliveredAt': status['delivered_at'],
-            'readAt': status['read_at'],
+            'conversationId': status['chatId'] ?? status['chat_id'] ?? status['conv_id'],
+            'messageId': status['messageId'] ?? status['message_id'],
+            'userId': status['userId'] ?? status['user_id'],
+            'deliveredAt': status['deliveredAt'] ?? status['delivered_at'],
+            'readAt': status['readAt'] ?? status['read_at'],
             'reaction': status['reaction'],
           };
         }).toList();
@@ -2727,8 +2757,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   ) {
     if (_selectedMessages.isNotEmpty ||
         _swipeStartPosition == null ||
-        _isScrolling)
+        _isScrolling) {
       return;
+    }
 
     final currentPosition = details.globalPosition;
     final dx = currentPosition.dx - _swipeStartPosition!.dx;
@@ -2738,8 +2769,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Using squared distance avoids sqrt and keeps things fast.
     if (!_isSwipeGesture) {
       final distSq = dx * dx + dy * dy;
-      if (distSq < _minSwipeDistanceSq)
+      if (distSq < _minSwipeDistanceSq) {
         return; // too little movement to classify
+      }
 
       // Strictly left-to-right: vertical component must be < ~10° off horizontal
       if (dx > 0 && dy < dx * _maxSwipeAngleRatio) {
@@ -2915,6 +2947,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         onReplyTap: (String id) => _scrollToMessage(id),
         messagesRepo: _messagesRepo,
         userRepo: _userRepo,
+        reactions: _reactionsByMessage[message.id] ?? {},
         onReact: (emoji) => _reactToMessage(message, emoji),
         onShowReactionUsers: (reactions) {
           showModalBottomSheet(

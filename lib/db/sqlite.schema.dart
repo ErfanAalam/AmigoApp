@@ -115,7 +115,6 @@ class Messages extends Table {
 // Per-user delivery / read / reaction / delete-for-me state
 // (renamed from MessageStatusModel to MessageInfo for parity with backend)
 class MessageInfo extends Table {
-  TextColumn get id => text()();
   TextColumn get chatId => text()();
   TextColumn get messageId => text()();
   TextColumn get userId => text()();
@@ -125,7 +124,7 @@ class MessageInfo extends Table {
   TextColumn get deletedAt => text().nullable()(); // per-user "delete for me"
 
   @override
-  Set<Column> get primaryKey => {id};
+  Set<Column> get primaryKey => {messageId, userId};
 }
 
 // Outbound WS events queued while offline, replayed on reconnect.
@@ -155,7 +154,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration {
@@ -193,9 +192,6 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Future<void> _createIndices(Migrator m) async {
-    await m.database.customStatement(
-      'CREATE UNIQUE INDEX IF NOT EXISTS unique_user_message ON message_info(message_id, user_id)',
-    );
     await m.database.customStatement(
       'CREATE UNIQUE INDEX IF NOT EXISTS unique_chat_member_active '
       'ON chat_members(chat_id, user_id) WHERE removed_at IS NULL',
