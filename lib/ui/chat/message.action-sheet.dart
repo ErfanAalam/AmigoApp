@@ -133,7 +133,10 @@ class MessageActionSheet extends StatelessWidget {
               // Quick emoji reactions row
               if (onReact != null)
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
                   child: EmojiReactionPicker(
                     myReactions: myReactions,
                     onEmojiSelected: (emoji) {
@@ -142,12 +145,11 @@ class MessageActionSheet extends StatelessWidget {
                     },
                   ),
                 ),
-              if (onReact != null)
-                Divider(height: 1, color: Colors.grey[200]),
+              if (onReact != null) Divider(height: 1, color: Colors.grey[200]),
               // Message preview
               Container(
                 constraints: const BoxConstraints(maxHeight: 62),
-                margin: const EdgeInsets.only(left: 10, right: 10, bottom: 10),
+                margin: const EdgeInsets.all(10),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: Colors.grey[50],
@@ -257,7 +259,9 @@ class MessageActionSheet extends StatelessWidget {
                       },
                     ),
                   // Delete options - show different options based on context
-                  if (onDeleteForMe != null || onDeleteForEveryone != null || (isAdmin && onDelete != null))
+                  if (onDeleteForMe != null ||
+                      onDeleteForEveryone != null ||
+                      (isAdmin && onDelete != null))
                     _buildDeleteOptions(context),
                 ],
               ),
@@ -281,7 +285,7 @@ class MessageActionSheet extends StatelessWidget {
         },
       );
     }
-    
+
     // If only delete for me is available
     if (onDeleteForMe != null) {
       return MessageActionButton(
@@ -294,7 +298,7 @@ class MessageActionSheet extends StatelessWidget {
         },
       );
     }
-    
+
     // If only delete for everyone is available
     if (onDeleteForEveryone != null) {
       return MessageActionButton(
@@ -307,7 +311,7 @@ class MessageActionSheet extends StatelessWidget {
         },
       );
     }
-    
+
     // Admin delete (for groups)
     if (isAdmin && onDelete != null) {
       return MessageActionButton(
@@ -320,7 +324,7 @@ class MessageActionSheet extends StatelessWidget {
         },
       );
     }
-    
+
     return const SizedBox.shrink();
   }
 
@@ -338,9 +342,7 @@ class MessageActionSheet extends StatelessWidget {
             ),
             title: const Text(
               'Delete Message',
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-              ),
+              style: TextStyle(fontWeight: FontWeight.w600),
             ),
             content: const Text('How would you like to delete this message?'),
             actions: [

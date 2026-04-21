@@ -2,7 +2,6 @@ import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:drift/remote.dart';
 import 'package:flutter/foundation.dart';
-import 'package:uuid/uuid.dart';
 import '../../models/message-status.model.dart';
 import '../../types/socket.types.dart' show MessageStatusType;
 import '../sqlite.db.dart';
@@ -11,7 +10,6 @@ import '../../types/sqlite.types.dart';
 
 class MessageStatusRepository {
   final sqliteDatabase = SqliteDatabase.instance;
-  static const _uuid = Uuid();
 
   int? _extractSqliteErrorCode(dynamic e) {
     try {
@@ -27,7 +25,6 @@ class MessageStatusRepository {
 
   MessageInfoModel _rowToModel(MessageInfoData row) {
     return MessageInfoModel(
-      id: row.id,
       chatId: row.chatId,
       messageId: row.messageId,
       userId: row.userId,
@@ -54,11 +51,10 @@ class MessageStatusRepository {
       final readAtValue = readAt != null
           ? "'${readAt.replaceAll("'", "''")}'"
           : 'NULL';
-      final id = _uuid.v4();
       await db.customInsert(
         '''
-        INSERT INTO message_info (id, chat_id, message_id, user_id, delivered_at, read_at)
-        VALUES ('$id', '$chatId', '$messageId', '$userId', $deliveredAtValue, $readAtValue)
+        INSERT INTO message_info (chat_id, message_id, user_id, delivered_at, read_at)
+        VALUES ('$chatId', '$messageId', '$userId', $deliveredAtValue, $readAtValue)
         ON CONFLICT(message_id, user_id) DO UPDATE SET
           chat_id = excluded.chat_id,
           delivered_at = COALESCE(excluded.delivered_at, message_info.delivered_at),
@@ -104,13 +100,12 @@ class MessageStatusRepository {
           final reactionValue = reaction != null
               ? "'${reaction.replaceAll("'", "''")}'"
               : 'NULL';
-          final id = _uuid.v4();
 
           await db.customInsert(
             '''
             INSERT INTO message_info (
-              id, chat_id, message_id, user_id, delivered_at, read_at, reaction
-            ) VALUES ('$id', '$chatId', '$messageId', '$userId', $deliveredAtValue, $readAtValue, $reactionValue)
+              chat_id, message_id, user_id, delivered_at, read_at, reaction
+            ) VALUES ('$chatId', '$messageId', '$userId', $deliveredAtValue, $readAtValue, $reactionValue)
             ON CONFLICT(message_id, user_id) DO UPDATE SET
               chat_id = excluded.chat_id,
               delivered_at = COALESCE(excluded.delivered_at, message_info.delivered_at),
@@ -165,15 +160,6 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final rows = await db.select(db.messageInfo).get();
     return rows.map(_rowToModel).toList();
-  }
-
-  Future<MessageInfoModel?> getMessageStatusById(String id) async {
-    final db = sqliteDatabase.database;
-    final row = await (db.select(
-      db.messageInfo,
-    )..where((t) => t.id.equals(id))).getSingleOrNull();
-    if (row == null) return null;
-    return _rowToModel(row);
   }
 
   Future<List<MessageInfoModel>> getMessageStatusesByMessageId(
@@ -246,19 +232,6 @@ class MessageStatusRepository {
             .get();
 
     if (rows.isEmpty) return null;
-
-    if (rows.length > 1) {
-      final first = rows.first;
-      await db.transaction(() async {
-        for (int i = 1; i < rows.length; i++) {
-          await (db.delete(
-            db.messageInfo,
-          )..where((t) => t.id.equals(rows[i].id))).go();
-        }
-      });
-      return _rowToModel(first);
-    }
-
     return _rowToModel(rows.first);
   }
 
@@ -301,11 +274,10 @@ class MessageStatusRepository {
 
       if (message != null) {
         final deliveredAtSql = "'${timestamp.replaceAll("'", "''")}'";
-        final id = _uuid.v4();
         await db.customInsert(
           '''
-          INSERT INTO message_info (id, chat_id, message_id, user_id, delivered_at)
-          VALUES ('$id', '${message.chatId}', '$messageId', '$userId', $deliveredAtSql)
+          INSERT INTO message_info (chat_id, message_id, user_id, delivered_at)
+          VALUES ('${message.chatId}', '$messageId', '$userId', $deliveredAtSql)
           ON CONFLICT(message_id, user_id) DO UPDATE SET
             chat_id = excluded.chat_id,
             delivered_at = excluded.delivered_at
@@ -341,11 +313,10 @@ class MessageStatusRepository {
 
       if (message != null) {
         final timestampSql = "'${timestamp.replaceAll("'", "''")}'";
-        final id = _uuid.v4();
         await db.customInsert(
           '''
-          INSERT INTO message_info (id, chat_id, message_id, user_id, delivered_at, read_at)
-          VALUES ('$id', '${message.chatId}', '$messageId', '$userId', $timestampSql, $timestampSql)
+          INSERT INTO message_info (chat_id, message_id, user_id, delivered_at, read_at)
+          VALUES ('${message.chatId}', '$messageId', '$userId', $timestampSql, $timestampSql)
           ON CONFLICT(message_id, user_id) DO UPDATE SET
             chat_id = excluded.chat_id,
             delivered_at = COALESCE(message_info.delivered_at, excluded.delivered_at),
@@ -386,11 +357,10 @@ class MessageStatusRepository {
 
           if (message != null) {
             final deliveredAtSql = "'${timestamp.replaceAll("'", "''")}'";
-            final id = _uuid.v4();
             await db.customInsert(
               '''
-              INSERT INTO message_info (id, chat_id, message_id, user_id, delivered_at)
-              VALUES ('$id', '${message.chatId}', '$messageId', '$userId', $deliveredAtSql)
+              INSERT INTO message_info (chat_id, message_id, user_id, delivered_at)
+              VALUES ('${message.chatId}', '$messageId', '$userId', $deliveredAtSql)
               ON CONFLICT(message_id, user_id) DO UPDATE SET
                 chat_id = excluded.chat_id,
                 delivered_at = excluded.delivered_at
@@ -427,11 +397,10 @@ class MessageStatusRepository {
 
           if (message != null) {
             final timestampSql = "'${timestamp.replaceAll("'", "''")}'";
-            final id = _uuid.v4();
             await db.customInsert(
               '''
-              INSERT INTO message_info (id, chat_id, message_id, user_id, delivered_at, read_at)
-              VALUES ('$id', '${message.chatId}', '$messageId', '$userId', $timestampSql, $timestampSql)
+              INSERT INTO message_info (chat_id, message_id, user_id, delivered_at, read_at)
+              VALUES ('${message.chatId}', '$messageId', '$userId', $timestampSql, $timestampSql)
               ON CONFLICT(message_id, user_id) DO UPDATE SET
                 chat_id = excluded.chat_id,
                 delivered_at = COALESCE(message_info.delivered_at, excluded.delivered_at),
@@ -471,11 +440,10 @@ class MessageStatusRepository {
       final deliveredAtSql = deliveredAt != null
           ? "'${deliveredAt.replaceAll("'", "''")}'"
           : 'NULL';
-      final id = _uuid.v4();
       await db.customInsert(
         '''
-        INSERT INTO message_info (id, chat_id, message_id, user_id, delivered_at)
-        VALUES ('$id', '$chatId', '$messageId', '$userId', $deliveredAtSql)
+        INSERT INTO message_info (chat_id, message_id, user_id, delivered_at)
+        VALUES ('$chatId', '$messageId', '$userId', $deliveredAtSql)
         ON CONFLICT(message_id, user_id) DO UPDATE SET
           chat_id = excluded.chat_id,
           delivered_at = excluded.delivered_at,
@@ -507,11 +475,10 @@ class MessageStatusRepository {
       final readAtSql = readAt != null
           ? "'${readAt.replaceAll("'", "''")}'"
           : 'NULL';
-      final id = _uuid.v4();
       await db.customInsert(
         '''
-        INSERT INTO message_info (id, chat_id, message_id, user_id, read_at)
-        VALUES ('$id', '$chatId', '$messageId', '$userId', $readAtSql)
+        INSERT INTO message_info (chat_id, message_id, user_id, read_at)
+        VALUES ('$chatId', '$messageId', '$userId', $readAtSql)
         ON CONFLICT(message_id, user_id) DO UPDATE SET
           chat_id = excluded.chat_id,
           read_at = excluded.read_at,
@@ -530,14 +497,6 @@ class MessageStatusRepository {
         errorCode: errorCode,
       );
     }
-  }
-
-  Future<bool> deleteMessageStatus(String id) async {
-    final db = sqliteDatabase.database;
-    final deleted = await (db.delete(
-      db.messageInfo,
-    )..where((t) => t.id.equals(id))).go();
-    return deleted > 0;
   }
 
   Future<void> deleteMessageStatusesByMessageId(String messageId) async {
@@ -576,48 +535,48 @@ class MessageStatusRepository {
     final db = sqliteDatabase.database;
     final count =
         await (db.selectOnly(db.messageInfo)
-              ..addColumns([db.messageInfo.id.count()])
+              ..addColumns([db.messageInfo.messageId.count()])
               ..where(
                 db.messageInfo.messageId.equals(messageId) &
                     db.messageInfo.readAt.isNotNull(),
               ))
             .getSingle();
-    return count.read(db.messageInfo.id.count()) ?? 0;
+    return count.read(db.messageInfo.messageId.count()) ?? 0;
   }
 
   Future<int> getDeliveredCountByMessageId(String messageId) async {
     final db = sqliteDatabase.database;
     final count =
         await (db.selectOnly(db.messageInfo)
-              ..addColumns([db.messageInfo.id.count()])
+              ..addColumns([db.messageInfo.messageId.count()])
               ..where(
                 db.messageInfo.messageId.equals(messageId) &
                     db.messageInfo.deliveredAt.isNotNull(),
               ))
             .getSingle();
-    return count.read(db.messageInfo.id.count()) ?? 0;
+    return count.read(db.messageInfo.messageId.count()) ?? 0;
   }
 
   Future<int> getUnreadCountByMessageId(String messageId) async {
     final db = sqliteDatabase.database;
     final total =
         await (db.selectOnly(db.messageInfo)
-              ..addColumns([db.messageInfo.id.count()])
+              ..addColumns([db.messageInfo.messageId.count()])
               ..where(db.messageInfo.messageId.equals(messageId)))
             .getSingle();
     final readCount = await getReadCountByMessageId(messageId);
-    return (total.read(db.messageInfo.id.count()) ?? 0) - readCount;
+    return (total.read(db.messageInfo.messageId.count()) ?? 0) - readCount;
   }
 
   Future<int> getUndeliveredCountByMessageId(String messageId) async {
     final db = sqliteDatabase.database;
     final total =
         await (db.selectOnly(db.messageInfo)
-              ..addColumns([db.messageInfo.id.count()])
+              ..addColumns([db.messageInfo.messageId.count()])
               ..where(db.messageInfo.messageId.equals(messageId)))
             .getSingle();
     final deliveredCount = await getDeliveredCountByMessageId(messageId);
-    return (total.read(db.messageInfo.id.count()) ?? 0) - deliveredCount;
+    return (total.read(db.messageInfo.messageId.count()) ?? 0) - deliveredCount;
   }
 
   Future<bool> isReadByUser(String messageId, String userId) async {
@@ -675,11 +634,10 @@ class MessageStatusRepository {
     final emojiValue = emoji != null
         ? "'${emoji.replaceAll("'", "''")}'"
         : 'NULL';
-    final id = _uuid.v4();
     await db.customInsert(
       '''
-      INSERT INTO message_info (id, chat_id, message_id, user_id, reaction)
-      VALUES ('$id', '$chatId', '$messageId', '$userId', $emojiValue)
+      INSERT INTO message_info (chat_id, message_id, user_id, reaction)
+      VALUES ('$chatId', '$messageId', '$userId', $emojiValue)
       ON CONFLICT(message_id, user_id) DO UPDATE SET
         reaction = $emojiValue,
         delivered_at = COALESCE(message_info.delivered_at, excluded.delivered_at),

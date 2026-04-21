@@ -38,6 +38,7 @@ int? _backgroundPollingCallId;
 /// Background message handler (must be top-level function)
 @pragma('vm:entry-point')
 Future<void> fcmBackgroundHandler(RemoteMessage message) async {
+  debugPrint('[FCM-BG] 🔔 Handler fired, data keys: ${message.data.keys.toList()}');
   await Firebase.initializeApp();
 
   // Initialize ApiService for background handler
@@ -113,6 +114,7 @@ Future<void> fcmBackgroundHandler(RemoteMessage message) async {
       break;
 
     case 'ws-message':
+      debugPrint('[FCM-BG] ws-message batch: ${wsMessages.length} messages');
       await _handleMessageNotificationBatchBackground(
         data,
         message.notification,
@@ -309,11 +311,19 @@ Future<void> _handleMessageNotificationBatchBackground(
                       ? chatPayload.msgType.toString()
                       : 'New message');
 
-              await notificationService.showMessageNotification(
-                title: 'New Message',
-                body: msgBody.trim(),
-                chatPayload: chatPayload,
-              );
+              debugPrint('[FCM-BG] Showing notification for msg=${chatPayload.id}');
+              try {
+                await notificationService.showMessageNotification(
+                  title: 'New Message',
+                  body: msgBody.trim(),
+                  chatPayload: chatPayload,
+                );
+                debugPrint('[FCM-BG] ✅ Notification displayed');
+              } catch (e, st) {
+                debugPrint('[FCM-BG] ❌ showMessageNotification failed: $e\n$st');
+              }
+            } else {
+              debugPrint('[FCM-BG] Message ${chatPayload.id} already exists, skipping notification');
             }
 
             await _storeMessageFromPayloadBackground(

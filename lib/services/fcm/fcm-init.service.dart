@@ -88,11 +88,32 @@ class NotificationService {
 
       // Get FCM token
       await _getFCMToken();
+      debugPrint('[FCM] Token: ${_fcmToken?.substring(0, 20)}...');
+
+      // Upload token to backend (fire-and-forget; only succeeds if user is logged in)
+      if (_fcmToken != null) {
+        apiService.auth.updateFCMToken(_fcmToken!).then((_) {
+          debugPrint('[FCM] ✅ Token uploaded to backend');
+        }).catchError((e) {
+          debugPrint('[FCM] ❌ Token upload failed (user may not be logged in yet): $e');
+        });
+      }
+
+      // Listen for token refresh and upload the new one
+      _firebaseMessaging!.onTokenRefresh.listen((newToken) {
+        debugPrint('[FCM] Token refreshed');
+        _fcmToken = newToken;
+        apiService.auth.updateFCMToken(newToken).then((_) {
+          debugPrint('[FCM] ✅ Refreshed token uploaded');
+        }).catchError((e) {
+          debugPrint('[FCM] ❌ Refreshed token upload failed: $e');
+        });
+      });
 
       // Set up message handlers
       _setupMessageHandlers();
     } catch (e) {
-      debugPrint('❌ Error initializing NotificationService');
+      debugPrint('❌ Error initializing NotificationService: $e');
     }
   }
 

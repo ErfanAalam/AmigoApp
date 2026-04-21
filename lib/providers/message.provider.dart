@@ -5,6 +5,7 @@ import '../models/conversations.model.dart';
 import '../models/group.model.dart';
 import '../models/message.model.dart';
 import '../services/user-status.service.dart';
+import '../utils/user.utils.dart';
 
 /// Reactive stream of messages for a specific conversation.
 /// Backed by a Drift watch query — the UI auto-rebuilds whenever any write
@@ -17,8 +18,14 @@ final messageStreamProvider =
 /// Reactive stream of DM conversations ordered by last activity.
 /// Backed by Drift — auto-sorts the list when a new message updates the
 /// conversations table, regardless of how the message arrived.
-final dmListStreamProvider = StreamProvider<List<DmModel>>((ref) {
-  return ConversationRepository().watchDmConversations();
+final dmListStreamProvider = StreamProvider<List<DmModel>>((ref) async* {
+  // Resolve current user id once so the repo can exclude it from the DM's
+  // member list when picking the "recipient" — otherwise if chat_members
+  // contains both users, the current user's row may be picked first and
+  // the DM list ends up showing our own name instead of the recipient's.
+  final user = await UserUtils().getUserDetails();
+  yield* ConversationRepository()
+      .watchDmConversations(currentUserId: user?.id);
 });
 
 /// Reactive stream of group conversations ordered by last activity.

@@ -3499,15 +3499,6 @@ class $MessageInfoTable extends MessageInfo
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
   $MessageInfoTable(this.attachedDatabase, [this._alias]);
-  static const VerificationMeta _idMeta = const VerificationMeta('id');
-  @override
-  late final GeneratedColumn<String> id = GeneratedColumn<String>(
-    'id',
-    aliasedName,
-    false,
-    type: DriftSqlType.string,
-    requiredDuringInsert: true,
-  );
   static const VerificationMeta _chatIdMeta = const VerificationMeta('chatId');
   @override
   late final GeneratedColumn<String> chatId = GeneratedColumn<String>(
@@ -3581,7 +3572,6 @@ class $MessageInfoTable extends MessageInfo
   );
   @override
   List<GeneratedColumn> get $columns => [
-    id,
     chatId,
     messageId,
     userId,
@@ -3602,11 +3592,6 @@ class $MessageInfoTable extends MessageInfo
   }) {
     final context = VerificationContext();
     final data = instance.toColumns(true);
-    if (data.containsKey('id')) {
-      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
-    } else if (isInserting) {
-      context.missing(_idMeta);
-    }
     if (data.containsKey('chat_id')) {
       context.handle(
         _chatIdMeta,
@@ -3662,15 +3647,11 @@ class $MessageInfoTable extends MessageInfo
   }
 
   @override
-  Set<GeneratedColumn> get $primaryKey => {id};
+  Set<GeneratedColumn> get $primaryKey => {messageId, userId};
   @override
   MessageInfoData map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return MessageInfoData(
-      id: attachedDatabase.typeMapping.read(
-        DriftSqlType.string,
-        data['${effectivePrefix}id'],
-      )!,
       chatId: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}chat_id'],
@@ -3709,7 +3690,6 @@ class $MessageInfoTable extends MessageInfo
 }
 
 class MessageInfoData extends DataClass implements Insertable<MessageInfoData> {
-  final String id;
   final String chatId;
   final String messageId;
   final String userId;
@@ -3718,7 +3698,6 @@ class MessageInfoData extends DataClass implements Insertable<MessageInfoData> {
   final String? reaction;
   final String? deletedAt;
   const MessageInfoData({
-    required this.id,
     required this.chatId,
     required this.messageId,
     required this.userId,
@@ -3730,7 +3709,6 @@ class MessageInfoData extends DataClass implements Insertable<MessageInfoData> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
-    map['id'] = Variable<String>(id);
     map['chat_id'] = Variable<String>(chatId);
     map['message_id'] = Variable<String>(messageId);
     map['user_id'] = Variable<String>(userId);
@@ -3751,7 +3729,6 @@ class MessageInfoData extends DataClass implements Insertable<MessageInfoData> {
 
   MessageInfoCompanion toCompanion(bool nullToAbsent) {
     return MessageInfoCompanion(
-      id: Value(id),
       chatId: Value(chatId),
       messageId: Value(messageId),
       userId: Value(userId),
@@ -3776,7 +3753,6 @@ class MessageInfoData extends DataClass implements Insertable<MessageInfoData> {
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return MessageInfoData(
-      id: serializer.fromJson<String>(json['id']),
       chatId: serializer.fromJson<String>(json['chatId']),
       messageId: serializer.fromJson<String>(json['messageId']),
       userId: serializer.fromJson<String>(json['userId']),
@@ -3790,7 +3766,6 @@ class MessageInfoData extends DataClass implements Insertable<MessageInfoData> {
   Map<String, dynamic> toJson({ValueSerializer? serializer}) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
-      'id': serializer.toJson<String>(id),
       'chatId': serializer.toJson<String>(chatId),
       'messageId': serializer.toJson<String>(messageId),
       'userId': serializer.toJson<String>(userId),
@@ -3802,7 +3777,6 @@ class MessageInfoData extends DataClass implements Insertable<MessageInfoData> {
   }
 
   MessageInfoData copyWith({
-    String? id,
     String? chatId,
     String? messageId,
     String? userId,
@@ -3811,7 +3785,6 @@ class MessageInfoData extends DataClass implements Insertable<MessageInfoData> {
     Value<String?> reaction = const Value.absent(),
     Value<String?> deletedAt = const Value.absent(),
   }) => MessageInfoData(
-    id: id ?? this.id,
     chatId: chatId ?? this.chatId,
     messageId: messageId ?? this.messageId,
     userId: userId ?? this.userId,
@@ -3822,7 +3795,6 @@ class MessageInfoData extends DataClass implements Insertable<MessageInfoData> {
   );
   MessageInfoData copyWithCompanion(MessageInfoCompanion data) {
     return MessageInfoData(
-      id: data.id.present ? data.id.value : this.id,
       chatId: data.chatId.present ? data.chatId.value : this.chatId,
       messageId: data.messageId.present ? data.messageId.value : this.messageId,
       userId: data.userId.present ? data.userId.value : this.userId,
@@ -3838,7 +3810,6 @@ class MessageInfoData extends DataClass implements Insertable<MessageInfoData> {
   @override
   String toString() {
     return (StringBuffer('MessageInfoData(')
-          ..write('id: $id, ')
           ..write('chatId: $chatId, ')
           ..write('messageId: $messageId, ')
           ..write('userId: $userId, ')
@@ -3852,7 +3823,6 @@ class MessageInfoData extends DataClass implements Insertable<MessageInfoData> {
 
   @override
   int get hashCode => Object.hash(
-    id,
     chatId,
     messageId,
     userId,
@@ -3865,7 +3835,6 @@ class MessageInfoData extends DataClass implements Insertable<MessageInfoData> {
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is MessageInfoData &&
-          other.id == this.id &&
           other.chatId == this.chatId &&
           other.messageId == this.messageId &&
           other.userId == this.userId &&
@@ -3876,7 +3845,6 @@ class MessageInfoData extends DataClass implements Insertable<MessageInfoData> {
 }
 
 class MessageInfoCompanion extends UpdateCompanion<MessageInfoData> {
-  final Value<String> id;
   final Value<String> chatId;
   final Value<String> messageId;
   final Value<String> userId;
@@ -3886,7 +3854,6 @@ class MessageInfoCompanion extends UpdateCompanion<MessageInfoData> {
   final Value<String?> deletedAt;
   final Value<int> rowid;
   const MessageInfoCompanion({
-    this.id = const Value.absent(),
     this.chatId = const Value.absent(),
     this.messageId = const Value.absent(),
     this.userId = const Value.absent(),
@@ -3897,7 +3864,6 @@ class MessageInfoCompanion extends UpdateCompanion<MessageInfoData> {
     this.rowid = const Value.absent(),
   });
   MessageInfoCompanion.insert({
-    required String id,
     required String chatId,
     required String messageId,
     required String userId,
@@ -3906,12 +3872,10 @@ class MessageInfoCompanion extends UpdateCompanion<MessageInfoData> {
     this.reaction = const Value.absent(),
     this.deletedAt = const Value.absent(),
     this.rowid = const Value.absent(),
-  }) : id = Value(id),
-       chatId = Value(chatId),
+  }) : chatId = Value(chatId),
        messageId = Value(messageId),
        userId = Value(userId);
   static Insertable<MessageInfoData> custom({
-    Expression<String>? id,
     Expression<String>? chatId,
     Expression<String>? messageId,
     Expression<String>? userId,
@@ -3922,7 +3886,6 @@ class MessageInfoCompanion extends UpdateCompanion<MessageInfoData> {
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
-      if (id != null) 'id': id,
       if (chatId != null) 'chat_id': chatId,
       if (messageId != null) 'message_id': messageId,
       if (userId != null) 'user_id': userId,
@@ -3935,7 +3898,6 @@ class MessageInfoCompanion extends UpdateCompanion<MessageInfoData> {
   }
 
   MessageInfoCompanion copyWith({
-    Value<String>? id,
     Value<String>? chatId,
     Value<String>? messageId,
     Value<String>? userId,
@@ -3946,7 +3908,6 @@ class MessageInfoCompanion extends UpdateCompanion<MessageInfoData> {
     Value<int>? rowid,
   }) {
     return MessageInfoCompanion(
-      id: id ?? this.id,
       chatId: chatId ?? this.chatId,
       messageId: messageId ?? this.messageId,
       userId: userId ?? this.userId,
@@ -3961,9 +3922,6 @@ class MessageInfoCompanion extends UpdateCompanion<MessageInfoData> {
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
-    if (id.present) {
-      map['id'] = Variable<String>(id.value);
-    }
     if (chatId.present) {
       map['chat_id'] = Variable<String>(chatId.value);
     }
@@ -3994,7 +3952,6 @@ class MessageInfoCompanion extends UpdateCompanion<MessageInfoData> {
   @override
   String toString() {
     return (StringBuffer('MessageInfoCompanion(')
-          ..write('id: $id, ')
           ..write('chatId: $chatId, ')
           ..write('messageId: $messageId, ')
           ..write('userId: $userId, ')
@@ -6038,7 +5995,6 @@ typedef $$MessagesTableProcessedTableManager =
     >;
 typedef $$MessageInfoTableCreateCompanionBuilder =
     MessageInfoCompanion Function({
-      required String id,
       required String chatId,
       required String messageId,
       required String userId,
@@ -6050,7 +6006,6 @@ typedef $$MessageInfoTableCreateCompanionBuilder =
     });
 typedef $$MessageInfoTableUpdateCompanionBuilder =
     MessageInfoCompanion Function({
-      Value<String> id,
       Value<String> chatId,
       Value<String> messageId,
       Value<String> userId,
@@ -6070,11 +6025,6 @@ class $$MessageInfoTableFilterComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
-  ColumnFilters<String> get id => $composableBuilder(
-    column: $table.id,
-    builder: (column) => ColumnFilters(column),
-  );
-
   ColumnFilters<String> get chatId => $composableBuilder(
     column: $table.chatId,
     builder: (column) => ColumnFilters(column),
@@ -6120,11 +6070,6 @@ class $$MessageInfoTableOrderingComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
-  ColumnOrderings<String> get id => $composableBuilder(
-    column: $table.id,
-    builder: (column) => ColumnOrderings(column),
-  );
-
   ColumnOrderings<String> get chatId => $composableBuilder(
     column: $table.chatId,
     builder: (column) => ColumnOrderings(column),
@@ -6170,9 +6115,6 @@ class $$MessageInfoTableAnnotationComposer
     super.$addJoinBuilderToRootComposer,
     super.$removeJoinBuilderFromRootComposer,
   });
-  GeneratedColumn<String> get id =>
-      $composableBuilder(column: $table.id, builder: (column) => column);
-
   GeneratedColumn<String> get chatId =>
       $composableBuilder(column: $table.chatId, builder: (column) => column);
 
@@ -6228,7 +6170,6 @@ class $$MessageInfoTableTableManager
               $$MessageInfoTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
-                Value<String> id = const Value.absent(),
                 Value<String> chatId = const Value.absent(),
                 Value<String> messageId = const Value.absent(),
                 Value<String> userId = const Value.absent(),
@@ -6238,7 +6179,6 @@ class $$MessageInfoTableTableManager
                 Value<String?> deletedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MessageInfoCompanion(
-                id: id,
                 chatId: chatId,
                 messageId: messageId,
                 userId: userId,
@@ -6250,7 +6190,6 @@ class $$MessageInfoTableTableManager
               ),
           createCompanionCallback:
               ({
-                required String id,
                 required String chatId,
                 required String messageId,
                 required String userId,
@@ -6260,7 +6199,6 @@ class $$MessageInfoTableTableManager
                 Value<String?> deletedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MessageInfoCompanion.insert(
-                id: id,
                 chatId: chatId,
                 messageId: messageId,
                 userId: userId,

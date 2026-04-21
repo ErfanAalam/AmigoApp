@@ -140,10 +140,12 @@ class ChatState {
   }
 
   bool isUserOnline(String recipientId, String convId) {
-    final dm = dmList.firstWhere(
-      (dm) => dm.chatId == convId && dm.recipientId == recipientId,
-    );
-    return dm.isRecipientOnline;
+    for (final dm in dmList) {
+      if (dm.chatId == convId && dm.recipientId == recipientId) {
+        return dm.isRecipientOnline;
+      }
+    }
+    return false;
   }
 }
 
@@ -429,6 +431,7 @@ class ChatNotifier extends Notifier<ChatState> {
 
         List<GroupModel> groups = [];
         List<ConversationModel> convs = [];
+        final List<MessageModel> groupLastMessagesToInsert = [];
 
         for (final group in groupsList) {
           try {
@@ -441,16 +444,15 @@ class ChatNotifier extends Notifier<ChatState> {
                   ? group['lastMessage'] as Map<String, dynamic>
                   : null;
 
-              // Insert last message into messages table so the Drift stream can read it
               if (lastMsg != null && lastMsg['id'] != null) {
-                _messageRepo.insertMessage(MessageModel(
+                groupLastMessagesToInsert.add(MessageModel(
                   id: lastMsg['id'].toString(),
                   chatId: groupModel.chatId,
                   senderId: lastMsg['sender_id']?.toString() ?? '',
                   type: MessageType.fromString(lastMsg['type']?.toString()) ?? MessageType.text,
                   body: lastMsg['body']?.toString() ?? '',
                   sentAt: lastMsg['sent_at']?.toString() ?? DateTime.now().toIso8601String(),
-                )).catchError((e) => debugPrint('❌ Error inserting group last message: $e'));
+                ));
               }
 
               final enrichedGroup = groupModel.copyWith(
@@ -515,6 +517,17 @@ class ChatNotifier extends Notifier<ChatState> {
           // Continue even if DB insert fails - we can still show groups from server
         }
 
+        // Await last-message inserts so the Drift stream has them when it
+        // emits on the subsequent chat insert — otherwise last-message body
+        // flashes empty in the group list.
+        if (groupLastMessagesToInsert.isNotEmpty) {
+          try {
+            await _messageRepo.insertMessages(groupLastMessagesToInsert);
+          } catch (e) {
+            debugPrint('❌ Error inserting group last messages batch: $e');
+          }
+        }
+
         // Load pin/mute/favorite status from local DB for groups (these are local-only, not from server)
         final localGroupConvs = await _conversationsRepo.getConversationsByType(
           ChatType.group,
@@ -574,6 +587,10 @@ class ChatNotifier extends Notifier<ChatState> {
   ) async {
     const chunkSize = 10;
     List<DmModel> processedConversations = [];
+    // Collect last-message inserts and await them before returning so the
+    // watchDmConversations stream (which joins messages on lastMsgId) has
+    // the rows when it next emits — otherwise the body flashes empty.
+    final List<MessageModel> lastMessagesToInsert = [];
 
     for (int i = 0; i < conversationsList.length; i += chunkSize) {
       final end = (i + chunkSize < conversationsList.length)
@@ -599,17 +616,16 @@ class ChatNotifier extends Notifier<ChatState> {
                     ? json['lastMessage'] as Map<String, dynamic>
                     : null;
 
-                // Insert last message into messages table so the Drift stream can read it
                 if (lastMsg != null && lastMsg['id'] != null) {
                   final convId = json['conversationId']?.toString() ?? '';
-                  _messageRepo.insertMessage(MessageModel(
+                  lastMessagesToInsert.add(MessageModel(
                     id: lastMsg['id'].toString(),
                     chatId: convId,
                     senderId: lastMsg['sender_id']?.toString() ?? '',
                     type: MessageType.fromString(lastMsg['type']?.toString()) ?? MessageType.text,
                     body: lastMsg['body']?.toString() ?? '',
                     sentAt: lastMsg['sent_at']?.toString() ?? DateTime.now().toIso8601String(),
-                  )).catchError((e) => debugPrint('❌ Error inserting DM last message: $e'));
+                  ));
                 }
 
                 return DmModel(
@@ -642,6 +658,16 @@ class ChatNotifier extends Notifier<ChatState> {
 
       if (i + chunkSize < conversationsList.length) {
         await Future.delayed(Duration.zero);
+      }
+    }
+
+    // Await all last-message inserts so the Drift reactive stream has them
+    // when it emits on the subsequent chat insert.
+    if (lastMessagesToInsert.isNotEmpty) {
+      try {
+        await _messageRepo.insertMessages(lastMessagesToInsert);
+      } catch (e) {
+        debugPrint('❌ Error inserting DM last messages batch: $e');
       }
     }
 
@@ -1233,12 +1259,16 @@ class ChatNotifier extends Notifier<ChatState> {
     try {
       final convId = payload.convId;
 
-      // Ack delivery (and read if this chat is active) via StatusAckService
+      // Ack delivery (and read if this chat is active) via StatusAckService.
+      // Skip system messages — they are client-only (synthetic) and don't exist
+      // in the backend messages table, so status acks for them fail FK checks.
       final currentUser = await UserUtils().getUserDetails();
       if (currentUser != null) {
         StatusAckService.instance.setCurrentUserId(currentUser.id);
       }
-      if (currentUser != null && payload.senderId != currentUser.id) {
+      if (currentUser != null &&
+          payload.senderId != currentUser.id &&
+          payload.msgType != MessageType.system) {
         StatusAckService.instance.ackMessage(
           convId,
           payload.id,
@@ -1760,7 +1790,9 @@ class ChatNotifier extends Notifier<ChatState> {
   Future<void> _handleOnlineStatus(ConnectionStatusPayload payload) async {
     try {
       final userId = payload.senderId;
-      final isOnline = payload.status == 'foreground';
+      // Backend now emits 'online' | 'offline' | 'stale'
+      final isOnline = payload.status == 'online';
+      debugPrint('[OnlineStatus] user=$userId status=${payload.status} isOnline=$isOnline');
 
       // Update user online status in database
       await _userRepo.updateUserOnlineStatus(userId, isOnline);
@@ -1951,6 +1983,25 @@ class ChatNotifier extends Notifier<ChatState> {
               )
               .toList();
           await _conversationsMemberRepo.insertConversationMembers(members);
+
+          // Also upsert user info for each new member so message bubbles
+          // can resolve sender names instead of showing "Unknown User".
+          final userModels = payload.members
+              .map(
+                (m) => UserModel(
+                  id: m.userId,
+                  name: m.userName,
+                  phone: '',
+                  profilePic: m.userPfp,
+                  isOnline: false,
+                ),
+              )
+              .toList();
+          await _userRepo.insertOrUpdateUsers(userModels);
+          // Prime the in-memory cache too
+          for (final u in userModels) {
+            UserInfoCache.instance.setUser(u);
+          }
           break;
         case ConversationActionType.memberRemoved:
           for (final member in payload.members) {
@@ -1958,6 +2009,14 @@ class ChatNotifier extends Notifier<ChatState> {
               payload.convId,
               member.userId,
             );
+          }
+          // If the current user is among the removed, mark the group as
+          // "you are no longer a member" by setting deletedAt on the chat row.
+          // The group messaging screen checks this to disable input.
+          final currentUser = await UserUtils().getUserDetails();
+          if (currentUser != null &&
+              payload.members.any((m) => m.userId == currentUser.id)) {
+            await _conversationsRepo.softDeleteConversation(payload.convId);
           }
           break;
         case ConversationActionType.memberPromoted:

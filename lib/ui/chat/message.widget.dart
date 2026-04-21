@@ -465,21 +465,21 @@ class MessageBubble extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Show sender name for group messages (non-my messages)
-                    // if (!config.isMyMessage) ...[
-                    //   Padding(
-                    //     padding: const EdgeInsets.only(top: 4, bottom: 2),
-                    //     child: Text(
-                    //       config.message.senderName?.isNotEmpty ?? false
-                    //           ? config.message.senderName ?? ''
-                    //           : 'Unknown User',
-                    //       style: TextStyle(
-                    //         color: themeColor.primary,
-                    //         fontSize: 12,
-                    //         fontWeight: FontWeight.w700,
-                    //       ),
-                    //     ),
-                    //   ),
-                    // ],
+                    if (config.isGroupChat && !config.isMyMessage) ...[
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4, bottom: 2),
+                        child: Text(
+                          config.message.senderName?.isNotEmpty ?? false
+                              ? config.message.senderName ?? ''
+                              : 'Unknown User',
+                          style: TextStyle(
+                            color: themeColor.primary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
                     // Reply message preview (if this is a reply)
                     if (config.message.isReply) _buildReplyPreviewWithFetch(),
 

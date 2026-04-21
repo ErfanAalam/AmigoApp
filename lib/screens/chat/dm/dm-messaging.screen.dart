@@ -18,6 +18,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:scroll_to_index/scroll_to_index.dart';
 
+import '../../../db/repositories/conversation-member.repo.dart';
 import '../../../db/repositories/message-status.repo.dart';
 import '../../../db/repositories/missed-ws-messages.repo.dart';
 import '../../../models/user.model.dart';
@@ -79,6 +80,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   final MessageRepository _messagesRepo = MessageRepository();
   final MessageStatusRepository _messageStatusRepo = MessageStatusRepository();
   final UserRepository _userRepo = UserRepository();
+  final ConversationMemberRepository _conversationMemberRepo =
+      ConversationMemberRepository();
   final AutoScrollController _scrollController = AutoScrollController(
     suggestedRowHeight: 100,
   );
@@ -502,7 +505,15 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   /// If offline, stores the event in MissedWsMessages for replay on reconnect.
   Future<void> _sendConversationJoin() async {
     if (_currentUserDetails == null) return;
-    final latestMsgId = _messages.isNotEmpty ? _messages.last.id : '';
+    // Walk backwards to find the latest NON-system message — system messages
+    // are client-only and don't exist in the backend messages table.
+    String latestMsgId = '';
+    for (int i = _messages.length - 1; i >= 0; i--) {
+      if (_messages[i].type != MessageType.system) {
+        latestMsgId = _messages[i].id;
+        break;
+      }
+    }
     if (latestMsgId.isEmpty || latestMsgId == _lastSentReadMsgId) return;
     _lastSentReadMsgId = latestMsgId;
     final joinConvPayload = ConvJoinPayload(
@@ -781,6 +792,53 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
   }
 
+  /// One-shot: fetch chat members from server and upsert to
+  /// local chat_members + users tables. Called on first chat open only.
+  Future<void> _fetchAndSaveChatMembers() async {
+    try {
+      final result = await apiService.chat.getChatMembers(
+        conversationId: widget.dm.chatId,
+      );
+      if (!result.isSuccess || result.data == null) return;
+
+      final data = result.data as Map<String, dynamic>;
+      final List<dynamic> raw = (data['members'] ?? []) as List<dynamic>;
+      if (raw.isEmpty) return;
+
+      final members = raw
+          .map(
+            (e) => ConversationMemberModel(
+              id: e['id']?.toString(),
+              chatId: widget.dm.chatId,
+              userId: (e['user_id'] ?? '').toString(),
+              role: (e['role'] ?? 'member').toString(),
+              joinedAt: e['joined_at']?.toString(),
+              removedAt: e['removed_at']?.toString(),
+              lastReadMsgId: e['last_read_msg_id']?.toString(),
+              lastDeliveredMsgId: e['last_delivered_msg_id']?.toString(),
+            ),
+          )
+          .toList();
+
+      final users = raw
+          .map(
+            (e) => UserModel(
+              id: (e['user_id'] ?? '').toString(),
+              name: (e['name'] ?? '').toString(),
+              phone: (e['phone'] ?? '').toString(),
+              profilePic: e['profile_pic']?.toString(),
+              role: e['user_role']?.toString(),
+            ),
+          )
+          .toList();
+
+      await _conversationMemberRepo.insertOrUpdateConversationMembers(members);
+      await _userRepo.insertOrUpdateUsers(users);
+    } catch (e) {
+      debugPrint('[DM] Error fetching chat members: $e');
+    }
+  }
+
   /// Sync messages from server — lightweight gap detection.
   /// First open: bulk fetch up to 300 messages.
   /// Subsequent opens: only fetch if local is behind server's lastMsgId.
@@ -827,7 +885,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       return;
     }
 
-    // First open: fetch up to 3 batches of 100 = 300 messages
+    // First open: fetch chat members once, then fetch up to 3 batches of 100 = 300 messages
+    await _fetchAndSaveChatMembers();
+
     const int firstOpenMaxBatches = 3;
     const int limit = 100;
     int batch = 0;
@@ -2100,39 +2160,40 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
                             widget.dm.recipientName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
                               fontSize: 16,
                             ),
                           ),
-                          Row(
-                            children: [
-                              StreamBuilder<Map<String, bool>>(
-                                stream: UserStatusService().userStatusStream,
-                                initialData: UserStatusService().onlineStatus,
-                                builder: (context, snapshot) {
-                                  final isOnline = ref
-                                      .read(chatProvider)
-                                      .isUserOnline(
-                                        widget.dm.recipientId,
-                                        widget.dm.chatId,
-                                      );
-                                  return Text(
-                                    isOnline ? 'Online' : 'Offline',
-                                    style: TextStyle(
-                                      color: isOnline
-                                          ? Colors.greenAccent[100]
-                                          : Colors.red[100],
-                                      fontSize: 12,
-                                    ),
+                          StreamBuilder<Map<String, bool>>(
+                            stream: UserStatusService().userStatusStream,
+                            initialData: UserStatusService().onlineStatus,
+                            builder: (context, snapshot) {
+                              final isOnline = ref
+                                  .read(chatProvider)
+                                  .isUserOnline(
+                                    widget.dm.recipientId,
+                                    widget.dm.chatId,
                                   );
-                                },
-                              ),
-                            ],
+                              return Text(
+                                isOnline ? 'Online' : 'Offline',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: isOnline
+                                      ? Colors.greenAccent[100]
+                                      : Colors.red[100],
+                                  fontSize: 12,
+                                ),
+                              );
+                            },
                           ),
                         ],
                       ),
@@ -2142,6 +2203,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
               ),
         backgroundColor: themeColor.primary,
         elevation: 0,
+        titleSpacing: 0,
         actions: _selectedMessages.isNotEmpty
             ? [
                 IconButton(
@@ -2485,6 +2547,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Widget _buildMediaGroup(MediaGroup group, int actualIndex) {
+    if (group.messages.isEmpty) return const SizedBox.shrink();
     final firstMessage = group.messages.first;
     final isMyMessage = firstMessage.senderId == _currentUserDetails?.id;
 

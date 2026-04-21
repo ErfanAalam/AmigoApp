@@ -16,7 +16,7 @@ class StatusAckService {
   StatusAckService._();
   static final instance = StatusAckService._();
 
-  static const _debounceMs = 1500;
+  static const _debounceMs = 800;
 
   final Map<String, _ChatAckBuffer> _buffer = {};
   Timer? _debounceTimer;
@@ -29,17 +29,16 @@ class StatusAckService {
   }
 
   void ackMessage(String chatId, String msgId, {required bool isRead}) {
-    debugPrint('[StatusAck] Buffering msgId=$msgId chat=$chatId isRead=$isRead userId=$_currentUserId');
+    debugPrint(
+      '[StatusAck] Buffering msgId=$msgId chat=$chatId isRead=$isRead userId=$_currentUserId',
+    );
     final buf = _buffer.putIfAbsent(chatId, () => _ChatAckBuffer());
     buf.msgIds.add(msgId);
     buf.statuses.add('delivered');
     if (isRead) buf.statuses.add('read');
 
     _debounceTimer?.cancel();
-    _debounceTimer = Timer(
-      const Duration(milliseconds: _debounceMs),
-      _flush,
-    );
+    _debounceTimer = Timer(const Duration(milliseconds: _debounceMs), _flush);
   }
 
   void flushNow() {
@@ -54,8 +53,13 @@ class StatusAckService {
       return;
     }
 
-    final totalMsgs = _buffer.values.fold<int>(0, (s, b) => s + b.msgIds.length);
-    debugPrint('[StatusAck] Flushing ${_buffer.length} chats, $totalMsgs messages');
+    final totalMsgs = _buffer.values.fold<int>(
+      0,
+      (s, b) => s + b.msgIds.length,
+    );
+    debugPrint(
+      '[StatusAck] Flushing ${_buffer.length} chats, $totalMsgs messages',
+    );
 
     final acks = <Map<String, dynamic>>[];
     for (final entry in _buffer.entries) {
@@ -82,14 +86,19 @@ class StatusAckService {
 
     final transport = TransportManager();
     if (transport.isConnected) {
-      debugPrint('[StatusAck] Sending via WS: ${acks.length} chats, ${acks.map((a) => (a['msg_ids'] as List).length).reduce((a, b) => a + b)} msgs');
-      transport.sendMessage(wsMsg.toJson()).then((_) {
-        debugPrint('[StatusAck] ✅ WS send succeeded');
-      }).catchError((e) {
-        debugPrint('[StatusAck] WS send failed, storing offline: $e');
-        _storeOffline(payload);
-        return false;
-      });
+      debugPrint(
+        '[StatusAck] Sending via WS: ${acks.length} chats, ${acks.map((a) => (a['msg_ids'] as List).length).reduce((a, b) => a + b)} msgs',
+      );
+      transport
+          .sendMessage(wsMsg.toJson())
+          .then((_) {
+            debugPrint('[StatusAck] ✅ WS send succeeded');
+          })
+          .catchError((e) {
+            debugPrint('[StatusAck] WS send failed, storing offline: $e');
+            _storeOffline(payload);
+            return false;
+          });
     } else {
       _storeOffline(payload);
     }

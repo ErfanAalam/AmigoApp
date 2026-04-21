@@ -41,6 +41,13 @@ class ChatClient extends BaseApiClient {
     );
   }
 
+  /// Get chat members (called once on first chat load)
+  Future<ApiResult<dynamic>> getChatMembers({
+    required String conversationId,
+  }) async {
+    return get('/chat/get-chat-members/$conversationId');
+  }
+
   /// Get message statuses
   Future<ApiResult<dynamic>> getMessageStatuses({
     required String conversationId,

@@ -77,8 +77,8 @@ class _EmojiReactionPickerState extends State<EmojiReactionPicker>
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.15),
-                    blurRadius: 16,
-                    offset: const Offset(0, 4),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
                   ),
                 ],
               ),

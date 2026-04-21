@@ -8,7 +8,6 @@ part of 'message-status.model.dart';
 
 _MessageInfoModel _$MessageInfoModelFromJson(Map<String, dynamic> json) =>
     _MessageInfoModel(
-      id: json['id'] as String,
       chatId: json['chat_id'] as String,
       messageId: json['message_id'] as String,
       userId: json['user_id'] as String,
@@ -20,7 +19,6 @@ _MessageInfoModel _$MessageInfoModelFromJson(Map<String, dynamic> json) =>
 
 Map<String, dynamic> _$MessageInfoModelToJson(_MessageInfoModel instance) =>
     <String, dynamic>{
-      'id': instance.id,
       'chat_id': instance.chatId,
       'message_id': instance.messageId,
       'user_id': instance.userId,

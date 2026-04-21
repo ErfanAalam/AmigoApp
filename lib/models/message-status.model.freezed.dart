@@ -15,7 +15,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$MessageInfoModel {
 
- String get id;@JsonKey(name: 'chat_id') String get chatId;@JsonKey(name: 'message_id') String get messageId;@JsonKey(name: 'user_id') String get userId;@JsonKey(name: 'delivered_at') String? get deliveredAt;@JsonKey(name: 'read_at') String? get readAt; String? get reaction;@JsonKey(name: 'deleted_at') String? get deletedAt;
+@JsonKey(name: 'chat_id') String get chatId;@JsonKey(name: 'message_id') String get messageId;@JsonKey(name: 'user_id') String get userId;@JsonKey(name: 'delivered_at') String? get deliveredAt;@JsonKey(name: 'read_at') String? get readAt; String? get reaction;@JsonKey(name: 'deleted_at') String? get deletedAt;
 /// Create a copy of MessageInfoModel
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -28,16 +28,16 @@ $MessageInfoModelCopyWith<MessageInfoModel> get copyWith => _$MessageInfoModelCo
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is MessageInfoModel&&(identical(other.id, id) || other.id == id)&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.messageId, messageId) || other.messageId == messageId)&&(identical(other.userId, userId) || other.userId == userId)&&(identical(other.deliveredAt, deliveredAt) || other.deliveredAt == deliveredAt)&&(identical(other.readAt, readAt) || other.readAt == readAt)&&(identical(other.reaction, reaction) || other.reaction == reaction)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is MessageInfoModel&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.messageId, messageId) || other.messageId == messageId)&&(identical(other.userId, userId) || other.userId == userId)&&(identical(other.deliveredAt, deliveredAt) || other.deliveredAt == deliveredAt)&&(identical(other.readAt, readAt) || other.readAt == readAt)&&(identical(other.reaction, reaction) || other.reaction == reaction)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,chatId,messageId,userId,deliveredAt,readAt,reaction,deletedAt);
+int get hashCode => Object.hash(runtimeType,chatId,messageId,userId,deliveredAt,readAt,reaction,deletedAt);
 
 @override
 String toString() {
-  return 'MessageInfoModel(id: $id, chatId: $chatId, messageId: $messageId, userId: $userId, deliveredAt: $deliveredAt, readAt: $readAt, reaction: $reaction, deletedAt: $deletedAt)';
+  return 'MessageInfoModel(chatId: $chatId, messageId: $messageId, userId: $userId, deliveredAt: $deliveredAt, readAt: $readAt, reaction: $reaction, deletedAt: $deletedAt)';
 }
 
 
@@ -48,7 +48,7 @@ abstract mixin class $MessageInfoModelCopyWith<$Res>  {
   factory $MessageInfoModelCopyWith(MessageInfoModel value, $Res Function(MessageInfoModel) _then) = _$MessageInfoModelCopyWithImpl;
 @useResult
 $Res call({
- String id,@JsonKey(name: 'chat_id') String chatId,@JsonKey(name: 'message_id') String messageId,@JsonKey(name: 'user_id') String userId,@JsonKey(name: 'delivered_at') String? deliveredAt,@JsonKey(name: 'read_at') String? readAt, String? reaction,@JsonKey(name: 'deleted_at') String? deletedAt
+@JsonKey(name: 'chat_id') String chatId,@JsonKey(name: 'message_id') String messageId,@JsonKey(name: 'user_id') String userId,@JsonKey(name: 'delivered_at') String? deliveredAt,@JsonKey(name: 'read_at') String? readAt, String? reaction,@JsonKey(name: 'deleted_at') String? deletedAt
 });
 
 
@@ -65,10 +65,9 @@ class _$MessageInfoModelCopyWithImpl<$Res>
 
 /// Create a copy of MessageInfoModel
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? chatId = null,Object? messageId = null,Object? userId = null,Object? deliveredAt = freezed,Object? readAt = freezed,Object? reaction = freezed,Object? deletedAt = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? chatId = null,Object? messageId = null,Object? userId = null,Object? deliveredAt = freezed,Object? readAt = freezed,Object? reaction = freezed,Object? deletedAt = freezed,}) {
   return _then(_self.copyWith(
-id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
-as String,chatId: null == chatId ? _self.chatId : chatId // ignore: cast_nullable_to_non_nullable
+chatId: null == chatId ? _self.chatId : chatId // ignore: cast_nullable_to_non_nullable
 as String,messageId: null == messageId ? _self.messageId : messageId // ignore: cast_nullable_to_non_nullable
 as String,userId: null == userId ? _self.userId : userId // ignore: cast_nullable_to_non_nullable
 as String,deliveredAt: freezed == deliveredAt ? _self.deliveredAt : deliveredAt // ignore: cast_nullable_to_non_nullable
@@ -160,10 +159,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id, @JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'message_id')  String messageId, @JsonKey(name: 'user_id')  String userId, @JsonKey(name: 'delivered_at')  String? deliveredAt, @JsonKey(name: 'read_at')  String? readAt,  String? reaction, @JsonKey(name: 'deleted_at')  String? deletedAt)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'message_id')  String messageId, @JsonKey(name: 'user_id')  String userId, @JsonKey(name: 'delivered_at')  String? deliveredAt, @JsonKey(name: 'read_at')  String? readAt,  String? reaction, @JsonKey(name: 'deleted_at')  String? deletedAt)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _MessageInfoModel() when $default != null:
-return $default(_that.id,_that.chatId,_that.messageId,_that.userId,_that.deliveredAt,_that.readAt,_that.reaction,_that.deletedAt);case _:
+return $default(_that.chatId,_that.messageId,_that.userId,_that.deliveredAt,_that.readAt,_that.reaction,_that.deletedAt);case _:
   return orElse();
 
 }
@@ -181,10 +180,10 @@ return $default(_that.id,_that.chatId,_that.messageId,_that.userId,_that.deliver
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id, @JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'message_id')  String messageId, @JsonKey(name: 'user_id')  String userId, @JsonKey(name: 'delivered_at')  String? deliveredAt, @JsonKey(name: 'read_at')  String? readAt,  String? reaction, @JsonKey(name: 'deleted_at')  String? deletedAt)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'message_id')  String messageId, @JsonKey(name: 'user_id')  String userId, @JsonKey(name: 'delivered_at')  String? deliveredAt, @JsonKey(name: 'read_at')  String? readAt,  String? reaction, @JsonKey(name: 'deleted_at')  String? deletedAt)  $default,) {final _that = this;
 switch (_that) {
 case _MessageInfoModel():
-return $default(_that.id,_that.chatId,_that.messageId,_that.userId,_that.deliveredAt,_that.readAt,_that.reaction,_that.deletedAt);case _:
+return $default(_that.chatId,_that.messageId,_that.userId,_that.deliveredAt,_that.readAt,_that.reaction,_that.deletedAt);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -201,10 +200,10 @@ return $default(_that.id,_that.chatId,_that.messageId,_that.userId,_that.deliver
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id, @JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'message_id')  String messageId, @JsonKey(name: 'user_id')  String userId, @JsonKey(name: 'delivered_at')  String? deliveredAt, @JsonKey(name: 'read_at')  String? readAt,  String? reaction, @JsonKey(name: 'deleted_at')  String? deletedAt)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'message_id')  String messageId, @JsonKey(name: 'user_id')  String userId, @JsonKey(name: 'delivered_at')  String? deliveredAt, @JsonKey(name: 'read_at')  String? readAt,  String? reaction, @JsonKey(name: 'deleted_at')  String? deletedAt)?  $default,) {final _that = this;
 switch (_that) {
 case _MessageInfoModel() when $default != null:
-return $default(_that.id,_that.chatId,_that.messageId,_that.userId,_that.deliveredAt,_that.readAt,_that.reaction,_that.deletedAt);case _:
+return $default(_that.chatId,_that.messageId,_that.userId,_that.deliveredAt,_that.readAt,_that.reaction,_that.deletedAt);case _:
   return null;
 
 }
@@ -216,10 +215,9 @@ return $default(_that.id,_that.chatId,_that.messageId,_that.userId,_that.deliver
 @JsonSerializable()
 
 class _MessageInfoModel implements MessageInfoModel {
-  const _MessageInfoModel({required this.id, @JsonKey(name: 'chat_id') required this.chatId, @JsonKey(name: 'message_id') required this.messageId, @JsonKey(name: 'user_id') required this.userId, @JsonKey(name: 'delivered_at') this.deliveredAt, @JsonKey(name: 'read_at') this.readAt, this.reaction, @JsonKey(name: 'deleted_at') this.deletedAt});
+  const _MessageInfoModel({@JsonKey(name: 'chat_id') required this.chatId, @JsonKey(name: 'message_id') required this.messageId, @JsonKey(name: 'user_id') required this.userId, @JsonKey(name: 'delivered_at') this.deliveredAt, @JsonKey(name: 'read_at') this.readAt, this.reaction, @JsonKey(name: 'deleted_at') this.deletedAt});
   factory _MessageInfoModel.fromJson(Map<String, dynamic> json) => _$MessageInfoModelFromJson(json);
 
-@override final  String id;
 @override@JsonKey(name: 'chat_id') final  String chatId;
 @override@JsonKey(name: 'message_id') final  String messageId;
 @override@JsonKey(name: 'user_id') final  String userId;
@@ -241,16 +239,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _MessageInfoModel&&(identical(other.id, id) || other.id == id)&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.messageId, messageId) || other.messageId == messageId)&&(identical(other.userId, userId) || other.userId == userId)&&(identical(other.deliveredAt, deliveredAt) || other.deliveredAt == deliveredAt)&&(identical(other.readAt, readAt) || other.readAt == readAt)&&(identical(other.reaction, reaction) || other.reaction == reaction)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _MessageInfoModel&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.messageId, messageId) || other.messageId == messageId)&&(identical(other.userId, userId) || other.userId == userId)&&(identical(other.deliveredAt, deliveredAt) || other.deliveredAt == deliveredAt)&&(identical(other.readAt, readAt) || other.readAt == readAt)&&(identical(other.reaction, reaction) || other.reaction == reaction)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,chatId,messageId,userId,deliveredAt,readAt,reaction,deletedAt);
+int get hashCode => Object.hash(runtimeType,chatId,messageId,userId,deliveredAt,readAt,reaction,deletedAt);
 
 @override
 String toString() {
-  return 'MessageInfoModel(id: $id, chatId: $chatId, messageId: $messageId, userId: $userId, deliveredAt: $deliveredAt, readAt: $readAt, reaction: $reaction, deletedAt: $deletedAt)';
+  return 'MessageInfoModel(chatId: $chatId, messageId: $messageId, userId: $userId, deliveredAt: $deliveredAt, readAt: $readAt, reaction: $reaction, deletedAt: $deletedAt)';
 }
 
 
@@ -261,7 +259,7 @@ abstract mixin class _$MessageInfoModelCopyWith<$Res> implements $MessageInfoMod
   factory _$MessageInfoModelCopyWith(_MessageInfoModel value, $Res Function(_MessageInfoModel) _then) = __$MessageInfoModelCopyWithImpl;
 @override @useResult
 $Res call({
- String id,@JsonKey(name: 'chat_id') String chatId,@JsonKey(name: 'message_id') String messageId,@JsonKey(name: 'user_id') String userId,@JsonKey(name: 'delivered_at') String? deliveredAt,@JsonKey(name: 'read_at') String? readAt, String? reaction,@JsonKey(name: 'deleted_at') String? deletedAt
+@JsonKey(name: 'chat_id') String chatId,@JsonKey(name: 'message_id') String messageId,@JsonKey(name: 'user_id') String userId,@JsonKey(name: 'delivered_at') String? deliveredAt,@JsonKey(name: 'read_at') String? readAt, String? reaction,@JsonKey(name: 'deleted_at') String? deletedAt
 });
 
 
@@ -278,10 +276,9 @@ class __$MessageInfoModelCopyWithImpl<$Res>
 
 /// Create a copy of MessageInfoModel
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? chatId = null,Object? messageId = null,Object? userId = null,Object? deliveredAt = freezed,Object? readAt = freezed,Object? reaction = freezed,Object? deletedAt = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? chatId = null,Object? messageId = null,Object? userId = null,Object? deliveredAt = freezed,Object? readAt = freezed,Object? reaction = freezed,Object? deletedAt = freezed,}) {
   return _then(_MessageInfoModel(
-id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
-as String,chatId: null == chatId ? _self.chatId : chatId // ignore: cast_nullable_to_non_nullable
+chatId: null == chatId ? _self.chatId : chatId // ignore: cast_nullable_to_non_nullable
 as String,messageId: null == messageId ? _self.messageId : messageId // ignore: cast_nullable_to_non_nullable
 as String,userId: null == userId ? _self.userId : userId // ignore: cast_nullable_to_non_nullable
 as String,deliveredAt: freezed == deliveredAt ? _self.deliveredAt : deliveredAt // ignore: cast_nullable_to_non_nullable

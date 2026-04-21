@@ -137,6 +137,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   bool _isTyping = false;
   bool _isSendingMessage = false;
   String? _lastSentReadMsgId;
+  bool _isRemovedFromGroup = false;
   bool _isAdminOrStaff = false;
   // bool _isOtherTyping = false;
   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
@@ -603,6 +604,19 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   /// Load pinned message from database
+  /// Check whether the current user has been removed from this group.
+  /// `_handleConversationAction` in chat.provider sets deletedAt on the chat
+  /// when the current user is in the removed members list.
+  Future<void> _checkRemovedState() async {
+    final conv = await _conversationRepo.getConversationById(
+      widget.group.chatId,
+    );
+    final removed = conv?.deletedAt != null;
+    if (mounted && _isRemovedFromGroup != removed) {
+      setState(() => _isRemovedFromGroup = removed);
+    }
+  }
+
   Future<void> _loadPinnedMessage() async {
     final conversation = await _conversationRepo.getConversationById(
       widget.group.chatId,
@@ -653,6 +667,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         .read(chatProvider.notifier)
         .setActiveConversation(widget.group.chatId, ChatType.group);
 
+    // Check initial membership state
+    _checkRemovedState();
+
     // --- Parallel: independent reads that don't depend on each other ---
     // Start message stream (synchronous subscription setup)
     _messagesStreamSub?.cancel();
@@ -666,6 +683,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
               _sortMessagesBySentAt();
               _isLoading = false;
             });
+            // Re-check removed state after each message batch (memberRemoved
+            // WS events trigger the provider to soft-delete the chat).
+            _checkRemovedState();
           },
           onError: (e) {
             debugPrint('Group messages stream error: $e');
@@ -833,6 +853,53 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
   }
 
+  /// One-shot: fetch chat members from server and upsert to
+  /// local chat_members + users tables. Called on first chat open only.
+  Future<void> _fetchAndSaveChatMembers() async {
+    try {
+      final result = await apiService.chat.getChatMembers(
+        conversationId: widget.group.chatId,
+      );
+      if (!result.isSuccess || result.data == null) return;
+
+      final data = result.data as Map<String, dynamic>;
+      final List<dynamic> raw = (data['members'] ?? []) as List<dynamic>;
+      if (raw.isEmpty) return;
+
+      final members = raw
+          .map(
+            (e) => ConversationMemberModel(
+              id: e['id']?.toString(),
+              chatId: widget.group.chatId,
+              userId: (e['user_id'] ?? '').toString(),
+              role: (e['role'] ?? 'member').toString(),
+              joinedAt: e['joined_at']?.toString(),
+              removedAt: e['removed_at']?.toString(),
+              lastReadMsgId: e['last_read_msg_id']?.toString(),
+              lastDeliveredMsgId: e['last_delivered_msg_id']?.toString(),
+            ),
+          )
+          .toList();
+
+      final users = raw
+          .map(
+            (e) => UserModel(
+              id: (e['user_id'] ?? '').toString(),
+              name: (e['name'] ?? '').toString(),
+              phone: (e['phone'] ?? '').toString(),
+              profilePic: e['profile_pic']?.toString(),
+              role: e['user_role']?.toString(),
+            ),
+          )
+          .toList();
+
+      await _conversationMemberRepo.insertOrUpdateConversationMembers(members);
+      await _userRepo.insertOrUpdateUsers(users);
+    } catch (e) {
+      debugPrint('[Group] Error fetching chat members: $e');
+    }
+  }
+
   /// Sync all messages from server to local DB
   /// This is called when user visits the conversation for the first time
   /// Sync messages from server — lightweight gap detection.
@@ -872,7 +939,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       return;
     }
 
-    // First open: fetch up to 3 batches of 100 = 300 messages
+    // First open: fetch chat members once, then fetch up to 3 batches of 100 = 300 messages
+    await _fetchAndSaveChatMembers();
+
     const int firstOpenMaxBatches = 3;
     const int limit = 100;
     int batch = 0;
@@ -897,39 +966,6 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         final history = ConversationHistoryResponse.fromJson(result.data!);
 
         if (history.messages.isEmpty) break;
-
-        // Insert members/users on first batch
-        if (batch == 0) {
-          final List<ConversationMemberModel> membersOfConversation = history
-              .members
-              .map(
-                (e) => ConversationMemberModel(
-                  chatId: widget.group.chatId,
-                  userId: (e['user_id'] ?? '').toString(),
-                  role: (e['group_role'] ?? 'member').toString(),
-                  joinedAt: e['joined_at']?.toString(),
-                  removedAt: e['removed_at']?.toString(),
-                ),
-              )
-              .toList();
-          await _conversationMemberRepo.insertOrUpdateConversationMembers(
-            membersOfConversation,
-          );
-          await _userRepo.insertOrUpdateUsers(
-            history.members
-                .map(
-                  (e) => UserModel(
-                    id: e['user_id'],
-                    name: e['name'],
-                    profilePic: e['profile_pic'],
-                    phone: e['phone'],
-                    isOnline: e['is_online'] ?? false,
-                    role: e['user_role'],
-                  ),
-                )
-                .toList(),
-          );
-        }
 
         await _messagesRepo.insertMessages(history.messages);
 
@@ -1524,7 +1560,15 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   /// If offline, stores the event in MissedWsMessages for replay on reconnect.
   Future<void> _sendConversationJoin() async {
     if (_currentUserDetails == null) return;
-    final latestMsgId = _messages.isNotEmpty ? _messages.last.id : '';
+    // Walk backwards to find the latest NON-system message — system messages
+    // are client-only and don't exist in the backend messages table.
+    String latestMsgId = '';
+    for (int i = _messages.length - 1; i >= 0; i--) {
+      if (_messages[i].type != MessageType.system) {
+        latestMsgId = _messages[i].id;
+        break;
+      }
+    }
     if (latestMsgId.isEmpty || latestMsgId == _lastSentReadMsgId) return;
     _lastSentReadMsgId = latestMsgId;
     final joinConvPayload = ConvJoinPayload(
@@ -2379,6 +2423,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     int? retryCount = 0,
     String? body,
   }) async {
+    if (_isRemovedFromGroup) {
+      debugPrint('[GROUP] Blocked send — user removed from group');
+      return;
+    }
     if (mounted) {
       setState(() {
         _isSendingMessage = true;
@@ -4961,6 +5009,22 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   Widget _buildMessageInput() {
+    if (_isRemovedFromGroup) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        color: Colors.grey[100],
+        child: const Text(
+          "You're no longer a member of this group",
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.black54,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      );
+    }
     return MessageInputContainer(
       messageController: _messageController,
       isOtherTypingNotifier: _isOtherTypingNotifier,

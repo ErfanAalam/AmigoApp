@@ -8,7 +8,6 @@ part 'message-status.model.g.dart';
 @freezed
 abstract class MessageInfoModel with _$MessageInfoModel {
   const factory MessageInfoModel({
-    required String id,
     @JsonKey(name: 'chat_id') required String chatId,
     @JsonKey(name: 'message_id') required String messageId,
     @JsonKey(name: 'user_id') required String userId,

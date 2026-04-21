@@ -235,6 +235,19 @@ class ConversationRepository {
     return deleted > 0;
   }
 
+  /// Mark a conversation as soft-deleted (sets deletedAt).
+  /// Used when the current user is removed from a group.
+  Future<void> softDeleteConversation(String conversationId) async {
+    final db = sqliteDatabase.database;
+    await (db.update(
+      db.chats,
+    )..where((t) => t.id.equals(conversationId))).write(
+      ChatsCompanion(
+        deletedAt: Value(DateTime.now().toUtc().toIso8601String()),
+      ),
+    );
+  }
+
   /// Update unread count for a conversation
   Future<void> updateUnreadCount(String conversationId, int unreadCount) async {
     final db = sqliteDatabase.database;
@@ -394,7 +407,12 @@ class ConversationRepository {
   /// Watch DM conversations as a reactive Drift stream ordered by last activity.
   /// Emits whenever the chats table changes (e.g. new message updates
   /// lastMsgId). Joins users/members asynchronously per emission.
-  Stream<List<DmModel>> watchDmConversations() {
+  ///
+  /// [currentUserId] is used to exclude the current user from the DM's
+  /// member list when picking the "recipient". Without it, if chat_members
+  /// contains both current user and recipient, the wrong user could be
+  /// picked as the recipient → DM list shows your own name instead.
+  Stream<List<DmModel>> watchDmConversations({String? currentUserId}) {
     final db = sqliteDatabase.database;
 
     return (db.select(db.chats)
@@ -422,8 +440,18 @@ class ConversationRepository {
                 .get();
             if (members.isEmpty) continue;
 
+            // Pick the first non-current-user member as the "recipient".
+            String? recipientUserId;
+            for (final m in members) {
+              if (currentUserId == null || m.userId != currentUserId) {
+                recipientUserId = m.userId;
+                break;
+              }
+            }
+            if (recipientUserId == null) continue;
+
             final recipientUser = await (db.select(db.users)
-                  ..where((t) => t.id.equals(members[0].userId)))
+                  ..where((t) => t.id.equals(recipientUserId!)))
                 .getSingleOrNull();
             if (recipientUser == null) continue;
 

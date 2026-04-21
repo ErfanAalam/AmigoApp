@@ -117,6 +117,56 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
     _loadCurrentUser();
 
     _loadGroupInfoFromLocal();
+
+    // Fire-and-forget: fetch fresh group info from server and persist to
+    // local sqlite so member names show correctly and role lists are up to date.
+    _syncGroupInfoFromServer();
+  }
+
+  /// Fetch group info from server and upsert members + users into local sqlite.
+  Future<void> _syncGroupInfoFromServer() async {
+    try {
+      final result = await apiService.group.getGroupInfo(widget.group.chatId);
+      if (!result.isSuccess || result.data == null) return;
+      final data = result.data as Map<String, dynamic>;
+      final members = data['members'] as List<dynamic>? ?? const [];
+
+      final userModels = <UserModel>[];
+      final memberModels = <ConversationMemberModel>[];
+
+      for (final m in members) {
+        if (m is! Map<String, dynamic>) continue;
+        final userId = m['userId']?.toString();
+        if (userId == null || userId.isEmpty) continue;
+        userModels.add(UserModel(
+          id: userId,
+          name: m['userName']?.toString() ?? '',
+          phone: m['userPhone']?.toString() ?? '',
+          profilePic: m['userProfilePic']?.toString(),
+          isOnline: false,
+        ));
+        memberModels.add(ConversationMemberModel(
+          chatId: widget.group.chatId,
+          userId: userId,
+          role: m['role']?.toString() ?? 'member',
+          joinedAt: m['joinedAt']?.toString(),
+        ));
+      }
+
+      if (userModels.isNotEmpty) {
+        await _userRepository.insertOrUpdateUsers(userModels);
+      }
+      if (memberModels.isNotEmpty) {
+        await _conversationMemberRepository.insertOrUpdateConversationMembers(
+          memberModels,
+        );
+      }
+
+      // Reload UI with the freshly-synced data
+      if (mounted) await _loadGroupInfoFromLocal();
+    } catch (e) {
+      debugPrint('❌ Error syncing group info: $e');
+    }
   }
 
   @override
@@ -146,6 +196,23 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
         );
 
         final groupInfoMap = groupInfo.toJson();
+
+        // `groupInfo.toJson()` leaves `members` as `List<GroupMember>` because
+        // json_serializable doesn't recursively convert nested objects here.
+        // The rest of this screen indexes members as camelCase maps — normalize.
+        final rawMembers = groupInfo.members ?? const <GroupMember>[];
+        groupInfoMap['members'] = rawMembers
+            .map(
+              (m) => <String, dynamic>{
+                'userId': m.userId,
+                'name': m.name,
+                'userName': m.name,
+                'profilePic': m.profilePic,
+                'role': m.role,
+                'joinedAt': m.joinedAt,
+              },
+            )
+            .toList();
 
         // Enrich member data with display names from users table first
         await _enrichMembersWithDisplayNames(groupInfoMap);

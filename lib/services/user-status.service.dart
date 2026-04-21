@@ -32,15 +32,16 @@ class UserStatusService {
     _notifyStatusChange();
   }
 
-  /// Handle user_online WebSocket message
+  /// Handle connection:status WebSocket message.
+  /// Backend sends 'online' | 'offline' | 'stale' (not 'foreground'/'background').
   void handleUserOnlineMessage(ConnectionStatusPayload payload) {
     try {
       setUserOnlineStatus(
         payload.senderId,
-        isOnline: payload.status == 'foreground',
+        isOnline: payload.status == 'online',
       );
     } catch (e) {
-      debugPrint('❌ Error handling user_online message');
+      debugPrint('❌ Error handling connection:status message: $e');
     }
   }
 
