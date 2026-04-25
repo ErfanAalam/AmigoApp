@@ -409,6 +409,17 @@ class ChatNotifier extends Notifier<ChatState> {
             dmList,
           );
 
+          // Reconcile local DB unread counts with the server's authoritative
+          // values. Without this, FCM-background increments from a previous
+          // session stay in the DB and compound with the WS replay on restart.
+          for (final dm in enrichedDmList) {
+            try {
+              await _conversationsRepo.updateUnreadCount(dm.chatId, dm.unreadCount ?? 0);
+            } catch (e) {
+              debugPrint('⚠️ Failed to reconcile unread count for ${dm.chatId}: $e');
+            }
+          }
+
           // Update Provider state
           final sortedDms = await filterAndSortConversations(enrichedDmList);
           debugPrint('✅ Processed ${sortedDms.length} DMs');
@@ -551,6 +562,16 @@ class ChatNotifier extends Notifier<ChatState> {
         }).toList();
 
         // Storing group members and metadata can be added here if needed
+        // Reconcile local DB unread counts with the server's authoritative
+        // values so FCM-background increments don't compound with WS replay.
+        for (final group in groups) {
+          try {
+            await _conversationsRepo.updateUnreadCount(group.chatId, group.unreadCount);
+          } catch (e) {
+            debugPrint('⚠️ Failed to reconcile unread count for ${group.chatId}: $e');
+          }
+        }
+
         // Sort groups
         final sortedGroups = await filterAndSortGroupConversations(groups);
         debugPrint('✅ Processed ${groups.length} groups');
@@ -1280,7 +1301,13 @@ class ChatNotifier extends Notifier<ChatState> {
       final convTypeStr = await _conversationsRepo.getConversationTypeById(convId);
       final convType = ChatType.fromString(convTypeStr) ?? ChatType.dm;
 
-      // Insert message into local DB
+      // Idempotency guard: if this message id is already in local DB, this is a
+      // replay (WS reconnect after FCM delivered it, or a re-join flush).
+      // Skipping the unread-count increment here prevents double-counting on
+      // app restarts when the server re-delivers unacked messages.
+      final isReplay = await _messageRepo.getMessageById(payload.id) != null;
+
+      // Insert message into local DB (upsert — safe on replay)
       await _messageRepo.insertMessage(
         MessageModel(
           id: payload.id,
@@ -1293,6 +1320,11 @@ class ChatNotifier extends Notifier<ChatState> {
           sentAt: payload.sentAt.toIso8601String(),
         ),
       );
+
+      if (isReplay) {
+        debugPrint('[ChatProvider] Skipping unread increment for replayed message ${payload.id}');
+        return;
+      }
 
       int newDmUnreadCount = 0, newGrpUnreadCount = 0;
 
