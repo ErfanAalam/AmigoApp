@@ -18,7 +18,8 @@ extension _GroupSend on _InnerGroupChatPageState {
       });
     }
     String messageText = '';
-    if (messageType == MessageType.text) {
+    if (messageType == MessageType.text ||
+        messageType == MessageType.contact) {
       messageText = body ?? _messageController.text.trim();
       if (messageText.isEmpty) return;
     }
@@ -44,9 +45,9 @@ extension _GroupSend on _InnerGroupChatPageState {
     // a top-level metadata field; we stash pending contact info inside
     // attachments so it survives the round-trip).
     Map<String, dynamic>? combinedAttachments = mediaResponse?.toJson();
-    if (!isResend && _pendingContactMetadata != null) {
+    if (!isResend && pendingContactMetadata != null) {
       combinedAttachments = Map<String, dynamic>.from(combinedAttachments ?? {})
-        ..addAll(_pendingContactMetadata!);
+        ..addAll(pendingContactMetadata!);
     }
 
     final newMsg = MessageModel(
@@ -58,7 +59,7 @@ extension _GroupSend on _InnerGroupChatPageState {
       attachments: combinedAttachments,
       type: messageType,
       body: messageText,
-      repliedTo: _replyToMessageData?.id,
+      repliedTo: replyToMessageData?.id,
       sentAt: nowUTC.toIso8601String(),
     );
 
@@ -96,7 +97,7 @@ extension _GroupSend on _InnerGroupChatPageState {
     if (!isResend) {
       _messageController.clear();
       // Clear pending contact metadata after using it
-      _pendingContactMetadata = null;
+      pendingContactMetadata = null;
     }
 
     // Add message to UI immediately with animation
@@ -121,8 +122,8 @@ extension _GroupSend on _InnerGroupChatPageState {
         // }
       });
 
-      _animateNewMessage(newMsg.id);
-      _handleScrollToBottomTap();
+      animateNewMessage(newMsg.id);
+      handleScrollToBottomTap();
     }
 
     // >>>>>-- sending to ws (fire-and-forget) -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -130,10 +131,10 @@ extension _GroupSend on _InnerGroupChatPageState {
       id: id,
       convId: widget.group.chatId,
       senderId: _currentUserDetails!.id,
-      attachments: mediaResponse,
+      attachments: combinedAttachments,
       msgType: messageType,
       body: messageText,
-      repliedTo: _replyToMessageData?.id,
+      repliedTo: replyToMessageData?.id,
       sentAt: nowUTC,
     );
 
@@ -151,7 +152,7 @@ extension _GroupSend on _InnerGroupChatPageState {
           newMsg,
         );
 
-    _cancelReply();
+    cancelReply();
 
     // Fire-and-forget: send via transport without blocking UI.
     // The MessageSentAckPayload handler marks as "sent" on success or "failed" on failure.
@@ -226,7 +227,7 @@ extension _GroupSend on _InnerGroupChatPageState {
       attachments: attachments,
       localMediaPath: mediaFile.path,
       type: messageType,
-      repliedTo: _replyToMessageData?.id,
+      repliedTo: replyToMessageData?.id,
       sentAt: nowUTC.toIso8601String(),
     );
 
@@ -238,8 +239,8 @@ extension _GroupSend on _InnerGroupChatPageState {
             _messages[index] = newMsg;
             _sortMessagesBySentAt();
           });
-          _animateNewMessage(newMsg.id);
-          _handleScrollToBottomTap();
+          animateNewMessage(newMsg.id);
+          handleScrollToBottomTap();
         }
         // Also update in DB
       } else {
@@ -248,8 +249,8 @@ extension _GroupSend on _InnerGroupChatPageState {
           _sortMessagesBySentAt();
         });
 
-        _animateNewMessage(newMsg.id);
-        _handleScrollToBottomTap();
+        animateNewMessage(newMsg.id);
+        handleScrollToBottomTap();
 
         // immediately insert message in the localDB for future reference
         await _messagesRepo.insertMessage(newMsg);
@@ -630,13 +631,13 @@ extension _GroupSend on _InnerGroupChatPageState {
       }
 
       // Preserve reply target if the failed message was a reply
-      MessageModel? originalReplyToMessageData = _replyToMessageData;
+      MessageModel? originalReplyToMessageData = replyToMessageData;
       if (message.repliedTo != null) {
         final replyToMessage = await _messagesRepo.getMessageById(
           message.repliedTo!,
         );
         if (replyToMessage != null) {
-          _replyToMessageData = replyToMessage;
+          replyToMessageData = replyToMessage;
         }
       }
 
@@ -678,7 +679,7 @@ extension _GroupSend on _InnerGroupChatPageState {
         }
       } finally {
         // Restore original reply message data
-        _replyToMessageData = originalReplyToMessageData;
+        replyToMessageData = originalReplyToMessageData;
       }
     } catch (e) {
       debugPrint('Error resending failed message: $e');
@@ -722,18 +723,6 @@ extension _GroupSend on _InnerGroupChatPageState {
 
   /// Resend a failed message
 
-  void _sendVoiceNote() async {
-    final micStatus = await Permission.microphone.status;
-    if (micStatus.isGranted) {
-      _showVoiceRecordingModal();
-    } else {
-      await _checkAndRequestMicrophonePermission();
-      final newStatus = await Permission.microphone.status;
-      if (newStatus.isGranted) {
-        _showVoiceRecordingModal();
-      }
-    }
-  }
 
   // // Media sending methods
   // void _sendImageMessage(
@@ -747,8 +736,8 @@ extension _GroupSend on _InnerGroupChatPageState {
   //       conversationId: widget.group.chatId,
   //       currentUserId: _currentUserId,
   //       optimisticMessageId: _optimisticMessageId,
-  //       replyToMessage: _replyToMessageData,
-  //       replyToMessageId: _replyToMessageData?.id,
+  //       replyToMessage: replyToMessageData,
+  //       replyToMessageId: replyToMessageData?.id,
   //       failedMessage: failedMessage,
   //       messageType: 'image',
   //       messages: _messages,
@@ -760,9 +749,9 @@ extension _GroupSend on _InnerGroupChatPageState {
   //       mounted: () => mounted,
   //       setState: _safeSetState,
   //       handleMediaUploadFailure: _handleMediaUploadFailure,
-  //       animateNewMessage: _animateNewMessage,
+  //       animateNewMessage: animateNewMessage,
   //       scrollToBottom: _scrollToBottom,
-  //       cancelReply: _cancelReply,
+  //       cancelReply: cancelReply,
   //       isReplying: _isReplying,
   //     ),
   //   );
@@ -784,8 +773,8 @@ extension _GroupSend on _InnerGroupChatPageState {
   //       conversationId: widget.group.chatId,
   //       currentUserId: _currentUserId,
   //       optimisticMessageId: _optimisticMessageId,
-  //       replyToMessage: _replyToMessageData,
-  //       replyToMessageId: _replyToMessageData?.id,
+  //       replyToMessage: replyToMessageData,
+  //       replyToMessageId: replyToMessageData?.id,
   //       failedMessage: failedMessage,
   //       messageType: 'video',
   //       messages: _messages,
@@ -797,9 +786,9 @@ extension _GroupSend on _InnerGroupChatPageState {
   //       mounted: () => mounted,
   //       setState: _safeSetState,
   //       handleMediaUploadFailure: _handleMediaUploadFailure,
-  //       animateNewMessage: _animateNewMessage,
+  //       animateNewMessage: animateNewMessage,
   //       scrollToBottom: _scrollToBottom,
-  //       cancelReply: _cancelReply,
+  //       cancelReply: cancelReply,
   //       isReplying: _isReplying,
   //     ),
   //   );
@@ -822,8 +811,8 @@ extension _GroupSend on _InnerGroupChatPageState {
   //       conversationId: widget.group.chatId,
   //       currentUserId: _currentUserId,
   //       optimisticMessageId: _optimisticMessageId,
-  //       replyToMessage: _replyToMessageData,
-  //       replyToMessageId: _replyToMessageData?.id,
+  //       replyToMessage: replyToMessageData,
+  //       replyToMessageId: replyToMessageData?.id,
   //       failedMessage: failedMessage,
   //       messageType: 'document',
   //       fileName: fileName,
@@ -837,9 +826,9 @@ extension _GroupSend on _InnerGroupChatPageState {
   //       mounted: () => mounted,
   //       setState: _safeSetState,
   //       handleMediaUploadFailure: _handleMediaUploadFailure,
-  //       animateNewMessage: _animateNewMessage,
+  //       animateNewMessage: animateNewMessage,
   //       scrollToBottom: _scrollToBottom,
-  //       cancelReply: _cancelReply,
+  //       cancelReply: cancelReply,
   //       isReplying: _isReplying,
   //     ),
   //   );
@@ -850,144 +839,5 @@ extension _GroupSend on _InnerGroupChatPageState {
   //   }
   // }
 
-  // Message action methods
-
-  void _showVoiceRecordingModal() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      barrierColor: Colors.transparent,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) {
-          return Align(
-            alignment: Alignment.bottomCenter,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 80, left: 16, right: 16),
-              child: VoiceRecordingModal(
-                onStartRecording: _startRecording,
-                onStopRecording: _stopRecording,
-                onCancelRecording: _cancelRecording,
-                onSendRecording: _sendRecordedVoice,
-                isRecording: _voiceRecordingManager.isRecording,
-                recordingDuration: _voiceRecordingManager.recordingDuration,
-                zigzagAnimation: _zigzagAnimation,
-                voiceModalAnimation: _voiceModalAnimation,
-                timerStream: _timerStreamController.stream,
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Future<void> _checkAndRequestMicrophonePermission() async {
-    await _voiceRecordingManager.checkAndRequestMicrophonePermission();
-  }
-
-  Future<void> _startRecording() async {
-    await _voiceRecordingManager.startRecording();
-  }
-
-  Future<void> _stopRecording() async {
-    await _voiceRecordingManager.stopRecording();
-  }
-
-  void _cancelRecording() async {
-    await _voiceRecordingManager.cancelRecording();
-  }
-
-  Future<void> _sendRecordedVoice({MessageModel? failedMessage}) async {
-    try {
-      File? voiceFile;
-      // ignore: unused_local_variable
-      int? duration;
-
-      if (failedMessage != null) {
-        // Retry: Get file info from failed message
-        final attachments = failedMessage.attachments;
-        final localPath = attachments?['local_path'] as String?;
-        duration = attachments?['duration'] as int?;
-
-        if (localPath == null || !File(localPath).existsSync()) {
-          _showErrorDialog(
-            'Original recording not found. Please record again.',
-          );
-          return;
-        }
-
-        voiceFile = File(localPath);
-      } else {
-        // New send: Stop recording if still recording
-        final recordingPath = await _voiceRecordingManager.stopIfRecording();
-
-        if (recordingPath == null) {
-          _showErrorDialog('No recording found. Please try again.');
-          return;
-        }
-
-        voiceFile = File(recordingPath);
-        if (!await voiceFile.exists()) {
-          _showErrorDialog('Recording file not found. Please try again.');
-          return;
-        }
-
-        final fileSize = await voiceFile.length();
-        if (fileSize == 0) {
-          _showErrorDialog('Recording is empty. Please try recording again.');
-          return;
-        }
-
-        duration = _voiceRecordingManager.recordingDuration.inSeconds;
-      }
-      // Stop recording first
-      await _stopRecording();
-
-      // Close the voice recording modal immediately (don't wait for upload)
-      if (mounted && failedMessage == null) {
-        Navigator.of(context).pop();
-      }
-
-      // Send the message (upload continues in background)
-      await _sendMediaMessageToServer(voiceFile, MessageType.audio);
-
-      // await sendRecordedVoice(
-      //   SendMediaMessageConfig(
-      //     mediaFile: voiceFile,
-      //     conversationId: widget.group.chatId,
-      //     currentUserId: _currentUserId,
-      //     optimisticMessageId: _optimisticMessageId,
-      //     replyToMessage: _replyToMessageData,
-      //     replyToMessageId: _replyToMessageData?.id,
-      //     failedMessage: failedMessage,
-      //     messageType: 'audio',
-      //     duration: duration,
-      //     messages: _messages,
-      //     optimisticMessageIds: _optimisticMessageIds,
-      //     conversationMeta: _conversationMeta,
-      //     messagesRepo: _messagesRepo,
-      //     chatsServices: _chatsServices,
-      //     websocketService: _websocketService,
-      //     mounted: () => mounted,
-      //     setState: _safeSetState,
-      //     handleMediaUploadFailure: _handleMediaUploadFailure,
-      //     animateNewMessage: _animateNewMessage,
-      //     scrollToBottom: _scrollToBottom,
-      //     cancelReply: _cancelReply,
-      //     isReplying: _isReplying,
-      //     context: context,
-      //     closeModal: failedMessage == null
-      //         ? () => Navigator.of(context).pop()
-      //         : null,
-      //   ),
-      // );
-
-      // Only decrement optimistic ID if this was a new message (not a retry)
-      // if (failedMessage == null) {
-      //   _optimisticMessageId--;
-      // }
-    } catch (e) {
-      _showErrorDialog('Failed to send voice note. Please try again.');
-    }
-  }
+  // Voice recording methods moved to ChatVoiceRecordingMixin.
 }

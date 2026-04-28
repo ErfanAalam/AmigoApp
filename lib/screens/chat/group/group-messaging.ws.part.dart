@@ -195,7 +195,7 @@ extension _GroupWsHandlers on _InnerGroupChatPageState {
           }
         });
 
-        _animateNewMessage(message.id);
+        animateNewMessage(message.id);
       }
     } catch (e) {
       debugPrint('❌ Error processing incoming message: $e');
@@ -410,7 +410,7 @@ extension _GroupWsHandlers on _InnerGroupChatPageState {
   //       _showStickyDate = true;
   //     });
 
-  //     _animateNewMessage(optimisticMessage.id);
+  //     animateNewMessage(optimisticMessage.id);
   //     _scrollToBottom();
   //   }
 

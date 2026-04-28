@@ -1,147 +1,6 @@
 part of 'dm-messaging.screen.dart';
 
 extension _DmActions on _InnerChatPageState {
-  void _toggleMessageSelection(String messageId) {
-    if (!_canSetState) {
-      return;
-    }
-    _safeSetState(() {
-      if (_selectedMessages.contains(messageId)) {
-        _selectedMessages.remove(messageId);
-      } else {
-        _selectedMessages.add(messageId);
-      }
-    });
-  }
-
-  void _exitSelectionMode() {
-    if (!_canSetState) {
-      return;
-    }
-    _safeSetState(() {
-      _selectedMessages.clear();
-    });
-  }
-
-  void _enterSelectionMode(String messageId) {
-    if (!_canSetState) {
-      return;
-    }
-    _safeSetState(() {
-      _selectedMessages.add(messageId);
-    });
-  }
-
-  void _togglePinMessage(MessageModel message) async {
-    // Check if this message is currently pinned by comparing IDs
-    final messageId = message.id;
-    final pinnedMessageId = _pinnedMessage?.id;
-    final wasPinned = messageId == pinnedMessageId && _pinnedMessage != null;
-    final newPinnedMessageId = wasPinned ? null : message.id;
-
-    // Clear or set pinned message immediately for instant UI feedback
-    if (!_canSetState) {
-      return;
-    }
-    _safeSetState(() {
-      _pinnedMessage = wasPinned ? null : message;
-    });
-
-    await ChatHelpers.togglePinMessage(
-      message: message,
-      conversationId: widget.dm.chatId,
-      currentPinnedMessageId: pinnedMessageId,
-      setPinnedMessageId: (value) {
-        // This is called inside togglePinMessage's setState, but we already updated above
-        // Keep it for consistency
-        if (_canSetState) {
-          _pinnedMessage = value;
-        }
-      },
-      currentUserId: _currentUserDetails?.id,
-      setState: _safeSetState,
-    );
-
-    // Update provider state immediately for UI consistency
-    ref
-        .read(chatProvider.notifier)
-        .updatePinnedMessageInState(widget.dm.chatId, newPinnedMessageId);
-  }
-
-  void _toggleStarMessage(String messageId) async {
-    if (_starEnabled) {
-      /* star disabled */
-    }
-  }
-
-  void _reactToMessage(MessageModel message, String emoji) async {
-    if (_currentUserDetails == null) return;
-
-    final msgReactions = _reactionsByMessage[message.id] ?? {};
-    final emojiUsers =
-        (msgReactions[emoji] as List?)
-            ?.map((e) => Map<String, dynamic>.from(e as Map))
-            .toList() ??
-        [];
-    final alreadyReacted = emojiUsers.any(
-      (u) => u['user_id']?.toString() == _currentUserDetails!.id,
-    );
-    final action = alreadyReacted ? 'remove' : 'add';
-
-    // Write to local DB immediately so the Drift stream re-emits
-    await _messageStatusRepo.upsertReaction(
-      messageId: message.id,
-      userId: _currentUserDetails!.id,
-      chatId: widget.dm.chatId,
-      emoji: action == 'add' ? emoji : null,
-    );
-
-    // Fire to backend (which will broadcast to other conversation members)
-    try {
-      await apiService.chat.reactToMessage(
-        messageId: message.id,
-        conversationId: widget.dm.chatId,
-        emoji: emoji,
-        action: action,
-        senderName: _currentUserDetails!.name,
-      );
-    } catch (e) {
-      debugPrint('❌ Failed to send reaction: $e');
-    }
-  }
-
-  void _replyToMessage(MessageModel message) async {
-    if (!_canSetState) {
-      return;
-    }
-    _safeSetState(() {
-      _replyToMessageData = message;
-    });
-    // Keep keyboard open — re-request focus after the layout settles
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_canSetState) _messageFocusNode.requestFocus();
-    });
-  }
-
-  void _cancelReply() {
-    if (!_canSetState) {
-      return;
-    }
-    _safeSetState(() {
-      _replyToMessageData = null;
-    });
-  }
-
-  Future<void> _forwardMessage(MessageModel message) async {
-    if (_canSetState) {
-      _safeSetState(() {
-        _messagesToForward.clear();
-        _messagesToForward.add(message.id);
-      });
-    }
-    await _showForwardModal();
-  }
-
   void _deleteMessage(
     String messageId, {
     bool deleteForEveryone = false,
@@ -257,17 +116,17 @@ extension _DmActions on _InnerChatPageState {
 
   void _bulkForwardMessages() async {
     await ChatHelpers.bulkForwardMessages(
-      selectedMessages: _selectedMessages,
-      messagesToForward: _messagesToForward,
+      selectedMessages: selectedMessages,
+      messagesToForward: messagesToForward,
       setState: _safeSetState,
-      exitSelectionMode: _exitSelectionMode,
+      exitSelectionMode: exitSelectionMode,
       showForwardModal: _showForwardModal,
     );
   }
 
   void _showMessageActions(MessageModel message, bool isMyMessage) {
     final isPinned = _pinnedMessage?.id == message.id;
-    final isStarred = _starredMessages.contains(message.id);
+    final isStarred = starredMessages.contains(message.id);
 
     // Determine which emojis the current user has already reacted with on this message
     final myReactions = <String>[];
@@ -292,16 +151,16 @@ extension _DmActions on _InnerChatPageState {
         isPinned: isPinned,
         isStarred: isStarred,
         showReadBy: false,
-        onReply: () => _replyToMessage(message),
-        onPin: () => _togglePinMessage(message),
-        onStar: () => _toggleStarMessage(message.id),
-        onForward: () => _forwardMessage(message),
-        onSelect: () => _enterSelectionMode(message.id),
+        onReply: () => replyToMessage(message),
+        onPin: () => togglePinMessage(message),
+        onStar: () => toggleStarMessage(message.id),
+        onForward: () => forwardMessage(message),
+        onSelect: () => enterSelectionMode(message.id),
         onDeleteForMe: () => _deleteMessageForMe(message.id),
         onDeleteForEveryone: isMyMessage
             ? () => _deleteMessage(message.id, deleteForEveryone: true)
             : null,
-        onReact: (emoji) => _reactToMessage(message, emoji),
+        onReact: (emoji) => reactToMessage(message, emoji),
         myReactions: myReactions,
       ),
     );
@@ -320,10 +179,10 @@ extension _DmActions on _InnerChatPageState {
       isScrollControlled: true,
       enableDrag: true,
       builder: (context) => ForwardMessageModal(
-        messagesToForward: _messagesToForward,
+        messagesToForward: messagesToForward,
         dmList: dmList,
         groupList: groupList,
-        isLoading: _isLoadingConversations,
+        isLoading: isLoadingConversations,
         onForward: _handleForwardToConversations,
         currentConversationId: widget.dm.chatId,
       ),
@@ -335,7 +194,7 @@ extension _DmActions on _InnerChatPageState {
   ) async {
     await handleForwardToConversations(
       HandleForwardToConversationsConfig(
-        messagesToForward: _messagesToForward,
+        messagesToForward: messagesToForward,
         selectedConversationIds: selectedConversationIds,
         currentUserId: _currentUserDetails?.id ?? '',
         sourceConversationId: widget.dm.chatId,
@@ -344,153 +203,12 @@ extension _DmActions on _InnerChatPageState {
         clearMessagesToForward: (messages) {
           if (_canSetState) {
             _safeSetState(() {
-              _messagesToForward.clear();
+              messagesToForward.clear();
             });
           }
         },
-        showErrorDialog: _showErrorDialog,
+        showErrorDialog: showErrorDialog,
       ),
-    );
-  }
-
-  void _showAttachmentModal() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) => AttachmentActionSheet(
-        onCameraTap: () => _handleCameraAttachment(),
-        onGalleryTap: () => _handleGalleryAttachment(),
-        onDocumentTap: () => _handleDocumentAttachment(),
-        onContactTap: () => _handleContactAttachment(),
-      ),
-    );
-  }
-
-  void _handleCameraAttachment() async {
-    await handleCameraAttachment(
-      imagePicker: _imagePicker,
-      context: context,
-      onImageSelected: (imageFile, source) async {
-        // Open image editor before sending
-        final editedFile = await Navigator.of(context).push<File>(
-          MaterialPageRoute(
-            builder: (context) => ImageEditorScreen(imageFile: imageFile),
-          ),
-        );
-
-        if (editedFile != null) {
-          _sendMediaMessageToServer(editedFile, MessageType.image);
-        }
-      },
-      onError: (message) {
-        _showErrorDialog(message);
-      },
-      onPermissionDenied: (permissionType) {
-        openAppSettings();
-      },
-    );
-  }
-
-  void _handleGalleryAttachment() async {
-    await handleGalleryAttachment(
-      context: context,
-      onImageSelected: (imageFile, source) async {
-        // Open image editor before sending
-        final editedFile = await Navigator.of(context).push<File>(
-          MaterialPageRoute(
-            builder: (context) => ImageEditorScreen(imageFile: imageFile),
-          ),
-        );
-
-        if (editedFile != null) {
-          _sendMediaMessageToServer(editedFile, MessageType.image);
-        }
-      },
-      onVideoSelected: (videoFile, source) {
-        _sendMediaMessageToServer(videoFile, MessageType.video);
-      },
-      onError: (message) {
-        _showErrorDialog(message);
-      },
-    );
-  }
-
-  void _handleDocumentAttachment() async {
-    await handleDocumentAttachment(
-      context: context,
-      onDocumentSelected: (documentFile, fileName, extension) {
-        _sendMediaMessageToServer(documentFile, MessageType.document);
-      },
-      onError: (message) {
-        _showErrorDialog(message);
-      },
-    );
-  }
-
-  void _handleContactAttachment() async {
-    if (!mounted) return;
-
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ContactSelectionWidget(
-          onContactsSelected: (List<ContactModel> contacts) {
-            if (contacts.isEmpty) return;
-
-            // Store contacts in metadata for special rendering
-            final contactsMetadata = contacts
-                .map(
-                  (contact) => {
-                    'name': contact.displayName,
-                    'displayName': contact.displayName,
-                    'firstName': contact.firstName,
-                    'lastName': contact.lastName,
-                    'phone': contact.phoneNumber,
-                    'phoneNumber': contact.phoneNumber,
-                  },
-                )
-                .toList();
-
-            // Also format as text for backward compatibility
-            final contactText = contacts
-                .map(
-                  (contact) => '${contact.displayName}: ${contact.phoneNumber}',
-                )
-                .join(',\n');
-
-            // Set the formatted text in the message controller
-            _messageController.text = contactText;
-
-            // Store metadata before sending
-            _pendingContactMetadata = {
-              'contacts': contactsMetadata,
-              'is_contact_message': true,
-            };
-
-            // Send the message
-            _sendMessage(MessageType.text);
-          },
-        ),
-      ),
-    );
-  }
-
-  void _showErrorDialog(String message) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Error'),
-          content: Text(message),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
-            ),
-          ],
-        );
-      },
     );
   }
 

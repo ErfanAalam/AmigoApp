@@ -228,15 +228,3 @@ List<ContactModel> parseContactsFromMessage(MessageModel message) {
 
   return [];
 }
-
-/// Check if message contains shared contacts
-/// Only returns true when contacts were explicitly shared via the contact
-/// selection flow (attachments['contacts'] is set). Regular text messages
-/// containing phone numbers should render as normal text, not contact bubbles.
-bool isContactMessage(MessageModel message) {
-  final attachments = message.attachments;
-  if (attachments is Map<String, dynamic> && attachments['contacts'] != null) {
-    return true;
-  }
-  return false;
-}

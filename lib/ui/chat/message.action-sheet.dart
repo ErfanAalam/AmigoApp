@@ -70,6 +70,8 @@ class MessageActionSheet extends StatelessWidget {
         return Icons.perm_media;
       case MessageType.system:
         return Icons.info;
+      case MessageType.contact:
+        return Icons.contact_phone;
       case MessageType.text:
         return Icons.message;
     }
@@ -97,6 +99,8 @@ class MessageActionSheet extends StatelessWidget {
         return 'Media';
       case MessageType.system:
         return 'System message';
+      case MessageType.contact:
+        return 'Contact';
       case MessageType.text:
         return 'Text message';
     }

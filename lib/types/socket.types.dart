@@ -50,7 +50,8 @@ enum MessageType {
   forwarded('forwarded'),
   system('system'),
   attachment('attachment'),
-  reaction('reaction');
+  reaction('reaction'),
+  contact('contact');
 
   final String value;
   const MessageType(this.value);

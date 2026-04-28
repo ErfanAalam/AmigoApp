@@ -189,7 +189,7 @@ extension _DmWsHandlers on _InnerChatPageState {
         _sortMessagesBySentAt();
       });
 
-      _animateNewMessage(message.id);
+      animateNewMessage(message.id);
     } catch (e) {
       debugPrint('❌ Error processing incoming message: $e');
     }

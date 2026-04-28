@@ -13,7 +13,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:scroll_to_index/scroll_to_index.dart';
 
 import '../../../api/api_service.dart';
@@ -26,7 +25,6 @@ import '../../../models/user.model.dart';
 import '../../../providers/chat.provider.dart';
 import '../../../providers/draft.provider.dart';
 import '../../../providers/theme-color.provider.dart';
-import '../../../config/app-colors.config.dart';
 import '../../../services/draft-message.service.dart';
 import '../../../services/fcm/fcm-init.service.dart';
 import '../../../services/media-cache.service.dart';
@@ -35,40 +33,36 @@ import '../../../services/socket/transport.service.dart';
 import '../../../services/socket/ws-message.handler.dart';
 import '../../../services/user-info-cache.service.dart';
 import '../../../types/socket.types.dart';
-import '../../../ui/chat/attachment.action-sheet.dart';
 import '../../../ui/chat/date.widgets.dart';
 import '../../../ui/chat/forward-message.widget.dart';
 import '../../../ui/chat/group-readby.modal.dart';
 import '../../../ui/chat/input-container.widget.dart';
 import '../../../ui/chat/media-messages.widget.dart';
 import '../../../ui/chat/media-grid.widget.dart';
-import '../../../ui/chat/emoji-reaction.widget.dart';
 import '../../../ui/chat/message.action-sheet.dart';
-import '../../../ui/chat/message.widget.dart';
 import '../../../ui/chat/pinned-message.widget.dart';
 import '../../../ui/chat/chat-pills.widget.dart';
 import '../../../ui/chat/scroll-to-bottom.button.dart';
-import '../../../ui/chat/voice-recording.widget.dart';
 import '../../../ui/chat/message-recommendations.widget.dart';
-import '../../../ui/chat/contact-selection.widget.dart';
-import '../../../ui/chat/contact-message.widget.dart';
-import '../../../models/contact.model.dart';
 import '../../../utils/animations.utils.dart';
-import '../../../utils/chat/attachments.utils.dart';
 import '../../../utils/chat/audio-playback.utils.dart';
 import '../../../utils/chat/chat-helpers.utils.dart';
 import '../../../utils/chat/forward-message.utils.dart';
 import '../../../utils/chat/preview-media.utils.dart';
-import '../../../ui/snackbar.dart';
 import '../../../utils/route-transitions.util.dart';
 import 'group-info.screen.dart';
 import '../chat-details.screen.dart';
-import '../image-editor.screen.dart';
+import '../shared/chat-actions.mixin.dart';
+import '../shared/chat-attachment.mixin.dart';
+import '../shared/chat-bubble.mixin.dart';
+import '../shared/chat-scroll.mixin.dart';
+import '../shared/chat-search.mixin.dart';
+import '../shared/chat-swipe-reply.mixin.dart';
+import '../shared/chat-voice-recording.mixin.dart';
+import '../shared/media-message-config.builder.dart' as shared_media;
 
 part 'group-messaging.ws.part.dart';
 part 'group-messaging.sync.part.dart';
-part 'group-messaging.scroll.part.dart';
-part 'group-messaging.search.part.dart';
 part 'group-messaging.send.part.dart';
 part 'group-messaging.actions.part.dart';
 part 'group-messaging.ui.part.dart';
@@ -89,8 +83,20 @@ class InnerGroupChatPage extends ConsumerStatefulWidget {
   ConsumerState<InnerGroupChatPage> createState() => _InnerGroupChatPageState();
 }
 
+// Star feature is dropped on the backend. Keep all star UI reachable behind
+// a compile-time flag so it can be restored without restructuring the screen.
+const bool _starEnabled = false;
+
 class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
-    with TickerProviderStateMixin {
+    with
+        TickerProviderStateMixin,
+        ChatSearchMixin<InnerGroupChatPage>,
+        ChatSwipeReplyMixin<InnerGroupChatPage>,
+        ChatAttachmentMixin<InnerGroupChatPage>,
+        ChatActionsMixin<InnerGroupChatPage>,
+        ChatVoiceRecordingMixin<InnerGroupChatPage>,
+        ChatScrollMixin<InnerGroupChatPage>,
+        ChatBubbleMixin<InnerGroupChatPage> {
   // final GroupsService _groupsService = GroupsService();
   // final UserService _userService = UserService();
   final apiService = ApiService();
@@ -151,8 +157,98 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
   }
 
-  // Scroll to bottom button state
-  bool _isAtBottom = true;
+  // ChatSearchMixin requirements
+  @override
+  bool get canSetState => _canSetState;
+  @override
+  void safeSetState(VoidCallback fn) => _safeSetState(fn);
+  @override
+  List<MessageModel> get messages => _messages;
+  @override
+  TextEditingController get messageController => _messageController;
+  @override
+  FocusNode get messageFocusNode => _messageFocusNode;
+  // scrollToMessage is provided concretely by ChatScrollMixin.
+  @override
+  void sendMessage(MessageType type) => _sendMessage(type);
+
+  // ChatSwipeReplyMixin requirements
+  @override
+  Set<String> get selectedMessageIds => selectedMessages;
+  @override
+  void onSwipeReply(MessageModel message) => replyToMessage(message);
+
+  // ChatAttachmentMixin requirements
+  @override
+  ImagePicker get imagePicker => _imagePicker;
+  @override
+  Future<void> sendMediaMessageToServer(File file, MessageType type) =>
+      _sendMediaMessageToServer(file, type);
+
+  // ChatActionsMixin requirements
+  @override
+  String get conversationId => widget.group.chatId;
+  @override
+  String? get currentUserId => _currentUserDetails?.id;
+  @override
+  String? get currentUserName => _currentUserDetails?.name;
+  @override
+  MessageStatusRepository get messageStatusRepo => _messageStatusRepo;
+  @override
+  ApiService get chatApiService => apiService;
+  @override
+  MessageModel? get pinnedMessage => _pinnedMessage;
+  @override
+  void setPinnedMessage(MessageModel? message) => _pinnedMessage = message;
+  @override
+  Map<String, Map<String, dynamic>> get reactionsByMessage =>
+      _reactionsByMessage;
+  @override
+  Future<void> showForwardModal() => _showForwardModal();
+
+  // ChatVoiceRecordingMixin requirements
+  @override
+  String get voiceFilePrefix => 'group_voice_note_';
+
+  // ChatScrollMixin requirements
+  @override
+  AutoScrollController get scrollController => _scrollController;
+  @override
+  Future<void> loadMoreMessages() => _loadMoreMessages();
+  @override
+  String get scrollDebugPrefix => '[Group]';
+  @override
+  int get loadMoreDistanceFromTop => 1000;
+
+  // ChatBubbleMixin requirements
+  @override
+  bool get isGroupChat => true;
+  @override
+  Color get nonMyMessageBackgroundColor => Colors.grey[100]!;
+  @override
+  bool get useIntrinsicWidth => false;
+  @override
+  bool get useStackContainer => false;
+  @override
+  Widget buildMessageStatusTicks(MessageModel message) =>
+      _buildMessageStatusTicks(message);
+  @override
+  void showMessageActions(MessageModel message, bool isMyMessage) =>
+      _showMessageActions(message, isMyMessage);
+  @override
+  MediaMessageConfig buildMediaMessageConfig(
+    MessageModel message,
+    bool isMyMessage,
+  ) => _buildMediaMessageConfig(message, isMyMessage);
+  @override
+  MessageRepository get messagesRepo => _messagesRepo;
+  @override
+  UserRepository get userRepo => _userRepo;
+  @override
+  Future<void> Function(String) get onResendFailedMessage =>
+      resendFailedMessage;
+
+  // isAtBottom, lastScrollPosition live on ChatScrollMixin.
   // int _unreadCountWhileScrolled = 0;
   // int _previousMessageCount = 0;
 
@@ -205,51 +301,21 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     );
   }
 
-  // Message selection and actions
-  final Set<String> _selectedMessages = {};
-  // bool _isSelectionMode = false;
+  // selectedMessages, starredMessages, messagesToForward, replyToMessageData,
+  // and isLoadingConversations live on ChatActionsMixin.
   MessageModel? _pinnedMessage; // Only one message can be pinned
-  final Set<String> _starredMessages = {};
 
-  // Forward message state
-  final Set<String> _messagesToForward = {};
-  bool _isLoadingConversations = false;
-
-  // Reply message state
-  MessageModel? _replyToMessageData;
-
-  // Pending contact metadata for contact messages
-  Map<String, dynamic>? _pendingContactMetadata;
+  // pendingContactMetadata lives on ChatAttachmentMixin.
   // bool _isReplying = false;
 
-  // Highlighted message state (for scroll-to effect)
-  String? _highlightedMessageId; // Current match being viewed
-  Set<String> _highlightedMessageIds = {}; // All matching messages
-  Timer? _highlightTimer;
-
-  // Scroll-to-reply loading state
-  bool _isLoadingTargetMessage = false;
-
-  // ── Jump mode ─────────────────────────────────────────────────────────────
-  List<MessageModel> _jumpMessages = [];
-  bool _isInJumpMode = false;
-  bool _jumpHasOlderMessages = true;
-  bool _jumpHasNewerMessages = true;
-  bool _isLoadingJumpOlder = false;
-  bool _isLoadingJumpNewer = false;
-  bool _isScrollingToJumpTarget =
-      false; // Guard: true while scrollToIndex animates
-  static const int _jumpWindowSize = 300;
-
-  List<MessageModel> get _displayMessages =>
-      _isInJumpMode ? _jumpMessages : _messages;
+  // Highlight timer, isLoadingTargetMessage, jump-mode state, displayMessages
+  // getter, message-animation maps, draft / sticky-date debounce timers,
+  // and isAtBottom / lastScrollPosition all live on ChatScrollMixin.
 
   // GlobalKeys for message widgets to enable accurate scrolling
   final Map<String, GlobalKey> _messageKeys = {};
 
-  // Sticky date separator state
-  String? _currentStickyDate;
-  bool _showStickyDate = false;
+  // Sticky-date state lives on ChatScrollMixin (currentStickyDate, showStickyDate).
 
   // Typing animation controllers
   late AnimationController _typingAnimationController;
@@ -257,21 +323,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   Timer? _typingTimeout;
   DateTime? _lastTypingMessageSent; // Track when last typing message was sent
 
-  // Scroll debounce timer
-  Timer? _scrollDebounceTimer;
+  // Search state lives on ChatSearchMixin (isSearchMode, searchController,
+  // searchMatches, currentMatchIndex, searchDebounceTimer, isInputFocused,
+  // highlightedMessageId, highlightedMessageIds).
 
-  // Draft save debounce timer
-  Timer? _draftSaveTimer;
-
-  // Search state
-  bool _isSearchMode = false;
-  final TextEditingController _searchController = TextEditingController();
-  List<String> _searchMatches = []; // List of message IDs that match search
-  int _currentMatchIndex = -1; // Current match index in _searchMatches
-  Timer? _searchDebounceTimer;
-
-  // Message recommendations state
-  bool _isInputFocused = false;
   final List<String> _messageRecommendations = [
     'Hi',
     'Hello',
@@ -285,44 +340,12 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     'Maybe',
   ];
 
-  // Message animation controllers
-  final Map<String, AnimationController> _messageAnimationControllers = {};
-  final Map<String, Animation<double>> _messageSlideAnimations = {};
-  final Map<String, Animation<double>> _messageFadeAnimations = {};
-  final Set<String> _animatedMessages = {};
+  // Swipe animation controllers, gesture state, and constants live on
+  // ChatSwipeReplyMixin (swipeAnimationControllers, swipeAnimations,
+  // swipeStartPosition, isSwipeGesture, isScrolling).
 
-  // Swipe animation controllers for reply gesture
-  final Map<String, AnimationController> _swipeAnimationControllers = {};
-  final Map<String, Animation<double>> _swipeAnimations = {};
-
-  // Swipe gesture tracking variables
-  Offset? _swipeStartPosition;
-  double _swipeTotalDistance = 0.0;
-  bool _isSwipeGesture = false;
-  bool _isScrolling = false;
-  double _lastScrollPosition = 0.0;
-  // Minimum travel (px²) before classifying gesture direction — keeps classification stable
-  static const double _minSwipeDistanceSq = 16.0; // 4px
-  // Max vertical-to-horizontal ratio allowed — keeps swipe strictly left-to-right (~10°)
-  static const double _maxSwipeAngleRatio = 0.18;
-  static const double _minSwipeVelocity =
-      500.0; // Minimum velocity for swipe completion
-  static const double _swipeThreshold =
-      0.35; // Threshold for swipe completion (0.0 to 1.0)
-
-  // Voice recording related variables
-  late AnimationController _voiceModalAnimationController;
-  late AnimationController _zigzagAnimationController;
-  late Animation<double> _voiceModalAnimation;
-  late Animation<double> _zigzagAnimation;
-  final StreamController<Duration> _timerStreamController =
-      StreamController<Duration>.broadcast();
-
-  // Audio playback manager
+  // Voice recording state lives on ChatVoiceRecordingMixin.
   late AudioPlaybackManager _audioPlaybackManager;
-
-  // Voice recording manager
-  late VoiceRecordingManager _voiceRecordingManager;
 
   // Video thumbnail cache
   final Map<String, String?> _videoThumbnailCache = {};
@@ -331,7 +354,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   @override
   void initState() {
     super.initState();
-    _scrollController.addListener(_onScroll);
+    _scrollController.addListener(onScroll);
 
     // Clear notifications for this conversation when opened
     NotificationService().clearConversationNotifications(
@@ -345,8 +368,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // Initialize typing animation
     _initializeTypingAnimation();
 
-    // Initialize voice recording animations
-    _initializeVoiceAnimations();
+    // Initialize voice recording animations + manager (mixin-owned)
+    initializeVoiceRecording();
+    _initializeAudioPlayback();
 
     // Set up WebSocket message listener
     _setupWebSocketListener();
@@ -361,13 +385,13 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // _updateIsAdminOrStaff();
 
     // Listen to text changes for draft saving
-    _messageController.addListener(_onMessageTextChanged);
+    _messageController.addListener(onMessageTextChanged);
 
     // Listen to search text changes
-    _searchController.addListener(_onSearchTextChanged);
+    searchController.addListener(onSearchTextChanged);
 
     // Listen to focus changes
-    _messageFocusNode.addListener(_onInputFocusChange);
+    _messageFocusNode.addListener(onInputFocusChange);
   }
 
   void _initializeTypingAnimation() {
@@ -376,37 +400,16 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     _typingDotAnimations = result.dotAnimations;
   }
 
-  void _initializeVoiceAnimations() {
-    final result = initializeVoiceAnimations(this);
-    _voiceModalAnimationController = result.voiceModalController;
-    _zigzagAnimationController = result.zigzagController;
-    _voiceModalAnimation = result.voiceModalAnimation;
-    _zigzagAnimation = result.zigzagAnimation;
-
-    // Initialize voice recording manager
-    _voiceRecordingManager = VoiceRecordingManager(
-      mounted: () => mounted,
-      setState: () => setState(() {}),
-      showErrorDialog: _showErrorDialog,
-      context: context,
-      voiceModalAnimationController: _voiceModalAnimationController,
-      zigzagAnimationController: _zigzagAnimationController,
-      timerStreamController: _timerStreamController,
-      filePrefix: 'group_voice_note_',
-    );
-
-    // Initialize audio playback manager
+  void _initializeAudioPlayback() {
     _audioPlaybackManager = AudioPlaybackManager(
       vsync: this,
       mounted: () => mounted,
       setState: () => setState(() {}),
-      showErrorDialog: _showErrorDialog,
+      showErrorDialog: showErrorDialog,
       mediaCacheService: _mediaCacheService,
       messages: _messages,
       onAudioFinished: _handleAudioFinished,
     );
-
-    // Initialize the audio player asynchronously
     _audioPlaybackManager.initialize();
   }
 
@@ -486,20 +489,20 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     return Scaffold(
       backgroundColor: Colors.white, // Pure white background
       appBar: AppBar(
-        leading: _selectedMessages.isNotEmpty
+        leading: selectedMessages.isNotEmpty
             ? IconButton(
                 icon: const Icon(Icons.close, color: Colors.white),
-                onPressed: _exitSelectionMode,
+                onPressed: exitSelectionMode,
               )
             : IconButton(
                 icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
                 onPressed: () => Navigator.pop(context),
               ),
-        title: _isSearchMode
-            ? _buildSearchBar(themeColor)
-            : _selectedMessages.isNotEmpty
+        title: isSearchMode
+            ? buildSearchBar(themeColor)
+            : selectedMessages.isNotEmpty
             ? Text(
-                '${_selectedMessages.length} selected',
+                '${selectedMessages.length} selected',
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
@@ -553,7 +556,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
               ),
         backgroundColor: themeColor.primary,
         elevation: 0,
-        actions: _selectedMessages.isNotEmpty
+        actions: selectedMessages.isNotEmpty
             ? _buildSelectionModeActions()
             : [
                 // Search button
@@ -600,8 +603,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                     ),
                     currentUserId: _currentUserDetails?.id ?? '',
                     // isGroupChat: widget.group.type == ChatType.group,
-                    onTap: () => _scrollToMessage(_pinnedMessage?.id ?? ''),
-                    onUnpin: () => _togglePinMessage(_pinnedMessage!),
+                    onTap: () => scrollToMessage(_pinnedMessage?.id ?? ''),
+                    onUnpin: () => togglePinMessage(_pinnedMessage!),
                   ),
 
                 // Messages List
@@ -613,7 +616,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             ),
 
             // Loading-target-message pill
-            if (_isLoadingTargetMessage)
+            if (isLoadingTargetMessage)
               Positioned(
                 top: 10,
                 left: 0,
@@ -621,7 +624,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                 child: _buildLoadingTargetPill(),
               ),
             // Sync indicator pill - above date separator
-            if (_isSyncingMessages && !_isLoadingTargetMessage)
+            if (_isSyncingMessages && !isLoadingTargetMessage)
               Positioned(
                 top: 10,
                 left: 0,
@@ -632,24 +635,24 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
             Positioned(
               top:
                   (_isSyncingMessages ||
-                      _isLoadingTargetMessage ||
-                      _isInJumpMode)
+                      isLoadingTargetMessage ||
+                      isInJumpMode)
                   ? 54
                   : 10,
               left: 0,
               right: 0,
-              child: _buildStickyDateSeparator(),
+              child: buildStickyDateSeparator(),
             ),
             // Scroll to Bottom Button - positioned at right bottom
             Positioned(
               right: 16,
-              bottom: _replyToMessageData != null
+              bottom: replyToMessageData != null
                   ? 150.0
                   : 110.0, // Position above message input
               child: ScrollToBottomButton(
                 scrollController: _scrollController,
-                onTap: _handleScrollToBottomTap,
-                isAtBottom: _isAtBottom,
+                onTap: handleScrollToBottomTap,
+                isAtBottom: isAtBottom,
                 // unreadCount: _unreadCountWhileScrolled > 0
                 //     ? _unreadCountWhileScrolled
                 //     : null,
@@ -658,14 +661,14 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
               ),
             ),
             // "Return to Latest" — visible only in jump mode
-            if (_isInJumpMode)
+            if (isInJumpMode)
               Positioned(
-                top: (_isSyncingMessages || _isLoadingTargetMessage) ? 54 : 10,
+                top: (_isSyncingMessages || isLoadingTargetMessage) ? 54 : 10,
                 left: 0,
                 right: 0,
                 child: Center(
                   child: GestureDetector(
-                    onTap: _exitJumpMode,
+                    onTap: exitJumpMode,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 14,
@@ -716,15 +719,14 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   void dispose() {
     if (_isDisposed) return; // Prevent multiple dispose calls
     _isDisposed = true;
-    _jumpMessages = [];
-    _isInJumpMode = false;
+    jumpMessages = [];
+    isInJumpMode = false;
 
     _scrollController.dispose();
     _messageController.dispose();
     _messageFocusNode.dispose();
-    _searchController.dispose();
+    disposeSearch();
     _isOtherTypingNotifier.dispose();
-    _searchDebounceTimer?.cancel();
     _messagesStreamSub?.cancel();
     _reactionsSubscription?.cancel();
     _deliveryStatusSubscription?.cancel();
@@ -736,9 +738,6 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     _messageDeleteSubscription?.cancel();
     _typingAnimationController.dispose();
     _typingTimeout?.cancel();
-    _scrollDebounceTimer?.cancel();
-    _highlightTimer?.cancel();
-    _draftSaveTimer?.cancel();
 
     // Clear message keys
     _messageKeys.clear();
@@ -750,34 +749,18 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     }
 
     // Remove listener
-    _messageController.removeListener(_onMessageTextChanged);
+    _messageController.removeListener(onMessageTextChanged);
 
-    // Dispose message animation controllers
-    for (final controller in _messageAnimationControllers.values) {
-      controller.dispose();
-    }
-    _messageAnimationControllers.clear();
-    _messageSlideAnimations.clear();
-    _messageFadeAnimations.clear();
-    _animatedMessages.clear();
+    // Scroll-mixin-owned timers + message-animation controllers.
+    disposeScroll();
 
-    // Dispose swipe animation controllers
-    for (final controller in _swipeAnimationControllers.values) {
-      controller.dispose();
-    }
-    _swipeAnimationControllers.clear();
-    _swipeAnimations.clear();
+    disposeSwipeReply();
 
     // Dispose audio playback manager
     _audioPlaybackManager.dispose();
 
-    // Dispose voice recording manager
-    _voiceRecordingManager.dispose();
-
-    // Dispose voice recording controllers
-    _voiceModalAnimationController.dispose();
-    _zigzagAnimationController.dispose();
-    _timerStreamController.close();
+    // Dispose voice recording (mixin-owned)
+    disposeVoiceRecording();
 
     // Clear active conversation when leaving the messaging screen
     ref.read(chatProvider.notifier).setActiveConversation(null, null);

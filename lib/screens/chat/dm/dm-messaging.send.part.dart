@@ -15,7 +15,8 @@ extension _DmSend on _InnerChatPageState {
     }
     // grab the text from the text input controller or use provided body
     String messageText = '';
-    if (messageType == MessageType.text) {
+    if (messageType == MessageType.text ||
+        messageType == MessageType.contact) {
       messageText = body ?? _messageController.text.trim();
       if (messageText.isEmpty) return;
     }
@@ -36,16 +37,24 @@ extension _DmSend on _InnerChatPageState {
     // Create message for immediate display with current UTC time
     final nowUTC = DateTime.now().toUtc();
 
+    // Merge contact metadata into attachments if present (a contact message
+    // carries the picked contacts in attachments alongside any media payload).
+    Map<String, dynamic>? combinedAttachments = mediaResponse?.toJson();
+    if (!isResend && pendingContactMetadata != null) {
+      combinedAttachments = Map<String, dynamic>.from(combinedAttachments ?? {})
+        ..addAll(pendingContactMetadata!);
+    }
+
     final newMsg = MessageModel(
       id: id,
       chatId: widget.dm.chatId,
       senderId: _currentUserDetails!.id,
       senderName: _currentUserDetails!.name,
       senderProfilePic: _currentUserDetails!.profilePic,
-      repliedTo: _replyToMessageData?.id,
+      repliedTo: replyToMessageData?.id,
       type: messageType,
       body: messageText,
-      attachments: mediaResponse?.toJson(),
+      attachments: combinedAttachments,
       sentAt: nowUTC.toIso8601String(),
     );
 
@@ -71,7 +80,7 @@ extension _DmSend on _InnerChatPageState {
     if (!isResend) {
       _messageController.clear();
       // Clear pending contact metadata after using it
-      _pendingContactMetadata = null;
+      pendingContactMetadata = null;
     }
 
     // Add message to UI immediately with animation
@@ -86,9 +95,9 @@ extension _DmSend on _InnerChatPageState {
         _sortMessagesBySentAt();
       });
 
-      _animateNewMessage(newMsg.id);
+      animateNewMessage(newMsg.id);
       // scroll to bottom when a new message is sent
-      _handleScrollToBottomTap();
+      handleScrollToBottomTap();
     }
 
     // >>>>>-- sending to ws (fire-and-forget) -->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -96,10 +105,10 @@ extension _DmSend on _InnerChatPageState {
       id: id,
       convId: widget.dm.chatId,
       senderId: _currentUserDetails!.id,
-      attachments: mediaResponse,
+      attachments: combinedAttachments,
       msgType: messageType,
       body: messageText,
-      repliedTo: _replyToMessageData?.id,
+      repliedTo: replyToMessageData?.id,
       sentAt: nowUTC,
     );
 
@@ -115,7 +124,7 @@ extension _DmSend on _InnerChatPageState {
         .updateLastMessageOnSendingOwnMessage(widget.dm.chatId, newMsg);
 
     // remove the reply container if any
-    _cancelReply();
+    cancelReply();
 
     // Fire-and-forget: send via transport without blocking UI.
     // The MessageSentAckPayload handler marks as "sent" on success or "failed" on failure.
@@ -184,7 +193,7 @@ extension _DmSend on _InnerChatPageState {
       senderId: _currentUserDetails!.id,
       senderName: _currentUserDetails!.name,
       senderProfilePic: _currentUserDetails!.profilePic,
-      repliedTo: _replyToMessageData?.id,
+      repliedTo: replyToMessageData?.id,
       attachments: attachments,
       type: messageType,
       sentAt: nowUTC.toIso8601String(),
@@ -199,8 +208,8 @@ extension _DmSend on _InnerChatPageState {
             _messages[index] = newMsg;
             _sortMessagesBySentAt();
           });
-          _animateNewMessage(newMsg.id);
-          _handleScrollToBottomTap();
+          animateNewMessage(newMsg.id);
+          handleScrollToBottomTap();
         }
         // Also update in DB
       } else {
@@ -209,8 +218,8 @@ extension _DmSend on _InnerChatPageState {
           _sortMessagesBySentAt();
         });
 
-        _animateNewMessage(newMsg.id);
-        _handleScrollToBottomTap();
+        animateNewMessage(newMsg.id);
+        handleScrollToBottomTap();
 
         // immediately insert message in the localDB for future reference
         await _messagesRepo.insertMessage(newMsg);
@@ -356,14 +365,14 @@ extension _DmSend on _InnerChatPageState {
       }
 
       // Preserve reply target if the failed message was a reply
-      MessageModel? originalReplyToMessageData = _replyToMessageData;
+      MessageModel? originalReplyToMessageData = replyToMessageData;
       final replyToMessageId = message.repliedTo;
       if (replyToMessageId != null) {
         final replyToMessage = await _messagesRepo.getMessageById(
           replyToMessageId,
         );
         if (replyToMessage != null) {
-          _replyToMessageData = replyToMessage;
+          replyToMessageData = replyToMessage;
         }
       }
 
@@ -405,7 +414,7 @@ extension _DmSend on _InnerChatPageState {
         }
       } finally {
         // Restore original reply message data
-        _replyToMessageData = originalReplyToMessageData;
+        replyToMessageData = originalReplyToMessageData;
       }
     } catch (e) {
       debugPrint('Error resending failed message: $e');
@@ -445,121 +454,4 @@ extension _DmSend on _InnerChatPageState {
     }
   }
 
-  void _sendVoiceNote() async {
-    final micStatus = await Permission.microphone.status;
-    if (micStatus.isGranted) {
-      _showVoiceRecordingModal();
-    } else {
-      await _checkAndRequestMicrophonePermission();
-      final newStatus = await Permission.microphone.status;
-      if (newStatus.isGranted) {
-        _showVoiceRecordingModal();
-      }
-    }
-  }
-
-  void _showVoiceRecordingModal() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      barrierColor: Colors.transparent,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) {
-          return Align(
-            alignment: Alignment.bottomCenter,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 80, left: 16, right: 16),
-              child: VoiceRecordingModal(
-                onStartRecording: _startRecording,
-                onStopRecording: _stopRecording,
-                onCancelRecording: _cancelRecording,
-                onSendRecording: _sendRecordedVoice,
-                isRecording: _voiceRecordingManager.isRecording,
-                recordingDuration: _voiceRecordingManager.recordingDuration,
-                zigzagAnimation: _zigzagAnimation,
-                voiceModalAnimation: _voiceModalAnimation,
-                timerStream: _timerStreamController.stream,
-                recordingTextPrefix: 'Still Recording',
-                sendButtonColor: Colors.green,
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Future<void> _checkAndRequestMicrophonePermission() async {
-    await _voiceRecordingManager.checkAndRequestMicrophonePermission();
-  }
-
-  Future<void> _startRecording() async {
-    await _voiceRecordingManager.startRecording();
-  }
-
-  Future<void> _stopRecording() async {
-    await _voiceRecordingManager.stopRecording();
-  }
-
-  void _cancelRecording() async {
-    await _voiceRecordingManager.cancelRecording();
-  }
-
-  Future<void> _sendRecordedVoice({MessageModel? failedMessage}) async {
-    try {
-      File? voiceFile;
-      int? duration;
-
-      // if (failedMessage != null) {
-      //   // Retry: Get file info from failed message
-      //   final attachments = failedMessage.attachments;
-      //   final localPath = attachments?['local_path'] as String?;
-      //   duration = attachments?['duration'] as int?;
-      //
-      //   if (localPath == null || !File(localPath).existsSync()) {
-      //     _showErrorDialog(
-      //       'Original recording not found. Please record again.',
-      //     );
-      //     return;
-      //   }
-      //
-      //   voiceFile = File(localPath);
-      // } else {
-      // New send: Stop recording if still recording
-      final recordingPath = await _voiceRecordingManager.stopIfRecording();
-
-      if (recordingPath == null) {
-        _showErrorDialog('No recording found. Please try again.');
-        return;
-      }
-
-      voiceFile = File(recordingPath);
-      if (!await voiceFile.exists()) {
-        _showErrorDialog('Recording file not found. Please try again.');
-        return;
-      }
-
-      final fileSize = await voiceFile.length();
-      if (fileSize == 0) {
-        _showErrorDialog('Recording is empty. Please try recording again.');
-        return;
-      }
-
-      duration = _voiceRecordingManager.recordingDuration.inSeconds;
-      // }
-
-      // Stop recording first
-      await _stopRecording();
-
-      // Close the voice recording modal immediately (don't wait for upload)
-      if (mounted && failedMessage == null) {
-        Navigator.of(context).pop();
-      }
-
-      // Send the message (upload continues in background)
-      await _sendMediaMessageToServer(voiceFile, MessageType.audio);
-    } catch (e) {
-      _showErrorDialog('Failed to send voice note. Please try again.');
-    }
-  }
 }
