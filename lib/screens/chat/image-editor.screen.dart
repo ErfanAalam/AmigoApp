@@ -33,6 +33,11 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
   List<DrawingPath> _paths = [];
   List<DrawingPath> _redoStack = [];
 
+  /// True once the source image has decoded its first frame. Send button is
+  /// disabled until then so users can't capture an empty (transparent)
+  /// RepaintBoundary that would render as a white bubble in chat.
+  bool _imageLoaded = false;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -64,10 +69,14 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
             ),
             onPressed: _redoStack.isEmpty ? null : _redo,
           ),
-          // Send button
+          // Send button — disabled until the source image's first frame
+          // has decoded, otherwise the RepaintBoundary capture is empty.
           IconButton(
-            icon: const Icon(Icons.send, color: Colors.white),
-            onPressed: _saveAndSend,
+            icon: Icon(
+              Icons.send,
+              color: _imageLoaded ? Colors.white : Colors.white38,
+            ),
+            onPressed: _imageLoaded ? _saveAndSend : null,
           ),
         ],
       ),
@@ -85,6 +94,18 @@ class _ImageEditorScreenState extends State<ImageEditorScreen> {
                       widget.imageFile,
                       fit: BoxFit.contain,
                       key: _imageKey,
+                      frameBuilder:
+                          (context, child, frame, wasSynchronouslyLoaded) {
+                        if ((frame != null || wasSynchronouslyLoaded) &&
+                            !_imageLoaded) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted) {
+                              setState(() => _imageLoaded = true);
+                            }
+                          });
+                        }
+                        return child;
+                      },
                     ),
                   ),
                   // Drawing canvas

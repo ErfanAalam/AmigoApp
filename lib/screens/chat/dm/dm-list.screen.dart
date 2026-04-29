@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../config/app-colors.config.dart';
 import '../../../providers/chat.provider.dart';
 import '../../../providers/draft.provider.dart';
-import '../../../providers/message.provider.dart';
 import '../../../providers/theme-color.provider.dart';
 import '../../../services/user-status.service.dart';
 import '../../../types/socket.types.dart';
@@ -393,8 +392,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
             return Container(); // Skip invalid conversations
           }
 
-          final typingUsers =
-              chatState.typingConvUsers[conversation.chatId];
+          final typingUsers = chatState.typingConvUsers[conversation.chatId];
           final isTyping = typingUsers != null && typingUsers.isNotEmpty;
 
           return ChatListItem(
@@ -433,10 +431,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
               // Set this conversation as active and clear unread count
               ref
                   .read(chatProvider.notifier)
-                  .setActiveConversation(
-                    conversation.chatId,
-                    ChatType.dm,
-                  );
+                  .setActiveConversation(conversation.chatId, ChatType.dm);
 
               // Navigate to inner chat page with slide animation
               await Navigator.push(

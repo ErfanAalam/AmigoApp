@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:amigo/db/repositories/contacts.repo.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
@@ -114,13 +113,25 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
           ),
         );
 
-    _loadCurrentUser();
+    unawaited(
+      _loadCurrentUser().catchError(
+        (e) => debugPrint('❌ Error loading current user details: $e'),
+      ),
+    );
 
-    _loadGroupInfoFromLocal();
+    unawaited(
+      _loadGroupInfoFromLocal().catchError(
+        (e) => debugPrint('❌ Error loading group info from local DB: $e'),
+      ),
+    );
 
     // Fire-and-forget: fetch fresh group info from server and persist to
     // local sqlite so member names show correctly and role lists are up to date.
-    _syncGroupInfoFromServer();
+    unawaited(
+      _syncGroupInfoFromServer().catchError(
+        (e) => debugPrint('❌ Error syncing group info from server: $e'),
+      ),
+    );
   }
 
   /// Fetch group info from server and upsert members + users into local sqlite.
@@ -138,19 +149,23 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
         if (m is! Map<String, dynamic>) continue;
         final userId = m['userId']?.toString();
         if (userId == null || userId.isEmpty) continue;
-        userModels.add(UserModel(
-          id: userId,
-          name: m['userName']?.toString() ?? '',
-          phone: m['userPhone']?.toString() ?? '',
-          profilePic: m['userProfilePic']?.toString(),
-          isOnline: false,
-        ));
-        memberModels.add(ConversationMemberModel(
-          chatId: widget.group.chatId,
-          userId: userId,
-          role: m['role']?.toString() ?? 'member',
-          joinedAt: m['joinedAt']?.toString(),
-        ));
+        userModels.add(
+          UserModel(
+            id: userId,
+            name: m['userName']?.toString() ?? '',
+            phone: m['userPhone']?.toString() ?? '',
+            profilePic: m['userProfilePic']?.toString(),
+            isOnline: false,
+          ),
+        );
+        memberModels.add(
+          ConversationMemberModel(
+            chatId: widget.group.chatId,
+            userId: userId,
+            role: m['role']?.toString() ?? 'member',
+            joinedAt: m['joinedAt']?.toString(),
+          ),
+        );
       }
 
       if (userModels.isNotEmpty) {
@@ -1846,10 +1861,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
           _showSnackBar('$userName removed from group');
 
           await _conversationMemberRepository
-              .deleteMemberByConversationAndUserId(
-                widget.group.chatId,
-                userId,
-              );
+              .deleteMemberByConversationAndUserId(widget.group.chatId, userId);
 
           await _loadGroupInfoFromLocal(); // Refresh group info
         } else {
@@ -2354,9 +2366,7 @@ class _GroupInfoPageState extends ConsumerState<GroupInfoPage>
 
       if (response['success'] == true) {
         // Delete from local database
-        await _conversationRepository.deleteConversation(
-          widget.group.chatId,
-        );
+        await _conversationRepository.deleteConversation(widget.group.chatId);
 
         // Update state to remove the group
         ref

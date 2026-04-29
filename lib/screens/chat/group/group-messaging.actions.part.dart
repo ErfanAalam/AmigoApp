@@ -211,7 +211,7 @@ extension _GroupActions on _InnerGroupChatPageState {
     // Determine which emojis the current user has already reacted with
     final myReactions = <String>[];
     if (_currentUserDetails != null) {
-      final msgReactions = _reactionsByMessage[message.id] ?? {};
+      final msgReactions = reactionsByMessage[message.id] ?? {};
       for (final entry in msgReactions.entries) {
         final users = (entry.value as List?) ?? [];
         if (users.any(

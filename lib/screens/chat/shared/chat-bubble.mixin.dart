@@ -1,17 +1,53 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:scroll_to_index/scroll_to_index.dart';
 
 import '../../../db/repositories/message.repo.dart';
 import '../../../db/repositories/user.repo.dart';
 import '../../../models/message.model.dart';
 import '../../../providers/theme-color.provider.dart';
+import '../../../services/media-cache.service.dart';
 import '../../../types/socket.types.dart';
 import '../../../ui/chat/contact-message.widget.dart';
+import '../../../ui/chat/date.widgets.dart';
 import '../../../ui/chat/emoji-reaction.widget.dart';
+import '../../../ui/chat/media-grid.widget.dart';
 import '../../../ui/chat/media-messages.widget.dart';
 import '../../../ui/chat/message.widget.dart';
 import '../../../utils/chat/chat-helpers.utils.dart';
+import '../../../utils/chat/preview-media.utils.dart';
 import 'media-message-config.builder.dart' as shared_media;
+
+/// Status-tick variant shown while a media upload is in flight. Reads the
+/// real percentage from `attachments.upload_progress` (0-100, written by
+/// `ChatSendMixin.sendMediaMessageToServer` from the `onSendProgress`
+/// callback) and renders it next to the cloud-up icon. Both DM and group
+/// host status-tick builders call into this for the uploading branch so
+/// the visual is identical.
+Widget buildUploadingStatusTick(MessageModel message) {
+  final progress = (message.attachments?['upload_progress'] as int?) ?? 0;
+  return Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const Icon(
+        Icons.cloud_upload_outlined,
+        size: 16,
+        color: Colors.greenAccent,
+      ),
+      const SizedBox(width: 2),
+      Text(
+        '$progress%',
+        style: const TextStyle(
+          fontSize: 11,
+          color: Colors.greenAccent,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    ],
+  );
+}
 
 /// Message-bubble rendering shared between DM and group screens.
 ///
@@ -62,6 +98,35 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
   /// Repos used to resolve reply-preview metadata.
   MessageRepository get messagesRepo;
   UserRepository get userRepo;
+
+  /// Used by media-grid caching + the unified media preview.
+  MediaCacheService get mediaCacheService;
+  Map<String, String?> get videoThumbnailCache;
+  Map<String, Future<String?>> get videoThumbnailFutures;
+
+  /// Where the [ListView] anchors its scroll. Hosts hand back `_scrollController`.
+  AutoScrollController get scrollController;
+
+  /// Top-level loading flag (used by the empty-state guard so the placeholder
+  /// only shows after the first sync completes).
+  bool get isLoading;
+
+  /// True while a `loadMoreMessages` request is in flight. Used to render the
+  /// load-more spinner at the top of the list.
+  bool get isLoadingMore;
+
+  /// Status-tick builder used inside the unified media preview. Defaults to
+  /// the host's [buildMessageStatusTicks]; group overrides with a simpler
+  /// failed/sent glyph because the preview doesn't need member-aware ticks.
+  Widget mediaPreviewStatusTicks(MessageModel message) =>
+      buildMessageStatusTicks(message);
+
+  /// Sends a media file to the server. Provided by [ChatAttachmentMixin] on
+  /// the host; redeclared here so this mixin compiles against its abstracts.
+  Future<void> sendMediaMessageToServer(File file, MessageType type);
+
+  /// Shows the friendly error dialog. Provided by [ChatAttachmentMixin].
+  void showErrorDialog(String message);
 
   // ---- Inherited from sibling mixins (declared here so this mixin compiles
   //      standalone; real impl is provided by ChatSearch / ChatActions /
@@ -304,4 +369,182 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
       ),
     );
   }
+
+  // ---- Messages list + media grouping ----
+
+  Widget buildMessagesList() {
+    if (displayMessages.isEmpty && !isLoading && !isInJumpMode) {
+      return _buildEmptyState();
+    }
+
+    final mediaGroups = ChatHelpers.findConsecutiveMediaGroups(displayMessages);
+    final groupedIndices = <int>{};
+    for (final group in mediaGroups) {
+      for (var i = group.startIndex; i <= group.endIndex; i++) {
+        groupedIndices.add(i);
+      }
+    }
+
+    return ListView.builder(
+      controller: scrollController,
+      reverse: true, // newest at the bottom
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      itemCount:
+          displayMessages.length + (isLoadingMore && !isInJumpMode ? 1 : 0),
+      physics: const ClampingScrollPhysics(),
+      cacheExtent: 200,
+      addAutomaticKeepAlives: false,
+      addRepaintBoundaries: true,
+      itemBuilder: (context, index) {
+        if (!isInJumpMode &&
+            isLoadingMore &&
+            index == displayMessages.length) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+        }
+
+        if (index < 0 || index >= displayMessages.length) {
+          return const SizedBox.shrink();
+        }
+        final actualIndex = displayMessages.length - 1 - index;
+        final message = displayMessages[actualIndex];
+
+        final mediaGroup = mediaGroups.firstWhere(
+          (g) => actualIndex >= g.startIndex && actualIndex <= g.endIndex,
+          orElse: () => MediaGroup(startIndex: -1, endIndex: -1, messages: []),
+        );
+
+        // First message of a media group → render the grid in its place.
+        if (mediaGroup.startIndex != -1 &&
+            actualIndex == mediaGroup.startIndex) {
+          return buildMediaGroup(mediaGroup, actualIndex);
+        }
+
+        // Subsequent messages of the same group are folded into the grid.
+        if (groupedIndices.contains(actualIndex)) {
+          return const SizedBox.shrink();
+        }
+
+        final isMyMessage = message.senderId == currentUserId;
+
+        return AutoScrollTag(
+          key: ValueKey(message.id),
+          controller: scrollController,
+          index: index,
+          child: Column(
+            children: [
+              if (ChatHelpers.shouldShowDateSeparator(displayMessages, index))
+                DateSeparator(dateTimeString: message.sentAt),
+              buildMessageWithActions(message, isMyMessage),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey[400]),
+          const SizedBox(height: 16),
+          Text(
+            'No messages yet',
+            style: TextStyle(color: Colors.grey[600], fontSize: 16),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Start the conversation!',
+            style: TextStyle(color: Colors.grey[500], fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildMediaGroup(MediaGroup group, int actualIndex) {
+    if (group.messages.isEmpty) return const SizedBox.shrink();
+
+    final firstMessage = group.messages.first;
+    final isMyMessage = firstMessage.senderId == currentUserId;
+
+    return Container(
+      margin: EdgeInsets.only(
+        left: isMyMessage ? 50 : 0,
+        right: isMyMessage ? 0 : 50,
+        bottom: 8,
+      ),
+      child: Column(
+        crossAxisAlignment:
+            isMyMessage ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          if (ChatHelpers.shouldShowDateSeparator(
+            displayMessages,
+            displayMessages.length - 1 - actualIndex,
+          ))
+            DateSeparator(dateTimeString: firstMessage.sentAt),
+          MediaGridWidget(
+            mediaMessages: group.messages,
+            isMyMessage: isMyMessage,
+            onTap: (messages, index) =>
+                openMediaGroupPreview(messages, index, isMyMessage),
+            onCacheImage: (url, id) {
+              ChatHelpers.cacheMediaForMessage(
+                url: url,
+                messageId: id.toString(),
+                mediaCacheService: mediaCacheService,
+                checkExistingCache: false,
+                debugPrefix: 'media grid',
+              );
+            },
+            videoThumbnailCache: videoThumbnailCache,
+            videoThumbnailFutures: videoThumbnailFutures,
+            generateVideoThumbnail: (url, _) async {
+              return await generateVideoThumbnailWithCache(
+                    url,
+                    videoThumbnailCache,
+                    videoThumbnailFutures,
+                  ) ??
+                  '';
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> openMediaGroupPreview(
+    List<MessageModel> messages,
+    int initialIndex,
+    bool isMyMessage,
+  ) async {
+    await openUnifiedMediaPreview(
+      context: context,
+      messages: messages,
+      initialIndex: initialIndex,
+      mediaCacheService: mediaCacheService,
+      messagesRepo: messagesRepo,
+      mounted: mounted,
+      isMyMessage: isMyMessage,
+      buildMessageStatusTicks: mediaPreviewStatusTicks,
+      onRetryImage: (file, source, {MessageModel? failedMessage}) {
+        sendMediaMessageToServer(file, MessageType.image);
+      },
+      onRetryVideo: (file, source, {MessageModel? failedMessage}) {
+        sendMediaMessageToServer(file, MessageType.video);
+      },
+      showErrorDialog: showErrorDialog,
+      starredMessages: starredMessages,
+    );
+  }
+
+  // Provided by ChatScrollMixin; redeclared here so this mixin's body can
+  // resolve the members without depending on that mixin explicitly. The
+  // host's combined class will satisfy them.
+  bool get isInJumpMode;
+  List<MessageModel> get displayMessages;
 }

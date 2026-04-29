@@ -101,7 +101,7 @@ extension _DmActions on _InnerChatPageState {
         );
         _safeSetState(() {
           _messages = messagesFromLocal;
-          _sortMessagesBySentAt();
+          sortMessagesBySentAt();
         });
       }
       Snack.error('Failed to delete message');
@@ -131,7 +131,7 @@ extension _DmActions on _InnerChatPageState {
     // Determine which emojis the current user has already reacted with on this message
     final myReactions = <String>[];
     if (_currentUserDetails != null) {
-      final msgReactions = _reactionsByMessage[message.id] ?? {};
+      final msgReactions = reactionsByMessage[message.id] ?? {};
       for (final entry in msgReactions.entries) {
         final users = (entry.value as List?) ?? [];
         if (users.any(

@@ -319,8 +319,7 @@ class _MyAppState extends material.State<MyApp>
   Future<void> _checkAuthentication() async {
     // Fast local check — reads secure storage only, no network call (~20ms).
     // This makes the app (and any pending share screen) visible immediately.
-    final isLocallyAuthenticated =
-        await _authService.isAuthenticatedLocally();
+    final isLocallyAuthenticated = await _authService.isAuthenticatedLocally();
     setState(() {
       _isAuthenticated = isLocallyAuthenticated;
       _isLoading = false;
@@ -372,8 +371,8 @@ class _MyAppState extends material.State<MyApp>
 
     // Check for any pending notification payload that was buffered
     // before this listener was attached (e.g., from background tap)
-    final pendingPayload =
-        _notificationService.consumePendingNavigationPayload();
+    final pendingPayload = _notificationService
+        .consumePendingNavigationPayload();
     if (pendingPayload != null) {
       debugPrint('📨 Found pending notification payload, navigating...');
       _handleNotificationNavigation(pendingPayload);
@@ -397,9 +396,7 @@ class _MyAppState extends material.State<MyApp>
 
   /// Handle navigation from notification tap
   void _handleNotificationNavigation(ChatMessagePayload data) async {
-    debugPrint(
-      '📨 Handling notification navigation: convId=${data.convId}',
-    );
+    debugPrint('📨 Handling notification navigation: convId=${data.convId}');
 
     // Ensure user is authenticated before navigating
     if (!_isAuthenticated) {
@@ -428,10 +425,7 @@ class _MyAppState extends material.State<MyApp>
           : ChatType.dm;
 
       // Try to fetch the conversation from local DB with retry
-      await _fetchAndNavigateToConversationWithRetry(
-        data.convId,
-        convType,
-      );
+      await _fetchAndNavigateToConversationWithRetry(data.convId, convType);
     } catch (e) {
       debugPrint('❌ Error navigating to conversation from notification: $e');
     }
@@ -515,7 +509,7 @@ class _MyAppState extends material.State<MyApp>
   /// Navigate to DM conversation
   void _navigateToDM(DmModel dm) {
     debugPrint('🚀 Navigating to DM conversation: ${dm.chatId}');
-    
+
     // Use NavigationHelper's pushRouteWithRetry for more reliable navigation
     NavigationHelper.pushRouteWithRetry(
       InnerChatPage(dm: dm),
@@ -527,7 +521,7 @@ class _MyAppState extends material.State<MyApp>
   /// Navigate to group conversation
   void _navigateToGroup(GroupModel group) {
     debugPrint('🚀 Navigating to group conversation: ${group.chatId}');
-    
+
     // Use NavigationHelper's pushRouteWithRetry for more reliable navigation
     NavigationHelper.pushRouteWithRetry(
       InnerGroupChatPage(group: group),
@@ -577,9 +571,12 @@ class _MyAppState extends material.State<MyApp>
     // addPostFrameCallback fires after the very next render frame (~16ms),
     // guaranteeing MainScreen (and therefore the navigator) is already built.
     material.WidgetsBinding.instance.addPostFrameCallback((_) {
-      _handleSharedMedia(files, onNavigated: () {
-        ReceiveSharingIntent.instance.reset();
-      });
+      _handleSharedMedia(
+        files,
+        onNavigated: () {
+          ReceiveSharingIntent.instance.reset();
+        },
+      );
     });
   }
 
@@ -602,7 +599,11 @@ class _MyAppState extends material.State<MyApp>
     } else if (retryCount < 10) {
       // Navigator not ready yet — retry with a bounded retry count
       Future.delayed(const Duration(milliseconds: 300), () {
-        _handleSharedMedia(files, onNavigated: onNavigated, retryCount: retryCount + 1);
+        _handleSharedMedia(
+          files,
+          onNavigated: onNavigated,
+          retryCount: retryCount + 1,
+        );
       });
     } else {
       debugPrint("❌ Could not navigate to ShareHandlerScreen after retries");
@@ -635,17 +636,14 @@ class _MyAppState extends material.State<MyApp>
       ),
       builder: (context, child) {
         return Stack(
-          children: [
-            child ?? const SizedBox.shrink(),
-            const GlobalCallPill(),
-          ],
+          children: [child ?? const SizedBox.shrink(), const GlobalCallPill()],
         );
       },
       home: _isLoading
           ? _buildLoadingScreen()
           : _isAuthenticated
-              ? MainScreen()
-              : LoginScreen(),
+          ? MainScreen()
+          : LoginScreen(),
       debugShowCheckedModeBanner: false,
     );
   }

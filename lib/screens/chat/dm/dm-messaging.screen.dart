@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:amigo/api/api_service.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
@@ -7,7 +6,6 @@ import 'package:amigo/db/repositories/user.repo.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/providers/call.provider.dart';
-import 'package:amigo/utils/id.utils.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -19,26 +17,20 @@ import 'package:scroll_to_index/scroll_to_index.dart';
 
 import '../../../db/repositories/conversation-member.repo.dart';
 import '../../../db/repositories/message-status.repo.dart';
-import '../../../db/repositories/missed-ws-messages.repo.dart';
 import '../../../models/user.model.dart';
 import '../../../providers/chat.provider.dart';
 import '../../../providers/draft.provider.dart';
 import '../../../providers/theme-color.provider.dart';
-import '../../../services/draft-message.service.dart';
 import '../../../services/fcm/fcm-init.service.dart';
 import '../../../services/media-cache.service.dart';
 import '../../../services/socket/transport.manager.dart';
-import '../../../services/socket/transport.service.dart';
 import '../../../services/socket/ws-message.handler.dart';
-import '../../../services/user-info-cache.service.dart';
 import '../../../services/user-status.service.dart';
 import '../../../types/socket.types.dart';
-import '../../../ui/chat/date.widgets.dart';
 import '../../../ui/chat/forward-message.widget.dart';
 import '../../../ui/snackbar.dart';
 import '../../../ui/chat/input-container.widget.dart';
 import '../../../ui/chat/media-messages.widget.dart';
-import '../../../ui/chat/media-grid.widget.dart';
 import '../../../ui/chat/message.action-sheet.dart';
 import '../../../ui/chat/chat-pills.widget.dart';
 import '../../../ui/chat/pinned-message.widget.dart';
@@ -54,8 +46,11 @@ import '../shared/chat-attachment.mixin.dart';
 import '../shared/chat-bubble.mixin.dart';
 import '../shared/chat-scroll.mixin.dart';
 import '../shared/chat-search.mixin.dart';
+import '../shared/chat-send.mixin.dart';
 import '../shared/chat-swipe-reply.mixin.dart';
+import '../shared/chat-sync.mixin.dart';
 import '../shared/chat-voice-recording.mixin.dart';
+import '../shared/chat-websocket.mixin.dart';
 import '../shared/media-message-config.builder.dart' as shared_media;
 import 'dm-details.screen.dart';
 
@@ -86,7 +81,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         ChatActionsMixin<InnerChatPage>,
         ChatVoiceRecordingMixin<InnerChatPage>,
         ChatScrollMixin<InnerChatPage>,
-        ChatBubbleMixin<InnerChatPage> {
+        ChatBubbleMixin<InnerChatPage>,
+        ChatSendMixin<InnerChatPage>,
+        ChatWebSocketMixin<InnerChatPage>,
+        ChatSyncMixin<InnerChatPage> {
   final apiService = ApiService();
   final ConversationRepository _conversationsRepo = ConversationRepository();
   final MessageRepository _messagesRepo = MessageRepository();
@@ -106,34 +104,18 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   final UserUtils _userUtils = UserUtils();
 
   // stream subscriptions
-  StreamSubscription<List<MessageModel>>? _messagesStreamSub;
-  StreamSubscription<Map<String, Map<String, dynamic>>>? _reactionsSubscription;
   StreamSubscription<ConnectionStatusPayload>? _onlineStatusSubscription;
-  StreamSubscription<TransportConnectionState>?
-  _transportConnectionSubscription;
-  StreamSubscription<TypingPayload>? _typingSubscription;
-  StreamSubscription<ChatMessagePayload>? _messageSubscription;
-  StreamSubscription<MessageSentAckPayload>? _messageAckSubscription;
-  StreamSubscription<MessagePinPayload>? _messagePinSubscription;
-  StreamSubscription<DeleteMessagePayload>? _messageDeleteSubscription;
   StreamSubscription<ConvJoinPayload>? _joinConvSubscription;
+  // Drift watch-streams (messages, reactions, delivery statuses) +
+  // sync flags (isSyncingMessages, hasMoreOnServer, isLoadingMore)
+  // live on ChatSyncMixin. WebSocket subscriptions live on
+  // ChatWebSocketMixin.
 
   // State variables
   bool _isLoading = false;
   List<MessageModel> _messages = [];
-  Map<String, Map<String, dynamic>> _reactionsByMessage = {};
-  Map<String, MessageStatusType> _deliveryStatusByMessage = {};
-  StreamSubscription<Map<String, MessageStatusType>>?
-  _deliveryStatusSubscription;
-  // List<MessageModel> _failedMessages = [];
   MessageModel? _pinnedMessage;
   UserModel? _currentUserDetails;
-
-  // Message sync state variables
-  bool _isSyncingMessages = false;
-  bool _hasMoreOnServer =
-      true; // whether server has more pages beyond what's in local DB
-  bool _isLoadingMore = false; // guard against concurrent load-more calls
 
   // Typing animation controllers
   late AnimationController _typingAnimationController;
@@ -145,8 +127,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // draftSaveTimer lives on ChatScrollMixin.
 
   // bool _isTyping = false;
-  bool _isSendingMessage = false;
-  String? _lastSentReadMsgId;
+  // isSendingMessage lives on ChatSendMixin.
+  // lastSentReadMsgId lives on ChatWebSocketMixin.
   // bool isloadingMediamessage = false;
   final ValueNotifier<bool> _isOtherTypingNotifier = ValueNotifier<bool>(false);
 
@@ -170,12 +152,13 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   @override
   List<MessageModel> get messages => _messages;
   @override
+  set messages(List<MessageModel> value) => _messages = value;
+  @override
   TextEditingController get messageController => _messageController;
   @override
   FocusNode get messageFocusNode => _messageFocusNode;
   // scrollToMessage is provided concretely by ChatScrollMixin.
-  @override
-  void sendMessage(MessageType type) => _sendMessage(type);
+  // sendMessage is provided concretely by ChatSendMixin.
 
   // ChatSwipeReplyMixin requirements
   @override
@@ -186,9 +169,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // ChatAttachmentMixin requirements
   @override
   ImagePicker get imagePicker => _imagePicker;
-  @override
-  Future<void> sendMediaMessageToServer(File file, MessageType type) =>
-      _sendMediaMessageToServer(file, type);
+  // sendMediaMessageToServer concrete is provided by ChatSendMixin; the
+  // sibling-mixin abstracts (ChatAttachment, ChatBubble, ChatVoiceRecording)
+  // are satisfied by that concrete.
 
   // ChatActionsMixin requirements
   @override
@@ -198,6 +181,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   @override
   String? get currentUserName => _currentUserDetails?.name;
   @override
+  String? get currentUserProfilePic => _currentUserDetails?.profilePic;
+  @override
   MessageStatusRepository get messageStatusRepo => _messageStatusRepo;
   @override
   ApiService get chatApiService => apiService;
@@ -205,9 +190,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   MessageModel? get pinnedMessage => _pinnedMessage;
   @override
   void setPinnedMessage(MessageModel? message) => _pinnedMessage = message;
-  @override
-  Map<String, Map<String, dynamic>> get reactionsByMessage =>
-      _reactionsByMessage;
+  // reactionsByMessage now lives on ChatSyncMixin (shared with delivery-status
+  // streams).
   @override
   Future<void> showForwardModal() => _showForwardModal();
 
@@ -222,8 +206,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // ChatScrollMixin requirements
   @override
   AutoScrollController get scrollController => _scrollController;
-  @override
-  Future<void> loadMoreMessages() => _loadMoreMessages();
+  // loadMoreMessages now lives on ChatSyncMixin.
   @override
   String get scrollDebugPrefix => '[DM]';
 
@@ -251,12 +234,54 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   @override
   Future<void> Function(String) get onResendFailedMessage =>
       resendFailedMessage;
+  @override
+  MediaCacheService get mediaCacheService => _mediaCacheService;
+  @override
+  Map<String, String?> get videoThumbnailCache => _videoThumbnailCache;
+  @override
+  Map<String, Future<String?>> get videoThumbnailFutures =>
+      _videoThumbnailFutures;
+  @override
+  bool get isLoading => _isLoading;
+  @override
+  set isLoading(bool value) => _isLoading = value;
+  // isLoadingMore now lives on ChatSyncMixin.
+
+  // ChatSendMixin requirements
+  // sortMessagesBySentAt is provided by ChatSyncMixin.
+  @override
+  TransportManager get transportManager => _transportManager;
+  @override
+  List<String> get statusAckRecipientIds => <String>[widget.dm.recipientId];
+
+  // ChatSyncMixin requirements
+  @override
+  ConversationRepository get conversationsRepo => _conversationsRepo;
+  @override
+  ConversationMemberRepository get conversationMemberRepo =>
+      _conversationMemberRepo;
+  @override
+  UserUtils get userUtils => _userUtils;
+  @override
+  String? get serverLatestMsgId => widget.dm.lastMsgId;
+  @override
+  ChatType get conversationType => ChatType.dm;
+  @override
+  void setCurrentUserDetails(UserModel? user) => _currentUserDetails = user;
+
+  // ChatWebSocketMixin requirements
+  @override
+  WebSocketMessageHandler get wsMessageHandler => _wsMessageHandler;
+  @override
+  ValueNotifier<bool> get isOtherTypingNotifier => _isOtherTypingNotifier;
+  @override
+  AnimationController get typingAnimationController =>
+      _typingAnimationController;
 
   // selectedMessages, starredMessages, messagesToForward, replyToMessageData,
   // and isLoadingConversations live on ChatActionsMixin.
 
-  // Resending failed messages state
-  final Map<String, bool> _resendingFailedMessages = {};
+  // resendingFailedMessages map lives on ChatSendMixin.
 
   // replyToMessageData lives on ChatActionsMixin.
 
@@ -290,8 +315,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   // Sticky-date state lives on ChatScrollMixin (currentStickyDate, showStickyDate).
 
-  Timer? _typingTimeout;
-  DateTime? _lastTypingMessageSent; // Track when last typing message was sent
+  // typingTimeout and lastTypingMessageSent live on ChatWebSocketMixin.
 
   // Swipe animation controllers, gesture state, and constants live on
   // ChatSwipeReplyMixin (swipeAnimationControllers, swipeAnimations,
@@ -316,14 +340,19 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     initializeVoiceRecording();
     _initializeAudioPlayback();
 
+    // Periodically retry failed messages while the screen is open (handles
+    // the "transport stable, but a media upload failed" case that
+    // MessageGarbageCollector can't because it can't re-upload files).
+    startSendAutoRetry();
+
     // Load draft message for this conversation
-    _loadDraft();
+    loadDraft();
 
     // Set up WebSocket message listener
-    _setupWebSocketListener();
+    setupWebSocketListener();
 
     // Start initialization immediately
-    _initializeChat();
+    initializeChat();
 
     _scrollController.addListener(onScroll);
 
@@ -597,7 +626,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                   ),
 
                 // Messages List
-                Expanded(child: _buildMessagesList()),
+                Expanded(child: buildMessagesList()),
 
                 // Message Input (includes typing indicator, recommendations, and input field)
                 _buildMessageInput(),
@@ -612,7 +641,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                 child: _buildLoadingTargetPill(),
               ),
             // Sync indicator pill - above date separator
-            if (_isSyncingMessages && !isLoadingTargetMessage)
+            if (isSyncingMessages && !isLoadingTargetMessage)
               Positioned(
                 top: 10,
                 left: 0,
@@ -622,7 +651,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             // Sticky Date Separator - shifts down when sync pill is visible
             Positioned(
               top:
-                  (_isSyncingMessages ||
+                  (isSyncingMessages ||
                       isLoadingTargetMessage ||
                       isInJumpMode)
                   ? 54
@@ -651,7 +680,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             // "Return to Latest" — visible only in jump mode
             if (isInJumpMode)
               Positioned(
-                top: (_isSyncingMessages || isLoadingTargetMessage) ? 54 : 10,
+                top: (isSyncingMessages || isLoadingTargetMessage) ? 54 : 10,
                 left: 0,
                 right: 0,
                 child: Center(
@@ -737,20 +766,13 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     _scrollController.dispose();
     _messageController.dispose();
     _messageFocusNode.dispose();
-    _messagesStreamSub?.cancel();
-    _reactionsSubscription?.cancel();
-    _deliveryStatusSubscription?.cancel();
-    _messageSubscription?.cancel();
-    _messageAckSubscription?.cancel();
-    _typingSubscription?.cancel();
-    _messagePinSubscription?.cancel();
-    // _messageReplySubscription?.cancel();
     _onlineStatusSubscription?.cancel();
-    _transportConnectionSubscription?.cancel();
-    _messageDeleteSubscription?.cancel();
     _joinConvSubscription?.cancel();
     _typingAnimationController.dispose();
-    _typingTimeout?.cancel();
+    // Drift watch-streams (messages / reactions / delivery statuses).
+    disposeSync();
+    // WS subscriptions + typing timeout (mixin-owned).
+    disposeWebSocketListener();
 
     // Save draft before disposing
     if (_messageController.text.isNotEmpty) {
@@ -779,6 +801,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
     // Dispose voice recording (mixin-owned)
     disposeVoiceRecording();
+
+    // Stop the periodic failed-message retry timer.
+    stopSendAutoRetry();
 
     // Dispose search controller and timer (mixin-owned).
     disposeSearch();

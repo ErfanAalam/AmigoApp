@@ -123,17 +123,30 @@ class MessageGarbageCollector {
   }
 
   Future<void> _retryNotFound(MessageModel msg, String convId) async {
-    // Skip media where upload itself failed — we no longer track metadata on
-    // MessageModel, so only skip based on isFailed flag.
-    final isMedia = [
+    // For failed media, distinguish by URL presence: if attachments carry a
+    // cloud `url`, the upload itself succeeded and only the WS notification
+    // failed — re-sending the WS payload here should work. If there's no
+    // url, the upload genuinely failed; only the screen can re-upload (via
+    // `_sendMediaMessageToServer`), so skip and let the screen-level
+    // auto-retry handle it on next foreground / reconnect.
+    final isMedia = const [
       MessageType.image,
       MessageType.video,
       MessageType.audio,
       MessageType.document,
     ].contains(msg.type);
     if (isMedia && msg.isFailed) {
-      debugPrint('[MSG-GC] msg ${msg.id} skipped — isFailed=true');
-      return;
+      final hasUploadedUrl =
+          (msg.attachments?['url'] as String?)?.isNotEmpty ?? false;
+      if (!hasUploadedUrl) {
+        debugPrint(
+          '[MSG-GC] msg ${msg.id} skipped — upload failed (no cloud url)',
+        );
+        return;
+      }
+      debugPrint(
+        '[MSG-GC] msg ${msg.id} failed but has cloud url → retry WS only',
+      );
     }
 
     if (!_transportManager.isConnected) {
