@@ -27,38 +27,30 @@ import '../../../services/socket/transport.manager.dart';
 import '../../../services/socket/ws-message.handler.dart';
 import '../../../services/user-status.service.dart';
 import '../../../types/socket.types.dart';
-import '../../../ui/chat/forward-message.widget.dart';
 import '../../../ui/snackbar.dart';
 import '../../../ui/chat/input-container.widget.dart';
 import '../../../ui/chat/media-messages.widget.dart';
 import '../../../ui/chat/message.action-sheet.dart';
-import '../../../ui/chat/chat-pills.widget.dart';
-import '../../../ui/chat/pinned-message.widget.dart';
-import '../../../ui/chat/scroll-to-bottom.button.dart';
 import '../../../ui/chat/message-recommendations.widget.dart';
 import '../../../utils/animations.utils.dart';
 import '../../../utils/chat/audio-playback.utils.dart';
 import '../../../utils/chat/chat-helpers.utils.dart';
-import '../../../utils/chat/forward-message.utils.dart';
-import '../../../utils/chat/preview-media.utils.dart';
 import '../shared/chat-actions.mixin.dart';
 import '../shared/chat-attachment.mixin.dart';
 import '../shared/chat-bubble.mixin.dart';
 import '../shared/chat-scroll.mixin.dart';
 import '../shared/chat-search.mixin.dart';
+import '../shared/chat-delete.mixin.dart';
+import '../shared/chat-media-preview.mixin.dart';
 import '../shared/chat-send.mixin.dart';
+import '../shared/chat-shell.mixin.dart';
+import '../shared/chat-status-ticks.mixin.dart';
 import '../shared/chat-swipe-reply.mixin.dart';
 import '../shared/chat-sync.mixin.dart';
 import '../shared/chat-voice-recording.mixin.dart';
 import '../shared/chat-websocket.mixin.dart';
 import '../shared/media-message-config.builder.dart' as shared_media;
 import 'dm-details.screen.dart';
-
-part 'dm-messaging.ws.part.dart';
-part 'dm-messaging.sync.part.dart';
-part 'dm-messaging.send.part.dart';
-part 'dm-messaging.actions.part.dart';
-part 'dm-messaging.ui.part.dart';
 
 class InnerChatPage extends ConsumerStatefulWidget {
   final DmModel dm;
@@ -67,10 +59,6 @@ class InnerChatPage extends ConsumerStatefulWidget {
   @override
   ConsumerState<InnerChatPage> createState() => _InnerChatPageState();
 }
-
-// Star feature is dropped on the backend. Keep all star UI reachable behind
-// a compile-time flag so it can be restored without restructuring the screen.
-const bool _starEnabled = false;
 
 class _InnerChatPageState extends ConsumerState<InnerChatPage>
     with
@@ -84,7 +72,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         ChatBubbleMixin<InnerChatPage>,
         ChatSendMixin<InnerChatPage>,
         ChatWebSocketMixin<InnerChatPage>,
-        ChatSyncMixin<InnerChatPage> {
+        ChatSyncMixin<InnerChatPage>,
+        ChatStatusTicksMixin<InnerChatPage>,
+        ChatMediaPreviewMixin<InnerChatPage>,
+        ChatDeleteMixin<InnerChatPage>,
+        ChatShellMixin<InnerChatPage> {
   final apiService = ApiService();
   final ConversationRepository _conversationsRepo = ConversationRepository();
   final MessageRepository _messagesRepo = MessageRepository();
@@ -192,8 +184,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   void setPinnedMessage(MessageModel? message) => _pinnedMessage = message;
   // reactionsByMessage now lives on ChatSyncMixin (shared with delivery-status
   // streams).
-  @override
-  Future<void> showForwardModal() => _showForwardModal();
+  // showForwardModal is provided by ChatMediaPreviewMixin.
 
   // ChatVoiceRecordingMixin requirements
   @override
@@ -216,9 +207,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   bool get isGroupChat => false;
   @override
   String? get conversationUserId => widget.dm.recipientId;
-  @override
-  Widget buildMessageStatusTicks(MessageModel message) =>
-      _buildMessageStatusTicks(message);
+  // buildMessageStatusTicks now provided by ChatStatusTicksMixin.
   @override
   void showMessageActions(MessageModel message, bool isMyMessage) =>
       _showMessageActions(message, isMyMessage);
@@ -418,7 +407,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
       // If found, auto-play the next audio message
       if (nextAudioMessage != null) {
-        final audioData = nextAudioMessage.attachments as Map<String, dynamic>?;
+        final audioData = nextAudioMessage.attachments;
         final audioUrl = audioData?['url'] as String?;
 
         if (audioUrl != null && audioUrl.isNotEmpty) {
@@ -456,270 +445,96 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   @override
+  double? get appBarTitleSpacing => 0;
+
+  @override
   Widget build(BuildContext context) {
     final themeColor = ref.watch(themeColorProvider);
+    return buildChatScaffold(
+      appBarTitle: _buildAppBarTitle(themeColor),
+      nonSelectionActions: [
+        if (_currentUserDetails?.callAccess == true)
+          IconButton(
+            icon: const Icon(Icons.call, color: Colors.white),
+            onPressed: () => _initiateCall(
+              widget.dm.recipientId,
+              widget.dm.recipientName,
+              widget.dm.recipientProfilePic,
+            ),
+          ),
+      ],
+      selectionModeActions: buildSelectionModeActions(),
+      messageInput: _buildMessageInput(),
+    );
+  }
 
-    return Scaffold(
-      backgroundColor: Colors.white, // Pure white background
-      //  resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        leading: selectedMessages.isNotEmpty
-            ? IconButton(
-                icon: const Icon(Icons.close, color: Colors.white),
-                onPressed: exitSelectionMode,
-              )
-            : IconButton(
-                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-                onPressed: () => Navigator.pop(context),
-              ),
-        title: isSearchMode
-            ? buildSearchBar(themeColor)
-            : selectedMessages.isNotEmpty
-            ? Text(
-                '${selectedMessages.length} selected',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                ),
-              )
-            : InkWell(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => DmDetailsScreen(dm: widget.dm),
-                    ),
-                  );
-                },
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 18,
-                      backgroundColor: Colors.white,
-                      backgroundImage: widget.dm.recipientProfilePic != null
-                          ? CachedNetworkImageProvider(
-                              widget.dm.recipientProfilePic!,
-                            )
-                          : null,
-                      child: widget.dm.recipientProfilePic == null
-                          ? Text(
-                              widget.dm.recipientName.isNotEmpty
-                                  ? widget.dm.recipientName[0].toUpperCase()
-                                  : '?',
-                              style: TextStyle(
-                                color: themeColor.primary,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            )
-                          : null,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            widget.dm.recipientName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          StreamBuilder<Map<String, bool>>(
-                            stream: UserStatusService().userStatusStream,
-                            initialData: UserStatusService().onlineStatus,
-                            builder: (context, snapshot) {
-                              final isOnline = ref
-                                  .read(chatProvider)
-                                  .isUserOnline(
-                                    widget.dm.recipientId,
-                                    widget.dm.chatId,
-                                  );
-                              return Text(
-                                isOnline ? 'Online' : 'Offline',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: isOnline
-                                      ? Colors.greenAccent[100]
-                                      : Colors.red[100],
-                                  fontSize: 12,
-                                ),
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-        backgroundColor: themeColor.primary,
-        elevation: 0,
-        titleSpacing: 0,
-        actions: selectedMessages.isNotEmpty
-            ? [
-                IconButton(
-                  icon: const Icon(Icons.star_border, color: Colors.white),
-                  onPressed: _bulkStarMessages,
-                  tooltip: 'Star messages',
-                ),
-                IconButton(
-                  icon: const Icon(Icons.forward, color: Colors.white),
-                  onPressed: _bulkForwardMessages,
-                  tooltip: 'Forward messages',
-                ),
-              ]
-            : [
-                // Search button
-                // IconButton(
-                //   icon: const Icon(Icons.search, color: Colors.white),
-                //   onPressed: _toggleSearchMode,
-                //   tooltip: 'Search messages',
-                // ),
-                // Only show call button if user has call access
-                if (_currentUserDetails?.callAccess == true)
-                  IconButton(
-                    icon: const Icon(Icons.call, color: Colors.white),
-                    onPressed: () => _initiateCall(
-                      widget.dm.recipientId,
-                      widget.dm.recipientName,
-                      widget.dm.recipientProfilePic,
-                    ),
-                  ),
-              ],
+  Widget _buildAppBarTitle(themeColor) {
+    return InkWell(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => DmDetailsScreen(dm: widget.dm)),
       ),
-      body: SafeArea(
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Container(
-                decoration: const BoxDecoration(
-                  image: DecorationImage(
-                    image: AssetImage('assets/images/chat_bg.jpg'),
-                    fit: BoxFit.cover,
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: Colors.white,
+            backgroundImage: widget.dm.recipientProfilePic != null
+                ? CachedNetworkImageProvider(widget.dm.recipientProfilePic!)
+                : null,
+            child: widget.dm.recipientProfilePic == null
+                ? Text(
+                    widget.dm.recipientName.isNotEmpty
+                        ? widget.dm.recipientName[0].toUpperCase()
+                        : '?',
+                    style: TextStyle(
+                      color: themeColor.primary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  )
+                : null,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  widget.dm.recipientName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
                   ),
                 ),
-              ),
-            ),
-            Positioned.fill(
-              child: Container(color: Colors.white.withAlpha(100)),
-            ),
-            Column(
-              children: [
-                // Pinned Message Section
-                if (_pinnedMessage != null && _pinnedMessage!.id.isNotEmpty)
-                  PinnedMessageSection(
-                    pinnedMessage: _messages.firstWhere(
-                      (message) => message.id == _pinnedMessage?.id,
-                      orElse: () => _pinnedMessage!,
-                    ),
-                    currentUserId: _currentUserDetails?.id,
-                    onTap: () => scrollToMessage(_pinnedMessage?.id ?? ''),
-                    onUnpin: () => togglePinMessage(_pinnedMessage!),
-                  ),
-
-                // Messages List
-                Expanded(child: buildMessagesList()),
-
-                // Message Input (includes typing indicator, recommendations, and input field)
-                _buildMessageInput(),
+                StreamBuilder<Map<String, bool>>(
+                  stream: UserStatusService().userStatusStream,
+                  initialData: UserStatusService().onlineStatus,
+                  builder: (context, snapshot) {
+                    final isOnline = ref
+                        .read(chatProvider)
+                        .isUserOnline(widget.dm.recipientId, widget.dm.chatId);
+                    return Text(
+                      isOnline ? 'Online' : 'Offline',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isOnline
+                            ? Colors.greenAccent[100]
+                            : Colors.red[100],
+                        fontSize: 12,
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
-            // Loading-target-message pill
-            if (isLoadingTargetMessage)
-              Positioned(
-                top: 10,
-                left: 0,
-                right: 0,
-                child: _buildLoadingTargetPill(),
-              ),
-            // Sync indicator pill - above date separator
-            if (isSyncingMessages && !isLoadingTargetMessage)
-              Positioned(
-                top: 10,
-                left: 0,
-                right: 0,
-                child: _buildSyncProgressBar(),
-              ),
-            // Sticky Date Separator - shifts down when sync pill is visible
-            Positioned(
-              top:
-                  (isSyncingMessages ||
-                      isLoadingTargetMessage ||
-                      isInJumpMode)
-                  ? 54
-                  : 10,
-              left: 0,
-              right: 0,
-              child: buildStickyDateSeparator(),
-            ),
-            // Scroll to Bottom Button - positioned at right bottom
-            Positioned(
-              right: 16,
-              bottom: replyToMessageData != null
-                  ? 150.0
-                  : 110.0, // Position above message input
-              child: ScrollToBottomButton(
-                scrollController: _scrollController,
-                onTap: handleScrollToBottomTap,
-                isAtBottom: isAtBottom,
-                // unreadCount: _unreadCountWhileScrolled > 0
-                //     ? _unreadCountWhileScrolled
-                //     : null,
-                bottomPadding:
-                    0.0, // Not used anymore, positioning handled by parent
-              ),
-            ),
-            // "Return to Latest" — visible only in jump mode
-            if (isInJumpMode)
-              Positioned(
-                top: (isSyncingMessages || isLoadingTargetMessage) ? 54 : 10,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: GestureDetector(
-                    onTap: exitJumpMode,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black87,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.arrow_downward_rounded,
-                            color: Colors.white,
-                            size: 14,
-                          ),
-                          SizedBox(width: 6),
-                          Text(
-                            'Return to latest',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -812,5 +627,121 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     _messageKeys.clear();
 
     super.dispose();
+  }
+
+  void _showMessageActions(MessageModel message, bool isMyMessage) {
+    final isPinned = _pinnedMessage?.id == message.id;
+    final isStarred = starredMessages.contains(message.id);
+
+    final myReactions = <String>[];
+    if (_currentUserDetails != null) {
+      final msgReactions = reactionsByMessage[message.id] ?? {};
+      for (final entry in msgReactions.entries) {
+        final users = (entry.value as List?) ?? [];
+        if (users.any(
+          (u) => u['user_id']?.toString() == _currentUserDetails!.id,
+        )) {
+          myReactions.add(entry.key);
+        }
+      }
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => MessageActionSheet(
+        message: message,
+        isMyMessage: isMyMessage,
+        isPinned: isPinned,
+        isStarred: isStarred,
+        showReadBy: false,
+        onReply: () => replyToMessage(message),
+        onPin: () => togglePinMessage(message),
+        onStar: () => toggleStarMessage(message.id),
+        onForward: () => forwardMessage(message),
+        onSelect: () => enterSelectionMode(message.id),
+        onDeleteForMe: () => deleteMessagesForMe([message.id]),
+        onDeleteForEveryone: isMyMessage
+            ? () => deleteMessages([message.id])
+            : null,
+        onReact: (emoji) => reactToMessage(message, emoji),
+        myReactions: myReactions,
+      ),
+    );
+  }
+
+  MediaMessageConfig _buildMediaMessageConfig(
+    MessageModel message,
+    bool isMyMessage,
+  ) {
+    return shared_media.buildMediaMessageConfig(
+      message: message,
+      isMyMessage: isMyMessage,
+      isStarred: starredMessages.contains(message.id),
+      mounted: () => mounted,
+      onSetState: () => _safeSetState(() {}),
+      showErrorDialog: showErrorDialog,
+      buildMessageStatusTicks: buildMessageStatusTicks,
+      onImagePreview: openImagePreviewForUrl,
+      onVideoPreview: openVideoPreviewForUrl,
+      onDocumentPreview: openDocumentPreviewForUrl,
+      sendMediaMessageToServer: sendMediaMessageToServer,
+      videoThumbnailCache: _videoThumbnailCache,
+      videoThumbnailFutures: _videoThumbnailFutures,
+      audioPlaybackManager: _audioPlaybackManager,
+      mediaCacheService: _mediaCacheService,
+      onResendFailedMessage: resendFailedMessage,
+      onDeleteFailedMessage: (messageId) async {
+        if (_canSetState) {
+          _safeSetState(() {
+            _messages.removeWhere((m) => m.id == messageId);
+          });
+        }
+        await _messagesRepo.permanentlyDeleteMessage(messageId);
+      },
+    );
+  }
+
+  Widget _buildMessageInput() {
+    return MessageInputContainer(
+      messageController: _messageController,
+      isOtherTypingNotifier: _isOtherTypingNotifier,
+      typingIndicator: _buildTypingIndicator(),
+      isReplying: replyToMessageData != null,
+      isSending: isSendingMessage,
+      replyToMessageData: replyToMessageData,
+      currentUserId: _currentUserDetails?.id,
+      onSendMessage: sendMessage,
+      onSendVoiceNote: sendVoiceNote,
+      onAttachmentTap: showAttachmentModal,
+      onTyping: handleTyping,
+      onCancelReply: cancelReply,
+      focusNode: _messageFocusNode,
+      onFocusChange: (isFocused) {
+        if (!_canSetState) return;
+        _safeSetState(() {
+          isInputFocused = isFocused;
+        });
+      },
+      dm: widget.dm,
+      recommendations: ValueListenableBuilder<TextEditingValue>(
+        valueListenable: _messageController,
+        builder: (context, value, child) {
+          return MessageRecommendations(
+            recommendations: _messageRecommendations,
+            onRecommendationTap: onRecommendationTap,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildTypingIndicator() {
+    return ChatHelpers.buildTypingIndicator(
+      typingDotAnimations: _typingDotAnimations,
+      isGroupChat: false,
+      userProfilePic: widget.dm.recipientProfilePic,
+      userName: widget.dm.recipientName,
+    );
   }
 }

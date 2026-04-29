@@ -3,7 +3,6 @@ import 'dart:math';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/db/repositories/user.repo.dart';
-import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
@@ -22,26 +21,19 @@ import '../../../models/user.model.dart';
 import '../../../providers/chat.provider.dart';
 import '../../../providers/draft.provider.dart';
 import '../../../providers/theme-color.provider.dart';
-import '../../../services/draft-message.service.dart';
 import '../../../services/fcm/fcm-init.service.dart';
 import '../../../services/media-cache.service.dart';
 import '../../../services/socket/transport.manager.dart';
 import '../../../services/socket/ws-message.handler.dart';
 import '../../../types/socket.types.dart';
-import '../../../ui/chat/forward-message.widget.dart';
 import '../../../ui/chat/group-readby.modal.dart';
 import '../../../ui/chat/input-container.widget.dart';
 import '../../../ui/chat/media-messages.widget.dart';
 import '../../../ui/chat/message.action-sheet.dart';
-import '../../../ui/chat/pinned-message.widget.dart';
-import '../../../ui/chat/chat-pills.widget.dart';
-import '../../../ui/chat/scroll-to-bottom.button.dart';
 import '../../../ui/chat/message-recommendations.widget.dart';
 import '../../../utils/animations.utils.dart';
 import '../../../utils/chat/audio-playback.utils.dart';
 import '../../../utils/chat/chat-helpers.utils.dart';
-import '../../../utils/chat/forward-message.utils.dart';
-import '../../../utils/chat/preview-media.utils.dart';
 import '../../../utils/route-transitions.util.dart';
 import 'group-info.screen.dart';
 import '../chat-details.screen.dart';
@@ -50,18 +42,16 @@ import '../shared/chat-attachment.mixin.dart';
 import '../shared/chat-bubble.mixin.dart';
 import '../shared/chat-scroll.mixin.dart';
 import '../shared/chat-search.mixin.dart';
+import '../shared/chat-delete.mixin.dart';
+import '../shared/chat-media-preview.mixin.dart';
 import '../shared/chat-send.mixin.dart';
+import '../shared/chat-shell.mixin.dart';
+import '../shared/chat-status-ticks.mixin.dart';
 import '../shared/chat-swipe-reply.mixin.dart';
 import '../shared/chat-sync.mixin.dart';
 import '../shared/chat-voice-recording.mixin.dart';
 import '../shared/chat-websocket.mixin.dart';
 import '../shared/media-message-config.builder.dart' as shared_media;
-
-part 'group-messaging.ws.part.dart';
-part 'group-messaging.sync.part.dart';
-part 'group-messaging.send.part.dart';
-part 'group-messaging.actions.part.dart';
-part 'group-messaging.ui.part.dart';
 
 class InnerGroupChatPage extends ConsumerStatefulWidget {
   final GroupModel group;
@@ -79,10 +69,6 @@ class InnerGroupChatPage extends ConsumerStatefulWidget {
   ConsumerState<InnerGroupChatPage> createState() => _InnerGroupChatPageState();
 }
 
-// Star feature is dropped on the backend. Keep all star UI reachable behind
-// a compile-time flag so it can be restored without restructuring the screen.
-const bool _starEnabled = false;
-
 class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     with
         TickerProviderStateMixin,
@@ -95,7 +81,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         ChatBubbleMixin<InnerGroupChatPage>,
         ChatSendMixin<InnerGroupChatPage>,
         ChatWebSocketMixin<InnerGroupChatPage>,
-        ChatSyncMixin<InnerGroupChatPage> {
+        ChatSyncMixin<InnerGroupChatPage>,
+        ChatStatusTicksMixin<InnerGroupChatPage>,
+        ChatMediaPreviewMixin<InnerGroupChatPage>,
+        ChatDeleteMixin<InnerGroupChatPage>,
+        ChatShellMixin<InnerGroupChatPage> {
   // final GroupsService _groupsService = GroupsService();
   // final UserService _userService = UserService();
   final apiService = ApiService();
@@ -198,8 +188,14 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   void setPinnedMessage(MessageModel? message) => _pinnedMessage = message;
   // reactionsByMessage now lives on ChatSyncMixin (shared with delivery-status
   // streams).
+  // showForwardModal is provided by ChatMediaPreviewMixin.
+
   @override
-  Future<void> showForwardModal() => _showForwardModal();
+  String? get mediaDebugPrefix => 'group message';
+  @override
+  bool get mediaCheckExistingCache => false;
+  @override
+  String? get forwardDebugPrefix => 'group';
 
   // ChatVoiceRecordingMixin requirements
   @override
@@ -223,9 +219,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   bool get useIntrinsicWidth => false;
   @override
   bool get useStackContainer => false;
-  @override
-  Widget buildMessageStatusTicks(MessageModel message) =>
-      _buildMessageStatusTicks(message);
+  // buildMessageStatusTicks now provided by ChatStatusTicksMixin.
   @override
   void showMessageActions(MessageModel message, bool isMyMessage) =>
       _showMessageActions(message, isMyMessage);
@@ -529,7 +523,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
       // If found, auto-play the next audio message
       if (nextAudioMessage != null) {
-        final audioData = nextAudioMessage.attachments as Map<String, dynamic>?;
+        final audioData = nextAudioMessage.attachments;
         final audioUrl = audioData?['url'] as String?;
 
         if (audioUrl != null && audioUrl.isNotEmpty) {
@@ -569,224 +563,63 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   @override
   Widget build(BuildContext context) {
     final themeColor = ref.watch(themeColorProvider);
-
-    return Scaffold(
-      backgroundColor: Colors.white, // Pure white background
-      appBar: AppBar(
-        leading: selectedMessages.isNotEmpty
-            ? IconButton(
-                icon: const Icon(Icons.close, color: Colors.white),
-                onPressed: exitSelectionMode,
-              )
-            : IconButton(
-                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-                onPressed: () => Navigator.pop(context),
-              ),
-        title: isSearchMode
-            ? buildSearchBar(themeColor)
-            : selectedMessages.isNotEmpty
-            ? Text(
-                '${selectedMessages.length} selected',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                ),
-              )
-            : InkWell(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) =>
-                          ChatDetailsScreen(group: widget.group),
-                    ),
-                  );
-                },
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 18,
-                      backgroundColor: Colors.white,
-                      child: Text(
-                        widget.group.title.isNotEmpty
-                            ? widget.group.title[0].toUpperCase()
-                            : '?',
-                        style: TextStyle(
-                          color: themeColor.primary,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.group.title,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-        backgroundColor: themeColor.primary,
-        elevation: 0,
-        actions: selectedMessages.isNotEmpty
-            ? _buildSelectionModeActions()
-            : [
-                // Search button
-                // IconButton(
-                //   icon: const Icon(Icons.search, color: Colors.white),
-                //   onPressed: _toggleSearchMode,
-                //   tooltip: 'Search messages',
-                // ),
-                IconButton(
-                  icon: const Icon(
-                    Icons.info_outline_rounded,
-                    color: Colors.white,
-                  ),
-                  onPressed: _openGroupInfo,
-                  tooltip: 'Group info',
-                ),
-              ],
-      ),
-      body: SafeArea(
-        child: Stack(
-          children: [
-            // Background Image
-            Positioned.fill(
-              child: Container(
-                decoration: const BoxDecoration(
-                  image: DecorationImage(
-                    image: AssetImage('assets/images/chat_bg.jpg'),
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ),
-            ),
-            Positioned.fill(
-              child: Container(color: Colors.white.withAlpha(100)),
-            ),
-            Column(
-              children: [
-                // Pinned Message Section
-                if (_pinnedMessage != null && _pinnedMessage!.id.isNotEmpty)
-                  PinnedMessageSection(
-                    pinnedMessage: _messages.firstWhere(
-                      (message) => message.id == _pinnedMessage?.id,
-                      orElse: () => _pinnedMessage!,
-                    ),
-                    currentUserId: _currentUserDetails?.id ?? '',
-                    // isGroupChat: widget.group.type == ChatType.group,
-                    onTap: () => scrollToMessage(_pinnedMessage?.id ?? ''),
-                    onUnpin: () => togglePinMessage(_pinnedMessage!),
-                  ),
-
-                // Messages List
-                Expanded(child: buildMessagesList()),
-
-                // Message Input (includes typing indicator, recommendations, and input field)
-                _buildMessageInput(),
-              ],
-            ),
-
-            // Loading-target-message pill
-            if (isLoadingTargetMessage)
-              Positioned(
-                top: 10,
-                left: 0,
-                right: 0,
-                child: _buildLoadingTargetPill(),
-              ),
-            // Sync indicator pill - above date separator
-            if (isSyncingMessages && !isLoadingTargetMessage)
-              Positioned(
-                top: 10,
-                left: 0,
-                right: 0,
-                child: _buildSyncProgressBar(),
-              ),
-            // Sticky Date Separator - shifts down when sync pill is visible
-            Positioned(
-              top:
-                  (isSyncingMessages ||
-                      isLoadingTargetMessage ||
-                      isInJumpMode)
-                  ? 54
-                  : 10,
-              left: 0,
-              right: 0,
-              child: buildStickyDateSeparator(),
-            ),
-            // Scroll to Bottom Button - positioned at right bottom
-            Positioned(
-              right: 16,
-              bottom: replyToMessageData != null
-                  ? 150.0
-                  : 110.0, // Position above message input
-              child: ScrollToBottomButton(
-                scrollController: _scrollController,
-                onTap: handleScrollToBottomTap,
-                isAtBottom: isAtBottom,
-                // unreadCount: _unreadCountWhileScrolled > 0
-                //     ? _unreadCountWhileScrolled
-                //     : null,
-                bottomPadding:
-                    0.0, // Not used anymore, positioning handled by parent
-              ),
-            ),
-            // "Return to Latest" — visible only in jump mode
-            if (isInJumpMode)
-              Positioned(
-                top: (isSyncingMessages || isLoadingTargetMessage) ? 54 : 10,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: GestureDetector(
-                    onTap: exitJumpMode,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black87,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.arrow_downward_rounded,
-                            color: Colors.white,
-                            size: 14,
-                          ),
-                          SizedBox(width: 6),
-                          Text(
-                            'Return to latest',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
+    return buildChatScaffold(
+      appBarTitle: _buildAppBarTitle(themeColor),
+      nonSelectionActions: [
+        IconButton(
+          icon: const Icon(Icons.info_outline_rounded, color: Colors.white),
+          onPressed: _openGroupInfo,
+          tooltip: 'Group info',
         ),
+      ],
+      selectionModeActions: buildSelectionModeActions(
+        onBulkDelete: _isAdminOrStaff ? _bulkDeleteMessages : null,
+      ),
+      messageInput: _buildMessageInput(),
+    );
+  }
+
+  Widget _buildAppBarTitle(themeColor) {
+    return InkWell(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ChatDetailsScreen(group: widget.group),
+        ),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: Colors.white,
+            child: Text(
+              widget.group.title.isNotEmpty
+                  ? widget.group.title[0].toUpperCase()
+                  : '?',
+              style: TextStyle(
+                color: themeColor.primary,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.group.title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -850,5 +683,197 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     // the absence of heartbeat / next join.
 
     super.dispose();
+  }
+
+  void _openGroupInfo() async {
+    final result = await Navigator.push(
+      context,
+      SlideRightRoute(page: GroupInfoPage(group: widget.group)),
+    );
+    if (result is Map && result['action'] == 'deleted') {
+      if (mounted) {
+        Navigator.pop(context, {'action': 'deleted'});
+      }
+    }
+  }
+
+  Future<void> _bulkDeleteMessages() async {
+    final selectedIds = selectedMessages.toList();
+    await deleteMessages(selectedIds, isAdminOrStaff: _isAdminOrStaff);
+    exitSelectionMode();
+  }
+
+  Future<void> _showMessageActions(
+    MessageModel message,
+    bool isMyMessage,
+  ) async {
+    final isPinned = _pinnedMessage?.id == message.id;
+    final isStarred = starredMessages.contains(message.id);
+
+    bool isAdmin = false;
+    if (widget.group.role == 'admin') {
+      isAdmin = true;
+      _safeSetState(() {
+        _isAdminOrStaff = true;
+      });
+    } else {
+      try {
+        if (_currentUserDetails != null &&
+            _currentUserDetails!.role == 'staff') {
+          isAdmin = true;
+          _safeSetState(() {
+            _isAdminOrStaff = true;
+          });
+        }
+      } catch (e) {
+        debugPrint('❌ Error checking user role: $e');
+      }
+    }
+
+    if (!mounted) return;
+
+    final myReactions = <String>[];
+    if (_currentUserDetails != null) {
+      final msgReactions = reactionsByMessage[message.id] ?? {};
+      for (final entry in msgReactions.entries) {
+        final users = (entry.value as List?) ?? [];
+        if (users.any(
+          (u) => u['user_id']?.toString() == _currentUserDetails!.id,
+        )) {
+          myReactions.add(entry.key);
+        }
+      }
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => MessageActionSheet(
+        message: message,
+        isMyMessage: isMyMessage,
+        isPinned: isPinned,
+        isStarred: isStarred,
+        isAdmin: isAdmin,
+        showReadBy: true,
+        onReply: () => replyToMessage(message),
+        onPin: () => togglePinMessage(message),
+        onStar: () => toggleStarMessage(message.id),
+        onForward: () => forwardMessage(message),
+        onSelect: () => enterSelectionMode(message.id),
+        onReadBy: (message.senderId == _currentUserDetails?.id)
+            ? () => _showReadByModal(message)
+            : null,
+        onDelete: isAdmin || _isAdminOrStaff
+            ? () => deleteMessages([message.id], isAdminOrStaff: true)
+            : null,
+        onReact: (emoji) => reactToMessage(message, emoji),
+        myReactions: myReactions,
+      ),
+    );
+  }
+
+  Future<void> _showReadByModal(MessageModel message) async {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => ReadByModal(
+        message: message,
+        members: _conversationMembers,
+        currentUserId: _currentUserDetails!.id,
+      ),
+    );
+  }
+
+  MediaMessageConfig _buildMediaMessageConfig(
+    MessageModel message,
+    bool isMyMessage,
+  ) {
+    return shared_media.buildMediaMessageConfig(
+      message: message,
+      isMyMessage: isMyMessage,
+      isStarred: starredMessages.contains(message.id),
+      mounted: () => mounted,
+      onSetState: () => _safeSetState(() {}),
+      showErrorDialog: showErrorDialog,
+      buildMessageStatusTicks: buildMessageStatusTicks,
+      onImagePreview: openImagePreviewForUrl,
+      onVideoPreview: openVideoPreviewForUrl,
+      onDocumentPreview: openDocumentPreviewForUrl,
+      sendMediaMessageToServer: sendMediaMessageToServer,
+      videoThumbnailCache: _videoThumbnailCache,
+      videoThumbnailFutures: _videoThumbnailFutures,
+      audioPlaybackManager: _audioPlaybackManager,
+      mediaCacheService: _mediaCacheService,
+      onResendFailedMessage: resendFailedMessage,
+      onDeleteFailedMessage: (messageId) async {
+        if (mounted) {
+          _safeSetState(() {
+            _messages.removeWhere((m) => m.id == messageId);
+          });
+        }
+        await _messagesRepo.permanentlyDeleteMessage(messageId);
+      },
+      cacheCheckExisting: false,
+      cacheDebugPrefix: 'group message',
+    );
+  }
+
+  Widget _buildMessageInput() {
+    if (_isRemovedFromGroup) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        color: Colors.grey[100],
+        child: const Text(
+          "You're no longer a member of this group",
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.black54,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      );
+    }
+    return MessageInputContainer(
+      messageController: _messageController,
+      isOtherTypingNotifier: _isOtherTypingNotifier,
+      typingIndicator: _buildTypingIndicator(),
+      isReplying: replyToMessageData != null,
+      isSending: isSendingMessage,
+      replyToMessageData: replyToMessageData,
+      currentUserId: _currentUserDetails?.id ?? '',
+      onSendMessage: sendMessage,
+      onSendVoiceNote: sendVoiceNote,
+      onAttachmentTap: showAttachmentModal,
+      onTyping: handleTyping,
+      onCancelReply: cancelReply,
+      focusNode: _messageFocusNode,
+      onFocusChange: (isFocused) {
+        if (!mounted) return;
+        _safeSetState(() {
+          isInputFocused = isFocused;
+        });
+      },
+      isCommunityGroup: widget.isCommunityGroup,
+      communityGroupMetadata: widget.communityGroupMetadata,
+      recommendations: ValueListenableBuilder<TextEditingValue>(
+        valueListenable: _messageController,
+        builder: (context, value, child) {
+          return MessageRecommendations(
+            recommendations: _messageRecommendations,
+            onRecommendationTap: onRecommendationTap,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildTypingIndicator() {
+    return ChatHelpers.buildTypingIndicator(
+      typingDotAnimations: _typingDotAnimations,
+      isGroupChat: true,
+    );
   }
 }

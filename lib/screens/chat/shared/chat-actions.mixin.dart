@@ -165,4 +165,43 @@ mixin ChatActionsMixin<T extends ConsumerStatefulWidget> on ConsumerState<T> {
     }
     await showForwardModal();
   }
+
+  void bulkStarMessages() {
+    if (_starEnabled) {
+      /* star disabled */
+    }
+  }
+
+  Future<void> bulkForwardMessages() => ChatHelpers.bulkForwardMessages(
+    selectedMessages: selectedMessages,
+    messagesToForward: messagesToForward,
+    setState: safeSetState,
+    exitSelectionMode: exitSelectionMode,
+    showForwardModal: showForwardModal,
+  );
+
+  /// AppBar `actions` list rendered while selection-mode is active. DM passes
+  /// no [onBulkDelete] (DM doesn't support bulk-delete from selection mode);
+  /// group passes the bulk-delete callback only when the current user is
+  /// admin/staff.
+  List<Widget> buildSelectionModeActions({VoidCallback? onBulkDelete}) {
+    return [
+      IconButton(
+        icon: const Icon(Icons.star_border, color: Colors.white),
+        onPressed: bulkStarMessages,
+        tooltip: 'Star messages',
+      ),
+      IconButton(
+        icon: const Icon(Icons.forward, color: Colors.white),
+        onPressed: bulkForwardMessages,
+        tooltip: 'Forward messages',
+      ),
+      if (onBulkDelete != null)
+        IconButton(
+          icon: const Icon(Icons.delete_outline, color: Colors.white),
+          onPressed: onBulkDelete,
+          tooltip: 'Delete messages',
+        ),
+    ];
+  }
 }
