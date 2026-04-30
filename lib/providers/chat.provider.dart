@@ -1040,15 +1040,11 @@ class ChatNotifier extends Notifier<ChatState> {
           case 'delete':
             final response = await apiService.chat.deleteDm(conversationId);
             if (response.isSuccess) {
-              // delete from local DB
-              await _conversationsRepo.deleteConversation(conversationId);
-
-              // update the UI
-              // final updatedConversations = List<DmModel>.from(state.dmList);
-              // updatedConversations.removeAt(convIndex);
-              // state = state.copyWith(dmList: updatedConversations);
-              // return;
-
+              // Soft-delete locally (sets chats.deletedAt) so the DM stays
+              // restorable from Profile → Chat Management. The dm-list
+              // stream filters deletedAt-not-null rows out of the active
+              // list, and toggleDeleteChat keeps state.dmList in sync.
+              await _conversationsRepo.softDeleteConversation(conversationId);
               toggleDeleteChat(conversationId, ChatType.dm);
             }
             break;

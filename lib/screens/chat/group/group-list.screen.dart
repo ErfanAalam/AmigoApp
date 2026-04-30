@@ -10,6 +10,7 @@ import '../../../models/group.model.dart';
 import '../../../providers/chat.provider.dart';
 import '../../../providers/draft.provider.dart';
 import '../../../providers/theme-color.provider.dart';
+import '../../../services/chat-prewarm.service.dart';
 import '../../../types/socket.types.dart';
 import '../../../ui/chat.action-sheet.dart';
 import '../../../ui/chat/searchable-list.widget.dart';
@@ -341,6 +342,11 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
               isFavorite: item.isFavorite ?? false,
               onLongPress: () => _showGroupChatActions(item),
               onTap: () async {
+                // Kick off the first-batch DB read while the route
+                // transition animates so the screen has a snapshot ready
+                // by the time its initState runs.
+                ChatPrewarm.warmMessages(item.chatId);
+
                 // Set this group as active and clear unread count
                 ref
                     .read(chatProvider.notifier)

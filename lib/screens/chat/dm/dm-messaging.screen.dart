@@ -27,6 +27,8 @@ import '../../../services/socket/transport.manager.dart';
 import '../../../services/socket/ws-message.handler.dart';
 import '../../../services/user-status.service.dart';
 import '../../../types/socket.types.dart';
+import '../../../ui/blurred-dialog.widget.dart';
+import '../../../ui/blurred-popup.widget.dart';
 import '../../../ui/snackbar.dart';
 import '../../../ui/chat/input-container.widget.dart';
 import '../../../ui/chat/media-messages.widget.dart';
@@ -51,6 +53,7 @@ import '../shared/chat-voice-recording.mixin.dart';
 import '../shared/chat-websocket.mixin.dart';
 import '../shared/media-message-config.builder.dart' as shared_media;
 import 'dm-details.screen.dart';
+import 'dm-media-links-docs.screen.dart';
 
 class InnerChatPage extends ConsumerStatefulWidget {
   final DmModel dm;
@@ -319,40 +322,30 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   void initState() {
     super.initState();
 
-    // Clear notifications for this conversation when opened
-    NotificationService().clearConversationNotifications(widget.dm.chatId);
+    // Critical-path: things the first frame and the message stream depend on.
+    // Listener registrations are O(1) and don't trigger work — keep inline.
+    _scrollController.addListener(onScroll);
+    _messageController.addListener(onMessageTextChanged);
+    searchController.addListener(onSearchTextChanged);
+    _messageFocusNode.addListener(onInputFocusChange);
 
-    // Initialize typing animation
-    _initializeTypingAnimation();
-
-    // Initialize voice recording animations + manager (mixin-owned)
-    initializeVoiceRecording();
-    _initializeAudioPlayback();
-
-    // Periodically retry failed messages while the screen is open (handles
-    // the "transport stable, but a media upload failed" case that
-    // MessageGarbageCollector can't because it can't re-upload files).
-    startSendAutoRetry();
-
-    // Load draft message for this conversation
-    loadDraft();
-
-    // Set up WebSocket message listener
     setupWebSocketListener();
-
-    // Start initialization immediately
+    // initializeChat() subscribes the messages-stream listener which flips
+    // `isLoading` → false on first emission, so the skeleton can clear.
     initializeChat();
 
-    _scrollController.addListener(onScroll);
-
-    // Listen to text changes for draft saving
-    _messageController.addListener(onMessageTextChanged);
-
-    // Listen to search text changes
-    searchController.addListener(onSearchTextChanged);
-
-    // Listen to focus changes
-    _messageFocusNode.addListener(onInputFocusChange);
+    // Everything else can wait until after the first frame paints — these
+    // touch the audio session, kick off DB reads (drafts), or set up timers
+    // / animation controllers that only matter once the UI is interactive.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      NotificationService().clearConversationNotifications(widget.dm.chatId);
+      _initializeTypingAnimation();
+      initializeVoiceRecording();
+      _initializeAudioPlayback();
+      startSendAutoRetry();
+      loadDraft();
+    });
   }
 
   void _initializeTypingAnimation() {
@@ -456,26 +449,103 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         if (_currentUserDetails?.callAccess == true)
           IconButton(
             icon: const Icon(Icons.call, color: Colors.white),
-            onPressed: () => _initiateCall(
-              widget.dm.recipientId,
-              widget.dm.recipientName,
-              widget.dm.recipientProfilePic,
-            ),
+            tooltip: 'Call',
+            onPressed: _confirmAndInitiateCall,
           ),
+        _buildDmOverflowMenu(),
       ],
       selectionModeActions: buildSelectionModeActions(),
       messageInput: _buildMessageInput(),
     );
   }
 
+  /// Trailing 3-dot menu in the DM app bar. Sits to the right of the call
+  /// button so the call CTA stays the most prominent action.
+  Widget _buildDmOverflowMenu() {
+    return BlurredPopupButton<String>(
+      icon: Icons.more_vert,
+      tooltip: 'More',
+      menuMaxWidth: 200,
+      itemsBuilder: () => const [
+        BlurredPopupAction(
+          value: 'view',
+          label: 'View Contact',
+          icon: Icons.person_outline_rounded,
+        ),
+        BlurredPopupAction(
+          value: 'media',
+          label: 'Media, Links & Docs',
+          icon: Icons.photo_library_outlined,
+        ),
+        BlurredPopupAction(
+          value: 'mute',
+          label: 'Mute',
+          icon: Icons.notifications_off_outlined,
+        ),
+      ],
+      onSelected: (v) {
+        switch (v) {
+          case 'view':
+            _openDmDetails();
+            break;
+          case 'media':
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => DmMediaLinksDocsScreen(dm: widget.dm),
+              ),
+            );
+            break;
+          case 'mute':
+            // Placeholder — wiring deferred until the per-DM mute toggle
+            // gets its own UX pass.
+            break;
+        }
+      },
+    );
+  }
+
+  /// Opens DM details and pops this messaging screen back to the chat list
+  /// when the details screen returns `{action: 'deleted'}` — same bubble-up
+  /// pattern group-messaging uses for the leave/delete flow.
+  Future<void> _openDmDetails() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => DmDetailsScreen(dm: widget.dm)),
+    );
+    if (mounted && result is Map && result['action'] == 'deleted') {
+      Navigator.pop(context, result);
+    }
+  }
+
+  /// Asks for confirmation before placing the call. Cheap insurance against
+  /// the call icon being tapped accidentally next to the message input.
+  Future<void> _confirmAndInitiateCall() async {
+    final ok = await showBlurredConfirm(
+      context: context,
+      title: 'Start call?',
+      message: 'Are you sure you want to call ${widget.dm.recipientName}?',
+      cancelLabel: 'Cancel',
+      confirmLabel: 'Call',
+      confirmIcon: Icons.call,
+    );
+    if (ok == true && mounted) {
+      await _initiateCall(
+        widget.dm.recipientId,
+        widget.dm.recipientName,
+        widget.dm.recipientProfilePic,
+      );
+    }
+  }
+
   Widget _buildAppBarTitle(themeColor) {
     return InkWell(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (context) => DmDetailsScreen(dm: widget.dm)),
-      ),
-      child: Row(
-        children: [
+      borderRadius: BorderRadius.circular(14),
+      onTap: _openDmDetails,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          children: [
           CircleAvatar(
             radius: 18,
             backgroundColor: Colors.white,
@@ -535,6 +605,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
             ),
           ),
         ],
+        ),
       ),
     );
   }

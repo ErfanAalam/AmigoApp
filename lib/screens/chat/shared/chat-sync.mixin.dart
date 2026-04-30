@@ -14,6 +14,7 @@ import '../../../models/message.model.dart';
 import '../../../models/user.model.dart';
 import '../../../providers/chat.provider.dart';
 import '../../../providers/draft.provider.dart';
+import '../../../services/chat-prewarm.service.dart';
 import '../../../services/draft-message.service.dart';
 import '../../../types/socket.types.dart';
 import '../../../utils/user.utils.dart';
@@ -162,9 +163,27 @@ mixin ChatSyncMixin<T extends ConsumerStatefulWidget>
 
     await onBeforeChatInit();
 
-    // --- Parallel: independent Drift streams that don't depend on each
-    //     other. Subscriptions are synchronous; the listeners fire whenever
-    //     the underlying tables emit a new snapshot.
+    // Pre-warm fast path: if the chat-list tile fired off a one-shot DB
+    // read on tap, it may already be resolved by the time we get here.
+    // Seed the messages list from it so the skeleton clears immediately —
+    // the stream subscription below will overwrite with the same data
+    // (or fresher) shortly. We don't await: a slow prewarm shouldn't
+    // delay the stream subscription. Whichever resolves first wins.
+    final pendingPrewarm = ChatPrewarm.takeMessages(conversationId);
+    if (pendingPrewarm != null) {
+      pendingPrewarm.then((prewarmed) {
+        if (!canSetState) return;
+        if (messages.isNotEmpty || prewarmed.isEmpty) return;
+        safeSetState(() {
+          messages = prewarmed;
+          sortMessagesBySentAt();
+          isLoading = false;
+        });
+      });
+    }
+
+    // Messages stream is the critical-path subscription — it drives the
+    // first paint (`isLoading = false` on first emission). Subscribe now.
     messagesStreamSub?.cancel();
     messagesStreamSub = messagesRepo.watchMessages(conversationId).listen(
       (msgs) {
@@ -180,30 +199,37 @@ mixin ChatSyncMixin<T extends ConsumerStatefulWidget>
           debugPrint('$scrollDebugPrefix messages stream error: $e'),
     );
 
-    reactionsSubscription?.cancel();
-    reactionsSubscription = messageStatusRepo
-        .watchReactionsByConversation(conversationId)
-        .listen(
-          (reactions) {
-            if (!canSetState) return;
-            safeSetState(() => reactionsByMessage = reactions);
-          },
-          onError: (e) =>
-              debugPrint('$scrollDebugPrefix reactions stream error: $e'),
-        );
+    // Reactions + delivery-status streams don't gate first paint — defer
+    // them to a post-frame callback so they don't compete with the message
+    // list's first layout/render. Each one emits on subscription, which
+    // would otherwise cause two extra setState rounds inside initializeChat.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!canSetState) return;
+      reactionsSubscription?.cancel();
+      reactionsSubscription = messageStatusRepo
+          .watchReactionsByConversation(conversationId)
+          .listen(
+            (reactions) {
+              if (!canSetState) return;
+              safeSetState(() => reactionsByMessage = reactions);
+            },
+            onError: (e) =>
+                debugPrint('$scrollDebugPrefix reactions stream error: $e'),
+          );
 
-    deliveryStatusSubscription?.cancel();
-    deliveryStatusSubscription = messageStatusRepo
-        .watchDeliveryStatusByConversation(conversationId)
-        .listen(
-          (statuses) {
-            if (!canSetState) return;
-            safeSetState(() => deliveryStatusByMessage = statuses);
-          },
-          onError: (e) => debugPrint(
-            '$scrollDebugPrefix delivery status stream error: $e',
-          ),
-        );
+      deliveryStatusSubscription?.cancel();
+      deliveryStatusSubscription = messageStatusRepo
+          .watchDeliveryStatusByConversation(conversationId)
+          .listen(
+            (statuses) {
+              if (!canSetState) return;
+              safeSetState(() => deliveryStatusByMessage = statuses);
+            },
+            onError: (e) => debugPrint(
+              '$scrollDebugPrefix delivery status stream error: $e',
+            ),
+          );
+    });
 
     // Independent async work: clear unread count + load pinned. Run in
     // parallel so chat-open isn't gated on the slower of the two.

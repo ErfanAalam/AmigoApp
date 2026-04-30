@@ -253,8 +253,10 @@ class _DeletedChatsPageState extends ConsumerState<DeletedChatsPage> {
         chatData['userName'] ?? chatData['user_name'] ?? 'Unknown User';
     final userProfilePic =
         chatData['userProfilePic'] ?? chatData['user_profile_pic'];
-    final deletedAt = chatData['deleted_at'] ?? '';
-    final lastMessage = chatData['metadata']?['last_message'];
+    final deletedAt =
+        chatData['deletedAt'] ?? chatData['deleted_at'] ?? '';
+    final lastMessage =
+        chatData['lastMessage'] ?? chatData['metadata']?['last_message'];
     final lastMessageText = lastMessage?['body'] ?? 'No messages';
     final lastMessageType = lastMessage?['type'] ?? 'text';
 

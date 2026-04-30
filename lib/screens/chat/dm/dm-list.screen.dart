@@ -7,6 +7,7 @@ import '../../../config/app-colors.config.dart';
 import '../../../providers/chat.provider.dart';
 import '../../../providers/draft.provider.dart';
 import '../../../providers/theme-color.provider.dart';
+import '../../../services/chat-prewarm.service.dart';
 import '../../../services/user-status.service.dart';
 import '../../../types/socket.types.dart';
 import '../../../ui/chat.action-sheet.dart';
@@ -428,6 +429,13 @@ class ChatsPageState extends ConsumerState<ChatsPage>
               }
             },
             onTap: () async {
+              // Kick off the first-batch DB read while the route transition
+              // animates — by the time the messaging screen's initState
+              // runs, the snapshot is usually already resolved, giving an
+              // instant first paint instead of waiting on the Drift stream's
+              // first emission.
+              ChatPrewarm.warmMessages(conversation.chatId);
+
               // Set this conversation as active and clear unread count
               ref
                   .read(chatProvider.notifier)

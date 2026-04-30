@@ -62,6 +62,19 @@ mixin ChatShellMixin<T extends ConsumerStatefulWidget>
                 ),
               )
             : appBarTitle,
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                themeColor.primaryDark,
+                themeColor.primary,
+                themeColor.primaryLight,
+              ],
+            ),
+          ),
+        ),
         backgroundColor: themeColor.primary,
         elevation: 0,
         titleSpacing: appBarTitleSpacing,
@@ -114,10 +127,7 @@ mixin ChatShellMixin<T extends ConsumerStatefulWidget>
                 child: SyncProgressPill(),
               ),
             Positioned(
-              top:
-                  (isSyncingMessages ||
-                      isLoadingTargetMessage ||
-                      isInJumpMode)
+              top: (isSyncingMessages || isLoadingTargetMessage || isInJumpMode)
                   ? 54
                   : 10,
               left: 0,
@@ -180,4 +190,3 @@ mixin ChatShellMixin<T extends ConsumerStatefulWidget>
     );
   }
 }
-

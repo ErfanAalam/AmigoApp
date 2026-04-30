@@ -34,9 +34,12 @@ import '../../../ui/chat/message-recommendations.widget.dart';
 import '../../../utils/animations.utils.dart';
 import '../../../utils/chat/audio-playback.utils.dart';
 import '../../../utils/chat/chat-helpers.utils.dart';
+import '../../../ui/blurred-popup.widget.dart';
+import '../../../ui/chat/add-member.sheet.dart';
+import '../../../ui/chat/group-actions.dart';
 import '../../../utils/route-transitions.util.dart';
-import 'group-info.screen.dart';
 import '../chat-details.screen.dart';
+import '../dm/dm-media-links-docs.screen.dart';
 import '../shared/chat-actions.mixin.dart';
 import '../shared/chat-attachment.mixin.dart';
 import '../shared/chat-bubble.mixin.dart';
@@ -427,49 +430,32 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   @override
   void initState() {
     super.initState();
+
+    // Critical-path: cheap listeners + the message stream subscription that
+    // drives first paint. Anything that does I/O, sets up animation
+    // controllers, or touches the audio session is deferred to post-frame.
     _scrollController.addListener(onScroll);
+    _messageController.addListener(onMessageTextChanged);
+    searchController.addListener(onSearchTextChanged);
+    _messageFocusNode.addListener(onInputFocusChange);
 
-    // Clear notifications for this conversation when opened
-    NotificationService().clearConversationNotifications(
-      widget.group.chatId.toString(),
-    );
-
-    // _websocketService.connect(widget.group.chatId);
-
-    getAllConversationMembers();
-
-    // Initialize typing animation
-    _initializeTypingAnimation();
-
-    // Initialize voice recording animations + manager (mixin-owned)
-    initializeVoiceRecording();
-    _initializeAudioPlayback();
-
-    // Periodically retry failed messages while the screen is open (handles
-    // the "transport stable, but a media upload failed" case that
-    // MessageGarbageCollector can't because it can't re-upload files).
-    startSendAutoRetry();
-
-    // Set up WebSocket message listener
     setupWebSocketListener();
-
-    // Start initialization immediately
     initializeChat();
 
-    // Load draft message for this conversation
-    loadDraft();
-
-    // Check admin or staff status
-    // _updateIsAdminOrStaff();
-
-    // Listen to text changes for draft saving
-    _messageController.addListener(onMessageTextChanged);
-
-    // Listen to search text changes
-    searchController.addListener(onSearchTextChanged);
-
-    // Listen to focus changes
-    _messageFocusNode.addListener(onInputFocusChange);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      NotificationService().clearConversationNotifications(
+        widget.group.chatId.toString(),
+      );
+      // Member list isn't needed for first paint — it's used for @mentions
+      // and member name resolution in long-press menus. Lazy-load it.
+      getAllConversationMembers();
+      _initializeTypingAnimation();
+      initializeVoiceRecording();
+      _initializeAudioPlayback();
+      startSendAutoRetry();
+      loadDraft();
+    });
   }
 
   void _initializeTypingAnimation() {
@@ -565,13 +551,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     final themeColor = ref.watch(themeColorProvider);
     return buildChatScaffold(
       appBarTitle: _buildAppBarTitle(themeColor),
-      nonSelectionActions: [
-        IconButton(
-          icon: const Icon(Icons.info_outline_rounded, color: Colors.white),
-          onPressed: _openGroupInfo,
-          tooltip: 'Group info',
-        ),
-      ],
+      nonSelectionActions: [_buildGroupOverflowMenu()],
       selectionModeActions: buildSelectionModeActions(
         onBulkDelete: _isAdminOrStaff ? _bulkDeleteMessages : null,
       ),
@@ -581,45 +561,49 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
   Widget _buildAppBarTitle(themeColor) {
     return InkWell(
+      borderRadius: BorderRadius.circular(14),
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => ChatDetailsScreen(group: widget.group),
         ),
       ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: Colors.white,
-            child: Text(
-              widget.group.title.isNotEmpty
-                  ? widget.group.title[0].toUpperCase()
-                  : '?',
-              style: TextStyle(
-                color: themeColor.primary,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: Colors.white,
+              child: Text(
+                widget.group.title.isNotEmpty
+                    ? widget.group.title[0].toUpperCase()
+                    : '?',
+                style: TextStyle(
+                  color: themeColor.primary,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.group.title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.group.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -688,13 +672,126 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   void _openGroupInfo() async {
     final result = await Navigator.push(
       context,
-      SlideRightRoute(page: GroupInfoPage(group: widget.group)),
+      SlideRightRoute(page: ChatDetailsScreen(group: widget.group)),
     );
-    if (result is Map && result['action'] == 'deleted') {
+    // Bubble up "deleted"/"left" so the messaging screen pops itself
+    // and the chat list refreshes.
+    if (result is Map &&
+        (result['action'] == 'deleted' || result['action'] == 'left')) {
       if (mounted) {
-        Navigator.pop(context, {'action': 'deleted'});
+        Navigator.pop(context, result);
       }
     }
+  }
+
+  /// True for users who can manage the group (admin role on the group, or
+  /// app-wide staff). Mirrors the gate used by the chat-details screen so
+  /// "Add Members" / "Delete and leave group" appear in both places for the
+  /// same set of users.
+  bool get _canManageGroup =>
+      widget.group.role == 'admin' || _currentUserDetails?.role == 'staff';
+
+  void _openMediaLinksDocs() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DmMediaLinksDocsScreen(group: widget.group),
+      ),
+    );
+  }
+
+  Future<void> _openAddMembersSheet() async {
+    final existing = _conversationMembers.map((u) => u.id).toSet();
+    final selected = await showAddMemberSheet(
+      context: context,
+      existingMemberIds: existing,
+      themeColor: ref.read(themeColorProvider),
+    );
+    if (selected != null && selected.isNotEmpty) {
+      final ok = await addMembersToGroup(
+        conversationId: widget.group.chatId,
+        userIds: selected,
+      );
+      if (ok && mounted) {
+        // Refresh the in-memory member list so future menu opens see the
+        // new members and don't suggest re-adding them.
+        await getAllConversationMembers();
+      }
+    }
+  }
+
+  Future<void> _confirmDeleteAndLeaveGroup() async {
+    final ok = await confirmAndDeleteGroup(
+      context: context,
+      ref: ref,
+      conversationId: widget.group.chatId,
+      groupTitle: widget.group.title,
+    );
+    if (ok && mounted) {
+      // Pop back to the group list with the same payload chat-details uses
+      // so the list refreshes consistently.
+      Navigator.pop(context, {'action': 'deleted'});
+    }
+  }
+
+  Widget _buildGroupOverflowMenu() {
+    return BlurredPopupButton<String>(
+      icon: Icons.more_vert,
+      tooltip: 'More',
+      menuMaxWidth: 220,
+      itemsBuilder: () => [
+        const BlurredPopupAction(
+          value: 'info',
+          label: 'Group info',
+          icon: Icons.info_outline_rounded,
+        ),
+        if (_canManageGroup)
+          const BlurredPopupAction(
+            value: 'add',
+            label: 'Add members',
+            icon: Icons.person_add_alt_1_rounded,
+          ),
+        const BlurredPopupAction(
+          value: 'media',
+          label: 'Media, Links & Docs',
+          icon: Icons.photo_library_outlined,
+        ),
+        const BlurredPopupAction(
+          value: 'mute',
+          label: 'Mute',
+          icon: Icons.notifications_off_outlined,
+        ),
+        if (_canManageGroup) ...[
+          const BlurredPopupSeparator(),
+          const BlurredPopupAction(
+            value: 'delete',
+            label: 'Delete and leave group',
+            icon: Icons.delete_outline_rounded,
+            style: BlurredPopupActionStyle.destructive,
+          ),
+        ],
+      ],
+      onSelected: (v) {
+        switch (v) {
+          case 'info':
+            _openGroupInfo();
+            break;
+          case 'add':
+            _openAddMembersSheet();
+            break;
+          case 'media':
+            _openMediaLinksDocs();
+            break;
+          case 'mute':
+            // Placeholder — menu entry is shown but the toggle isn't wired
+            // up yet (intentional, matches DM screen).
+            break;
+          case 'delete':
+            _confirmDeleteAndLeaveGroup();
+            break;
+        }
+      },
+    );
   }
 
   Future<void> _bulkDeleteMessages() async {

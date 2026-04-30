@@ -416,7 +416,7 @@ class ConversationRepository {
     final db = sqliteDatabase.database;
 
     return (db.select(db.chats)
-          ..where((t) => t.type.equals('dm'))
+          ..where((t) => t.type.equals('dm') & t.deletedAt.isNull())
           ..orderBy([
             (t) => OrderingTerm(
               expression: t.updatedAt,
@@ -993,6 +993,50 @@ class ConversationRepository {
     );
   }
 
+  /// Reactive stream of active members for a group, joined with their user
+  /// row (display name + avatar). Re-emits whenever `chat_members` or
+  /// `users` change for this conversation — so server-driven WS events
+  /// (`member_added` / `removed` / `promoted` / `demoted`) that the chat
+  /// provider applies to SQLite show up live in the chat-details screen
+  /// without any manual refresh.
+  Stream<List<GroupMember>> watchActiveGroupMembers(String conversationId) {
+    final db = sqliteDatabase.database;
+
+    final query = db.select(db.chatMembers).join([
+          leftOuterJoin(
+            db.users,
+            db.users.id.equalsExp(db.chatMembers.userId),
+          ),
+        ])
+      ..where(db.chatMembers.chatId.equals(conversationId))
+      ..where(db.chatMembers.removedAt.isNull())
+      ..orderBy([
+        OrderingTerm(
+          expression: db.chatMembers.joinedAt,
+          mode: OrderingMode.desc,
+        ),
+      ]);
+
+    return query.watch().map((rows) {
+      // Dedup by userId (the chat_members table can hold a removed-then-
+      // re-added row pair; the JOIN preserves both).
+      final map = <String, GroupMember>{};
+      for (final row in rows) {
+        final m = row.readTable(db.chatMembers);
+        final u = row.readTableOrNull(db.users);
+        if (map.containsKey(m.userId)) continue;
+        map[m.userId] = GroupMember(
+          userId: m.userId,
+          name: u?.username ?? u?.name ?? '',
+          profilePic: u?.profilePic,
+          role: m.role,
+          joinedAt: m.joinedAt,
+        );
+      }
+      return map.values.toList();
+    });
+  }
+
   // Get group by conversation ID with members
   Future<GroupModel?> getGroupWithMembersByConvId(
     String conversationId,
@@ -1010,36 +1054,41 @@ class ConversationRepository {
       return null;
     }
 
-    // Get active chat members
-    final conversationMembers = await ConversationMemberRepository()
-        .getActiveMembersByConversationId(conversationId);
+    // Single JOIN query: fetch active members + user details together.
+    // Replaces an N+1 loop that did one users-table SELECT per member —
+    // for a 100-member group that was 100 round-trips on every screen open.
+    final memberJoin = await (db.select(db.chatMembers).join([
+              leftOuterJoin(
+                db.users,
+                db.users.id.equalsExp(db.chatMembers.userId),
+              ),
+            ])
+          ..where(db.chatMembers.chatId.equals(conversationId))
+          ..where(db.chatMembers.removedAt.isNull())
+          ..orderBy([
+            OrderingTerm(
+              expression: db.chatMembers.joinedAt,
+              mode: OrderingMode.desc,
+            ),
+          ]))
+        .get();
 
-    // Build GroupMember list with user details
-    // Use a Map to deduplicate by userId (keep the first occurrence)
+    // Deduplicate by userId (keep the first occurrence — already ordered
+    // newest first, which matches the previous behaviour).
     final membersMap = <String, GroupMember>{};
-    for (final member in conversationMembers) {
-      // Skip if we already have this user (deduplicate)
-      if (membersMap.containsKey(member.userId)) {
-        continue;
-      }
-
-      // Get user info from users table
-      final user = await (db.select(
-        db.users,
-      )..where((t) => t.id.equals(member.userId))).getSingleOrNull();
-
-      if (user != null) {
-        membersMap[member.userId] = GroupMember(
-          userId: user.id,
-          name: user.username ?? user.name,
-          profilePic: user.profilePic,
-          role: member.role,
-          joinedAt: member.joinedAt,
-        );
-      }
+    for (final row in memberJoin) {
+      final member = row.readTable(db.chatMembers);
+      final user = row.readTableOrNull(db.users);
+      if (membersMap.containsKey(member.userId)) continue;
+      membersMap[member.userId] = GroupMember(
+        userId: member.userId,
+        name: user?.username ?? user?.name ?? '',
+        profilePic: user?.profilePic,
+        role: member.role,
+        joinedAt: member.joinedAt,
+      );
     }
 
-    // Convert map values to list
     final members = membersMap.values.toList();
 
     // Get last message details if lastMsgId exists
