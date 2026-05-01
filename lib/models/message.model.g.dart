@@ -14,6 +14,7 @@ _MessageModel _$MessageModelFromJson(Map<String, dynamic> json) =>
       senderName: json['sender_name'] as String?,
       senderProfilePic: json['sender_profile_pic'] as String?,
       repliedTo: json['replied_to'] as String?,
+      repliedToMessage: json['replied_to_message'] as Map<String, dynamic>?,
       type: json['type'] == null
           ? MessageType.text
           : _messageTypeFromJson(json['type']),
@@ -33,6 +34,7 @@ Map<String, dynamic> _$MessageModelToJson(_MessageModel instance) =>
       'sender_name': instance.senderName,
       'sender_profile_pic': instance.senderProfilePic,
       'replied_to': instance.repliedTo,
+      'replied_to_message': instance.repliedToMessage,
       'type': _messageTypeToJson(instance.type),
       'body': instance.body,
       'attachments': instance.attachments,

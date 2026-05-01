@@ -261,6 +261,14 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   @override
   void setCurrentUserDetails(UserModel? user) => _currentUserDetails = user;
 
+  @override
+  void onFirstMessagesEmitted() {
+    // Position initial scroll: to first unread if any, else to bottom.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) scrollToFirstUnreadOrBottom();
+    });
+  }
+
   // ChatWebSocketMixin requirements
   @override
   WebSocketMessageHandler get wsMessageHandler => _wsMessageHandler;
@@ -321,6 +329,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   @override
   void initState() {
     super.initState();
+
+    // Capture unread snapshot BEFORE initializeChat clears it — drives the
+    // unread-separator pill and the scroll-to-first-unread initial position.
+    unreadAtOpen = widget.dm.unreadCount ?? 0;
 
     // Critical-path: things the first frame and the message stream depend on.
     // Listener registrations are O(1) and don't trigger work — keep inline.

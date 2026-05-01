@@ -105,7 +105,8 @@ enum ConversationActionType {
   memberAdded('member_added'),
   memberRemoved('member_removed'),
   memberPromoted('member_promoted'),
-  memberDemoted('member_demoted');
+  memberDemoted('member_demoted'),
+  chatDelete('chat_delete');
 
   final String value;
   const ConversationActionType(this.value);
@@ -263,6 +264,10 @@ abstract class ChatMessagePayload with _$ChatMessagePayload {
     String? body,
     dynamic attachments,
     @JsonKey(name: 'replied_to') String? repliedTo,
+    // Pre-warmed compact preview of the replied-to message, attached by the
+    // server so the receiver can render the reply container without a local
+    // DB lookup falling through to "empty".
+    @JsonKey(name: 'replied_to_message') Map<String, dynamic>? repliedToMessage,
     @JsonKey(name: 'sent_at') required DateTime sentAt,
   }) = _ChatMessagePayload;
   factory ChatMessagePayload.fromJson(Map<String, dynamic> json) =>

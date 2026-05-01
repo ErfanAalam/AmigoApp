@@ -69,13 +69,24 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
     _loadContactsAndUsers();
   }
 
+  // Case-insensitive sort by displayName. Applied at every source assignment
+  // to _availableUsers; the search-filter paths reuse the already-sorted list.
+  List<UserModel> _sortByName(List<UserModel> users) {
+    final sorted = [...users];
+    sorted.sort(
+      (a, b) => a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
+    );
+    return sorted;
+  }
+
   Future<void> _loadUsersFromLocal() async {
     try {
       final localContacts = await _contactsRepository.getAllContacts();
       if (localContacts.isNotEmpty) {
+        final sorted = _sortByName(localContacts);
         setState(() {
-          _availableUsers = localContacts;
-          _filteredUsers = localContacts;
+          _availableUsers = sorted;
+          _filteredUsers = sorted;
         });
         
         // If we have contacts loaded, update all existing users with contact names
@@ -114,9 +125,10 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
         await _updateAllExistingUsersWithContacts();
 
         if (mounted) {
+          final sorted = _sortByName(users);
           setState(() {
-            _availableUsers = users;
-            _filteredUsers = users;
+            _availableUsers = sorted;
+            _filteredUsers = sorted;
           });
         }
       }
@@ -303,9 +315,10 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
         // Update existing users in the users table with username
         await _updateExistingUsersWithUsername(users);
 
+        final sorted = _sortByName(users);
         setState(() {
-          _availableUsers = users;
-          _filteredUsers = users;
+          _availableUsers = sorted;
+          _filteredUsers = sorted;
         });
       }
     } catch (e) {

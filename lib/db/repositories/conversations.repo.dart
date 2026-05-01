@@ -83,31 +83,38 @@ class ConversationRepository {
     );
   }
 
-  /// Insert multiple contacts (bulk insert)
+  /// Bulk insert conversations atomically. Uses InsertMode.insertOrIgnore so
+  /// re-inserting an existing chat row preserves the user's local-only flags
+  /// (isPinned/isMuted/isFavorite) instead of being clobbered by server data
+  /// that doesn't carry them. db.batch wraps the whole thing in one
+  /// transaction → one Drift watch emit, no partial loads, no per-row throws.
   Future<void> insertConversations(
     List<ConversationModel> conversations,
   ) async {
+    if (conversations.isEmpty) return;
     final db = sqliteDatabase.database;
 
-    for (final conv in conversations) {
-      final convCompanion = ChatsCompanion.insert(
-        id: conv.id,
-        type: conv.type,
-        title: Value(conv.title),
-        createrId: Value(conv.createrId),
-        lastMsgId: Value(conv.lastMsgId),
-        lastMsgAt: Value(conv.lastMsgAt),
-        pinnedMsgId: Value(conv.pinnedMsgId),
-        unreadCount: Value(conv.unreadCount ?? 0),
-        createdAt: Value(conv.createdAt),
-        deletedAt: Value(conv.deletedAt),
-        isPinned: Value(conv.isPinned),
-        isMuted: Value(conv.isMuted),
-        isFavorite: Value(conv.isFavorite),
-        updatedAt: Value(conv.updatedAt),
-      );
-      await db.into(db.chats).insert(convCompanion);
-    }
+    await db.batch((b) {
+      for (final conv in conversations) {
+        final convCompanion = ChatsCompanion.insert(
+          id: conv.id,
+          type: conv.type,
+          title: Value(conv.title),
+          createrId: Value(conv.createrId),
+          lastMsgId: Value(conv.lastMsgId),
+          lastMsgAt: Value(conv.lastMsgAt),
+          pinnedMsgId: Value(conv.pinnedMsgId),
+          unreadCount: Value(conv.unreadCount ?? 0),
+          createdAt: Value(conv.createdAt),
+          deletedAt: Value(conv.deletedAt),
+          isPinned: Value(conv.isPinned),
+          isMuted: Value(conv.isMuted),
+          isFavorite: Value(conv.isFavorite),
+          updatedAt: Value(conv.updatedAt),
+        );
+        b.insert(db.chats, convCompanion, mode: InsertMode.insertOrIgnore);
+      }
+    });
   }
 
   // Get All members by conversation id with thier details from users table

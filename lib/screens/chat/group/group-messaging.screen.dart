@@ -292,6 +292,15 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     _checkRemovedState();
   }
 
+  @override
+  void onFirstMessagesEmitted() {
+    // Position initial scroll: to the first unread if any, else to bottom.
+    // Defer one frame so the list is laid out and scrollToIndex can resolve.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) scrollToFirstUnreadOrBottom();
+    });
+  }
+
   // ChatWebSocketMixin requirements
   @override
   WebSocketMessageHandler get wsMessageHandler => _wsMessageHandler;
@@ -430,6 +439,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   @override
   void initState() {
     super.initState();
+
+    // Capture unread snapshot BEFORE initializeChat clears it — drives the
+    // unread-separator pill and the scroll-to-first-unread initial position.
+    unreadAtOpen = widget.group.unreadCount;
 
     // Critical-path: cheap listeners + the message stream subscription that
     // drives first paint. Anything that does I/O, sets up animation

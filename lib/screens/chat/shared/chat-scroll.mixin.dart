@@ -88,6 +88,13 @@ mixin ChatScrollMixin<T extends ConsumerStatefulWidget>
   bool get isScrolling;
   set isScrolling(bool value);
 
+  /// Provided by ChatSyncMixin (read+write so this mixin can clear the
+  /// separator when the user scrolls to bottom).
+  String? get firstUnreadMessageId;
+  set firstUnreadMessageId(String? value);
+  int get unreadAtOpen;
+  set unreadAtOpen(int value);
+
   void onMessageTextChanged() {
     draftSaveTimer?.cancel();
     draftSaveTimer = Timer(const Duration(milliseconds: 500), () {
@@ -218,6 +225,10 @@ mixin ChatScrollMixin<T extends ConsumerStatefulWidget>
       if (canSetState && !isAtBottom) {
         safeSetState(() {
           isAtBottom = true;
+          // Caught up — drop the unread separator so it doesn't reappear
+          // if more messages arrive while still pinned to bottom.
+          firstUnreadMessageId = null;
+          unreadAtOpen = 0;
         });
       }
     } else if (scrolledUp || scrollPosition > 100) {
@@ -229,6 +240,38 @@ mixin ChatScrollMixin<T extends ConsumerStatefulWidget>
     }
 
     lastScrollPosition = scrollPosition;
+  }
+
+  /// Scroll to the first-unread anchor on initial paint if one exists,
+  /// otherwise fall back to the default newest-at-bottom behavior. Called
+  /// from ChatSyncMixin once the messages stream produces its first
+  /// non-empty emit. The list is `reverse: true` (newest at index 0 in
+  /// builder space), so the builder index is `length - 1 - displayIndex`.
+  Future<void> scrollToFirstUnreadOrBottom() async {
+    if (!mounted || !scrollController.hasClients) {
+      // Wait one frame — first emit fires before the list is laid out.
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !scrollController.hasClients) return;
+    }
+    final anchor = firstUnreadMessageId;
+    if (anchor != null && unreadAtOpen > 0) {
+      final list = displayMessages;
+      final idx = list.indexWhere((m) => m.id == anchor);
+      if (idx != -1) {
+        final builderIndex = list.length - 1 - idx;
+        try {
+          await scrollController.scrollToIndex(
+            builderIndex,
+            preferPosition: AutoScrollPosition.middle,
+            duration: const Duration(milliseconds: 250),
+          );
+          return;
+        } catch (_) {
+          // Fall through to scrollToBottom on any layout race.
+        }
+      }
+    }
+    scrollToBottom();
   }
 
   Future<void> scrollToMessage(String messageId) async {

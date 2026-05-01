@@ -429,6 +429,10 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
 
         final isMyMessage = message.senderId == currentUserId;
 
+        final showUnreadDivider = firstUnreadMessageId != null &&
+            unreadAtOpen > 0 &&
+            message.id == firstUnreadMessageId;
+
         return AutoScrollTag(
           key: ValueKey(message.id),
           controller: scrollController,
@@ -437,11 +441,50 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
             children: [
               if (ChatHelpers.shouldShowDateSeparator(displayMessages, index))
                 DateSeparator(dateTimeString: message.sentAt),
+              if (showUnreadDivider) _buildUnreadSeparator(unreadAtOpen),
               buildMessageWithActions(message, isMyMessage),
             ],
           ),
         );
       },
+    );
+  }
+
+  Widget _buildUnreadSeparator(int count) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          const Expanded(child: Divider(thickness: 0.6)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(100),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(30),
+                    blurRadius: 2,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+              child: Text(
+                count == 1 ? '1 unread message' : '$count unread messages',
+                style: const TextStyle(
+                  color: Colors.black87,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+          const Expanded(child: Divider(thickness: 0.6)),
+        ],
+      ),
     );
   }
 
@@ -547,4 +590,9 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
   // host's combined class will satisfy them.
   bool get isInJumpMode;
   List<MessageModel> get displayMessages;
+
+  // Provided by ChatSyncMixin — drives the unread separator pill rendered
+  // above the first unread message in buildMessagesList.
+  String? get firstUnreadMessageId;
+  int get unreadAtOpen;
 }

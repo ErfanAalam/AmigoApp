@@ -129,25 +129,33 @@ class ConversationMemberRepository {
     }
   }
 
-  /// Insert multiple chat members (insert only, no update on conflict)
+  /// Bulk-upsert chat members atomically — single Drift batch wraps everything
+  /// in one transaction so a partial-failure can't leak rows.
   Future<void> insertConversationMembersOnly(
     List<ChatMemberModel> members,
   ) async {
+    if (members.isEmpty) return;
     final db = sqliteDatabase.database;
 
-    for (final member in members) {
-      final memberCompanion = ChatMembersCompanion.insert(
-        id: member.id ?? '${member.chatId}_${member.userId}',
-        chatId: member.chatId,
-        userId: member.userId,
-        role: member.role,
-        joinedAt: Value(member.joinedAt),
-        removedAt: Value(member.removedAt),
-        lastReadMsgId: Value(member.lastReadMsgId),
-        lastDeliveredMsgId: Value(member.lastDeliveredMsgId),
-      );
-      await db.into(db.chatMembers).insertOnConflictUpdate(memberCompanion);
-    }
+    await db.batch((b) {
+      for (final member in members) {
+        final memberCompanion = ChatMembersCompanion.insert(
+          id: member.id ?? '${member.chatId}_${member.userId}',
+          chatId: member.chatId,
+          userId: member.userId,
+          role: member.role,
+          joinedAt: Value(member.joinedAt),
+          removedAt: Value(member.removedAt),
+          lastReadMsgId: Value(member.lastReadMsgId),
+          lastDeliveredMsgId: Value(member.lastDeliveredMsgId),
+        );
+        b.insert(
+          db.chatMembers,
+          memberCompanion,
+          mode: InsertMode.insertOrReplace,
+        );
+      }
+    });
   }
 
   /// Get all chat members

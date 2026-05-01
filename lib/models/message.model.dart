@@ -19,6 +19,12 @@ abstract class MessageModel with _$MessageModel {
     @JsonKey(name: 'sender_name') String? senderName,
     @JsonKey(name: 'sender_profile_pic') String? senderProfilePic,
     @JsonKey(name: 'replied_to') String? repliedTo,
+    // Server attaches a compact preview of the replied-to message so the
+    // client can render the reply container immediately without waiting for
+    // the original message to be paged into local DB. Untyped on purpose —
+    // we transiently use it to upsert a row into the messages table on
+    // insert, then it's not needed again.
+    @JsonKey(name: 'replied_to_message') Map<String, dynamic>? repliedToMessage,
     @JsonKey(
       fromJson: _messageTypeFromJson,
       toJson: _messageTypeToJson,

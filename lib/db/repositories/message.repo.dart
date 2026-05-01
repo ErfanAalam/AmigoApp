@@ -73,6 +73,30 @@ class MessageRepository {
     return result.toMap();
   }
 
+  /// If the message carries a server-attached `repliedToMessage` preview,
+  /// build a synthetic MessageModel from it so callers can upsert it as a
+  /// regular row. The real message — when later paged in via scroll — wins
+  /// because we always use insertOrIgnore (preview never overwrites real).
+  MessageModel? _previewToModel(MessageModel m) {
+    final preview = m.repliedToMessage;
+    if (preview == null) return null;
+    final id = preview['id']?.toString();
+    if (id == null || id.isEmpty) return null;
+    return MessageModel(
+      id: id,
+      chatId: m.chatId,
+      senderId: preview['sender_id']?.toString(),
+      senderName: preview['sender_name']?.toString(),
+      type: MessageType.fromString(preview['type']?.toString()) ??
+          MessageType.text,
+      body: preview['body']?.toString(),
+      attachments: preview['attachments'] is Map<String, dynamic>
+          ? preview['attachments'] as Map<String, dynamic>
+          : null,
+      sentAt: preview['sent_at']?.toString() ?? m.sentAt,
+    );
+  }
+
   /// Insert a single message with SqliteResult
   Future<SqliteResult<int>> insertMessageWithResult(
     MessageModel message,
@@ -80,11 +104,20 @@ class MessageRepository {
     final db = sqliteDatabase.database;
 
     try {
-      final companion = _modelToCompanion(message);
-      await db.into(db.messages).insert(
-        companion,
-        mode: InsertMode.insertOrIgnore,
-      );
+      await db.transaction(() async {
+        final preview = _previewToModel(message);
+        if (preview != null) {
+          await db.into(db.messages).insert(
+                _modelToCompanion(preview),
+                mode: InsertMode.insertOrIgnore,
+              );
+        }
+        final companion = _modelToCompanion(message);
+        await db.into(db.messages).insert(
+              companion,
+              mode: InsertMode.insertOrIgnore,
+            );
+      });
       return SqliteResult.success(
         data: 0,
         message: 'Message inserted or already exists',
@@ -107,11 +140,18 @@ class MessageRepository {
     await db.transaction(() async {
       for (final message in messages) {
         try {
+          final preview = _previewToModel(message);
+          if (preview != null) {
+            await db.into(db.messages).insert(
+                  _modelToCompanion(preview),
+                  mode: InsertMode.insertOrIgnore,
+                );
+          }
           final companion = _modelToCompanion(message);
           await db.into(db.messages).insert(
-            companion,
-            mode: InsertMode.insertOrIgnore,
-          );
+                companion,
+                mode: InsertMode.insertOrIgnore,
+              );
         } catch (e) {
           debugPrint(
             "Error inserting message with ID ${message.id}: $e",

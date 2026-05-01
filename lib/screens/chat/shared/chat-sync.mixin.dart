@@ -36,6 +36,21 @@ mixin ChatSyncMixin<T extends ConsumerStatefulWidget>
   bool hasMoreOnServer = true;
   bool isLoadingMore = false;
 
+  /// Unread count snapshot taken when the chat was opened — captured by the
+  /// host in initState before initializeChat runs (which clears the count to
+  /// zero). Drives the "$N unread messages" separator pill and the
+  /// scroll-to-first-unread initial scroll position.
+  int unreadAtOpen = 0;
+
+  /// ID of the oldest unread message visible at chat-open time (computed on
+  /// the first non-empty messages stream emit). Cleared when the user scrolls
+  /// to bottom (caught up) or the screen disposes.
+  String? firstUnreadMessageId;
+
+  /// Tracks whether the messages stream has produced its first non-empty
+  /// emission. Used to gate the one-shot first-unread compute + initial scroll.
+  bool _firstMessagesEmitDone = false;
+
   StreamSubscription<List<MessageModel>>? messagesStreamSub;
   StreamSubscription<Map<String, Map<String, dynamic>>>? reactionsSubscription;
   StreamSubscription<Map<String, MessageStatusType>>?
@@ -104,6 +119,25 @@ mixin ChatSyncMixin<T extends ConsumerStatefulWidget>
   /// removed-from-group state because `memberRemoved` WS events
   /// soft-delete the chat row through the chat provider. Default no-op.
   void onMessagesStreamUpdate() {}
+
+  /// Fires after the first non-empty messages stream emit. Hosts use this to
+  /// position the initial scroll (to first-unread if any, else to bottom).
+  /// Default no-op so DM screens that don't override still get current behaviour.
+  void onFirstMessagesEmitted() {}
+
+  /// Compute the oldest unread message at chat-open from the most recent
+  /// `unreadAtOpen` messages. Skip own messages — the divider only marks
+  /// what *I* haven't read. Returns null if all unread are own messages
+  /// (no separator needed) or if unreadAtOpen is 0.
+  String? _computeFirstUnreadId(List<MessageModel> sortedAsc) {
+    if (unreadAtOpen <= 0 || sortedAsc.isEmpty) return null;
+    final start = sortedAsc.length - unreadAtOpen;
+    final tail = start <= 0 ? sortedAsc : sortedAsc.sublist(start);
+    for (final m in tail) {
+      if (m.senderId != null && m.senderId != currentUserId) return m.id;
+    }
+    return null;
+  }
 
   // ---- Methods ----
 
@@ -193,6 +227,17 @@ mixin ChatSyncMixin<T extends ConsumerStatefulWidget>
           sortMessagesBySentAt();
           isLoading = false;
         });
+        // One-shot first-emit work: compute the first-unread anchor (if any)
+        // and let the host position the initial scroll. Subsequent emits
+        // just refresh the list.
+        if (!_firstMessagesEmitDone && messages.isNotEmpty) {
+          _firstMessagesEmitDone = true;
+          final firstUnread = _computeFirstUnreadId(messages);
+          if (firstUnread != null && canSetState) {
+            safeSetState(() => firstUnreadMessageId = firstUnread);
+          }
+          onFirstMessagesEmitted();
+        }
         onMessagesStreamUpdate();
       },
       onError: (e) =>

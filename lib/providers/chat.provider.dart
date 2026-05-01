@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/db/repositories/user.repo.dart';
+import 'package:amigo/db/sqlite.db.dart';
 import 'package:amigo/models/conversations.model.dart';
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/types/chat.types.dart';
@@ -130,13 +131,21 @@ class ChatState {
   }
 
   int get unreadDmCount {
-    // count the number of DMs where unread count is greater than 0 (not unread message count just the number of conversations with unread messages)
-    return dmList.where((dm) => (dm.unreadCount ?? 0) > 0).length;
+    // Dedupe by chatId — the in-memory dmList can briefly contain duplicates
+    // when WS replay (`conversation:new`) races the initial load. The list
+    // sorter scrubs them on the next state update; this guard makes the badge
+    // correct in the meantime.
+    final seen = <String>{};
+    return dmList
+        .where((dm) => (dm.unreadCount ?? 0) > 0 && seen.add(dm.chatId))
+        .length;
   }
 
   int get unreadGroupCount {
-    // count the number of DMs where unread count is greater than 0 (not unread message count just the number of conversations with unread messages)
-    return groupList.where((group) => (group.unreadCount) > 0).length;
+    final seen = <String>{};
+    return groupList
+        .where((group) => group.unreadCount > 0 && seen.add(group.chatId))
+        .length;
   }
 
   bool isUserOnline(String recipientId, String convId) {
@@ -297,39 +306,14 @@ class ChatNotifier extends Notifier<ChatState> {
             conversationsList,
           );
 
-          // Delete local DMs that no longer exist on the server
           final serverConvIds = convList.map((c) => c.id).toSet();
           final deletedDmIds = existingConvIdsSet
               .where((id) => !serverConvIds.contains(id))
               .toList();
-          if (deletedDmIds.isNotEmpty) {
-            debugPrint(
-              '🗑️ Removing ${deletedDmIds.length} deleted DMs from local DB',
-            );
-            for (final id in deletedDmIds) {
-              await _conversationsRepo.deleteConversation(id);
-            }
-          }
-
-          // Filter conversations to only include new ones
           final newConvs = convList
               .where((conv) => !existingConvIdsSet.contains(conv.id))
               .toList();
-          debugPrint(
-            'New conversations to insert: ${newConvs.length} out of ${convList.length}',
-          );
 
-          // Store only new conversations in local DB
-          try {
-            if (newConvs.isNotEmpty) {
-              await _conversationsRepo.insertConversations(newConvs);
-            }
-          } catch (e) {
-            debugPrint('❌ Error inserting DM conversations to DB: $e');
-            // Continue even if DB insert fails
-          }
-
-          // Store conversation members in local DB - filter to only new ones
           final convMembers = dmList
               .map(
                 (dm) => ConversationMemberModel(
@@ -340,8 +324,6 @@ class ChatNotifier extends Notifier<ChatState> {
                 ),
               )
               .toList();
-
-          // Filter to only new member pairs
           final newMembers = convMembers
               .where(
                 (member) => !existingMemberPairs.contains(
@@ -349,22 +331,7 @@ class ChatNotifier extends Notifier<ChatState> {
                 ),
               )
               .toList();
-          // debugPrint(
-          //   'New members to insert: ${newMembers.length} out of ${convMembers.length}',
-          // );
 
-          try {
-            if (newMembers.isNotEmpty) {
-              await _conversationsMemberRepo.insertConversationMembersOnly(
-                newMembers,
-              );
-            }
-          } catch (e) {
-            debugPrint('❌ Error inserting conversation members to DB: $e');
-            // Continue even if DB insert fails
-          }
-
-          // Store user (recipient) in local DB - filter to only new ones
           final users = dmList
               .map(
                 (dm) => UserModel(
@@ -376,48 +343,48 @@ class ChatNotifier extends Notifier<ChatState> {
                 ),
               )
               .toList();
-
-          // Filter to only new users
           final newUsers = users
               .where((user) => !existingUserIds.contains(user.id))
               .toList();
-          debugPrint(
-            'New users to insert: ${newUsers.length} out of ${users.length}',
-          );
-
-          try {
-            if (newUsers.isNotEmpty) {
-              await _userRepo.insertUsersOnly(newUsers);
-            }
-          } catch (e) {
-            debugPrint('❌ Error inserting users to DB: $e');
-            // Continue even if DB insert fails
-          }
-
-          // Load pin/mute/favorite status from local DB (these are local-only, not from server)
-          // Query all DM conversations from DB to get their local pin/mute/favorite status
-          final localConvs = await _conversationsRepo.getConversationsByType(
-            ChatType.dm,
-          );
-          final convStatusMap = <String, ConversationModel>{};
-          for (final conv in localConvs) {
-            convStatusMap[conv.id] = conv;
-          }
 
           // Enrich DMs with local user display names (includes username from contacts)
           final enrichedDmList = await UserUtils().enrichDmsWithDisplayNames(
             dmList,
           );
 
-          // Reconcile local DB unread counts with the server's authoritative
-          // values. Without this, FCM-background increments from a previous
-          // session stay in the DB and compound with the WS replay on restart.
-          for (final dm in enrichedDmList) {
-            try {
-              await _conversationsRepo.updateUnreadCount(dm.chatId, dm.unreadCount ?? 0);
-            } catch (e) {
-              debugPrint('⚠️ Failed to reconcile unread count for ${dm.chatId}: $e');
+          // Single Drift transaction → one watch emit, no partial loads.
+          // Order: users + members first (referenced by DM enrichment), then
+          // conversations, then deletes, then unread reconcile.
+          try {
+            await SqliteDatabase.instance.database.transaction(() async {
+              if (newUsers.isNotEmpty) {
+                await _userRepo.insertUsersOnly(newUsers);
+              }
+              if (newMembers.isNotEmpty) {
+                await _conversationsMemberRepo.insertConversationMembersOnly(
+                  newMembers,
+                );
+              }
+              for (final id in deletedDmIds) {
+                await _conversationsRepo.deleteConversation(id);
+              }
+              if (newConvs.isNotEmpty) {
+                await _conversationsRepo.insertConversations(newConvs);
+              }
+              for (final dm in enrichedDmList) {
+                await _conversationsRepo.updateUnreadCount(
+                  dm.chatId,
+                  dm.unreadCount ?? 0,
+                );
+              }
+            });
+            if (deletedDmIds.isNotEmpty) {
+              debugPrint(
+                '🗑️ Removed ${deletedDmIds.length} deleted DMs from local DB',
+              );
             }
+          } catch (e) {
+            debugPrint('❌ Error reconciling DM conversations to DB: $e');
           }
 
           // Update Provider state
@@ -499,44 +466,46 @@ class ChatNotifier extends Notifier<ChatState> {
             .getAllConversationIds(type: ChatType.group);
         final existingGroupConvIdsSet = existingGroupConvIds.toSet();
 
-        // Delete local groups that no longer exist on the server
         final serverGroupConvIds = convs.map((c) => c.id).toSet();
         final deletedGroupIds = existingGroupConvIdsSet
             .where((id) => !serverGroupConvIds.contains(id))
             .toList();
-        if (deletedGroupIds.isNotEmpty) {
-          debugPrint(
-            '🗑️ Removing ${deletedGroupIds.length} deleted groups from local DB',
-          );
-          for (final id in deletedGroupIds) {
-            await _conversationsRepo.deleteConversation(id);
-          }
-        }
-
-        // Filter group conversations to only include new ones
         final newGroupConvs = convs
             .where((conv) => !existingGroupConvIdsSet.contains(conv.id))
             .toList();
 
-        // Store only new group conversations in local DB
+        // Run reconcile (delete-gone + insert-messages + insert-chats +
+        // unread-update) inside a single Drift transaction so the watch
+        // streams emit ONCE with consistent state. Critical: messages
+        // first, then chats — the chats row references lastMsgId, and
+        // watchGroupConversations joins on it. Without this ordering the
+        // first emit shows empty last-message bodies until a follow-up
+        // emit lands with the messages.
         try {
-          if (newGroupConvs.isNotEmpty) {
-            await _conversationsRepo.insertConversations(newGroupConvs);
+          await SqliteDatabase.instance.database.transaction(() async {
+            if (groupLastMessagesToInsert.isNotEmpty) {
+              await _messageRepo.insertMessages(groupLastMessagesToInsert);
+            }
+            for (final id in deletedGroupIds) {
+              await _conversationsRepo.deleteConversation(id);
+            }
+            if (newGroupConvs.isNotEmpty) {
+              await _conversationsRepo.insertConversations(newGroupConvs);
+            }
+            for (final group in groups) {
+              await _conversationsRepo.updateUnreadCount(
+                group.chatId,
+                group.unreadCount,
+              );
+            }
+          });
+          if (deletedGroupIds.isNotEmpty) {
+            debugPrint(
+              '🗑️ Removed ${deletedGroupIds.length} deleted groups from local DB',
+            );
           }
         } catch (e) {
-          debugPrint('❌ Error inserting group conversations to DB: $e');
-          // Continue even if DB insert fails - we can still show groups from server
-        }
-
-        // Await last-message inserts so the Drift stream has them when it
-        // emits on the subsequent chat insert — otherwise last-message body
-        // flashes empty in the group list.
-        if (groupLastMessagesToInsert.isNotEmpty) {
-          try {
-            await _messageRepo.insertMessages(groupLastMessagesToInsert);
-          } catch (e) {
-            debugPrint('❌ Error inserting group last messages batch: $e');
-          }
+          debugPrint('❌ Error reconciling group conversations to DB: $e');
         }
 
         // Load pin/mute/favorite status from local DB for groups (these are local-only, not from server)
@@ -560,17 +529,6 @@ class ChatNotifier extends Notifier<ChatState> {
           }
           return group;
         }).toList();
-
-        // Storing group members and metadata can be added here if needed
-        // Reconcile local DB unread counts with the server's authoritative
-        // values so FCM-background increments don't compound with WS replay.
-        for (final group in groups) {
-          try {
-            await _conversationsRepo.updateUnreadCount(group.chatId, group.unreadCount);
-          } catch (e) {
-            debugPrint('⚠️ Failed to reconcile unread count for ${group.chatId}: $e');
-          }
-        }
 
         // Sort groups
         final sortedGroups = await filterAndSortGroupConversations(groups);
@@ -768,7 +726,14 @@ class ChatNotifier extends Notifier<ChatState> {
   Future<List<DmModel>> filterAndSortConversations(
     List<DmModel> conversations,
   ) async {
-    final filteredConversations = conversations
+    // Dedupe by chatId — race conditions in _handleConversationAdded /
+    // addNewGroup can append the same conv twice. Last write wins so newer
+    // unread counts / last-message data take precedence.
+    final byId = <String, DmModel>{};
+    for (final c in conversations) {
+      byId[c.chatId] = c;
+    }
+    final filteredConversations = byId.values
         .where((conv) => conv.deletedAt == null)
         .toList();
 
@@ -804,9 +769,12 @@ class ChatNotifier extends Notifier<ChatState> {
   Future<List<GroupModel>> filterAndSortGroupConversations(
     List<GroupModel> groups,
   ) async {
-    final filteredGroups = groups;
-    // .where((group) => !state.deletedChats.contains(group.conversationId))
-    // .toList();
+    // Dedupe by chatId — see filterAndSortConversations for the rationale.
+    final byId = <String, GroupModel>{};
+    for (final g in groups) {
+      byId[g.chatId] = g;
+    }
+    final filteredGroups = byId.values.toList();
 
     filteredGroups.sort((a, b) {
       final aPinned = a.isPinned;
@@ -1313,6 +1281,7 @@ class ChatNotifier extends Notifier<ChatState> {
           body: payload.body,
           attachments: payload.attachments,
           repliedTo: payload.repliedTo,
+          repliedToMessage: payload.repliedToMessage,
           sentAt: payload.sentAt.toIso8601String(),
         ),
       );
@@ -2061,6 +2030,30 @@ class ChatNotifier extends Notifier<ChatState> {
             );
           }
           break;
+        case ConversationActionType.chatDelete:
+          // Admin hard-deleted the chat. Wipe local state and bail out before
+          // the system-message insert below — there's no chat row left for
+          // it to belong to. If the user is currently inside this chat,
+          // setActiveConvId(null) so the screen's existing removed-from-group
+          // empty-state path takes over on next build.
+          await _conversationsMemberRepo.deleteMembersByConversationId(
+            payload.convId,
+          );
+          await _conversationsRepo.deleteConversation(payload.convId);
+          final updatedGroupList = state.groupList
+              .where((g) => g.chatId != payload.convId)
+              .toList();
+          final updatedDmList = state.dmList
+              .where((d) => d.chatId != payload.convId)
+              .toList();
+          final clearedActive =
+              state.activeConvId == payload.convId ? null : state.activeConvId;
+          state = state.copyWith(
+            groupList: updatedGroupList,
+            dmList: updatedDmList,
+            activeConvId: clearedActive,
+          );
+          return;
       }
 
       // Look up actor info from cache

@@ -155,24 +155,27 @@ class UserRepository {
     }
   }
 
-  /// Insert multiple users (insert only, no update on conflict)
-  /// Use this when you've already checked that users don't exist
+  /// Bulk-insert users atomically. Uses insertOrIgnore so a duplicate row in
+  /// the input set (or a stale "not in DB" snapshot) doesn't abort the batch.
   Future<void> insertUsersOnly(List<UserModel> users) async {
+    if (users.isEmpty) return;
     final db = sqliteDatabase.database;
 
-    for (final user in users) {
-      final userCompanion = UsersCompanion.insert(
-        id: user.id,
-        name: user.name,
-        username: Value(user.username),
-        phone: user.phone,
-        role: Value(user.role),
-        profilePic: Value(user.profilePic),
-        isOnline: user.isOnline,
-        callAccess: Value(user.callAccess ?? true),
-      );
-      await db.into(db.users).insert(userCompanion);
-    }
+    await db.batch((b) {
+      for (final user in users) {
+        final userCompanion = UsersCompanion.insert(
+          id: user.id,
+          name: user.name,
+          username: Value(user.username),
+          phone: user.phone,
+          role: Value(user.role),
+          profilePic: Value(user.profilePic),
+          isOnline: user.isOnline,
+          callAccess: Value(user.callAccess ?? true),
+        );
+        b.insert(db.users, userCompanion, mode: InsertMode.insertOrIgnore);
+      }
+    });
   }
 
   /// Get all users

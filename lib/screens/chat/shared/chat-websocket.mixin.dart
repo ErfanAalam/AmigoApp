@@ -196,6 +196,7 @@ mixin ChatWebSocketMixin<T extends ConsumerStatefulWidget>
         senderName: senderDetails?.name ?? '',
         senderProfilePic: senderDetails?.profilePic ?? '',
         repliedTo: payload.repliedTo,
+        repliedToMessage: payload.repliedToMessage,
         type: payload.msgType,
         sentAt: payload.sentAt.toIso8601String(),
       );
