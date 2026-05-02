@@ -15,6 +15,8 @@ import '../../api/api_service.dart';
 import '../../config/app-colors.config.dart';
 import '../../models/user.model.dart';
 import '../../providers/theme-color.provider.dart';
+import '../../ui/blurred-dialog.widget.dart';
+import '../../utils/message-recommendations.store.dart';
 import '../../services/auth/auth.service.dart';
 import '../../ui/snackbar.dart';
 import '../auth/login.screen.dart';
@@ -438,6 +440,75 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     await Permission.location.request();
   }
 
+  void _showRecommendationsDialog() {
+    showBlurredDialog<void>(
+      context: context,
+      title: 'Quick Replies',
+      bodyPadding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+      body: _RecommendationsEditor(
+        themeColor: ref.read(themeColorProvider).primary,
+      ),
+    );
+  }
+
+  Widget _buildSettingsRow({
+    required IconData icon,
+    required String label,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    final themeColor = ref.watch(themeColorProvider);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: themeColor.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: themeColor.primary, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: Colors.black87,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.arrow_forward_ios,
+              color: Colors.grey[400],
+              size: 16,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildInfoSection({
     required String title,
     required List<Widget> children,
@@ -844,7 +915,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 ),
               ),
 
-              // App Theme Color Section
+              // Settings Section (App appearance + customizations)
               Container(
                 margin: EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -862,69 +933,19 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 child: Column(
                   children: [
                     _buildInfoSection(
-                      title: 'App Appearance',
+                      title: 'Settings',
                       children: [
-                        InkWell(
-                          onTap: () => _showColorPickerDialog(),
-                          borderRadius: BorderRadius.circular(8),
-                          child: Padding(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  padding: EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: ref
-                                        .watch(themeColorProvider)
-                                        .primary
-                                        .withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Icon(
-                                    Icons.palette,
-                                    color: ref
-                                        .watch(themeColorProvider)
-                                        .primary,
-                                    size: 20,
-                                  ),
-                                ),
-                                SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Theme Color',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey[600],
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                      SizedBox(height: 2),
-                                      Text(
-                                        'Select your preferred app color',
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          color: Colors.black87,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Icon(
-                                  Icons.arrow_forward_ios,
-                                  color: Colors.grey[400],
-                                  size: 16,
-                                ),
-                              ],
-                            ),
-                          ),
+                        _buildSettingsRow(
+                          icon: Icons.palette,
+                          label: 'Theme Color',
+                          subtitle: 'Select your preferred app color',
+                          onTap: _showColorPickerDialog,
+                        ),
+                        _buildSettingsRow(
+                          icon: Icons.chat_bubble_outline,
+                          label: 'Quick Replies',
+                          subtitle: 'Customize message recommendations',
+                          onTap: _showRecommendationsDialog,
                         ),
                         SizedBox(height: 8),
                       ],
@@ -1569,6 +1590,374 @@ class _NetworkDiagnosticsDialogState extends State<_NetworkDiagnosticsDialog> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _RecommendationsEditor extends StatefulWidget {
+  final Color themeColor;
+
+  const _RecommendationsEditor({required this.themeColor});
+
+  @override
+  State<_RecommendationsEditor> createState() => _RecommendationsEditorState();
+}
+
+class _RecommendationsEditorState extends State<_RecommendationsEditor> {
+  static const int _maxLength = 40;
+
+  List<String> _recs = [];
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    MessageRecommendationsStore.load().then((recs) {
+      if (!mounted) return;
+      setState(() {
+        _recs = recs;
+        _loaded = true;
+      });
+    });
+  }
+
+  void _persist() {
+    MessageRecommendationsStore.save(_recs);
+  }
+
+  void _add(String value) {
+    final v = value.trim();
+    if (v.isEmpty) return;
+    setState(() => _recs = [..._recs, v]);
+    _persist();
+  }
+
+  void _updateAt(int index, String value) {
+    final v = value.trim();
+    if (v.isEmpty || index < 0 || index >= _recs.length) return;
+    if (_recs[index] == v) return;
+    setState(() {
+      final next = [..._recs];
+      next[index] = v;
+      _recs = next;
+    });
+    _persist();
+  }
+
+  void _removeAt(int index) {
+    if (index < 0 || index >= _recs.length) return;
+    setState(() {
+      final next = [..._recs];
+      next.removeAt(index);
+      _recs = next;
+    });
+    _persist();
+  }
+
+  void _reset() {
+    setState(() {
+      _recs = List<String>.from(kDefaultMessageRecommendations);
+    });
+    _persist();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_loaded) {
+      return const SizedBox(
+        height: 120,
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 380),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_recs.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 24,
+              ),
+              child: Text(
+                'No quick replies yet. Add one below.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey[600],
+                ),
+              ),
+            )
+          else
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                itemCount: _recs.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 6),
+                itemBuilder: (context, index) {
+                  return _RecommendationRow(
+                    key: ValueKey('rec-$index-${_recs[index]}'),
+                    initialValue: _recs[index],
+                    themeColor: widget.themeColor,
+                    maxLength: _maxLength,
+                    onChanged: (next) => _updateAt(index, next),
+                    onRemove: () => _removeAt(index),
+                  );
+                },
+              ),
+            ),
+          const SizedBox(height: 10),
+          _AddRecommendationField(
+            themeColor: widget.themeColor,
+            maxLength: _maxLength,
+            onSubmit: _add,
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: _reset,
+              icon: Icon(Icons.refresh, size: 16, color: Colors.grey[700]),
+              label: Text(
+                'Reset to defaults',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[700],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecommendationRow extends StatefulWidget {
+  final String initialValue;
+  final Color themeColor;
+  final int maxLength;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onRemove;
+
+  const _RecommendationRow({
+    super.key,
+    required this.initialValue,
+    required this.themeColor,
+    required this.maxLength,
+    required this.onChanged,
+    required this.onRemove,
+  });
+
+  @override
+  State<_RecommendationRow> createState() => _RecommendationRowState();
+}
+
+class _RecommendationRowState extends State<_RecommendationRow> {
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue);
+    _focusNode = FocusNode();
+    _focusNode.addListener(_onFocusChange);
+  }
+
+  void _onFocusChange() {
+    if (!_focusNode.hasFocus) {
+      _commit();
+    }
+  }
+
+  void _commit() {
+    final v = _controller.text.trim();
+    if (v.isEmpty) {
+      _controller.text = widget.initialValue;
+      return;
+    }
+    if (v != widget.initialValue) {
+      widget.onChanged(v);
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_onFocusChange);
+    _focusNode.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.7),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey.shade300, width: 0.5),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _controller,
+              focusNode: _focusNode,
+              maxLength: widget.maxLength,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) {
+                _commit();
+                _focusNode.unfocus();
+              },
+              decoration: const InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                counterText: '',
+                contentPadding: EdgeInsets.symmetric(vertical: 10),
+              ),
+              style: const TextStyle(
+                fontSize: 14,
+                color: Color(0xFF1F2329),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Remove',
+            onPressed: widget.onRemove,
+            icon: Icon(
+              Icons.close_rounded,
+              size: 18,
+              color: Colors.grey[600],
+            ),
+            splashRadius: 18,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(
+              minWidth: 32,
+              minHeight: 32,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AddRecommendationField extends StatefulWidget {
+  final Color themeColor;
+  final int maxLength;
+  final ValueChanged<String> onSubmit;
+
+  const _AddRecommendationField({
+    required this.themeColor,
+    required this.maxLength,
+    required this.onSubmit,
+  });
+
+  @override
+  State<_AddRecommendationField> createState() =>
+      _AddRecommendationFieldState();
+}
+
+class _AddRecommendationFieldState extends State<_AddRecommendationField> {
+  final TextEditingController _controller = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final v = _controller.text.trim();
+    if (v.isEmpty) return;
+    widget.onSubmit(v);
+    _controller.clear();
+    _focusNode.requestFocus();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.85),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: widget.themeColor.withOpacity(0.4),
+                  width: 0.8,
+                ),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: TextField(
+                controller: _controller,
+                focusNode: _focusNode,
+                maxLength: widget.maxLength,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _submit(),
+                decoration: InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  counterText: '',
+                  hintText: 'Add a quick reply',
+                  hintStyle: TextStyle(
+                    color: Colors.grey[500],
+                    fontSize: 14,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Color(0xFF1F2329),
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Material(
+            color: widget.themeColor,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: _submit,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.add, color: Colors.white, size: 18),
+                    SizedBox(width: 4),
+                    Text(
+                      'Add',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

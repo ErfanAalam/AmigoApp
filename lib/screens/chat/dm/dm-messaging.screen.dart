@@ -21,6 +21,7 @@ import '../../../models/user.model.dart';
 import '../../../providers/chat.provider.dart';
 import '../../../providers/draft.provider.dart';
 import '../../../providers/theme-color.provider.dart';
+import '../../../utils/message-recommendations.store.dart';
 import '../../../services/fcm/fcm-init.service.dart';
 import '../../../services/media-cache.service.dart';
 import '../../../services/socket/transport.manager.dart';
@@ -300,18 +301,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // searchMatches, currentMatchIndex, searchDebounceTimer, isInputFocused,
   // highlightedMessageId, highlightedMessageIds).
 
-  final List<String> _messageRecommendations = [
-    'Hi',
-    'Hello',
-    'Done',
-    'Bye',
-    'Ok',
-    'Thanks',
-    'Sure',
-    'Yes',
-    'No',
-    'Maybe',
-  ];
+  List<String> _messageRecommendations =
+      List<String>.from(kDefaultMessageRecommendations);
 
   // Sticky-date state lives on ChatScrollMixin (currentStickyDate, showStickyDate).
 
@@ -345,6 +336,11 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // initializeChat() subscribes the messages-stream listener which flips
     // `isLoading` → false on first emission, so the skeleton can clear.
     initializeChat();
+
+    MessageRecommendationsStore.load().then((recs) {
+      if (!mounted) return;
+      setState(() => _messageRecommendations = recs);
+    });
 
     // Everything else can wait until after the first frame paints — these
     // touch the audio session, kick off DB reads (drafts), or set up timers

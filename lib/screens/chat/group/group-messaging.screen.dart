@@ -21,6 +21,7 @@ import '../../../models/user.model.dart';
 import '../../../providers/chat.provider.dart';
 import '../../../providers/draft.provider.dart';
 import '../../../providers/theme-color.provider.dart';
+import '../../../utils/message-recommendations.store.dart';
 import '../../../services/fcm/fcm-init.service.dart';
 import '../../../services/media-cache.service.dart';
 import '../../../services/socket/transport.manager.dart';
@@ -391,18 +392,8 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   // searchMatches, currentMatchIndex, searchDebounceTimer, isInputFocused,
   // highlightedMessageId, highlightedMessageIds).
 
-  final List<String> _messageRecommendations = [
-    'Hi',
-    'Hello',
-    'Done',
-    'Bye',
-    'Ok',
-    'Thanks',
-    'Sure',
-    'Yes',
-    'No',
-    'Maybe',
-  ];
+  List<String> _messageRecommendations =
+      List<String>.from(kDefaultMessageRecommendations);
 
   // Swipe animation controllers, gesture state, and constants live on
   // ChatSwipeReplyMixin (swipeAnimationControllers, swipeAnimations,
@@ -454,6 +445,11 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
 
     setupWebSocketListener();
     initializeChat();
+
+    MessageRecommendationsStore.load().then((recs) {
+      if (!mounted) return;
+      setState(() => _messageRecommendations = recs);
+    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
