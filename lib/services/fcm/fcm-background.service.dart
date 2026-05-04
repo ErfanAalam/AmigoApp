@@ -28,6 +28,7 @@ import '../../utils/call.utils.dart';
 import '../../types/socket.types.dart';
 import '../../utils/serialization.utils.dart';
 import '../../utils/user.utils.dart';
+import '../call/stream/stream_call.fcm.dart';
 
 import '../fcm/fcm-init.service.dart';
 
@@ -40,6 +41,16 @@ int? _backgroundPollingCallId;
 Future<void> fcmBackgroundHandler(RemoteMessage message) async {
   debugPrint('[FCM-BG] 🔔 Handler fired, data keys: ${message.data.keys.toList()}');
   await Firebase.initializeApp();
+
+  // Stream Video pushes are routed straight to the Stream SDK; they do not
+  // share the `type=call` / `ws_message` envelope used by the in-house
+  // WebRTC backend, so handle and short-circuit before the chat parsing path.
+  if (isStreamVideoPush(message.data)) {
+    debugPrint('[STREAM-FCM] (background) intercepted Stream push, routing to handler');
+    await handleStreamVideoBackgroundPush(message);
+    debugPrint('[STREAM-FCM] (background) handler done — returning');
+    return;
+  }
 
   // Initialize ApiService for background handler
   try {

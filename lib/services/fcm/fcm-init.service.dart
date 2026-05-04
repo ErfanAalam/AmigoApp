@@ -19,6 +19,7 @@ import 'package:amigo/models/message.model.dart';
 import '../../api/api_service.dart';
 import '../../types/socket.types.dart';
 import '../../utils/user.utils.dart';
+import '../call/stream/stream_call.fcm.dart';
 import '../user-info-cache.service.dart';
 
 // import 'package:amigo/firebase_options.dart';
@@ -353,6 +354,15 @@ class NotificationService {
     final data = message.data;
     final notification = message.notification;
     final notificationType = data['type'] as String?;
+
+    // Stream Video pushes own their own foreground handling — surface the
+    // incoming-call UI immediately and skip the chat parsing path.
+    if (isStreamVideoPush(data)) {
+      debugPrint('[STREAM-FCM] (foreground) intercepted Stream push, routing to handler');
+      await handleStreamVideoBackgroundPush(message);
+      debugPrint('[STREAM-FCM] (foreground) handler done — returning');
+      return;
+    }
 
     switch (notificationType) {
       case 'ws-message':

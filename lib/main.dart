@@ -28,6 +28,7 @@ import 'services/auth/auth.service.dart';
 import 'models/call.model.dart';
 import 'services/call/call-foreground.service.dart';
 import 'services/call/call.service.dart';
+import 'services/call/stream/stream_call.service.dart';
 import 'services/cookies.service.dart';
 import 'services/fcm/fcm-init.service.dart';
 import 'services/message/message_gc.service.dart';
@@ -170,6 +171,19 @@ class _MyAppState extends material.State<MyApp>
       // subscribed to callRingingStream when the first WS messages arrive.
       await CallService().initialize();
 
+      // Stream Video backend runs side-by-side with the WebRTC one. It only
+      // self-initialises if `Environment.callBackend == 'stream'` and a
+      // STREAM_API_KEY is configured at build time — otherwise this is a
+      // cheap no-op that keeps the WebRTC path the only active provider.
+      debugPrint('[STREAM-CALL] main: callBackend=${Environment.callBackend}  '
+          'isStreamCallBackend=${Environment.isStreamCallBackend}  '
+          'streamApiKey.len=${Environment.streamApiKey.length}');
+      if (Environment.isStreamCallBackend) {
+        debugPrint('[STREAM-CALL] main: kicking off StreamCallService().initialize()');
+        // ignore: unawaited_futures
+        StreamCallService().initialize();
+      }
+
       // Initialize centralized WebSocket message handler (only once)
       WebSocketMessageHandler().initialize();
       MessageGarbageCollector.instance.init();
@@ -190,8 +204,12 @@ class _MyAppState extends material.State<MyApp>
       // Initialize RingtoneManager for call audio
       await RingtoneManager.init();
 
+      // The killed-state pending-accept cache is WebRTC-only. With the Stream
+      // backend, the SDK + CallKit-style notification own the killed-launch
+      // path, so skip this entirely.
       final callUtils = CallUtils();
-      final callDetails = await callUtils.getCallDetails();
+      final callDetails =
+          Environment.isStreamCallBackend ? null : await callUtils.getCallDetails();
       final callStatus = callDetails?.callStatus;
       final callId = callDetails?.callId;
       final callerId = callDetails?.callerId;

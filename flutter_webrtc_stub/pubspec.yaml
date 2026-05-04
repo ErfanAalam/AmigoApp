@@ -1,0 +1,22 @@
+name: flutter_webrtc
+description: >
+  Local stub of the flutter_webrtc package. Used as a `dependency_overrides`
+  swap when the app is built with the Stream Video calling backend, because
+  flutter_webrtc and stream_video_flutter cannot coexist in a single APK
+  (both ship `org.webrtc.*` Java classes that collide at dex-merge).
+
+  Stubs out the symbols the in-house WebRTC `CallService` references so the
+  source still compiles in Stream-only builds. None of the methods do anything
+  at runtime — when CALL_BACKEND=stream, CallService is never instantiated.
+
+  To revive the real WebRTC backend: remove the dependency_overrides entry in
+  amigo-app/pubspec.yaml, drop the stream_video_* dependencies, then `pub get`.
+version: 0.0.1+stub
+publish_to: none
+
+environment:
+  sdk: ^3.0.0
+
+dependencies:
+  flutter:
+    sdk: flutter

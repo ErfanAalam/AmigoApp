@@ -30,12 +30,13 @@ import '../socket/transport.service.dart';
 import '../cookies.service.dart';
 import '../socket/ws-message.handler.dart';
 import 'call-foreground.service.dart';
+import 'i_call_backend.dart';
 import 'native_call_screen.service.dart';
 
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 
 
-class CallService {
+class CallService implements ICallBackend {
   static final CallService _instance = CallService._internal();
   factory CallService() => _instance;
   CallService._internal();

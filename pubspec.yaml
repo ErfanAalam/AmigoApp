@@ -47,7 +47,7 @@ dependencies:
   provider: ^6.1.1
   path_provider: ^2.1.5
   flutter_contacts: ^1.1.9+2
-  permission_handler: ^11.3.1
+  permission_handler: ^12.0.1
   image_picker: ^1.0.4
   file_picker: ^8.0.0
   photo_view: ^0.14.0
@@ -57,11 +57,17 @@ dependencies:
   path: ^1.8.3
   flutter_sound: ^9.2.13
   geolocator: ^12.0.0
+  # The real flutter_webrtc plugin can't ship in the same APK as
+  # stream_video_flutter (both occupy the org.webrtc.* package). When the Stream
+  # backend is selected, `dependency_overrides` below swaps this entry for a
+  # local stub package so the legacy WebRTC source still compiles. To revive
+  # the real WebRTC backend, drop the override + remove the stream_video_*
+  # dependencies, then re-run `flutter pub get`.
   flutter_webrtc: ^1.3.1
   wakelock_plus: ^1.2.8
   flutter_foreground_task: ^8.11.0
-  firebase_core: ^3.6.0
-  firebase_messaging: ^15.1.3
+  firebase_core: ^4.0.0
+  firebase_messaging: ^16.0.2
   flutter_local_notifications: ^18.0.1
   restart_app: ^1.3.1
   flutter_riverpod: ^3.0.0
@@ -92,6 +98,19 @@ dependencies:
   uuid: ^4.5.1
   freezed_annotation: ^3.0.0
   json_annotation: ^4.9.0
+
+  # ---- Stream Video (alternate calling backend, runtime-switched via env.dart) ----
+  stream_video_flutter: ^1.3.3
+  stream_video_push_notification: ^1.3.3
+
+# Swap the real `flutter_webrtc` plugin for a local no-op stub so the legacy
+# WebRTC backend source still compiles, but only stream_video_flutter ships its
+# native `org.webrtc.*` classes — eliminating the dex-merge collision that
+# otherwise prevents the Android build. Comment this block out (and remove the
+# stream_video_* deps above) to fall back to the real WebRTC backend.
+dependency_overrides:
+  flutter_webrtc:
+    path: flutter_webrtc_stub
 
 dev_dependencies:
   flutter_test:
