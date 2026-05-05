@@ -74,6 +74,12 @@ class StreamCallService implements ICallBackend {
   StreamSubscription<Call?>? _incomingCallSub;
   StreamSubscription? _coreRingingSub;
   StreamSubscription? _connectionSub;
+  // Per-call diagnostic subscription — fires for every coordinator event the
+  // SDK processes for this call (accept/reject/end/etc.). Lets us see the
+  // exact event sequence when something goes sideways (ghost call,
+  // self-reject, …). Re-bound in `_attachCallEventLogging` whenever the
+  // active call changes.
+  StreamSubscription? _callEventsSub;
 
   bool _isInitialized = false;
   bool _isTerminating = false;
@@ -158,6 +164,7 @@ class StreamCallService implements ICallBackend {
         ),
       );
       debugPrint('[STREAM-CALL]   StreamVideo client constructed (with push manager)');
+      debugPrint('[STREAM-CALL]   pushNotificationManager=${_client!.pushNotificationManager == null ? "NULL" : "ok"}');
 
       _bindStateSubscriptions();
       debugPrint('[STREAM-CALL]   subscriptions wired');
@@ -201,9 +208,14 @@ class StreamCallService implements ICallBackend {
           final consumed = await _client!.consumeAndAcceptActiveCall(
             onCallAccepted: (call) async {
               debugPrint('[STREAM-CALL]   ✓ cold-start accepted call: '
-                  '${call.callCid.value}');
+                  '${call.callCid.value}  status=${call.state.value.status.runtimeType}  '
+                  'acceptedByMe=${(call.state.value.status is CallStatusIncoming) ? (call.state.value.status as CallStatusIncoming).acceptedByMe : "n/a"}');
               _streamCall = call;
               _callerHint = _hintFromCall(call);
+              // Attach the events logger immediately — the activeCall stream
+              // may not have fired yet, and this is the path most likely to
+              // surface the WS-vs-HTTP race we patched in vendor/.
+              _attachCallEventLogging(call);
               // CRITICAL: Stream's consume helper accepts but never joins.
               // Without this the SFU connection is never established and mic
               // stays dead even though the UI shows "Connected".
@@ -350,10 +362,18 @@ class StreamCallService implements ICallBackend {
           '(${status.runtimeType}) — flag synced');
       return;
     }
-    debugPrint('[STREAM-CALL]   ensureJoined: joining $cid (status=$status)');
+    debugPrint('[STREAM-CALL]   ensureJoined: joining $cid (status=$status)  '
+        'connection=${_client?.state.connection.value}');
     _joinedCid = cid;
     final res = await call.join(connectOptions: audioOnlyConnect);
-    debugPrint('[STREAM-CALL]   ensureJoined: join → success=${res.isSuccess}');
+    res.fold(
+      success: (_) => debugPrint('[STREAM-CALL]   ensureJoined: join SUCCESS'),
+      failure: (f) => debugPrint('[STREAM-CALL]   ensureJoined: join FAILED — '
+          'type=${f.error.runtimeType} '
+          'message="${f.error.message}" '
+          'full=${f.error}\n'
+          'stack=${f.error.stackTrace}'),
+    );
     if (res.isFailure) {
       _joinedCid = null;
       return;
@@ -387,12 +407,14 @@ class StreamCallService implements ICallBackend {
         // "Call ended" pulse. Bypassing that would make the UI flash off.
         debugPrint('[STREAM-CALL]   activeCall=null  '
             '(mirror linger=${_terminalLingerTimer != null})');
+        _attachCallEventLogging(null);
         if (_terminalLingerTimer == null) _clearMirror();
         return;
       }
 
       _callerHint ??= _hintFromCall(call);
       _callStateSub = call.state.listen(_onCallStateChanged);
+      _attachCallEventLogging(call);
       debugPrint('[STREAM-CALL]   subscribed to call.state for ${call.callCid.value}');
       // Push the in-call screen if the user accepted from CallKit/notification
       // and there's no UI yet.
@@ -411,6 +433,7 @@ class StreamCallService implements ICallBackend {
       if (call == null) return;
       _streamCall = call;
       _callerHint ??= _hintFromCall(call);
+      _attachCallEventLogging(call);
       _maybePushCallScreen(call);
     });
 
@@ -419,9 +442,13 @@ class StreamCallService implements ICallBackend {
     _coreRingingSub?.cancel();
     _coreRingingSub = client.observeCoreRingingEvents(
       onCallAccepted: (Call call) async {
-        debugPrint('[STREAM-CALL] ★ observeCoreRingingEvents → onCallAccepted for ${call.callCid.value}');
+        debugPrint('[STREAM-CALL] ★ observeCoreRingingEvents → onCallAccepted '
+            'cid=${call.callCid.value}  '
+            'status=${call.state.value.status.runtimeType}  '
+            'createdByMe=${call.state.value.createdByMe}');
         _streamCall = call;
         _callerHint ??= _hintFromCall(call);
+        _attachCallEventLogging(call);
         await ensureJoined(call);
         _maybePushCallScreen(call);
       },
@@ -435,6 +462,57 @@ class StreamCallService implements ICallBackend {
     });
 
     debugPrint('[STREAM-CALL]   _bindStateSubscriptions complete');
+  }
+
+  /// Subscribes to the call's coordinator-event stream so we can see *exactly*
+  /// what the SDK is processing when something looks suspicious. This is the
+  /// channel that carries `StreamCallAcceptedEvent` / `StreamCallRejectedEvent`
+  /// / `StreamCallEndedEvent` etc. — the same events that drive
+  /// `_handleCoordinatorCallAccepted` / `_handleCoordinatorCallRejected` (the
+  /// pair we patched in `vendor/stream_video/`).
+  ///
+  /// Why this matters: when the call goes wrong (caller sees "Call declined"
+  /// out of nowhere, callee opens to a ghost call, …) the smoking-gun is in
+  /// this stream. Logging it makes the failure obvious instead of having to
+  /// reverse-engineer it from `state.status` transitions.
+  void _attachCallEventLogging(Call? call) {
+    _callEventsSub?.cancel();
+    _callEventsSub = null;
+    if (call == null) return;
+    final cidShort = call.callCid.value;
+    final me = _currentUser?.id ?? '<unknown>';
+    debugPrint('[STREAM-EVENTS] ▶ attaching events listener  cid=$cidShort  me=$me');
+    _callEventsSub = call.callEvents.listen((event) {
+      // Decode the most diagnostic fields per event type so we don't have to
+      // rely on toString() which the SDK doesn't always implement nicely.
+      String summary;
+      if (event is StreamCallAcceptedEvent) {
+        summary = 'StreamCallAcceptedEvent  acceptedByUserId=${event.acceptedByUserId}'
+            '  ←me=${event.acceptedByUserId == me}';
+      } else if (event is StreamCallRejectedEvent) {
+        summary = 'StreamCallRejectedEvent  rejectedByUserId=${event.rejectedByUserId}'
+            '  ←me=${event.rejectedByUserId == me}';
+      } else if (event is StreamCallEndedEvent) {
+        summary = 'StreamCallEndedEvent';
+      } else if (event is StreamCallRingingEvent) {
+        summary = 'StreamCallRingingEvent';
+      } else if (event is StreamCallMissedEvent) {
+        summary = 'StreamCallMissedEvent';
+      } else if (event is StreamCallSessionStartedEvent) {
+        summary = 'StreamCallSessionStartedEvent';
+      } else if (event is StreamCallSessionEndedEvent) {
+        summary = 'StreamCallSessionEndedEvent';
+      } else if (event is StreamCallMemberAddedEvent) {
+        summary = 'StreamCallMemberAddedEvent';
+      } else if (event is StreamCallMemberRemovedEvent) {
+        summary = 'StreamCallMemberRemovedEvent';
+      } else if (event is StreamCallUpdatedEvent) {
+        summary = 'StreamCallUpdatedEvent';
+      } else {
+        summary = '${event.runtimeType}';
+      }
+      debugPrint('[STREAM-EVENTS] ⮕ $cidShort  $summary');
+    });
   }
 
   Timer? _terminalLingerTimer;
@@ -453,6 +531,11 @@ class StreamCallService implements ICallBackend {
     app_call.CallStatus refined = status;
     if (state.status is CallStatusDisconnected) {
       final reason = (state.status as CallStatusDisconnected).reason;
+      debugPrint('[STREAM-CALL]   disconnect details: '
+          'reason=${reason.runtimeType} '
+          'reasonStr="$reason" '
+          'wasRinging=${_activeCall?.status == app_call.CallStatus.ringing} '
+          'priorMirrorStatus=${_activeCall?.status}');
       final reasonStr = reason.toString().toLowerCase();
       final wasRinging = _activeCall?.status == app_call.CallStatus.ringing;
       if (reasonStr.contains('reject')) {
@@ -669,18 +752,45 @@ class StreamCallService implements ICallBackend {
       userProfilePic: calleeProfilePic,
     );
 
-    debugPrint('[STREAM-CALL]   getOrCreate(members=[${_currentUser!.id}, $calleeId], '
+    // IMPORTANT: only pass the callees in `memberIds`. The caller is already
+    // implicitly a member as the call's creator. Including them as an
+    // explicit member triggers Stream's coordinator to emit a
+    // `StreamCallRejectedEvent{rejectedByUserId: <caller>}` on certain
+    // ringing edge paths (the caller-as-member is treated as "didn't pick
+    // up"), which marks the call as `Disconnected{Rejected{caller}}` ~1s
+    // after getOrCreate. The SDK's `_clear()` then cancels the in-flight
+    // `call.join()` with "connect cancelled" and the call dies before the
+    // callee even sees the ring.
+    debugPrint('[STREAM-CALL]   getOrCreate(members=[$calleeId], '
         'ringing=true, video=false) …');
     final result = await call.getOrCreate(
-      memberIds: [_currentUser!.id, calleeId],
+      memberIds: [calleeId],
       ringing: true,
       video: false, // audio-only for now
     );
 
     result.fold(
       success: (data) {
-        debugPrint('[STREAM-CALL]   ✓ getOrCreate succeeded — call should be ringing on '
-            'the server. Stream will fan-out the push to $calleeId now.');
+        // Log everything Stream returned so we can confirm the ring was
+        // actually requested and the callee is in `members`. If `members`
+        // doesn't contain $calleeId, the coordinator has nobody to push the
+        // FCM to. If `ringing` isn't set on the call settings, no push
+        // gets fanned out at all.
+        try {
+          final s = call.state.value;
+          debugPrint('[STREAM-CALL]   ✓ getOrCreate succeeded  cid=${call.callCid.value}');
+          debugPrint('[STREAM-CALL]     members=${s.callMembers.map((m) => m.userId).toList()}');
+          debugPrint('[STREAM-CALL]     createdByMe=${s.createdByMe}  '
+              'createdByUserId=${s.createdByUserId}  status=${s.status.runtimeType}');
+          debugPrint('[STREAM-CALL]     isRingingFlow=${s.isRingingFlow}  '
+              'startedAt=${s.startedAt}');
+          debugPrint('[STREAM-CALL]   Stream should now push FCM to $calleeId. '
+              'If callee never gets it: check Dashboard → Push Providers '
+              '(Firebase) is configured and the callee user has a registered '
+              'device token (via the SDK\'s pushNotificationManager).');
+        } catch (e) {
+          debugPrint('[STREAM-CALL]   could not introspect call state: $e');
+        }
         _streamCall = call;
         _maybePushCallScreen(call);
       },
@@ -699,51 +809,68 @@ class StreamCallService implements ICallBackend {
     String? callerName,
     String? callerProfilePic,
   }) async {
-    debugPrint('[STREAM-CALL] ▶ acceptCall(callId=$callId)');
+    final t0 = DateTime.now();
+    debugPrint('[STREAM-CALL] ▶ acceptCall(callId=$callId)  t=$t0');
     final call = _streamCall ?? _client?.state.activeCall.valueOrNull;
     if (call == null) {
       debugPrint('[STREAM-CALL] ✗ acceptCall: no incoming call to accept');
       return;
     }
-    debugPrint('[STREAM-CALL]   accepting cid=${call.callCid.value}');
+    final cid = call.callCid.value;
+    final preStatus = call.state.value.status;
+    debugPrint('[STREAM-CALL]   accepting cid=$cid  preStatus=${preStatus.runtimeType}  '
+        'me=${_currentUser?.id}');
+    _attachCallEventLogging(call);
 
     final accept = await call.accept();
+    final dt = DateTime.now().difference(t0).inMilliseconds;
     accept.fold(
       success: (_) async {
-        debugPrint('[STREAM-CALL]   ✓ accept() ok — joining…');
+        final postStatus = call.state.value.status;
+        debugPrint('[STREAM-CALL]   ✓ accept() ok in ${dt}ms — '
+            'postStatus=${postStatus.runtimeType} — joining…');
         final join = await call.join();
         join.fold(
           success: (_) {
             debugPrint('[STREAM-CALL]   ✓ join() ok — pushing call screen');
             _maybePushCallScreen(call);
           },
-          failure: (f) => debugPrint('[STREAM-CALL] ✗ join failed: ${f.error.message}'),
+          failure: (f) => debugPrint('[STREAM-CALL] ✗ join failed: '
+              'type=${f.error.runtimeType}  message="${f.error.message}"  full=${f.error}'),
         );
       },
-      failure: (f) => debugPrint('[STREAM-CALL] ✗ accept failed: ${f.error.message}'),
+      failure: (f) => debugPrint('[STREAM-CALL] ✗ accept failed in ${dt}ms — '
+          'type=${f.error.runtimeType}  message="${f.error.message}"  full=${f.error}'),
     );
   }
 
   @override
   Future<void> declineCall({String? reason, String? callId}) async {
-    debugPrint('[STREAM-CALL] ▶ declineCall(reason=$reason, callId=$callId)');
+    debugPrint('[STREAM-CALL] ▶ declineCall(reason=$reason, callId=$callId)  '
+        'me=${_currentUser?.id}');
     final call = _streamCall ?? _client?.state.activeCall.valueOrNull;
     if (call == null) {
       debugPrint('[STREAM-CALL]   no active call to decline');
       return;
     }
+    debugPrint('[STREAM-CALL]   reject() on cid=${call.callCid.value}  '
+        'preStatus=${call.state.value.status.runtimeType}');
     final res = await call.reject();
-    debugPrint('[STREAM-CALL]   reject() → success=${res.isSuccess}');
+    debugPrint('[STREAM-CALL]   reject() → success=${res.isSuccess}  '
+        'postStatus=${call.state.value.status.runtimeType}');
     _clearMirror();
   }
 
   @override
   Future<void> endCall({String? reason}) async {
-    debugPrint('[STREAM-CALL] ▶ endCall(reason=$reason)  terminating=$_isTerminating');
+    debugPrint('[STREAM-CALL] ▶ endCall(reason=$reason)  terminating=$_isTerminating  '
+        'me=${_currentUser?.id}');
     if (_isTerminating) return;
     _isTerminating = true;
     final call = _streamCall ?? _client?.state.activeCall.valueOrNull;
     if (call != null) {
+      debugPrint('[STREAM-CALL]   leave() on cid=${call.callCid.value}  '
+          'preStatus=${call.state.value.status.runtimeType}');
       final res = await call.leave();
       debugPrint('[STREAM-CALL]   leave() → success=${res.isSuccess}');
     }
@@ -790,11 +917,13 @@ class StreamCallService implements ICallBackend {
     await _callStateSub?.cancel();
     await _coreRingingSub?.cancel();
     await _connectionSub?.cancel();
+    await _callEventsSub?.cancel();
     _activeCallSub = null;
     _incomingCallSub = null;
     _callStateSub = null;
     _coreRingingSub = null;
     _connectionSub = null;
+    _callEventsSub = null;
     try {
       await _client?.disconnect();
     } catch (_) {}

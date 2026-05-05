@@ -108,9 +108,19 @@ dependencies:
 # native `org.webrtc.*` classes — eliminating the dex-merge collision that
 # otherwise prevents the Android build. Comment this block out (and remove the
 # stream_video_* deps above) to fall back to the real WebRTC backend.
+#
+# `stream_video` is vendored under `vendor/stream_video/` so we can patch a
+# specific race in `_handleCoordinatorCallAccepted` / `_handleCoordinatorCallRejected`
+# (see vendor/stream_video/lib/src/call/call.dart, search for "AMIGO-PATCH").
+# The race causes the SDK to self-reject calls the user just accepted because
+# the WS broadcast of our accept arrives before `lifecycleCallAccepted()` can
+# update local state. Without this patch: B taps Accept → A sees "Call
+# declined" → B opens to a ghost call.
 dependency_overrides:
   flutter_webrtc:
     path: flutter_webrtc_stub
+  stream_video:
+    path: vendor/stream_video
 
 dev_dependencies:
   flutter_test:

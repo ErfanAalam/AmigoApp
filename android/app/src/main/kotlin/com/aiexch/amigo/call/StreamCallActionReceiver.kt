@@ -23,22 +23,27 @@ class StreamCallActionReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        Log.i(TAG, "onReceive ${intent.action}")
+        val callId = intent.getStringExtra("callId")
+        Log.i(TAG, "🔘 onReceive action=${intent.action}  callId=$callId")
 
-        if (intent.action != StreamOngoingCallNotifier.ACTION_HANGUP) return
+        if (intent.action != StreamOngoingCallNotifier.ACTION_HANGUP) {
+            Log.w(TAG, "ignoring non-HANGUP action: ${intent.action}")
+            return
+        }
 
         // Lookup the running Flutter engine. If the app is killed there's no
         // engine to talk to — the broadcast is best-effort.
         val engine: FlutterEngine = FlutterEngineCache.getInstance().get(ENGINE_KEY)
             ?: run {
-                Log.w(TAG, "no engine in cache — ignoring hangup")
+                Log.w(TAG, "no engine in cache — ignoring hangup (app likely killed)")
                 return
             }
 
+        Log.i(TAG, "forwarding hangup to Dart over MethodChannel")
         val channel = MethodChannel(
             engine.dartExecutor.binaryMessenger,
             StreamOngoingCallNotifier.CHANNEL_ID_DART,
         )
-        channel.invokeMethod("onHangup", mapOf("callId" to intent.getStringExtra("callId")))
+        channel.invokeMethod("onHangup", mapOf("callId" to callId))
     }
 }

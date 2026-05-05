@@ -3,6 +3,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 import 'package:stream_video_push_notification/stream_video_push_notification.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../env.dart';
 import '../../../utils/user.utils.dart';
@@ -21,15 +22,42 @@ bool isStreamVideoPush(Map<String, dynamic> data) {
   return hit;
 }
 
-/// Hand a Stream-originated FCM payload to the SDK so it can show the native
-/// incoming-call UI (CallKit on iOS, full-screen heads-up notification on
-/// Android) even when the app is killed.
+/// Hand a Stream-originated FCM payload to the push notification manager so
+/// it can show the native incoming-call UI (CallKit on iOS, full-screen
+/// heads-up notification on Android) even when the app is killed.
+///
+/// IMPORTANT — this function deliberately does NOT open a WebSocket. Earlier
+/// versions called `StreamVideo.handleRingingFlowNotifications` which goes
+/// through `getCallRingingState` (a coordinator-WS call). That worked, but
+/// the cold-path WS would race with the warm-path WS the activity opens
+/// after the user taps Accept, and the SDK could interpret the cold-path
+/// drop as "user rejected the call". By calling `showIncomingCall` directly
+/// we skip the WS entirely — the native push notification UI doesn't need
+/// it, and the warm-path takes over from cold-start via
+/// `consumeAndAcceptActiveCall`.
+///
+/// Trade-off: we don't ask the coordinator whether the call is still
+/// ringing before showing the UI. If the call was already cancelled in the
+/// short FCM-delivery window, the user might see a brief notification
+/// before the cancel-FCM clears it. That's acceptable; in exchange we
+/// eliminate a whole category of WS-race bugs.
 ///
 /// Safe to call from a top-level @pragma('vm:entry-point') function.
 Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
   debugPrint('[STREAM-FCM] ▶ handleStreamVideoBackgroundPush  msgId=${message.messageId}');
+  // Dump the full data payload so we can see exactly what Stream sent — type
+  // (`call.ring` / `call.missed` / `call.ended`), call_cid, sender, etc.
+  debugPrint('[STREAM-FCM]   data=${message.data}');
   if (Environment.streamApiKey.isEmpty) {
     debugPrint('[STREAM-FCM] ✗ STREAM_API_KEY empty — bailing');
+    return;
+  }
+
+  final data = message.data;
+  final type = data['type']?.toString();
+  final callCid = data['call_cid']?.toString();
+  if (callCid == null) {
+    debugPrint('[STREAM-FCM] ✗ missing call_cid — bailing');
     return;
   }
 
@@ -37,7 +65,7 @@ Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
     await Firebase.initializeApp();
     debugPrint('[STREAM-FCM]   Firebase initialised in handler');
 
-    // Reuse already-running client if the engine is alive (foreground/idle).
+    // ---------- Warm path: reuse the running client if one exists -------------
     StreamVideo client;
     bool warmStart = true;
     try {
@@ -45,21 +73,13 @@ Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
       debugPrint('[STREAM-FCM]   warm path: reusing StreamVideo.instance');
     } catch (_) {
       warmStart = false;
-      // Cold path: the app is killed and there is no client. Build a
-      // short-lived one JUST to call handleRingingFlowNotifications.
-      //
-      // CRITICAL: we do NOT call client.connect() and we set
-      // autoConnect:false. Opening a WebSocket here would race with the
-      // warm-path StreamCallService that the activity later spins up — two
-      // WS for the same user, the cold-path one dies, Stream's coordinator
-      // interprets that as "callee left the call" and ends it for the
-      // caller.
-      //
-      // The native push-notification manager (which `manager.showIncomingCall`
-      // delegates to) is process-level, not WS-dependent, and the
-      // `getCallRingingState` HTTP call inside handleRingingFlowNotifications
-      // uses the user JWT directly. So everything we need works without a WS.
-      debugPrint('[STREAM-FCM]   cold path: bootstrapping (no WS connect)');
+      // ---------- Cold path: build a non-connecting client ----------------------
+      // We don't need a WS for `showIncomingCall` / `showMissedCall` — both
+      // route to the native push notification SDK and don't talk to the
+      // coordinator. The token only matters because StreamVideoOptions
+      // requires a user; we still pass a real one so push-token registration
+      // continues to work after the activity boots.
+      debugPrint('[STREAM-FCM]   cold path: bootstrapping (no WS)');
       final user = await UserUtils().getUserDetails();
       if (user == null) {
         debugPrint('[STREAM-FCM] ✗ no logged-in user in cold path — abort');
@@ -76,6 +96,9 @@ Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
         return;
       }
 
+      // autoConnect:false is the load-bearing option here. Without it the
+      // SDK opens a WS during the constructor and we're back in the
+      // dual-WS race that previously broke accept-from-killed-state.
       client = StreamVideo.create(
         Environment.streamApiKey,
         user: User.regular(
@@ -85,8 +108,8 @@ Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
         ),
         userToken: token,
         options: StreamVideoOptions(
-          keepConnectionsAliveWhenInBackground: true,
           autoConnect: false,
+          keepConnectionsAliveWhenInBackground: true,
         ),
         pushNotificationManagerProvider: StreamVideoPushNotificationManager.create(
           iosPushProvider: StreamVideoPushProvider.apn(
@@ -99,33 +122,77 @@ Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
           registerApnDeviceToken: true,
         ),
       );
-
-      // Subscribe to native push action events so the cold-path client can
-      // dispose itself when the user declines from the notification, or
-      // when a follow-up FCM (call.ended / call.missed) cancels the ring.
-      // No WS needed — these events come from the native push manager.
-      final subs = client.observeCoreRingingEventsForBackground();
-      client.disposeAfterResolvingRinging(
-        disposingCallback: () {
-          debugPrint('[STREAM-FCM]   cold-path client disposed (ringing resolved)');
-          subs.cancel();
-        },
-      );
+      debugPrint('[STREAM-FCM]   cold-path client built  '
+          'pushManager=${client.pushNotificationManager == null ? "NULL" : "ok"}');
     }
 
-    debugPrint('[STREAM-FCM]   handing payload to '
-        'StreamVideo.handleRingingFlowNotifications  warm=$warmStart  '
-        'data.keys=${message.data.keys.toList()}');
-    final handled = await client.handleRingingFlowNotifications(message.data);
-    debugPrint('[STREAM-FCM]   ✓ handleRingingFlowNotifications → $handled');
+    final manager = client.pushNotificationManager;
+    if (manager == null) {
+      debugPrint('[STREAM-FCM] ✗ pushNotificationManager is NULL — bailing');
+      return;
+    }
 
-    // Don't tear the cold-path client down here. `manager.showIncomingCall`
-    // inside handleRingingFlowNotifications is fired with `unawaited(...)` —
-    // calling `disconnect()` immediately races against that pending native
-    // notification show. Let the client live until `disposeAfterResolvingRinging`
-    // fires on a terminal event (decline / cancel / accept-handed-off).
-    // Since autoConnect is false, no WS is open, so there's no dual-connection
-    // problem to worry about.
+    // Snapshot the cached active calls — useful for debugging stale-entry bugs
+    // where a previous call's leftover entry confuses consumeAndAcceptActiveCall.
+    try {
+      final pre = await manager.activeCalls();
+      debugPrint('[STREAM-FCM]   activeCalls() before show: '
+          '${pre.length}: '
+          '${pre.map((c) => "${c.callCid}(accepted=${c.isAccepted})").toList()}');
+    } catch (_) {}
+
+    // Pull display info out of the FCM payload. Stream sets these on every
+    // ringing push; the field names are stable across SDK minor versions.
+    final createdById = data['created_by_id']?.toString();
+    final createdByName = data['created_by_display_name']?.toString();
+    final callDisplayName = data['call_display_name']?.toString();
+    final hasVideo = data['video']?.toString() != 'false';
+    final callerName = (callDisplayName != null && callDisplayName.isNotEmpty)
+        ? callDisplayName
+        : createdByName;
+
+    debugPrint('[STREAM-FCM]   parsed payload: type=$type  callCid=$callCid  '
+        'createdById=$createdById  callerName="$callerName"  hasVideo=$hasVideo  '
+        'warmStart=$warmStart');
+
+    if (type == 'call.missed') {
+      debugPrint('[STREAM-FCM]   showMissedCall…');
+      await manager.showMissedCall(
+        uuid: const Uuid().v4(),
+        handle: createdById,
+        callerName: callerName,
+        callCid: callCid,
+        hasVideo: hasVideo,
+      );
+      debugPrint('[STREAM-FCM]   ✓ showMissedCall returned');
+      return;
+    }
+    if (type != 'call.ring') {
+      debugPrint('[STREAM-FCM]   non-ring type "$type" — ignoring');
+      return;
+    }
+
+    // call.ring → show incoming-call notification. NO ws connect, NO
+    // getCallRingingState pre-flight. The native UI takes over from here;
+    // when the user taps Accept the activity boots and StreamCallService's
+    // `consumeAndAcceptActiveCall` does the actual coordinator accept on
+    // the warm-path WS that will exist by then.
+    debugPrint('[STREAM-FCM]   showIncomingCall(uuid=…, callCid=$callCid)');
+    await manager.showIncomingCall(
+      uuid: const Uuid().v4(),
+      handle: createdById,
+      callerName: callerName,
+      callCid: callCid,
+      hasVideo: hasVideo,
+    );
+    debugPrint('[STREAM-FCM]   ✓ showIncomingCall returned');
+
+    try {
+      final post = await manager.activeCalls();
+      debugPrint('[STREAM-FCM]   activeCalls() after show: '
+          '${post.length}: '
+          '${post.map((c) => "${c.callCid}(accepted=${c.isAccepted})").toList()}');
+    } catch (_) {}
   } catch (e, st) {
     debugPrint('[STREAM-FCM] ✗ handleStreamVideoBackgroundPush threw: $e\n$st');
   }

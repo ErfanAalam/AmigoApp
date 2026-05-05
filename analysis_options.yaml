@@ -13,6 +13,9 @@ analyzer:
   exclude:
     - "**/*.freezed.dart"
     - "**/*.g.dart"
+    # Vendored Stream Video SDK with the AMIGO-PATCH applied. Skip linting
+    # third-party code; their style noise drowns out our own issues.
+    - "vendor/**"
 
 linter:
   # The lint rules applied to this project can be customized in the

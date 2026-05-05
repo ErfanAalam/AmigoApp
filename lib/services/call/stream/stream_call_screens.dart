@@ -219,19 +219,24 @@ class _StreamCallScreenState extends State<StreamCallScreen> {
     });
   }
 
-  /// Drive `call.join()` whenever the call has progressed past the ringing
-  /// phase but isn't joined yet. Covers all three entry paths:
-  ///   - caller (status briefly transitions through Outgoing)
-  ///   - foreground accept button (we already join() ourselves; the helper
-  ///     no-ops because `_joinedCid` is already set)
-  ///   - cold-start consume + accept (Stream's helper accepts but never
-  ///     joins, so this is the path that actually rescues the dead-mic case)
+  /// Drive `call.join()` once the call has progressed past the ringing
+  /// phase. We deliberately wait for `acceptedByCallee:true` on outgoing
+  /// calls because calling `join()` while still ringing puts the SDK into
+  /// `_awaitIfNeeded` — a 30s waiting state that, if anything cancels the
+  /// underlying cancelable, makes `_doJoin` fire `reject(timeout())`. That
+  /// reject ends the call from the caller's user account, so the callee
+  /// sees "Call declined" and the caller gets a ghost call. Joining only
+  /// after the callee has accepted bypasses that wait entirely.
   void _maybeJoinAsOutgoing(CallState s) {
     if (_outgoingJoined) return;
     final status = s.status;
-    final shouldJoin = status is CallStatusOutgoing ||
-        status is CallStatusJoining ||
-        status is CallStatusConnecting;
+    final shouldJoin =
+        // Caller path: only join after the callee has actually accepted.
+        (status is CallStatusOutgoing && status.acceptedByCallee) ||
+            // Callee path & post-accept resync: status is already past
+            // ringing, safe to (re)issue join().
+            status is CallStatusJoining ||
+            status is CallStatusConnecting;
     if (shouldJoin) {
       _outgoingJoined = true;
       debugPrint('[STREAM-CALL]   ensureJoined called from screen for '
@@ -366,8 +371,15 @@ class _GradientBackdrop extends StatelessWidget {
 
 /// Extracts a remote participant's avatar URL from call state, falling back to
 /// the call's first non-self member.
+///
+/// IMPORTANT: filter by `p.userId != state.currentUserId`. Without it, the
+/// first participant in the list wins regardless of which side they're on —
+/// once both parties have joined, that "first" entry is whichever Stream
+/// inserted first (typically the caller), so both caller and callee end up
+/// rendering the caller's PFP.
 String? _remoteAvatar(CallState state) {
   for (final p in state.callParticipants) {
+    if (p.userId == state.currentUserId) continue;
     if (p.image != null && p.image!.isNotEmpty) return p.image;
   }
   // Members are populated even before participants connect (incoming-call case).
@@ -696,7 +708,11 @@ class _IncomingActionRow extends StatelessWidget {
           color: const Color(0xFFE53935),
           label: 'Decline',
           onTap: () async {
-            await call.reject();
+            debugPrint('[STREAM-UI] 🔘 in-app DECLINE tapped  '
+                'cid=${call.callCid.value}  status=${call.state.value.status.runtimeType}');
+            final res = await call.reject();
+            debugPrint('[STREAM-UI]   reject() → success=${res.isSuccess}  '
+                'postStatus=${call.state.value.status.runtimeType}');
             if (context.mounted) Navigator.of(context).maybePop();
           },
         ),
@@ -705,7 +721,11 @@ class _IncomingActionRow extends StatelessWidget {
           color: const Color(0xFF20C26A),
           label: 'Accept',
           onTap: () async {
-            await call.accept();
+            debugPrint('[STREAM-UI] 🔘 in-app ACCEPT tapped  '
+                'cid=${call.callCid.value}  status=${call.state.value.status.runtimeType}');
+            final res = await call.accept();
+            debugPrint('[STREAM-UI]   accept() → success=${res.isSuccess}  '
+                'postStatus=${call.state.value.status.runtimeType}');
             // Use the centralised helper so `_joinedCid` is tracked and a
             // subsequent screen-side _maybeJoinAsOutgoing won't double-join.
             await StreamCallService().ensureJoined(call);
@@ -728,7 +748,10 @@ class _OutgoingActionRow extends StatelessWidget {
         color: const Color(0xFFE53935),
         label: 'Cancel',
         onTap: () async {
-          await call.leave();
+          debugPrint('[STREAM-UI] 🔘 outgoing CANCEL tapped  '
+              'cid=${call.callCid.value}  status=${call.state.value.status.runtimeType}');
+          final res = await call.leave();
+          debugPrint('[STREAM-UI]   leave() → success=${res.isSuccess}');
           if (context.mounted) Navigator.of(context).maybePop();
         },
       ),
@@ -1086,7 +1109,10 @@ class _ControlBarState extends State<_ControlBar> {
   }
 
   Future<void> _hangup() async {
-    await widget.call.leave();
+    debugPrint('[STREAM-UI] 🔘 in-call HANGUP tapped  '
+        'cid=${widget.call.callCid.value}  status=${widget.call.state.value.status.runtimeType}');
+    final res = await widget.call.leave();
+    debugPrint('[STREAM-UI]   leave() → success=${res.isSuccess}');
     if (mounted) Navigator.of(context).maybePop();
   }
 

@@ -74,10 +74,15 @@ class StreamOngoingCallNotifier {
                 val callId = call.argument<String>("callId") ?: ""
                 val callerName = call.argument<String>("callerName") ?: "Ongoing call"
                 val connectedAtMs = call.argument<Long>("connectedAtMs")
+                android.util.Log.i(
+                    "StreamOngoingNotif",
+                    "▶ show callId=$callId callerName=$callerName connectedAtMs=$connectedAtMs",
+                )
                 show(callId, callerName, connectedAtMs)
                 result.success(true)
             }
             "hide" -> {
+                android.util.Log.i("StreamOngoingNotif", "▶ hide")
                 hide()
                 result.success(true)
             }
@@ -105,6 +110,13 @@ class StreamOngoingCallNotifier {
     }
 
     private fun show(callId: String, callerName: String, connectedAtMs: Long?) {
+        // Android requires a CallStyle notification to either be a foreground
+        // service notification OR have a fullScreenIntent attached, otherwise
+        // NotificationManager rejects it with IllegalArgumentException. We
+        // can't bind to Stream's foreground service from here, so we attach a
+        // fullScreenIntent (re-using the body intent — both open MainActivity).
+        val fullScreenIntent = buildContentIntent()
+
         val builder = NotificationCompat.Builder(context, CHANNEL_ID_NATIVE)
             .setSmallIcon(android.R.drawable.sym_call_outgoing)
             .setOngoing(true)
@@ -117,7 +129,10 @@ class StreamOngoingCallNotifier {
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentTitle(callerName)
             .setContentText("Tap to return to call")
-            .setContentIntent(buildContentIntent())
+            .setContentIntent(fullScreenIntent)
+            // `false` for the second arg = don't show the heads-up banner
+            // immediately (the call is already in-progress, no need to nag).
+            .setFullScreenIntent(fullScreenIntent, false)
             // Anchor a chronometer to connectedAt so the system itself ticks
             // the elapsed counter — survives any kind of redraw.
             .also {
