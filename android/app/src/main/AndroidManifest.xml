@@ -99,6 +99,20 @@
         <category android:name="android.intent.category.DEFAULT" />
         <data android:mimeType="video/*" />
       </intent-filter>
+
+      <!-- stream_video_flutter sets the ongoing-call notification's
+           contentIntent to an implicit intent with this custom action. We
+           must declare a matching <intent-filter> on MainActivity so
+           PendingIntent.getActivity resolves to us when the user taps the
+           notification body — otherwise the tap is a no-op. The plugin's
+           StreamVideoFlutterPlugin.handleIntent fires
+           `onBackgroundNotificationContentClick` over the method channel
+           once we receive this intent, which our `onNotificationClick`
+           callback uses to push the call screen. -->
+      <intent-filter>
+        <action android:name="com.aiexch.amigo.intent.action.STREAM_CALL" />
+        <category android:name="android.intent.category.DEFAULT" />
+      </intent-filter>
     </activity>
 
     <!-- Native Call Screen Activity -->
@@ -117,6 +131,11 @@
     <!-- Call Action Broadcast Receiver (notification buttons) -->
     <receiver
       android:name=".call.CallActionReceiver"
+      android:exported="false" />
+
+    <!-- Hang-up button on the Stream CallStyle ongoing notification. -->
+    <receiver
+      android:name=".call.StreamCallActionReceiver"
       android:exported="false" />
 
     <!-- Don't delete the meta-data below.

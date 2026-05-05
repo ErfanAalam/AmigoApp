@@ -93,22 +93,30 @@ class NotificationService {
 
       // Upload token to backend (fire-and-forget; only succeeds if user is logged in)
       if (_fcmToken != null) {
-        apiService.auth.updateFCMToken(_fcmToken!).then((_) {
-          debugPrint('[FCM] ✅ Token uploaded to backend');
-        }).catchError((e) {
-          debugPrint('[FCM] ❌ Token upload failed (user may not be logged in yet): $e');
-        });
+        apiService.auth
+            .updateFCMToken(_fcmToken!)
+            .then((_) {
+              debugPrint('[FCM] ✅ Token uploaded to backend');
+            })
+            .catchError((e) {
+              debugPrint(
+                '[FCM] ❌ Token upload failed (user may not be logged in yet): $e',
+              );
+            });
       }
 
       // Listen for token refresh and upload the new one
       _firebaseMessaging!.onTokenRefresh.listen((newToken) {
         debugPrint('[FCM] Token refreshed');
         _fcmToken = newToken;
-        apiService.auth.updateFCMToken(newToken).then((_) {
-          debugPrint('[FCM] ✅ Refreshed token uploaded');
-        }).catchError((e) {
-          debugPrint('[FCM] ❌ Refreshed token upload failed: $e');
-        });
+        apiService.auth
+            .updateFCMToken(newToken)
+            .then((_) {
+              debugPrint('[FCM] ✅ Refreshed token uploaded');
+            })
+            .catchError((e) {
+              debugPrint('[FCM] ❌ Refreshed token upload failed: $e');
+            });
       });
 
       // Set up message handlers
@@ -268,8 +276,8 @@ class NotificationService {
 
     // 2. Check flutter_local_notifications launch details (local notification tap from terminated)
     try {
-      final launchDetails =
-          await _localNotifications.getNotificationAppLaunchDetails();
+      final launchDetails = await _localNotifications
+          .getNotificationAppLaunchDetails();
       if (launchDetails != null &&
           launchDetails.didNotificationLaunchApp &&
           launchDetails.notificationResponse != null) {
@@ -341,7 +349,10 @@ class NotificationService {
       }
       final List<dynamic> arr = jsonDecode(wsMessagesStr as String);
       return arr
-          .map((item) => WSMessage.fromJson(Map<String, dynamic>.from(item as Map)))
+          .map(
+            (item) =>
+                WSMessage.fromJson(Map<String, dynamic>.from(item as Map)),
+          )
           .toList();
     } catch (e) {
       debugPrint('❌ Error parsing ws_messages: $e');
@@ -355,12 +366,15 @@ class NotificationService {
     final notification = message.notification;
     final notificationType = data['type'] as String?;
 
-    // Stream Video pushes own their own foreground handling — surface the
-    // incoming-call UI immediately and skip the chat parsing path.
+    // Stream Video's push-notification package already registers its own
+    // FirebaseMessaging.onMessage listener and shows the incoming-call UI
+    // when the app is in the foreground. If we ALSO call
+    // handleRingingFlowNotifications here, the user sees two notifications.
+    // Just short-circuit so the SDK owns the foreground path.
     if (isStreamVideoPush(data)) {
-      debugPrint('[STREAM-FCM] (foreground) intercepted Stream push, routing to handler');
-      await handleStreamVideoBackgroundPush(message);
-      debugPrint('[STREAM-FCM] (foreground) handler done — returning');
+      debugPrint(
+        '[STREAM-FCM] (foreground) Stream push detected — letting SDK handle it',
+      );
       return;
     }
 
@@ -407,10 +421,10 @@ class NotificationService {
             if (chatPayload != null) {
               // Clear this conversation's notifications
               clearConversationNotifications(chatPayload.convId.toString());
-              
+
               // Emit to stream so main.dart can handle navigation
               _messageNotificationController.add(chatPayload);
-              
+
               debugPrint(
                 '📨 Firebase notification tapped: conversation ${chatPayload.convId}',
               );
@@ -640,32 +654,31 @@ class NotificationService {
     final convType = convRecord?.type != null
         ? ChatType.fromString(convRecord!.type)
         : null;
-    final isGroup = convType == ChatType.group ||
-        convType == ChatType.communityGroup;
+    final isGroup =
+        convType == ChatType.group || convType == ChatType.communityGroup;
 
     // 1. Accumulate messages (persisted via SharedPreferences for cross-isolate support)
     final messages = await _accumulateMessage(convId, chatPayload);
 
     // Look up sender name from local DB
-    final senderUser = await UserInfoCache.instance.getUser(chatPayload.senderId);
+    final senderUser = await UserInfoCache.instance.getUser(
+      chatPayload.senderId,
+    );
     final senderName = senderUser?.name;
 
     // 2. Resolve conversation title
     String conversationTitle;
     if (isGroup) {
       try {
-        conversationTitle =
-            convRecord?.title ?? senderName ?? 'Group Chat';
+        conversationTitle = convRecord?.title ?? senderName ?? 'Group Chat';
       } catch (_) {
         conversationTitle = senderName ?? 'Group Chat';
       }
     } else {
       // For DMs, try to get display name from users table
       try {
-        final sender =
-            await UserRepository().getUserById(chatPayload.senderId);
-        conversationTitle =
-            sender?.displayName ?? senderName ?? 'Unknown';
+        final sender = await UserRepository().getUserById(chatPayload.senderId);
+        conversationTitle = sender?.displayName ?? senderName ?? 'Unknown';
       } catch (_) {
         conversationTitle = senderName ?? 'Unknown';
       }
@@ -707,9 +720,7 @@ class NotificationService {
       final person = Person(
         name: msgSenderName,
         key: msg.senderId.toString(),
-        icon: senderAvatar != null
-            ? ByteArrayAndroidIcon(senderAvatar)
-            : null,
+        icon: senderAvatar != null ? ByteArrayAndroidIcon(senderAvatar) : null,
       );
 
       final messageBody = msg.body != null && msg.body!.isNotEmpty
@@ -778,8 +789,7 @@ class NotificationService {
     if (existing != null) {
       try {
         final List<dynamic> decoded = jsonDecode(existing);
-        messages =
-            decoded.map((e) => ChatMessagePayload.fromJson(e)).toList();
+        messages = decoded.map((e) => ChatMessagePayload.fromJson(e)).toList();
       } catch (_) {}
     }
 
@@ -798,8 +808,7 @@ class NotificationService {
     );
 
     // Track this convId in the active notification set
-    final activeConvs =
-        prefs.getStringList('active_notification_convs') ?? [];
+    final activeConvs = prefs.getStringList('active_notification_convs') ?? [];
     if (!activeConvs.contains(convId.toString())) {
       activeConvs.add(convId.toString());
       await prefs.setStringList('active_notification_convs', activeConvs);
@@ -869,8 +878,7 @@ class NotificationService {
   /// Only shown when there are 2+ active conversations with notifications
   Future<void> _updateSummaryNotification() async {
     final prefs = await SharedPreferences.getInstance();
-    final activeConvs =
-        prefs.getStringList('active_notification_convs') ?? [];
+    final activeConvs = prefs.getStringList('active_notification_convs') ?? [];
 
     // Only show summary when there are 2+ conversations
     if (activeConvs.length < 2) {
@@ -889,8 +897,9 @@ class NotificationService {
 
       try {
         final List<dynamic> decoded = jsonDecode(existing);
-        final messages =
-            decoded.map((e) => ChatMessagePayload.fromJson(e)).toList();
+        final messages = decoded
+            .map((e) => ChatMessagePayload.fromJson(e))
+            .toList();
         totalMessages += messages.length;
 
         if (messages.isNotEmpty) {
@@ -902,11 +911,13 @@ class NotificationService {
           final cType = convRec?.type != null
               ? ChatType.fromString(convRec!.type)
               : null;
-          final isGroup = cType == ChatType.group ||
-              cType == ChatType.communityGroup;
+          final isGroup =
+              cType == ChatType.group || cType == ChatType.communityGroup;
 
           // Look up sender name from local DB
-          final latestSender = await UserInfoCache.instance.getUser(latest.senderId);
+          final latestSender = await UserInfoCache.instance.getUser(
+            latest.senderId,
+          );
           final latestSenderName = latestSender?.name;
 
           // Resolve conversation title
@@ -921,14 +932,15 @@ class NotificationService {
             convTitle = latestSenderName ?? 'Unknown';
           }
 
-          final msgBody =
-              latest.body ?? _formatMessageType(latest.msgType);
-          final preview =
-              msgBody.length > 40 ? '${msgBody.substring(0, 40)}...' : msgBody;
+          final msgBody = latest.body ?? _formatMessageType(latest.msgType);
+          final preview = msgBody.length > 40
+              ? '${msgBody.substring(0, 40)}...'
+              : msgBody;
 
           if (isGroup) {
-            inboxLines
-                .add('<b>$convTitle</b>  ${latestSenderName ?? 'Unknown'}: $preview');
+            inboxLines.add(
+              '<b>$convTitle</b>  ${latestSenderName ?? 'Unknown'}: $preview',
+            );
           } else {
             inboxLines.add('<b>$convTitle</b>  $preview');
           }
@@ -978,8 +990,7 @@ class NotificationService {
     // Remove from SharedPreferences
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('notif_messages_$conversationId');
-    final activeConvs =
-        prefs.getStringList('active_notification_convs') ?? [];
+    final activeConvs = prefs.getStringList('active_notification_convs') ?? [];
     activeConvs.remove(conversationId);
     await prefs.setStringList('active_notification_convs', activeConvs);
 

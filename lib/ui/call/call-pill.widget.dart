@@ -3,9 +3,13 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../env.dart';
 import '../../models/call.model.dart';
 import '../../providers/call.provider.dart';
 import '../../services/call/native_call_screen.service.dart';
+import '../../services/call/stream/stream_call.service.dart';
+import '../../services/call/stream/stream_call_screens.dart';
+import '../../utils/navigation-helper.util.dart';
 
 /// Floating, draggable call pill that overlays the entire app during a call.
 /// Replaces the old GlobalCallBar. Must be placed inside a Stack that covers
@@ -85,11 +89,27 @@ class _GlobalCallPillState extends ConsumerState<GlobalCallPill>
     final callState = ref.watch(callServiceProvider);
     final activeCall = callState.activeCall;
 
+    // Mirror "is the call screen on top?" so we can hide the pill while it
+    // is — the pill is only useful for getting *back* to the screen.
+    return ValueListenableBuilder<bool>(
+      valueListenable: StreamCallScreen.isMountedNotifier,
+      builder: (context, screenOnTop, _) {
+        if (screenOnTop) return const SizedBox.shrink();
+        return _buildBody(context, activeCall);
+      },
+    );
+  }
+
+  Widget _buildBody(BuildContext context, ActiveCallState? activeCall) {
     final bool isVisible =
         activeCall != null &&
         (activeCall.status == CallStatus.initiated ||
             activeCall.status == CallStatus.ringing ||
-            activeCall.status == CallStatus.answered);
+            activeCall.status == CallStatus.answered ||
+            activeCall.status == CallStatus.connecting ||
+            activeCall.status == CallStatus.ended ||
+            activeCall.status == CallStatus.declined ||
+            activeCall.status == CallStatus.missed);
 
     // Drive entrance / exit
     if (isVisible && !_wasVisible) {
@@ -336,6 +356,27 @@ class _GlobalCallPillState extends ConsumerState<GlobalCallPill>
   }
 
   void _openCallScreen(ActiveCallState call) {
+    // Stream backend: push the Flutter call route. We avoid double-pushing if
+    // the screen is already mounted (StreamCallScreen exposes a static flag).
+    if (Environment.isStreamCallBackend) {
+      if (StreamCallScreen.isMounted) return;
+      final svc = StreamCallService();
+      final streamCall = svc.streamCall;
+      final nav = NavigationHelper.navigator;
+      if (streamCall == null || nav == null) return;
+      nav.push(
+        MaterialPageRoute(
+          builder: (_) => StreamCallScreen(
+            call: streamCall,
+            callerHint: svc.callerHint,
+          ),
+          fullscreenDialog: true,
+        ),
+      );
+      return;
+    }
+
+    // WebRTC backend: bring the native CallActivity back to foreground.
     NativeCallScreen.showCallScreen(
       callId: call.callId,
       callerName: call.userName,

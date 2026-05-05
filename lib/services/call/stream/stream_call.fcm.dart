@@ -7,6 +7,7 @@ import 'package:stream_video_push_notification/stream_video_push_notification.da
 import '../../../env.dart';
 import '../../../utils/user.utils.dart';
 import '../../cookies.service.dart';
+import 'stream_call_push_config.dart';
 import 'stream_call_token_loader.dart';
 
 /// Returns true if the FCM payload originated from Stream Video (vs our own
@@ -45,8 +46,20 @@ Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
     } catch (_) {
       warmStart = false;
       // Cold path: the app is killed and there is no client. Build a
-      // short-lived one just to handle this notification.
-      debugPrint('[STREAM-FCM]   cold path: no live client — bootstrapping');
+      // short-lived one JUST to call handleRingingFlowNotifications.
+      //
+      // CRITICAL: we do NOT call client.connect() and we set
+      // autoConnect:false. Opening a WebSocket here would race with the
+      // warm-path StreamCallService that the activity later spins up — two
+      // WS for the same user, the cold-path one dies, Stream's coordinator
+      // interprets that as "callee left the call" and ends it for the
+      // caller.
+      //
+      // The native push-notification manager (which `manager.showIncomingCall`
+      // delegates to) is process-level, not WS-dependent, and the
+      // `getCallRingingState` HTTP call inside handleRingingFlowNotifications
+      // uses the user JWT directly. So everything we need works without a WS.
+      debugPrint('[STREAM-FCM]   cold path: bootstrapping (no WS connect)');
       final user = await UserUtils().getUserDetails();
       if (user == null) {
         debugPrint('[STREAM-FCM] ✗ no logged-in user in cold path — abort');
@@ -73,6 +86,7 @@ Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
         userToken: token,
         options: StreamVideoOptions(
           keepConnectionsAliveWhenInBackground: true,
+          autoConnect: false,
         ),
         pushNotificationManagerProvider: StreamVideoPushNotificationManager.create(
           iosPushProvider: StreamVideoPushProvider.apn(
@@ -81,21 +95,20 @@ Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
           androidPushProvider: StreamVideoPushProvider.firebase(
             name: Environment.streamFcmProviderName,
           ),
+          pushConfiguration: amigoStreamPushConfiguration,
           registerApnDeviceToken: true,
         ),
       );
-      debugPrint('[STREAM-FCM]   cold-path client constructed → connecting…');
-      // ignore: unawaited_futures
-      client.connect().then((_) {
-        debugPrint('[STREAM-FCM]   cold-path client.connect() done');
-      });
 
-      // Tear the temporary client down once the ringing flow resolves.
-      final sub = client.observeCallDeclinedRingingEvent();
+      // Subscribe to native push action events so the cold-path client can
+      // dispose itself when the user declines from the notification, or
+      // when a follow-up FCM (call.ended / call.missed) cancels the ring.
+      // No WS needed — these events come from the native push manager.
+      final subs = client.observeCoreRingingEventsForBackground();
       client.disposeAfterResolvingRinging(
         disposingCallback: () {
           debugPrint('[STREAM-FCM]   cold-path client disposed (ringing resolved)');
-          sub?.cancel();
+          subs.cancel();
         },
       );
     }
@@ -105,6 +118,14 @@ Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
         'data.keys=${message.data.keys.toList()}');
     final handled = await client.handleRingingFlowNotifications(message.data);
     debugPrint('[STREAM-FCM]   ✓ handleRingingFlowNotifications → $handled');
+
+    // Don't tear the cold-path client down here. `manager.showIncomingCall`
+    // inside handleRingingFlowNotifications is fired with `unawaited(...)` —
+    // calling `disconnect()` immediately races against that pending native
+    // notification show. Let the client live until `disposeAfterResolvingRinging`
+    // fires on a terminal event (decline / cancel / accept-handed-off).
+    // Since autoConnect is false, no WS is open, so there's no dual-connection
+    // problem to worry about.
   } catch (e, st) {
     debugPrint('[STREAM-FCM] ✗ handleStreamVideoBackgroundPush threw: $e\n$st');
   }
