@@ -21,6 +21,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 
+import '../call/stream/stream_call.service.dart';
 import '../socket/transport.manager.dart';
 import '../user-status.service.dart';
 
@@ -233,6 +234,16 @@ class AuthService {
       // 7. Clear notification data
       final notificationService = NotificationService();
       await notificationService.clearNotificationData();
+
+      // 7b. Tear down the Stream Video client so the next login rebinds it
+      // to the new user identity. Without this the singleton retains the
+      // previous user's `User.regular(...)` and outgoing calls placed under
+      // the new login show the old user's name/avatar to the callee.
+      try {
+        await StreamCallService().dispose();
+      } catch (e) {
+        debugPrint('⚠️ StreamCallService.dispose failed: $e');
+      }
 
       // 8. Clear user status data
       final userStatusService = UserStatusService();

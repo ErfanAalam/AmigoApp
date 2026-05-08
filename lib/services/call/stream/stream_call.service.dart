@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' show Helper;
 import 'package:stream_video_flutter/stream_video_flutter.dart';
+import 'package:stream_video_flutter/stream_video_flutter_background.dart' show StreamVideoFlutterBackground;
 import 'package:stream_video_push_notification/stream_video_push_notification.dart';
 import 'package:uuid/uuid.dart';
 
@@ -15,7 +17,9 @@ import '../../../utils/navigation-helper.util.dart';
 import '../../../utils/user.utils.dart';
 import '../../cookies.service.dart';
 import '../i_call_backend.dart';
+import 'stream_call_logger.dart';
 import 'stream_call_push_config.dart';
+import 'stream_call_ringtones.dart';
 import 'stream_call_screens.dart';
 import 'stream_call_token_loader.dart';
 import 'stream_callstyle_notifier.dart';
@@ -69,6 +73,11 @@ class StreamCallService implements ICallBackend {
 
   /// Tracks the cid we've issued `join()` for — guards against double-join.
   String? _joinedCid;
+  /// Last name passed to the CallStyle notification. Lets us avoid spamming
+  /// the native channel with a refresh on every state change unless the
+  /// resolved name actually changed (e.g. SFU finally pushed participant
+  /// metadata, replacing 'Unknown' with the real name).
+  String? _lastShownNotifName;
   StreamSubscription<CallState>? _callStateSub;
   StreamSubscription<Call?>? _activeCallSub;
   StreamSubscription<Call?>? _incomingCallSub;
@@ -109,23 +118,34 @@ class StreamCallService implements ICallBackend {
   @override
   Future<void> initialize() async {
     debugPrint('[STREAM-CALL] ▶ initialize() called  (already=$_isInitialized)');
-    if (_isInitialized) {
-      debugPrint('[STREAM-CALL]   ↳ already initialised, skipping');
-      return;
-    }
-
-    debugPrint('[STREAM-CALL]   STREAM_API_KEY length=${Environment.streamApiKey.length}, '
-        'callBackend=${Environment.callBackend}');
     if (Environment.streamApiKey.isEmpty) {
       debugPrint('[STREAM-CALL] ✗ STREAM_API_KEY is empty — Stream backend disabled.');
       return;
     }
 
-    _currentUser = await UserUtils().getUserDetails();
-    if (_currentUser == null) {
+    // Look up the logged-in user FIRST so we can compare against any prior
+    // session. The Riverpod call provider re-runs `initialize()` every time
+    // the user logs back in (after `auth.service.dart:logout()` calls our
+    // dispose) — but in case dispose wasn't called for some reason, we
+    // still tear down a stale client when the user-id has changed.
+    final freshUser = await UserUtils().getUserDetails();
+    if (freshUser == null) {
       debugPrint('[STREAM-CALL] ✗ No logged-in user; deferring init until login.');
       return;
     }
+
+    if (_isInitialized) {
+      if (_currentUser?.id == freshUser.id) {
+        debugPrint('[STREAM-CALL]   ↳ already initialised for ${freshUser.id}, skipping');
+        return;
+      }
+      debugPrint('[STREAM-CALL]   user changed (was=${_currentUser?.id}, '
+          'now=${freshUser.id}) — disposing stale client before re-init');
+      await dispose();
+    }
+    _currentUser = freshUser;
+    debugPrint('[STREAM-CALL]   STREAM_API_KEY length=${Environment.streamApiKey.length}, '
+        'callBackend=${Environment.callBackend}');
     debugPrint('[STREAM-CALL]   currentUser.id=${_currentUser!.id} name=${_currentUser!.name}');
 
     try {
@@ -169,18 +189,41 @@ class StreamCallService implements ICallBackend {
       _bindStateSubscriptions();
       debugPrint('[STREAM-CALL]   subscriptions wired');
 
-      // Wire Stream's official foreground-service-backed call notification.
-      // This replaces our flutter_local_notifications path: the notification
-      // it produces is owned by `StreamCallService` (a real Android
-      // foreground service) and therefore truly non-dismissable, with the
-      // mic kept alive while the call is active.
-      _initBackgroundService(_client!);
+      // Wire ONLY the app-swipe-from-recents handler — we deliberately skip
+      // `StreamBackgroundService.init()` because it spawns a second
+      // foreground-service notification on top of our CallStyle one (the
+      // user reported two stickies in release: "Unknown / Hang up" + "Amigo
+      // / vvvkkk vvvkkk / Cancel"). The CallStyle notification posted by
+      // [StreamCallStyleNotifier] is the only one we want.
+      //
+      // `setOnPlatformUiLayerDestroyed` fires from the SDK plugin's
+      // `onDetachedFromActivity` lifecycle callback (not from the
+      // foreground service itself), so it works fine without
+      // StreamBackgroundService. We use it to end the call when the user
+      // swipes the app away from recents.
+      _wireAppSwipeHandler();
+
+      // Belt-and-braces: drop any stale CallStyle notification leftover
+      // from a previous run (process killed mid-call, etc.). hide() is
+      // idempotent.
+      // ignore: unawaited_futures
+      StreamCallStyleNotifier.instance.hide();
 
       // Establish the WS connection eagerly so incoming-call events arrive
-      // without waiting for the first user action.
+      // without waiting for the first user action. After `connect` resolves,
+      // explicitly register the device's FCM token with the Stream
+      // coordinator — the SDK's auto-register path (in
+      // stream_video_push_notification's `registerDevice()`) only listens
+      // for `onTokenRefresh`, which doesn't fire on cold-start when the
+      // token is already cached, so without this manual call we'd miss
+      // the very first run after install (the "must open app twice"
+      // symptom users reported).
       debugPrint('[STREAM-CALL]   issuing client.connect()…');
-      _client!.connect().then((res) {
+      _client!.connect().then((res) async {
         debugPrint('[STREAM-CALL]   ✓ client.connect() completed → $res');
+        if (res.isSuccess) {
+          await _registerFcmTokenWithStream();
+        }
       }).catchError((e, st) {
         debugPrint('[STREAM-CALL] ✗ client.connect() failed: $e\n$st');
       });
@@ -257,60 +300,60 @@ class StreamCallService implements ICallBackend {
     }
   }
 
-  /// Wire Stream's foreground-service-backed call notification. The service
-  /// is auto-started when `streamVideo.activeCalls` becomes non-empty and
-  /// stopped on the last call ending — we just supply the content + click
-  /// handlers.
-  void _initBackgroundService(StreamVideo client) {
-    StreamBackgroundService.init(
-      client,
-      callNotificationOptionsBuilder: (Call call) {
-        final hint = _callerHint ?? _hintFromCall(call);
-        String name = hint?.userName ?? '';
-        if (name.isEmpty) {
-          for (final m in call.state.value.callMembers) {
-            if (m.userId != call.state.value.currentUserId &&
-                (m.name?.isNotEmpty ?? false)) {
-              name = m.name!;
-              break;
-            }
-          }
-        }
-        if (name.isEmpty) name = 'Ongoing call';
+  /// Explicitly register the FCM token with Stream's coordinator. Stream's
+  /// `pushNotificationManager.registerDevice()` only listens for
+  /// `onTokenRefresh` on Android — which doesn't fire on a cold start when
+  /// FirebaseMessaging already has a cached token. Without this manual call,
+  /// the device isn't known to Stream until the OS rotates the token (or the
+  /// app is opened a second time and `onTokenRefresh` finally fires), which
+  /// is exactly the "first launch doesn't get pushes" bug.
+  Future<void> _registerFcmTokenWithStream() async {
+    final client = _client;
+    if (client == null) return;
+    try {
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token == null || token.isEmpty) {
+        debugPrint('[STREAM-CALL]   ✗ FCM token unavailable — skip Stream device register');
+        return;
+      }
+      debugPrint('[STREAM-CALL]   registering FCM token with Stream  '
+          'tokenLen=${token.length}  provider=${Environment.streamFcmProviderName}');
+      final res = await client.addDevice(
+        pushToken: token,
+        pushProvider: PushProvider.firebase,
+        pushProviderName: Environment.streamFcmProviderName,
+        voipToken: false,
+      );
+      debugPrint('[STREAM-CALL]   addDevice → success=${res.isSuccess}');
+    } catch (e, st) {
+      debugPrint('[STREAM-CALL]   ✗ _registerFcmTokenWithStream threw: $e\n$st');
+    }
+  }
 
-        final avatarUrl = hint?.userProfilePic;
-        return NotificationOptions(
-          content: NotificationContent(
-            title: name,
-            text: 'Tap to return to call',
-          ),
-          avatar: (avatarUrl != null && avatarUrl.isNotEmpty)
-              ? NotificationAvatar(url: avatarUrl)
-              : null,
-        );
-      },
-      onNotificationClick: (Call call) async {
-        final nav = NavigationHelper.navigator;
-        if (nav == null) return;
-        if (StreamCallScreen.isMounted) return;
-        nav.push(
-          MaterialPageRoute(
-            builder: (_) =>
-                StreamCallScreen(call: call, callerHint: _callerHint),
-            fullscreenDialog: true,
-          ),
-        );
-      },
-      onButtonClick: (Call call, ButtonType type, ServiceType service) async {
-        if (type == ButtonType.cancel && service == ServiceType.call) {
-          await call.leave();
+  /// Hooks the SDK's plugin-level "platform UI layer destroyed" callback so
+  /// we can detect the user swiping the app away from recents and tear the
+  /// in-flight call down. The callback fires from the Stream Flutter plugin's
+  /// `onDetachedFromActivity` lifecycle event, independent of whether
+  /// `StreamBackgroundService` (the foreground-service notification source
+  /// we deliberately skipped) is running.
+  ///
+  /// The platform forwards an empty `callCid` here, so we resolve the active
+  /// call ourselves from `client.state.activeCall`.
+  void _wireAppSwipeHandler() {
+    StreamVideoFlutterBackground.setOnPlatformUiLayerDestroyed(
+      (String _) async {
+        // Always stop any in-flight ringtone before the activity tears
+        // down — the channel may be dead by the time _onCallStateChanged
+        // fires its terminal stop, leaving native MediaPlayer/ToneGenerator
+        // resources orphaned. AmigoRingtoneManager.onDestroy provides the
+        // final fallback if even this drops.
+        // ignore: unawaited_futures
+        StreamCallRingtones.instance.stopAll();
+        final call = _streamCall ?? _client?.state.activeCall.valueOrNull;
+        if (call == null) {
+          debugPrint('[STREAM-CALL] onPlatformUiLayerDestroyed — no active call, nothing to tear down');
+          return;
         }
-      },
-      onPlatformUiLayerDestroyed: (Call call) async {
-        // The Activity has been destroyed — typically because the user swiped
-        // the app away from the recents list. End the call now so the other
-        // side immediately gets a "call ended" signal instead of waiting for
-        // Stream's WS timeout (~30s).
         debugPrint('[STREAM-CALL] onPlatformUiLayerDestroyed — '
             'app removed from recents, ending call ${call.callCid.value}');
         try {
@@ -335,6 +378,11 @@ class StreamCallService implements ICallBackend {
         try {
           await _client?.disconnect();
         } catch (_) {}
+        // Drop the CallStyle notification deterministically — without
+        // StreamBackgroundService managing the call lifecycle, we own
+        // dismissal end-to-end.
+        // ignore: unawaited_futures
+        StreamCallStyleNotifier.instance.hide();
       },
     );
   }
@@ -362,10 +410,20 @@ class StreamCallService implements ICallBackend {
           '(${status.runtimeType}) — flag synced');
       return;
     }
+    // Pick the right connect-options based on whether the call was placed
+    // as a video call. We read `amigo_video_call` from the call's custom
+    // data — stamped by the caller's `initiateCall` (see above). We do
+    // NOT use `state.settings.video.enabled` because that's a per-call-TYPE
+    // setting (always true for the default call type) and ignores the
+    // per-call `video` flag.
+    final customVideo = call.state.value.custom['amigo_video_call'];
+    final isVideoCall = customVideo == true;
+    final connectOpts = isVideoCall ? videoConnect : audioOnlyConnect;
     debugPrint('[STREAM-CALL]   ensureJoined: joining $cid (status=$status)  '
+        'video=$isVideoCall  customVideo=$customVideo  '
         'connection=${_client?.state.connection.value}');
     _joinedCid = cid;
-    final res = await call.join(connectOptions: audioOnlyConnect);
+    final res = await call.join(connectOptions: connectOpts);
     res.fold(
       success: (_) => debugPrint('[STREAM-CALL]   ensureJoined: join SUCCESS'),
       failure: (f) => debugPrint('[STREAM-CALL]   ensureJoined: join FAILED — '
@@ -434,6 +492,16 @@ class StreamCallService implements ICallBackend {
       _streamCall = call;
       _callerHint ??= _hintFromCall(call);
       _attachCallEventLogging(call);
+      // Subscribe to the call's state stream directly — Stream only flips
+      // `state.activeCall` after we accept+join, so without this hook
+      // _onCallStateChanged never fires during the ring phase (no
+      // "answered"/"missed"/"declined" terminal handling, no auto-stop
+      // ringtone via the state-stream driver).
+      _callStateSub?.cancel();
+      _callStateSub = call.state.listen(_onCallStateChanged);
+      // Play the system ringtone right now; don't wait for a state event.
+      // ignore: unawaited_futures
+      StreamCallRingtones.instance.playIncoming();
       _maybePushCallScreen(call);
     });
 
@@ -483,6 +551,21 @@ class StreamCallService implements ICallBackend {
     final me = _currentUser?.id ?? '<unknown>';
     debugPrint('[STREAM-EVENTS] ▶ attaching events listener  cid=$cidShort  me=$me');
     _callEventsSub = call.callEvents.listen((event) {
+      // Coordinator events are the most reliable signal that the ring
+      // phase is over — Accepted/Rejected/Ended all mean "stop the
+      // ringtone, now". We can't rely on the call.state stream alone
+      // because for the caller, the state stream lags behind the
+      // coordinator event by 200-1000ms (the SDK has to round-trip a
+      // join() before flipping state.status), and the user reads that
+      // gap as "the ringback kept going after the call connected".
+      if (event is StreamCallAcceptedEvent ||
+          event is StreamCallRejectedEvent ||
+          event is StreamCallEndedEvent ||
+          event is StreamCallSessionEndedEvent ||
+          event is StreamCallMissedEvent) {
+        // ignore: unawaited_futures
+        StreamCallRingtones.instance.stopAll();
+      }
       // Decode the most diagnostic fields per event type so we don't have to
       // rely on toString() which the SDK doesn't always implement nicely.
       String summary;
@@ -525,6 +608,21 @@ class StreamCallService implements ICallBackend {
         'createdByMe=${state.createdByMe} '
         'participants=${state.callParticipants.map((p) => p.userId).toList()}');
 
+    // Drive ringtone playback off the SDK's status. Idempotent: each helper
+    // no-ops if already in the right mode and stops the *other* tone first.
+    final streamStatus = state.status;
+    if (streamStatus is CallStatusIncoming && !streamStatus.acceptedByMe) {
+      // ignore: unawaited_futures
+      StreamCallRingtones.instance.playIncoming();
+    } else if (streamStatus is CallStatusOutgoing &&
+        !streamStatus.acceptedByCallee) {
+      // ignore: unawaited_futures
+      StreamCallRingtones.instance.playOutgoing();
+    } else {
+      // ignore: unawaited_futures
+      StreamCallRingtones.instance.stopAll();
+    }
+
     // Refine `ended` into `declined`/`missed` when possible, based on the
     // disconnect reason and prior status. The pill renders different copy
     // for each.
@@ -549,11 +647,53 @@ class StreamCallService implements ICallBackend {
       }
     }
 
+    // Best-name resolution chain: live SFU participant > existing mirror
+    // entry (already enriched) > caller hint (stuffed in by initiateCall /
+    // _hintFromCall) > member metadata > 'Unknown'. We avoid landing on
+    // 'Unknown' aggressively because the CallStyle notification is built
+    // off this and the user complained it stuck on "Unknown".
+    String pickName() {
+      if (remote != null && remote.name.isNotEmpty) return remote.name;
+      final mirrored = _activeCall?.userName;
+      if (mirrored != null && mirrored.isNotEmpty && mirrored != 'Unknown') {
+        return mirrored;
+      }
+      final hintName = _callerHint?.userName;
+      if (hintName != null && hintName.isNotEmpty) return hintName;
+      for (final m in state.callMembers) {
+        if (m.userId != state.currentUserId && m.name.isNotEmpty) {
+          return m.name;
+        }
+      }
+      return remote?.userId ?? 'Unknown';
+    }
+
+    String? pickAvatar() {
+      final remoteImage = remote?.image;
+      if (remoteImage != null && remoteImage.isNotEmpty) return remoteImage;
+      final mirrored = _activeCall?.userProfilePic;
+      if (mirrored != null && mirrored.isNotEmpty) return mirrored;
+      final hintImage = _callerHint?.userProfilePic;
+      if (hintImage != null && hintImage.isNotEmpty) return hintImage;
+      for (final m in state.callMembers) {
+        final image = m.image;
+        if (m.userId != state.currentUserId &&
+            image != null &&
+            image.isNotEmpty) {
+          return image;
+        }
+      }
+      return null;
+    }
+
+    final resolvedName = pickName();
+    final resolvedAvatar = pickAvatar();
+
     final mirror = (_activeCall ?? app_call.ActiveCallState(
       callId: state.callCid.value,
-      userId: remote?.userId ?? '',
-      userName: remote?.name ?? remote?.userId ?? 'Unknown',
-      userProfilePic: remote?.image,
+      userId: remote?.userId ?? _callerHint?.userId ?? '',
+      userName: resolvedName,
+      userProfilePic: resolvedAvatar,
       callType: state.createdByMe
           ? app_call.CallType.outgoing
           : app_call.CallType.incoming,
@@ -561,13 +701,43 @@ class StreamCallService implements ICallBackend {
       startTime: DateTime.now(),
     )).copyWith(
       status: refined,
-      // Backfill remote identity once a participant joins.
-      userId: remote?.userId ?? _activeCall?.userId ?? '',
-      userName: remote?.name ?? _activeCall?.userName ?? 'Unknown',
-      userProfilePic: remote?.image ?? _activeCall?.userProfilePic,
+      userId: remote?.userId ?? _activeCall?.userId ?? _callerHint?.userId ?? '',
+      userName: resolvedName,
+      userProfilePic: resolvedAvatar,
     );
 
     _activeCall = mirror;
+
+    // Local call-history bookkeeping. We have everything we need from the
+    // SDK's call.state stream — caller, callee, status — so we persist
+    // straight into our SQLite `calls` table instead of relying on the
+    // backend webhook. Methods are idempotent: replays of the same status
+    // are no-ops.
+    final cid = state.callCid.value;
+    final callerIdResolved = state.createdByUserId;
+    String? calleeIdResolved;
+    for (final m in state.callMembers) {
+      if (m.userId.isNotEmpty && m.userId != callerIdResolved) {
+        calleeIdResolved = m.userId;
+        break;
+      }
+    }
+    if (callerIdResolved.isNotEmpty &&
+        calleeIdResolved != null &&
+        calleeIdResolved.isNotEmpty) {
+      final isOutgoing = callerIdResolved == _currentUser?.id;
+      // ignore: unawaited_futures
+      StreamCallLogger.instance.recordStart(
+        cid: cid,
+        callerId: callerIdResolved,
+        calleeId: calleeIdResolved,
+        isOutgoing: isOutgoing,
+      );
+      if (refined == app_call.CallStatus.answered) {
+        // ignore: unawaited_futures
+        StreamCallLogger.instance.recordAnswered(cid);
+      }
+    }
 
     // Pin the canonical "call started" timestamp the first time we see the
     // call connected. The call screen reads from this so its on-screen
@@ -575,13 +745,25 @@ class StreamCallService implements ICallBackend {
     if (refined == app_call.CallStatus.answered) {
       final firstConnect = _callConnectedAt == null;
       _callConnectedAt ??= DateTime.now();
-      // Show the truly non-dismissable CallStyle notification on top of
-      // Stream's foreground-service notification.
-      if (firstConnect) {
+      // Post / refresh the CallStyle notification with the current best
+      // name. We re-fire on every state-change while answered so when the
+      // SFU finally surfaces participant.name (which lags behind the
+      // initial Connected status by 1-2 events) the notification picks
+      // up the real name instead of being stuck on the placeholder
+      // 'Unknown'. The native side caches by NOTIFICATION_ID so this is
+      // a cheap update — no flash, no reordering.
+      final notifName = mirror.userName.isNotEmpty &&
+              mirror.userName != 'Unknown'
+          ? mirror.userName
+          : (_callerHint?.userName ?? 'On call');
+      if (firstConnect || notifName != _lastShownNotifName) {
+        _lastShownNotifName = notifName;
+        debugPrint('[STREAM-CALL]   CallStyle show/refresh  name="$notifName"  '
+            'firstConnect=$firstConnect');
         // ignore: unawaited_futures
         StreamCallStyleNotifier.instance.show(
           callId: state.callCid.value,
-          callerName: mirror.userName,
+          callerName: notifName,
           connectedAt: _callConnectedAt!,
         );
       }
@@ -595,6 +777,19 @@ class StreamCallService implements ICallBackend {
       // Keep the mirror around for 2s so the pill/screen can show "Call
       // ended" / "Call declined" gracefully, then wipe everything.
       debugPrint('[STREAM-CALL]   terminal status $refined — lingering 2s');
+
+      // Finalise the call-history row in local SQLite. Pass the disconnect
+      // reason through verbatim so the logs screen can render "declined" /
+      // "missed" / "ended" without needing a server round-trip.
+      final terminalReason = state.status is CallStatusDisconnected
+          ? (state.status as CallStatusDisconnected).reason.toString()
+          : null;
+      // ignore: unawaited_futures
+      StreamCallLogger.instance.recordTerminal(
+        cid: state.callCid.value,
+        status: refined,
+        reason: terminalReason,
+      );
 
       // Belt-and-braces: dismiss any incoming-call notification still showing
       // on this device (the SDK normally does this, but if our caller
@@ -647,10 +842,15 @@ class StreamCallService implements ICallBackend {
     _callerHint = null;
     _callConnectedAt = null;
     _joinedCid = null;
+    _lastShownNotifName = null;
     _isTerminating = false;
-    // Belt-and-braces: ensure no stale CallStyle notification survives.
+    // Belt-and-braces: ensure no stale CallStyle notification or ringtone
+    // survives. Both are idempotent — calling them when already cleared
+    // is cheap.
     // ignore: unawaited_futures
     StreamCallStyleNotifier.instance.hide();
+    // ignore: unawaited_futures
+    StreamCallRingtones.instance.stopAll();
   }
 
   void _maybePushCallScreen(Call call) {
@@ -696,9 +896,11 @@ class StreamCallService implements ICallBackend {
   Future<void> initiateCall(
     String calleeId,
     String calleeName,
-    String? calleeProfilePic,
-  ) async {
-    debugPrint('[STREAM-CALL] ▶ initiateCall(calleeId=$calleeId, name=$calleeName)');
+    String? calleeProfilePic, {
+    bool video = false,
+  }) async {
+    debugPrint('[STREAM-CALL] ▶ initiateCall(calleeId=$calleeId, '
+        'name=$calleeName, video=$video)');
 
     if (!_isInitialized) {
       debugPrint('[STREAM-CALL]   not initialised yet — calling initialize() first');
@@ -761,12 +963,19 @@ class StreamCallService implements ICallBackend {
     // after getOrCreate. The SDK's `_clear()` then cancels the in-flight
     // `call.join()` with "connect cancelled" and the call dies before the
     // callee even sees the ring.
+    // Stamp `amigo_video_call` into the call's custom data. Stream's
+    // `settings.video.enabled` is a per-call-TYPE setting (always true for
+    // the default call type) — it does NOT reflect the per-call `video`
+    // flag, so we cannot use it to distinguish voice vs video calls on the
+    // callee side. Custom data round-trips through the coordinator so both
+    // ends can read the same flag.
     debugPrint('[STREAM-CALL]   getOrCreate(members=[$calleeId], '
-        'ringing=true, video=false) …');
+        'ringing=true, video=$video, custom={amigo_video_call: $video}) …');
     final result = await call.getOrCreate(
       memberIds: [calleeId],
       ringing: true,
-      video: false, // audio-only for now
+      video: video,
+      custom: {'amigo_video_call': video},
     );
 
     result.fold(
@@ -792,6 +1001,16 @@ class StreamCallService implements ICallBackend {
           debugPrint('[STREAM-CALL]   could not introspect call state: $e');
         }
         _streamCall = call;
+        // Drive the outgoing ringback ourselves — `state.activeCall` does
+        // not fire until the caller calls `join()`, so we cannot rely on
+        // _onCallStateChanged firing during the ring phase. Same reason
+        // we attach a state listener directly here: the existing
+        // _activeCallSub-based wiring won't kick in until accept+join.
+        _attachCallEventLogging(call);
+        _callStateSub?.cancel();
+        _callStateSub = call.state.listen(_onCallStateChanged);
+        // ignore: unawaited_futures
+        StreamCallRingtones.instance.playOutgoing();
         _maybePushCallScreen(call);
       },
       failure: (failure) {
@@ -822,6 +1041,13 @@ class StreamCallService implements ICallBackend {
         'me=${_currentUser?.id}');
     _attachCallEventLogging(call);
 
+    // Cut the ringtone immediately on the user's intent to accept — don't
+    // wait for the SDK's status transition to fire. The transition can
+    // lag 100-300ms behind the tap and the user reads that gap as "the
+    // ringtone kept playing after I picked up".
+    // ignore: unawaited_futures
+    StreamCallRingtones.instance.stopAll();
+
     final accept = await call.accept();
     final dt = DateTime.now().difference(t0).inMilliseconds;
     accept.fold(
@@ -848,6 +1074,10 @@ class StreamCallService implements ICallBackend {
   Future<void> declineCall({String? reason, String? callId}) async {
     debugPrint('[STREAM-CALL] ▶ declineCall(reason=$reason, callId=$callId)  '
         'me=${_currentUser?.id}');
+    // Stop the ringtone on user intent — same reason as acceptCall: the
+    // SDK's status transition can lag the tap.
+    // ignore: unawaited_futures
+    StreamCallRingtones.instance.stopAll();
     final call = _streamCall ?? _client?.state.activeCall.valueOrNull;
     if (call == null) {
       debugPrint('[STREAM-CALL]   no active call to decline');
@@ -867,6 +1097,10 @@ class StreamCallService implements ICallBackend {
         'me=${_currentUser?.id}');
     if (_isTerminating) return;
     _isTerminating = true;
+    // Belt-and-braces ringtone stop. endCall covers the caller-cancels-
+    // before-pickup path where the outgoing ringback is still pulsing.
+    // ignore: unawaited_futures
+    StreamCallRingtones.instance.stopAll();
     final call = _streamCall ?? _client?.state.activeCall.valueOrNull;
     if (call != null) {
       debugPrint('[STREAM-CALL]   leave() on cid=${call.callCid.value}  '
@@ -910,8 +1144,12 @@ class StreamCallService implements ICallBackend {
     // path. The active call surfaces via `state.activeCall` once the SDK boots.
   }
 
-  /// Tear down for sign-out.
+  /// Tear down for sign-out. Must be called from the auth logout flow so the
+  /// next login can re-bind the StreamVideo client to the new user identity
+  /// — otherwise the previous user's name/PFP keeps appearing on outgoing
+  /// calls placed under the new login.
   Future<void> dispose() async {
+    debugPrint('[STREAM-CALL] ▶ dispose()  user=${_currentUser?.id}');
     await _activeCallSub?.cancel();
     await _incomingCallSub?.cancel();
     await _callStateSub?.cancel();
@@ -928,7 +1166,9 @@ class StreamCallService implements ICallBackend {
       await _client?.disconnect();
     } catch (_) {}
     _client = null;
+    _currentUser = null;
     _isInitialized = false;
+    StreamCallLogger.instance.clear();
     _clearMirror();
   }
 }

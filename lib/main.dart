@@ -167,6 +167,20 @@ class _MyAppState extends material.State<MyApp>
         await _transportManager.connect(accessToken);
       }
 
+      // Push the FCM token to the chat backend now that we've confirmed the
+      // user is authenticated. NotificationService.initialize() (called from
+      // main()) attempts this earlier but it's fire-and-forget — on cold
+      // start, the auth cookies may not have been loaded yet so the upload
+      // returns 401 and is silently dropped. This re-attempt with a retry
+      // budget guarantees the chat backend has a current token before any
+      // chat/call notification can be sent. Without it the user has to
+      // open the app a second time to "wake up" notifications.
+      try {
+        await _authService.sendFCMTokenToBackend(3);
+      } catch (e) {
+        debugPrint('⚠️ FCM token upload after auth failed: $e');
+      }
+
       // Initialize CallService BEFORE WebSocketMessageHandler so it is already
       // subscribed to callRingingStream when the first WS messages arrive.
       await CallService().initialize();

@@ -6,7 +6,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
 import com.aiexch.amigo.MainActivity
@@ -166,13 +168,35 @@ class StreamOngoingCallNotifier {
             )
         }
 
-        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIFICATION_ID, builder.build())
+        // Hand the notification to our foreground service so it owns the
+        // sticky AND holds FOREGROUND_SERVICE_MICROPHONE — the latter is
+        // what keeps WebRTC's mic capture alive while the user has the app
+        // backgrounded. Calling `nm.notify(...)` on its own (the previous
+        // approach) doesn't grant Android the foreground guarantee, so the
+        // mic was being paused on minimize and the call silently dying for
+        // the minimizer.
+        StreamOngoingCallService.start(context, builder.build())
     }
 
     private fun hide() {
-        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.cancel(NOTIFICATION_ID)
+        StreamOngoingCallService.stop(context)
+
+        // Reset the audio mode now that the call is over. Without this, the
+        // BroadcasterAudioPolicy's MODE_IN_COMMUNICATION can persist and
+        // route the *next* incoming-call ringtone through the earpiece at
+        // in-call volume. We do the same on app cold-start (MainActivity)
+        // and on FCM message receipt (AmigoMessagingService); doing it here
+        // closes the loop end-of-call.
+        try {
+            val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (am.mode != AudioManager.MODE_NORMAL) {
+                Log.i("StreamOngoingNotif",
+                    "Resetting audio mode (was ${am.mode}) → MODE_NORMAL after call end")
+                am.mode = AudioManager.MODE_NORMAL
+            }
+        } catch (e: Exception) {
+            Log.w("StreamOngoingNotif", "Audio mode reset on hide failed: ${e.message}")
+        }
     }
 
     /** Tap-on-body pending intent → opens MainActivity with our action. */

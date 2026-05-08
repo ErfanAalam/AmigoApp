@@ -1,7 +1,9 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../env.dart';
+import '../../../utils/user.utils.dart';
 import '../../cookies.service.dart';
 
 /// Fetches a fresh Stream Video user token from our backend.
@@ -34,6 +36,32 @@ Future<String?> loadStreamToken() async {
     final token = (response.data?['data']?['token']) as String?;
     final apiKey = (response.data?['data']?['api_key']) as String?;
     debugPrint('[STREAM-TOKEN]   api_key=$apiKey  token.len=${token?.length}');
+
+    // Stash credentials in SharedPreferences so the Kotlin side can perform
+    // a cold-state reject (when the user taps the Decline button on the
+    // killed-app incoming-call notification, no Flutter isolate is alive
+    // to call `call.reject()` and the caller never sees the rejection).
+    // The native broadcast receiver reads these to call our backend's
+    // `/call/stream/decline-cold` endpoint directly.
+    if (token != null) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        // `flutter.` prefix matches Flutter's shared_preferences package
+        // convention so Kotlin's getSharedPreferences("FlutterSharedPreferences", …)
+        // can read the same keys our Dart code wrote.
+        await prefs.setString('flutter.stream_user_token', token);
+        if (apiKey != null) {
+          await prefs.setString('flutter.stream_api_key', apiKey);
+        }
+        final user = await UserUtils().getUserDetails();
+        if (user != null) {
+          await prefs.setString('flutter.stream_user_id', user.id);
+        }
+        await prefs.setString('flutter.stream_backend_base', Environment.baseUrl);
+      } catch (e) {
+        debugPrint('[STREAM-TOKEN]   ✗ failed to cache creds for native decline: $e');
+      }
+    }
     return token;
   } on DioException catch (e) {
     debugPrint('[STREAM-TOKEN] ✗ DioException status=${e.response?.statusCode} '

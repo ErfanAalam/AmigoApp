@@ -526,24 +526,22 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
   }
 
-  /// Asks for confirmation before placing the call. Cheap insurance against
-  /// the call icon being tapped accidentally next to the message input.
+  /// Asks the user whether to place a voice or video call (or cancel)
+  /// before initiating. Cheap insurance against the call icon being tapped
+  /// accidentally next to the message input, and the entry point for video
+  /// calls (no separate AppBar icon — keeps the bar uncluttered).
   Future<void> _confirmAndInitiateCall() async {
-    final ok = await showBlurredConfirm(
+    final choice = await showBlurredCallTypePicker(
       context: context,
-      title: 'Start call?',
-      message: 'Are you sure you want to call ${widget.dm.recipientName}?',
-      cancelLabel: 'Cancel',
-      confirmLabel: 'Call',
-      confirmIcon: Icons.call,
+      recipientName: widget.dm.recipientName,
     );
-    if (ok == true && mounted) {
-      await _initiateCall(
-        widget.dm.recipientId,
-        widget.dm.recipientName,
-        widget.dm.recipientProfilePic,
-      );
-    }
+    if (choice == null || !mounted) return;
+    await _initiateCall(
+      widget.dm.recipientId,
+      widget.dm.recipientName,
+      widget.dm.recipientProfilePic,
+      video: choice == CallTypeChoice.video,
+    );
   }
 
   Widget _buildAppBarTitle(themeColor) {
@@ -622,14 +620,16 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   Future<void> _initiateCall(
     String userId,
     String userName,
-    String? userProfilePic,
-  ) async {
+    String? userProfilePic, {
+    bool video = false,
+  }) async {
     try {
       final callServiceNotifier = ref.read(callServiceProvider.notifier);
       await callServiceNotifier.initiateCall(
         widget.dm.recipientId,
         widget.dm.recipientName,
         widget.dm.recipientProfilePic,
+        video: video,
       );
 
       // Native call screen is launched automatically by call.service.dart

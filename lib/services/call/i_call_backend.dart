@@ -17,8 +17,14 @@ abstract class ICallBackend {
   /// One-time setup. Idempotent.
   Future<void> initialize();
 
-  /// Place an outgoing audio call to [calleeId].
-  Future<void> initiateCall(String calleeId, String calleeName, String? calleeProfilePic);
+  /// Place an outgoing call to [calleeId]. Pass [video] = true to start
+  /// the call with the camera enabled on both ends; default is audio-only.
+  Future<void> initiateCall(
+    String calleeId,
+    String calleeName,
+    String? calleeProfilePic, {
+    bool video = false,
+  });
 
   /// Accept an incoming call.
   ///

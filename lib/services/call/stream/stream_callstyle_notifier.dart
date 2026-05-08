@@ -36,6 +36,26 @@ class StreamCallStyleNotifier {
             debugPrint('[STREAM-CALL-NOTIF] leave failed: $e');
           }
           break;
+        case 'onTaskRemoved':
+          // User swiped the app away from recents while a call was active.
+          // The FG service detected this in onTaskRemoved and forwarded it
+          // here. We end the call cleanly so the other side gets an
+          // immediate "ended" event instead of waiting for Stream's WS
+          // timeout (~30 s).
+          debugPrint('[STREAM-CALL-NOTIF] onTaskRemoved — ending call');
+          try {
+            final c = StreamCallService().streamCall;
+            if (c != null) {
+              if (c.state.value.createdByMe) {
+                await c.end();
+              } else {
+                await c.leave();
+              }
+            }
+          } catch (e) {
+            debugPrint('[STREAM-CALL-NOTIF] end/leave on swipe failed: $e');
+          }
+          break;
       }
     });
   }

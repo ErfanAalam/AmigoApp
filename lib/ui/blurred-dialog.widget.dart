@@ -90,6 +90,91 @@ Future<bool?> showBlurredConfirm({
   );
 }
 
+/// Result of [showBlurredCallTypePicker]. `null` is returned when the user
+/// dismisses the dialog (taps outside or hits Cancel).
+enum CallTypeChoice { voice, video }
+
+/// Three-option picker for choosing voice vs. video before placing a call.
+/// Cancel resolves to `null`. Voice and Video resolve to the matching enum
+/// value. Built on top of [showBlurredDialog] so it inherits the frosted
+/// look used everywhere else in the app.
+Future<CallTypeChoice?> showBlurredCallTypePicker({
+  required BuildContext context,
+  required String recipientName,
+}) {
+  return showBlurredDialog<CallTypeChoice>(
+    context: context,
+    title: 'Call $recipientName',
+    body: Text(
+      'Pick how you\'d like to connect.',
+      style: const TextStyle(
+        fontSize: 14,
+        height: 1.45,
+        color: Color(0xFF3A3F47),
+      ),
+    ),
+    footer: Builder(
+      builder: (ctx) => Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF3A3F47),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(width: 6),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF20C26A),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            onPressed: () =>
+                Navigator.of(ctx).pop(CallTypeChoice.voice),
+            icon: const Icon(Icons.call_rounded, size: 18),
+            label: const Text(
+              'Voice',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(width: 6),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1F6FEB),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            onPressed: () =>
+                Navigator.of(ctx).pop(CallTypeChoice.video),
+            icon: const Icon(Icons.videocam_rounded, size: 18),
+            label: const Text(
+              'Video',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 /// Standard footer row used by [showBlurredConfirm]. Exposed so callers of
 /// the generic [showBlurredDialog] can drop in the same button styling
 /// alongside fully-custom body content (e.g. a form).

@@ -2,10 +2,13 @@ package com.aiexch.amigo
 
 import android.app.KeyguardManager
 import android.content.Context
+import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.WindowManager
 import com.aiexch.amigo.call.AmigoCallPlugin
+import com.aiexch.amigo.call.AmigoRingtoneManager
 import com.aiexch.amigo.call.StreamOngoingCallNotifier
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -14,6 +17,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.aiexch.amigo/lock_screen"
+    private val RINGTONE_CHANNEL = "com.aiexch.amigo/stream_ringtone"
     private var lockScreenFlagsEnabled = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -48,12 +52,63 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+
+        // Foreground ringtone playback for the Stream backend. Dart owns the
+        // call.state stream, so it drives play/stop transitions; Kotlin owns
+        // the audio resources (MediaPlayer + ToneGenerator) so the
+        // mutex-guarded teardown is bullet-proof against the Dart-side
+        // races that plagued the old flutter_ringtone_player path.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, RINGTONE_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "playIncoming" -> {
+                        AmigoRingtoneManager.playIncoming(applicationContext)
+                        result.success(true)
+                    }
+                    "playOutgoing" -> {
+                        AmigoRingtoneManager.playOutgoing(applicationContext)
+                        result.success(true)
+                    }
+                    "stop" -> {
+                        AmigoRingtoneManager.stop()
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Don't toggle lock-screen flags by default; Dart enables them when the
         // Stream/WebRTC call screen mounts and disables them on dispose.
+
+        // Reset the AudioManager mode in case a previous call session left it
+        // stuck on `MODE_IN_COMMUNICATION`. Stream's WebRTC engine uses the
+        // BroadcasterAudioPolicy which forces this mode while a call is
+        // active; if the process was killed mid-call (or Stream's cleanup
+        // missed it), the system audio mode persists and routes ALL
+        // subsequent audio (including our incoming-call ringtones) through
+        // the earpiece at in-call volume — which is the user-reported
+        // "ringtone is buzzing in the in-ear speaker" bug.
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (am.mode != AudioManager.MODE_NORMAL) {
+                Log.i("MainActivity", "Resetting audio mode (was ${am.mode}) → MODE_NORMAL")
+                am.mode = AudioManager.MODE_NORMAL
+            }
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Audio mode reset failed: ${e.message}")
+        }
+    }
+
+    override fun onDestroy() {
+        // Belt-and-braces: kill any ringtone if the activity is being torn
+        // down. Flutter's call.service can't reliably stop the ringtone if
+        // the engine is being detached, so we make sure native resources
+        // don't outlive the process.
+        try { AmigoRingtoneManager.stop() } catch (_: Exception) {}
+        super.onDestroy()
     }
 
     /**

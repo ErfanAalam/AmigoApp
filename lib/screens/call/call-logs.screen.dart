@@ -118,9 +118,16 @@ class CallsPageState extends ConsumerState<CallsPage>
         // Save to local DB
         await callRepo.insertCalls(calls);
 
+        // Re-read from local DB so locally-logged Stream calls (which the
+        // backend never saw — see StreamCallLogger) survive the refresh.
+        // Without this, every server-fetch would replace the rendered list
+        // with server-only data and our Stream-logged calls would disappear
+        // from view until the next full reload.
+        final List<CallModel> mergedCalls = await callRepo.getAllCalls(currentUserId);
+
         // Enrich calls with local user display names (includes username from contacts)
         final enrichedCalls = await UserUtils().enrichCallsWithDisplayNames(
-          calls,
+          mergedCalls,
           currentUserId,
         );
 

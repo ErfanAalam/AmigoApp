@@ -388,12 +388,22 @@ class CallService implements ICallBackend {
   }
 
   /// Initiate an outgoing call
+  ///
+  /// [video] is part of the [ICallBackend] surface. The legacy WebRTC
+  /// backend doesn't have a video implementation — we accept the param
+  /// for ABI compatibility but log a warning if `video=true`. Use the
+  /// Stream backend for video calls.
   Future<void> initiateCall(
     String calleeId,
     String calleeName,
-    String? calleeProfilePic,
-  ) async {
+    String? calleeProfilePic, {
+    bool video = false,
+  }) async {
     try {
+      if (video) {
+        debugPrint('[CALL] ⚠ video=true requested but the legacy WebRTC '
+            'backend is audio-only. Falling back to audio.');
+      }
       // Ensure initialization completes before proceeding
       if (!_isInitialized) {
         await initialize();

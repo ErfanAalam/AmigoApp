@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:floating/floating.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 
@@ -67,10 +69,18 @@ class _CallerHintScope extends InheritedWidget {
       oldWidget.hint != hint;
 }
 
-/// Connect options shared by every join() in this app: audio-only by default.
-/// The user can flip the camera on later from the in-call control bar.
+/// Connect options for an audio-only call. The user can flip the camera on
+/// later from the in-call control bar.
 final CallConnectOptions audioOnlyConnect = CallConnectOptions(
   camera: TrackOption.disabled(),
+  microphone: TrackOption.enabled(),
+);
+
+/// Connect options for a video call. Both camera and microphone start
+/// enabled. We branch on `call.state.value.settings.video.enabled` to pick
+/// between this and [audioOnlyConnect] in [StreamCallService.ensureJoined].
+final CallConnectOptions videoConnect = CallConnectOptions(
+  camera: TrackOption.enabled(),
   microphone: TrackOption.enabled(),
 );
 
@@ -169,6 +179,16 @@ class _StreamCallScreenState extends State<StreamCallScreen> {
   // Null while the call is live.
   DisconnectReason? _disconnectReason;
 
+  // Picture-in-Picture is armed via `OnLeavePiP` whenever any participant
+  // (local or remote) has video on. The Floating package then triggers PiP
+  // automatically when the user navigates away (Home gesture) — no manual
+  // lifecycle plumbing needed. We re-arm/disarm whenever the video flag
+  // flips so audio-only calls don't accidentally enter PiP.
+  final Floating? _floating = defaultTargetPlatform == TargetPlatform.android
+      ? Floating()
+      : null;
+  bool _pipArmed = false;
+
   @override
   void initState() {
     super.initState();
@@ -194,6 +214,9 @@ class _StreamCallScreenState extends State<StreamCallScreen> {
   void dispose() {
     _stateSub?.cancel();
     _disconnectPopTimer?.cancel();
+    if (_pipArmed) {
+      _floating?.cancelOnLeavePiP();
+    }
     StreamCallScreen.isMounted = false;
     // Defer the notifier update — pushing it during dispose throws
     // `setState() called when widget tree was locked` because it would
@@ -212,11 +235,40 @@ class _StreamCallScreenState extends State<StreamCallScreen> {
     final initial = call.state.value;
     _maybeJoinAsOutgoing(initial);
     _autoPopOnDisconnect(initial);
+    _maybeArmPiP(initial);
 
     _stateSub = call.state.valueStream.listen((s) {
       _maybeJoinAsOutgoing(s);
       _autoPopOnDisconnect(s);
+      _maybeArmPiP(s);
     });
+  }
+
+  /// Arm/disarm Picture-in-Picture based on whether any participant has
+  /// video on. Only Android — iOS uses CallKit's native PiP path which
+  /// the SDK manages itself.
+  void _maybeArmPiP(CallState s) {
+    final f = _floating;
+    if (f == null) return;
+    final localVideo = s.localParticipant?.isVideoEnabled ?? false;
+    final remoteVideo = s.callParticipants.any((p) =>
+        !p.isLocal &&
+        p.publishedTracks[SfuTrackType.video] != null &&
+        !p.isTrackPaused(SfuTrackType.video));
+    final shouldArm = localVideo || remoteVideo;
+    if (shouldArm == _pipArmed) return;
+    _pipArmed = shouldArm;
+    if (shouldArm) {
+      // OnLeavePiP arms the system to enter PiP automatically when the
+      // user backgrounds the app (Home gesture). Aspect-ratio matches the
+      // 16:9 video rendering area.
+      f.enable(const OnLeavePiP()).catchError((Object e) {
+        debugPrint('[STREAM-CALL]   PiP enable failed: $e');
+        return PiPStatus.unavailable;
+      });
+    } else {
+      f.cancelOnLeavePiP();
+    }
   }
 
   /// Drive `call.join()` once the call has progressed past the ringing
@@ -889,11 +941,18 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
         final remoteName = _remoteName(state, fallback?.userName);
         final remoteAvatar = _remoteAvatar(state) ?? fallback?.userProfilePic;
 
+        // PiP detection — when launched into a small Android Picture-in-
+        // Picture window, the activity's reported size shrinks to ~200-300dp.
+        // We hide the top status bar and self-view to give the video grid
+        // (or remote avatar) the whole frame, and the control bar shrinks
+        // itself via its own MediaQuery check.
+        final isPip = MediaQuery.of(context).size.width < 360;
+
         debugPrint('[STREAM-CALL] in-call build  '
             'callParticipants=${state.callParticipants.length} '
             'remote=${remoteParticipants.length} '
             'local?${localUser != null} videoOn=$localVideoOn '
-            'audioMode=$isAudioMode name="$remoteName"');
+            'audioMode=$isAudioMode pip=$isPip name="$remoteName"');
 
         return Stack(
           fit: StackFit.expand,
@@ -907,15 +966,17 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
               _audioBody(remoteAvatar, remoteName),
 
             // Self-view PiP when video is on. Guarded — only when localUser
-            // is non-null so we never crash.
-            if (!isAudioMode && localVideoOn && localUser != null)
+            // is non-null so we never crash. Hidden in PiP because there's
+            // no room for it.
+            if (!isAudioMode && localVideoOn && localUser != null && !isPip)
               Positioned(
                 top: 24 + MediaQuery.of(context).padding.top,
                 right: 16,
                 child: _SelfViewTile(call: widget.call, participant: localUser),
               ),
 
-            // Top status bar
+            // Top status bar — hidden in PiP.
+            if (!isPip)
             Positioned(
               top: MediaQuery.of(context).padding.top + 18,
               left: 0,
@@ -927,7 +988,8 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
               ),
             ),
 
-            // Bottom controls
+            // Bottom controls. Tighter padding in PiP because every pixel
+            // of horizontal/vertical space matters at that size.
             Positioned(
               left: 0,
               right: 0,
@@ -935,7 +997,9 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
               child: SafeArea(
                 top: false,
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 22),
+                  padding: isPip
+                      ? const EdgeInsets.fromLTRB(8, 0, 8, 8)
+                      : const EdgeInsets.fromLTRB(20, 0, 20, 22),
                   child: _ControlBar(call: widget.call, state: state),
                 ),
               ),
@@ -1060,18 +1124,40 @@ class _ControlBar extends StatefulWidget {
 class _ControlBarState extends State<_ControlBar> {
   bool _speakerOn = false;
 
+  // Track the user's mic *intent*. Defaults to "unmuted" because we always
+  // join with `audioOnlyConnect` (microphone: enabled). Only the user's tap
+  // on the mute button flips this; SDK state changes don't.
+  //
+  // The previous "if me==null return false" fix was insufficient: once the
+  // SFU populates `localParticipant`, there's still a ~1 s window before
+  // the audio track is published, during which `isAudioEnabled` is false
+  // and the icon would flicker to "muted". We trust intent until the SFU
+  // confirms audio at least once (`_everSawAudioEnabled`) — after that the
+  // SDK's state is reliable.
+  bool _userMuted = false;
+  bool _everSawAudioEnabled = false;
+
   bool get _muted {
     final me = widget.state.localParticipant;
-    return me == null || !me.isAudioEnabled;
+    if (me?.isAudioEnabled == true) {
+      _everSawAudioEnabled = true;
+    }
+    if (!_everSawAudioEnabled) return _userMuted;
+    return !(me?.isAudioEnabled ?? false);
   }
 
   bool get _videoOn {
+    // For video the safe default is `false` because `audioOnlyConnect`
+    // disables the camera. Only reflect `isVideoEnabled` once SFU sync
+    // catches up.
     final me = widget.state.localParticipant;
     return me?.isVideoEnabled ?? false;
   }
 
   Future<void> _toggleMute() async {
-    await widget.call.setMicrophoneEnabled(enabled: _muted);
+    final nextMuted = !_muted;
+    setState(() => _userMuted = nextMuted);
+    await widget.call.setMicrophoneEnabled(enabled: !nextMuted);
   }
 
   Future<void> _toggleSpeaker() async {
@@ -1118,15 +1204,28 @@ class _ControlBarState extends State<_ControlBar> {
 
   @override
   Widget build(BuildContext context) {
+    // Detect cramped windows (Picture-in-Picture) by viewport width. PiP
+    // launches the activity into a window that's typically 200-300 dp wide
+    // — anything below this threshold is "too small for full controls" so
+    // we collapse to mute + hangup only and shrink the buttons.
+    final width = MediaQuery.of(context).size.width;
+    final isPip = width < 360;
+    final pillSize = isPip ? 38.0 : 54.0;
+    final iconSize = isPip ? 18.0 : 24.0;
+    final padding = isPip
+        ? const EdgeInsets.symmetric(horizontal: 6, vertical: 6)
+        : const EdgeInsets.symmetric(horizontal: 12, vertical: 14);
+    final radius = isPip ? 20.0 : 28.0;
+
     return ClipRRect(
-      borderRadius: BorderRadius.circular(28),
+      borderRadius: BorderRadius.circular(radius),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          padding: padding,
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.10),
-            borderRadius: BorderRadius.circular(28),
+            borderRadius: BorderRadius.circular(radius),
             border: Border.all(
               color: Colors.white.withValues(alpha: 0.16),
               width: 0.6,
@@ -1139,28 +1238,44 @@ class _ControlBarState extends State<_ControlBar> {
                 icon: _muted ? Icons.mic_off_rounded : Icons.mic_rounded,
                 active: _muted,
                 onTap: _toggleMute,
+                size: pillSize,
+                iconSize: iconSize,
               ),
-              _PillButton(
-                icon: _speakerOn ? Icons.volume_up_rounded : Icons.hearing_rounded,
-                active: _speakerOn,
-                onTap: _toggleSpeaker,
-              ),
-              _PillButton(
-                icon: _videoOn ? Icons.videocam_rounded : Icons.videocam_off_rounded,
-                active: _videoOn,
-                onTap: _toggleVideo,
-              ),
-              if (_videoOn)
+              if (!isPip)
+                _PillButton(
+                  icon: _speakerOn
+                      ? Icons.volume_up_rounded
+                      : Icons.hearing_rounded,
+                  active: _speakerOn,
+                  onTap: _toggleSpeaker,
+                  size: pillSize,
+                  iconSize: iconSize,
+                ),
+              if (!isPip)
+                _PillButton(
+                  icon: _videoOn
+                      ? Icons.videocam_rounded
+                      : Icons.videocam_off_rounded,
+                  active: _videoOn,
+                  onTap: _toggleVideo,
+                  size: pillSize,
+                  iconSize: iconSize,
+                ),
+              if (!isPip && _videoOn)
                 _PillButton(
                   icon: Icons.cameraswitch_rounded,
                   active: false,
                   onTap: _flip,
+                  size: pillSize,
+                  iconSize: iconSize,
                 ),
               _PillButton(
                 icon: Icons.call_end_rounded,
                 active: true,
                 color: const Color(0xFFE53935),
                 onTap: _hangup,
+                size: pillSize,
+                iconSize: iconSize,
               ),
             ],
           ),
@@ -1175,12 +1290,16 @@ class _PillButton extends StatelessWidget {
   final bool active;
   final VoidCallback onTap;
   final Color? color;
+  final double size;
+  final double iconSize;
 
   const _PillButton({
     required this.icon,
     required this.active,
     required this.onTap,
     this.color,
+    this.size = 54,
+    this.iconSize = 24,
   });
 
   @override
@@ -1196,9 +1315,9 @@ class _PillButton extends StatelessWidget {
         customBorder: const CircleBorder(),
         onTap: onTap,
         child: SizedBox(
-          width: 54,
-          height: 54,
-          child: Icon(icon, color: fg, size: 24),
+          width: size,
+          height: size,
+          child: Icon(icon, color: fg, size: iconSize),
         ),
       ),
     );

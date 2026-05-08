@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 import '../../../env.dart';
 import '../../../utils/user.utils.dart';
 import '../../cookies.service.dart';
+import 'stream_call_logger.dart';
 import 'stream_call_push_config.dart';
 import 'stream_call_token_loader.dart';
 
@@ -156,6 +157,33 @@ Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
         'warmStart=$warmStart');
 
     if (type == 'call.missed') {
+      // CRITICAL: dismiss the still-ringing incoming-call notification
+      // before the missed-call one is posted. Stream's SDK doesn't do this
+      // automatically — without `endCallByCid` the user sees BOTH the
+      // ringing notification (forever, since the WS isn't connected to
+      // deliver the cancel event) AND the missed-call notification
+      // co-existing in the tray. The ringing one only goes away when the
+      // user force-stops the app.
+      try {
+        await manager.endCallByCid(callCid);
+        debugPrint('[STREAM-FCM]   ✓ endCallByCid before showMissedCall');
+      } catch (e) {
+        debugPrint('[STREAM-FCM]   endCallByCid failed: $e');
+      }
+      // Record the missed call locally so it shows in the call-history
+      // screen even though no warm-path state-stream event ever fired.
+      try {
+        final me = await UserUtils().getUserDetails();
+        if (me != null && createdById != null && createdById.isNotEmpty) {
+          await StreamCallLogger.instance.recordColdMissed(
+            cid: callCid,
+            callerId: createdById,
+            calleeId: me.id,
+          );
+        }
+      } catch (e) {
+        debugPrint('[STREAM-FCM]   recordColdMissed failed: $e');
+      }
       debugPrint('[STREAM-FCM]   showMissedCall…');
       await manager.showMissedCall(
         uuid: const Uuid().v4(),
@@ -165,6 +193,30 @@ Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
         hasVideo: hasVideo,
       );
       debugPrint('[STREAM-FCM]   ✓ showMissedCall returned');
+      return;
+    }
+    if (type == 'call.ended') {
+      // Caller hung up while we were still ringing — dismiss the ringing
+      // notification. No missed-call follow-up because the call wasn't
+      // missed in the "didn't pick up in time" sense; it was cancelled.
+      try {
+        await manager.endCallByCid(callCid);
+        debugPrint('[STREAM-FCM]   ✓ endCallByCid for call.ended');
+      } catch (e) {
+        debugPrint('[STREAM-FCM]   endCallByCid failed: $e');
+      }
+      try {
+        final me = await UserUtils().getUserDetails();
+        if (me != null && createdById != null && createdById.isNotEmpty) {
+          await StreamCallLogger.instance.recordColdEnded(
+            cid: callCid,
+            callerId: createdById,
+            calleeId: me.id,
+          );
+        }
+      } catch (e) {
+        debugPrint('[STREAM-FCM]   recordColdEnded failed: $e');
+      }
       return;
     }
     if (type != 'call.ring') {

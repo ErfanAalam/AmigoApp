@@ -121,9 +121,15 @@ class CallServiceNotifier extends Notifier<CallServiceState> {
   Future<void> initiateCall(
     String calleeId,
     String calleeName,
-    String? calleeProfilePic,
-  ) async {
-    await _backend.initiateCall(calleeId, calleeName, calleeProfilePic);
+    String? calleeProfilePic, {
+    bool video = false,
+  }) async {
+    await _backend.initiateCall(
+      calleeId,
+      calleeName,
+      calleeProfilePic,
+      video: video,
+    );
     _syncState();
     _startDurationUpdates();
   }

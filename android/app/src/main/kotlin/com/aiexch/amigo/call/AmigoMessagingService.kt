@@ -2,6 +2,7 @@ package com.aiexch.amigo.call
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -29,14 +30,35 @@ class AmigoMessagingService : FlutterFirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val type = message.data["type"]
-        Log.d(TAG, "onMessageReceived: type=$type")
+        val sender = message.data["sender"]
+        Log.d(TAG, "onMessageReceived: type=$type sender=$sender")
+
+        // For ANY incoming Stream Video push (call.ring/call.missed/etc.),
+        // proactively reset Android's audio mode to NORMAL before the
+        // platform notification flow runs. If a previous call session left
+        // the device in MODE_IN_COMMUNICATION (Stream's BroadcasterAudioPolicy
+        // sets this), the upcoming ringtone — even with USAGE_NOTIFICATION_RINGTONE
+        // attributes — will route through the earpiece at in-call volume.
+        // Resetting here makes the ringtone come out the loudspeaker like
+        // a normal phone call.
+        if (sender == "stream.video") {
+            try {
+                val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                if (am.mode != AudioManager.MODE_NORMAL) {
+                    Log.i(TAG, "Resetting audio mode (was ${am.mode}) → MODE_NORMAL for Stream push")
+                    am.mode = AudioManager.MODE_NORMAL
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Audio mode reset failed: ${e.message}")
+            }
+        }
 
         if (type == "call") {
             handleCallNatively(message.data)
             // Do NOT call super — prevents Flutter background isolate from running for calls,
             // which avoids the MethodChannel-unavailable crash in terminated state
         } else {
-            // Chat messages and other types handled by Flutter
+            // Chat messages and other types (incl. Stream Video pushes) handled by Flutter
             super.onMessageReceived(message)
         }
     }
