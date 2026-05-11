@@ -14,14 +14,44 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.plugin.common.MethodChannel
+import org.json.JSONObject
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.aiexch.amigo/lock_screen"
     private val RINGTONE_CHANNEL = "com.aiexch.amigo/stream_ringtone"
     private var lockScreenFlagsEnabled = false
 
+    companion object {
+        private const val TAG = "MainActivity"
+        private const val PREFS_FILE = "FlutterSharedPreferences"
+        private const val CALL_DETAILS_KEY = "flutter.current_call_details"
+
+        // Statuses that mean a call is in flight; while any of these are set
+        // the activity must be allowed to render over the keyguard so it
+        // doesn't trigger the device password prompt on cold start.
+        private val ACTIVE_CALL_STATUSES = setOf(
+            "ringing", "accepting", "active", "in_call", "outgoing", "connecting"
+        )
+
+        /**
+         * True while a Flutter engine is attached to MainActivity in this
+         * process. Read from FCM service to decide whether the main
+         * isolate's Stream WS will already deliver an incoming-call event;
+         * when true we skip flutter_callkit_incoming on the background
+         * isolate to avoid two ringtones playing in parallel.
+         *
+         * Cleared in onDestroy so the next FCM after a clean teardown
+         * falls back to the FCM/CallKit path.
+         */
+        @Volatile
+        var isFlutterRunning: Boolean = false
+            private set
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        isFlutterRunning = true
 
         // Register the native call screen plugin (used by the legacy WebRTC backend).
         flutterEngine.plugins.add(AmigoCallPlugin())
@@ -45,6 +75,15 @@ class MainActivity : FlutterActivity() {
                 }
                 "disableLockScreenFlags" -> {
                     disableLockScreenFlags()
+                    result.success(true)
+                }
+                "dismissKeyguard" -> {
+                    // Explicit keyguard dismissal — only for user-initiated
+                    // actions that need access to the rest of the app (e.g.
+                    // tapping minimize during a call). On secured devices
+                    // this surfaces the unlock UI; that's intentional here
+                    // and not the cold-start password prompt we're avoiding.
+                    requestKeyguardDismissal()
                     result.success(true)
                 }
                 else -> {
@@ -79,9 +118,18 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // CRITICAL: showWhenLocked / turnScreenOn must be set BEFORE
+        // super.onCreate so the keyguard doesn't intercept the launch.
+        // Otherwise tapping "Answer" on the lock screen surfaces the
+        // device password prompt before MainActivity can render. We only
+        // do this when a call is actually in flight (legacy native path
+        // and Stream both write `flutter.current_call_details`); for
+        // normal launches the device should still require unlock.
+        if (isCallInFlight()) {
+            applyLockScreenFlags(requestDismiss = false)
+        }
+
         super.onCreate(savedInstanceState)
-        // Don't toggle lock-screen flags by default; Dart enables them when the
-        // Stream/WebRTC call screen mounts and disables them on dispose.
 
         // Reset the AudioManager mode in case a previous call session left it
         // stuck on `MODE_IN_COMMUNICATION`. Stream's WebRTC engine uses the
@@ -108,21 +156,27 @@ class MainActivity : FlutterActivity() {
         // the engine is being detached, so we make sure native resources
         // don't outlive the process.
         try { AmigoRingtoneManager.stop() } catch (_: Exception) {}
+        isFlutterRunning = false
         super.onDestroy()
     }
 
     /**
-     * Enable display over the lock screen. Combines:
-     *   - Activity#setShowWhenLocked / setTurnScreenOn  (API 27+)
-     *   - KeyguardManager#requestDismissKeyguard          (API 26+)
-     *   - Legacy WindowManager flags                      (API < 27 fallback)
+     * Display flags only — the activity renders over the keyguard but the
+     * keyguard itself is not dismissed. Flutter tap input still reaches the
+     * activity because `showWhenLocked` makes touches pass through.
      *
-     * The keyguard-dismiss request is what makes Stream's call screen actually
-     * usable from the lock screen on modern Android — without it, taps on
-     * Flutter widgets are swallowed by the keyguard.
+     * The previous implementation auto-dismissed the keyguard here, which on
+     * secured devices triggers the device unlock UI — i.e. the password
+     * prompt we are trying to avoid on cold-start accept. Dismissal is now
+     * opt-in via `requestKeyguardDismissal` (exposed as `dismissKeyguard`
+     * on the method channel).
      */
     private fun enableLockScreenFlags() {
-        if (lockScreenFlagsEnabled) return
+        applyLockScreenFlags(requestDismiss = false)
+    }
+
+    private fun applyLockScreenFlags(requestDismiss: Boolean) {
+        if (lockScreenFlagsEnabled && !requestDismiss) return
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
@@ -131,22 +185,26 @@ class MainActivity : FlutterActivity() {
             @Suppress("DEPRECATION")
             window.addFlags(
                 WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
             )
         }
-
-        // Always keep the screen on regardless of API level.
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // Ask the system to dismiss the keyguard so user input reaches Flutter.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-            keyguardManager.requestDismissKeyguard(this, null)
+        if (requestDismiss) {
+            requestKeyguardDismissal()
         }
 
         lockScreenFlagsEnabled = true
+    }
+
+    private fun requestKeyguardDismissal() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+            keyguardManager.requestDismissKeyguard(this, null)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD)
+        }
     }
 
     private fun disableLockScreenFlags() {
@@ -165,5 +223,17 @@ class MainActivity : FlutterActivity() {
         }
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         lockScreenFlagsEnabled = false
+    }
+
+    private fun isCallInFlight(): Boolean {
+        return try {
+            val prefs = getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+            val raw = prefs.getString(CALL_DETAILS_KEY, null) ?: return false
+            val status = JSONObject(raw).optString("call_status", "")
+            status in ACTIVE_CALL_STATUSES
+        } catch (e: Exception) {
+            Log.w(TAG, "isCallInFlight check failed: ${e.message}")
+            false
+        }
     }
 }

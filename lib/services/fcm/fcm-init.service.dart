@@ -8,6 +8,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
+import 'package:permission_handler/permission_handler.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
@@ -32,6 +33,19 @@ class NotificationService {
   FirebaseMessaging? _firebaseMessaging;
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
+
+  // Idempotency guards. firebase_messaging's docs are explicit that
+  // onBackgroundMessage must be called only once per process — calling it
+  // multiple times corrupts the native callback handle and breaks BG
+  // delivery on first install (see investigation in commit history).
+  bool _initialized = false;
+  Future<void>? _initializing;
+
+  // SharedPreferences keys for the "have we uploaded this token recently?"
+  // gate so we don't POST /update-fcm-token on every app open.
+  static const String _kLastUploadedToken = 'fcm_last_uploaded_token';
+  static const String _kLastUploadedAt = 'fcm_last_uploaded_at_ms';
+  static const Duration _kUploadHeartbeat = Duration(hours: 24);
 
   String? _fcmToken;
   String? get fcmToken => _fcmToken;
@@ -75,55 +89,77 @@ class NotificationService {
   /// Lazy getter for ApiService - only accessed after initialization
   ApiService get apiService => ApiService();
 
-  /// Initialize the notification service
+  /// Initialize the notification service.
+  /// Strictly idempotent — concurrent callers share the in-flight init,
+  /// subsequent callers after success are no-ops. This is required because
+  /// FirebaseMessaging.onBackgroundMessage must be called only once per
+  /// process; multiple registrations corrupt the native callback handle and
+  /// were the cause of FCM background delivery silently failing on the first
+  /// install (worked only after a second app open).
   Future<void> initialize() async {
+    if (_initialized) return;
+    if (_initializing != null) return _initializing;
+    _initializing = _doInitialize();
     try {
-      // Initialize Firebase
-      await Firebase.initializeApp();
-
-      // Initialize FirebaseMessaging after Firebase is initialized
-      _firebaseMessaging = FirebaseMessaging.instance;
-
-      // Initialize local notifications
-      await _initializeLocalNotifications();
-
-      // Get FCM token
-      await _getFCMToken();
-      debugPrint('[FCM] Token: ${_fcmToken?.substring(0, 20)}...');
-
-      // Upload token to backend (fire-and-forget; only succeeds if user is logged in)
-      if (_fcmToken != null) {
-        apiService.auth
-            .updateFCMToken(_fcmToken!)
-            .then((_) {
-              debugPrint('[FCM] ✅ Token uploaded to backend');
-            })
-            .catchError((e) {
-              debugPrint(
-                '[FCM] ❌ Token upload failed (user may not be logged in yet): $e',
-              );
-            });
-      }
-
-      // Listen for token refresh and upload the new one
-      _firebaseMessaging!.onTokenRefresh.listen((newToken) {
-        debugPrint('[FCM] Token refreshed');
-        _fcmToken = newToken;
-        apiService.auth
-            .updateFCMToken(newToken)
-            .then((_) {
-              debugPrint('[FCM] ✅ Refreshed token uploaded');
-            })
-            .catchError((e) {
-              debugPrint('[FCM] ❌ Refreshed token upload failed: $e');
-            });
-      });
-
-      // Set up message handlers
-      _setupMessageHandlers();
-    } catch (e) {
-      debugPrint('❌ Error initializing NotificationService: $e');
+      await _initializing;
+      _initialized = true;
+    } finally {
+      _initializing = null;
     }
+  }
+
+  Future<void> _doInitialize() async {
+    // Initialize Firebase
+    await Firebase.initializeApp();
+
+    // Initialize FirebaseMessaging after Firebase is initialized
+    _firebaseMessaging = FirebaseMessaging.instance;
+
+    // Request POST_NOTIFICATIONS permission EARLY in init, regardless of
+    // auth state. This MUST run before runApp() so a fresh-install user
+    // sees and resolves the dialog before any FCM can arrive. Without this
+    // call here, the dialog only appears later (inside
+    // initializeAuthenticatedUser) and on Android 13+ the FCM dispatcher
+    // keeps the app's BG delivery in a "not-yet-permitted" state until the
+    // next app launch — which is exactly the "must open app twice" bug.
+    // The OLD notification.service.dart had this in the same place; it
+    // got dropped during the FCM rewrite.
+    // if (Platform.isAndroid) {
+    //   await Permission.notification.request();
+    // }
+
+    // Initialize local notifications
+    await _initializeLocalNotifications();
+
+    // Register listeners exactly once. onBackgroundMessage in particular
+    // must run before runApp() and only once — see _initialized guard.
+    _setupMessageHandlers();
+
+    // Listen for token rotation. When Firebase rotates the token, push the
+    // new one to backend and refresh our cached upload metadata.
+    _firebaseMessaging!.onTokenRefresh.listen((newToken) async {
+      debugPrint('[FCM] Token refreshed');
+      _fcmToken = newToken;
+      try {
+        final result = await apiService.auth.updateFCMToken(newToken);
+        if (result.isSuccess) {
+          await _markTokenUploaded(newToken);
+          debugPrint('[FCM] ✅ Refreshed token uploaded');
+        } else {
+          debugPrint(
+            '[FCM] ❌ Refreshed token upload failed: code=${result.code}',
+          );
+        }
+      } catch (e) {
+        debugPrint('[FCM] ❌ Refreshed token upload threw: $e');
+      }
+    });
+
+    // Fetch the current token. We do NOT auto-upload here; uploads are
+    // gated by maybeSendTokenToBackend() so we don't hit the API on every
+    // app open. Callers in the authenticated path will trigger the gate.
+    await _getFCMToken();
+    debugPrint('[FCM] Token: ${_fcmToken?.substring(0, 20)}...');
   }
 
   /// Initialize local notifications
@@ -219,20 +255,31 @@ class NotificationService {
         ?.createNotificationChannel(callChannel);
   }
 
-  /// Get FCM token
+  /// Get FCM token. On a fresh install Firebase needs a moment to register
+  /// with FCM servers, so getToken() can return null briefly — retry with
+  /// backoff until we get a real token (or give up after a few seconds).
   Future<void> _getFCMToken() async {
-    try {
-      for (int attempt = 0; attempt < 2; attempt++) {
-        if (_firebaseMessaging != null) {
-          _fcmToken = await _firebaseMessaging!.getToken();
+    if (_firebaseMessaging == null) {
+      debugPrint('❌ FirebaseMessaging not initialized');
+      return;
+    }
+    const maxAttempts = 5;
+    for (int attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        final token = await _firebaseMessaging!.getToken();
+        if (token != null && token.isNotEmpty) {
+          _fcmToken = token;
           return;
         }
-        await Future.delayed(const Duration(milliseconds: 300));
+      } catch (e) {
+        debugPrint('❌ Error getting FCM token (attempt ${attempt + 1}): $e');
       }
-      debugPrint('❌ FirebaseMessaging not initialized');
-    } catch (e) {
-      debugPrint('❌ Error getting FCM token');
+      if (attempt < maxAttempts - 1) {
+        // 300ms, 600ms, 1.2s, 2.4s — ~4.5s total max wait
+        await Future.delayed(Duration(milliseconds: 300 * (1 << attempt)));
+      }
     }
+    debugPrint('❌ Failed to obtain FCM token after $maxAttempts attempts');
   }
 
   /// Set up message handlers
@@ -1001,15 +1048,85 @@ class NotificationService {
     await _updateSummaryNotification();
   }
 
-  /// Send FCM token to backend
-  Future<void> sendTokenToBackend(String userId) async {
-    if (_fcmToken == null) return;
+  /// Conditionally upload the FCM token to backend.
+  ///
+  /// Skips the upload if the same token was successfully uploaded less than
+  /// 24h ago. Uploads if (a) the token has changed, (b) the heartbeat
+  /// expired, or (c) we've never recorded a successful upload.
+  ///
+  /// Returns true if an upload happened and succeeded, false otherwise.
+  /// `force: true` bypasses the gate (e.g., right after login).
+  Future<bool> maybeSendTokenToBackend({bool force = false}) async {
+    if (!_initialized) {
+      debugPrint('[FCM] maybeSendTokenToBackend: not initialized — skipping');
+      return false;
+    }
+
+    // Make sure we have a current token; getToken() may have been null
+    // earlier in init on a fresh install.
+    if (_fcmToken == null || _fcmToken!.isEmpty) {
+      await _getFCMToken();
+    }
+    final token = _fcmToken;
+    if (token == null || token.isEmpty) {
+      debugPrint('[FCM] maybeSendTokenToBackend: no token available');
+      return false;
+    }
+
+    if (!force) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final lastToken = prefs.getString(_kLastUploadedToken);
+        final lastAt = prefs.getInt(_kLastUploadedAt) ?? 0;
+        final age = DateTime.now().millisecondsSinceEpoch - lastAt;
+        if (lastToken == token && age < _kUploadHeartbeat.inMilliseconds) {
+          debugPrint(
+            '[FCM] Token already uploaded ${(age / 1000).round()}s ago — skipping',
+          );
+          return false;
+        }
+      } catch (e) {
+        // If prefs read fails for any reason, fall through and upload.
+        debugPrint('[FCM] prefs read failed, will upload anyway: $e');
+      }
+    }
 
     try {
-      await apiService.auth.updateFCMToken(_fcmToken!);
+      final result = await apiService.auth.updateFCMToken(token);
+      if (result.isSuccess) {
+        await _markTokenUploaded(token);
+        debugPrint('[FCM] ✅ Token uploaded to backend');
+        return true;
+      }
+      debugPrint(
+        '[FCM] ❌ Token upload failed: code=${result.code} msg=${result.message}',
+      );
+      return false;
     } catch (e) {
-      debugPrint('❌ Error sending FCM token to backend');
+      debugPrint('[FCM] ❌ Token upload threw: $e');
+      return false;
     }
+  }
+
+  Future<void> _markTokenUploaded(String token) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kLastUploadedToken, token);
+      await prefs.setInt(
+        _kLastUploadedAt,
+        DateTime.now().millisecondsSinceEpoch,
+      );
+    } catch (e) {
+      debugPrint('[FCM] Failed to persist upload metadata: $e');
+    }
+  }
+
+  Future<void> _clearUploadMetadata() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kLastUploadedToken);
+      await prefs.remove(_kLastUploadedAt);
+    } catch (_) {}
   }
 
   /// Clear all notifications
@@ -1060,7 +1177,11 @@ class NotificationService {
     );
   }
 
-  /// Clear all notification data (for logout)
+  /// Clear all notification data (for logout).
+  /// We deliberately keep _initialized = true so we don't re-register the
+  /// FirebaseMessaging singleton listeners — those survive logout. The
+  /// upload metadata IS cleared so the next user's first authenticated
+  /// session forces a fresh upload regardless of token sameness.
   Future<void> clearNotificationData() async {
     try {
       // Cancel all notifications
@@ -1070,8 +1191,11 @@ class NotificationService {
       _conversationNotifications.clear();
       await _clearPersistedNotifications();
 
-      // Clear FCM token
+      // Reset cached token so the next session re-fetches from Firebase
       _fcmToken = null;
+
+      // Force the next maybeSendTokenToBackend() to actually upload
+      await _clearUploadMetadata();
     } catch (e) {
       debugPrint('❌ Error clearing notification data');
     }

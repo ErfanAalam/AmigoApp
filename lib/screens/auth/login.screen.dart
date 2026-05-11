@@ -174,10 +174,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           );
         }
 
-        // Send FCM token to backend after successful login
-        await authService.sendFCMTokenToBackend(3);
-        
-        // Initialize authenticated user (this runs all the main.dart authenticated logic)
+        // Initialize authenticated user (this runs all the main.dart authenticated logic).
+        // FCM token upload happens inside initializeAuthenticatedUser() — no need to call it here.
         final appState = main.MyApp.appStateKey.currentState;
         if (appState != null && appState is main.AppStateInterface) {
           await (appState as main.AppStateInterface).initializeAuthenticatedUser();
@@ -263,8 +261,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           );
         }
 
-        await authService.sendFCMTokenToBackend(3);
-
+        // FCM token upload happens inside initializeAuthenticatedUser().
         final appState = main.MyApp.appStateKey.currentState;
         if (appState != null && appState is main.AppStateInterface) {
           await (appState as main.AppStateInterface).initializeAuthenticatedUser();

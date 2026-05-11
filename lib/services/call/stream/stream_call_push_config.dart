@@ -7,10 +7,13 @@ import 'package:stream_video_push_notification/stream_video_push_notification.da
 StreamVideoPushConfiguration get amigoStreamPushConfiguration =>
     const StreamVideoPushConfiguration(
       android: AndroidPushConfiguration(
-        // Show the heads-up + full-screen incoming-call UI even when the
-        // device is locked. Without this the user only sees a heads-up banner
-        // and has to unlock first.
-        showFullScreenOnLockScreen: true,
+        // Disable flutter_callkit_incoming's generic IncomingCallActivity on
+        // lock screen. We instead fire our own fullScreenIntent (see
+        // CallNotificationManager.showStreamFullScreenLauncher) that launches
+        // MainActivity, so the lock-screen ringing UI is the same Flutter
+        // `_RingingView` users see in-app. The CallStyle heads-up still
+        // works for unlocked devices.
+        showFullScreenOnLockScreen: false,
 
         // Distinct channels so users can independently silence missed calls
         // without losing live ring sounds.

@@ -28,9 +28,15 @@ class CallNotificationManager(private val context: Context) {
     companion object {
         const val CHANNEL_INCOMING = "incoming_calls"
         const val CHANNEL_ONGOING = "ongoing_calls"
+        // Silent HIGH-importance channel used solely so the system fires
+        // our fullScreenIntent on lock-screen wake-ups without compounding
+        // the ringtone — flutter_callkit_incoming's CHANNEL_INCOMING is
+        // already responsible for the audible heads-up.
+        const val CHANNEL_FULLSCREEN_LAUNCHER = "incoming_calls_launcher"
         const val NOTIFICATION_INCOMING_ID = 9001
         const val NOTIFICATION_ONGOING_ID = 9002
         const val NOTIFICATION_MISSED_ID = 9003
+        const val NOTIFICATION_FULLSCREEN_LAUNCHER_ID = 9004
 
         const val ACTION_ANSWER = "com.aiexch.amigo.call.ACTION_ANSWER"
         const val ACTION_DECLINE = "com.aiexch.amigo.call.ACTION_DECLINE"
@@ -89,6 +95,24 @@ class CallNotificationManager(private val context: Context) {
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
             notificationManager.createNotificationChannel(ongoingChannel)
+
+            // Silent HIGH-importance channel used only to fire
+            // fullScreenIntent on lock-screen wake-ups. We deliberately set
+            // sound + vibration to null so this channel's notification
+            // doesn't double-ring on top of CHANNEL_INCOMING (which still
+            // owns the audible heads-up via flutter_callkit_incoming).
+            val launcherChannel = NotificationChannel(
+                CHANNEL_FULLSCREEN_LAUNCHER,
+                "Lock-screen call launcher",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Wakes the device for incoming calls so the in-app call screen can render."
+                setSound(null, null)
+                enableVibration(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                setBypassDnd(true)
+            }
+            notificationManager.createNotificationChannel(launcherChannel)
         }
     }
 
@@ -423,5 +447,56 @@ class CallNotificationManager(private val context: Context) {
             .setOngoing(false)
             .build()
         notificationManager.notify(NOTIFICATION_MISSED_ID, notification)
+    }
+
+    /**
+     * Lock-screen launcher for the Stream backend.
+     *
+     * Fires a silent, HIGH-importance notification whose sole purpose is
+     * `setFullScreenIntent` → MainActivity. On a locked device Android
+     * launches MainActivity (which has `showWhenLocked` set in onCreate
+     * once a call is in flight) and Flutter renders the in-app
+     * `_RingingView`. flutter_callkit_incoming's audible heads-up still
+     * runs in parallel via its own CHANNEL_INCOMING — we just suppress
+     * its generic IncomingCallActivity by setting
+     * `showFullScreenOnLockScreen: false` in dart-side push config.
+     */
+    fun showStreamFullScreenLauncher(
+        callCid: String,
+        callerName: String,
+        callerPhoto: String?
+    ) {
+        val main = Intent().apply {
+            setClassName(context.packageName, "${context.packageName}.MainActivity")
+            putExtra("incoming_call_cid", callCid)
+            putExtra("incoming_caller_name", callerName)
+            if (callerPhoto != null) putExtra("incoming_caller_photo", callerPhoto)
+            putExtra("incoming_backend", "stream")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val launcherPi = PendingIntent.getActivity(
+            context, 7, main,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_FULLSCREEN_LAUNCHER)
+            .setSmallIcon(R.drawable.ic_call)
+            .setContentTitle(callerName)
+            .setContentText("Incoming voice call")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setOngoing(true)
+            .setAutoCancel(true)
+            .setSilent(true)
+            .setFullScreenIntent(launcherPi, true)
+            .setContentIntent(launcherPi)
+            .build()
+
+        notificationManager.notify(NOTIFICATION_FULLSCREEN_LAUNCHER_ID, notification)
+    }
+
+    fun dismissStreamFullScreenLauncher() {
+        notificationManager.cancel(NOTIFICATION_FULLSCREEN_LAUNCHER_ID)
     }
 }

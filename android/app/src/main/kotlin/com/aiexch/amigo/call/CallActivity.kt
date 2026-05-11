@@ -368,65 +368,63 @@ class CallActivity : Activity() {
         btnMinimize.setOnClickListener { minimizeToApp() }
 
         btnAccept.setOnClickListener {
-            animateButtonPress(it) {
-                // Perform native actions so this works even without Flutter
-                try {
-                    CallNotificationForegroundService.stop(this)
-                } catch (_: Exception) {
-                }
-                CallNotificationManager.getInstance(this).dismissIncomingNotification()
-                setCallStatus("accepting")
+            // Press feedback runs in parallel with the actual accept work —
+            // wrapping the action in the press animation added ~250 ms of
+            // unavoidable latency before any handoff happened.
+            playPressFeedback(it)
 
-                // Accept via HTTP API so the caller is notified immediately
-                if (callId != 0) acceptCallViaApi(callId)
-
-                // Switch to in_call mode
-                callMode = "in_call"
-                updateUI()
-
-                // Notify Flutter if running
-                AmigoCallPlugin.sendEvent("onCallAccepted", mapOf("callId" to callId))
-
-                // Launch MainActivity so Flutter starts and reads "accepting" status
-                launchMainActivity()
+            // Perform native actions so this works even without Flutter
+            try {
+                CallNotificationForegroundService.stop(this)
+            } catch (_: Exception) {
             }
+            CallNotificationManager.getInstance(this).dismissIncomingNotification()
+            setCallStatus("accepting")
+
+            // Accept via HTTP API so the caller is notified immediately
+            if (callId != 0) acceptCallViaApi(callId)
+
+            // Switch to in_call mode
+            callMode = "in_call"
+            updateUI()
+
+            // Notify Flutter if running
+            AmigoCallPlugin.sendEvent("onCallAccepted", mapOf("callId" to callId))
+
+            // Launch MainActivity so Flutter starts and reads "accepting" status
+            launchMainActivity()
         }
 
         btnDecline.setOnClickListener {
-            animateButtonPress(it) {
-                // Perform native actions
-                try {
-                    CallNotificationForegroundService.stop(this)
-                } catch (_: Exception) {
-                }
-                CallNotificationManager.getInstance(this).dismissAllNotifications()
+            playPressFeedback(it)
 
-                // Notify Flutter if running
-                AmigoCallPlugin.sendEvent("onCallDeclined", mapOf("callId" to callId))
-
-                // Decline via HTTP API so caller is notified even without Flutter
-                if (callId != 0) declineCallViaApi(callId)
-
-                clearCallDetails()
-                finishWithAnimation()
+            try {
+                CallNotificationForegroundService.stop(this)
+            } catch (_: Exception) {
             }
+            CallNotificationManager.getInstance(this).dismissAllNotifications()
+
+            AmigoCallPlugin.sendEvent("onCallDeclined", mapOf("callId" to callId))
+
+            if (callId != 0) declineCallViaApi(callId)
+
+            clearCallDetails()
+            finishWithAnimation()
         }
 
         btnEndCall.setOnClickListener {
-            animateButtonPress(it) {
-                // Perform native actions
-                try {
-                    CallNotificationForegroundService.stop(this)
-                } catch (_: Exception) {
-                }
-                CallNotificationManager.getInstance(this).dismissAllNotifications()
-                clearCallDetails()
+            playPressFeedback(it)
 
-                // Notify Flutter if running
-                AmigoCallPlugin.sendEvent("onCallEnded", mapOf("callId" to callId))
-
-                finishWithAnimation()
+            try {
+                CallNotificationForegroundService.stop(this)
+            } catch (_: Exception) {
             }
+            CallNotificationManager.getInstance(this).dismissAllNotifications()
+            clearCallDetails()
+
+            AmigoCallPlugin.sendEvent("onCallEnded", mapOf("callId" to callId))
+
+            finishWithAnimation()
         }
 
         btnMute.setOnClickListener {
@@ -442,16 +440,16 @@ class CallActivity : Activity() {
         }
 
         btnEndCallRow.setOnClickListener {
-            animateButtonPress(it) {
-                try {
-                    CallNotificationForegroundService.stop(this)
-                } catch (_: Exception) {
-                }
-                CallNotificationManager.getInstance(this).dismissAllNotifications()
-                clearCallDetails()
-                AmigoCallPlugin.sendEvent("onCallEnded", mapOf("callId" to callId))
-                finishWithAnimation()
+            playPressFeedback(it)
+
+            try {
+                CallNotificationForegroundService.stop(this)
+            } catch (_: Exception) {
             }
+            CallNotificationManager.getInstance(this).dismissAllNotifications()
+            clearCallDetails()
+            AmigoCallPlugin.sendEvent("onCallEnded", mapOf("callId" to callId))
+            finishWithAnimation()
         }
     }
 
@@ -738,7 +736,7 @@ class CallActivity : Activity() {
         pulseRing2.alpha = 0f
     }
 
-    private fun animateButtonPress(view: View, action: () -> Unit) {
+    private fun playPressFeedback(view: View) {
         view.animate()
             .scaleX(0.85f)
             .scaleY(0.85f)
@@ -749,7 +747,6 @@ class CallActivity : Activity() {
                     .scaleY(1f)
                     .setDuration(150)
                     .setInterpolator(OvershootInterpolator(2f))
-                    .withEndAction { action() }
                     .start()
             }
             .start()

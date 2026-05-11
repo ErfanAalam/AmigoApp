@@ -24,8 +24,8 @@ import 'screens/chat/dm/dm-messaging.screen.dart';
 import 'screens/chat/group/group-messaging.screen.dart';
 import 'screens/home.layout.dart';
 import 'screens/share/external-share.screen.dart';
+import 'screens/version-gate.screen.dart';
 import 'services/auth/auth.service.dart';
-import 'models/call.model.dart';
 import 'services/call/call-foreground.service.dart';
 import 'services/call/call.service.dart';
 import 'services/call/stream/stream_call.service.dart';
@@ -37,6 +37,7 @@ import 'services/socket/transport.manager.dart';
 import 'services/socket/transport.service.dart';
 import 'services/socket/ws-message.handler.dart';
 import 'services/user-status.service.dart';
+import 'services/version-gate.service.dart';
 import 'ui/call/call-pill.widget.dart';
 import 'ui/loading-dots.widget.dart';
 import 'utils/navigation-helper.util.dart';
@@ -135,6 +136,8 @@ class _MyAppState extends material.State<MyApp>
     _initializeSharing();
     // _loadAppVersion();
     _getCurrentUser();
+    // Fire-and-forget — gate state flips via ValueNotifier when ready.
+    VersionGateService().check();
 
     // Process initial notification after the first frame is rendered
     // This ensures navigator is ready
@@ -145,6 +148,7 @@ class _MyAppState extends material.State<MyApp>
 
   /// Initialize authenticated user - can be called from anywhere after login/signup
   /// This method contains all the logic that should run when a user is authenticated
+  @override
   Future<void> initializeAuthenticatedUser() async {
     // Update authentication state
     final isAuthenticated = await _authService.isAuthenticated();
@@ -167,16 +171,13 @@ class _MyAppState extends material.State<MyApp>
         await _transportManager.connect(accessToken);
       }
 
-      // Push the FCM token to the chat backend now that we've confirmed the
-      // user is authenticated. NotificationService.initialize() (called from
-      // main()) attempts this earlier but it's fire-and-forget — on cold
-      // start, the auth cookies may not have been loaded yet so the upload
-      // returns 401 and is silently dropped. This re-attempt with a retry
-      // budget guarantees the chat backend has a current token before any
-      // chat/call notification can be sent. Without it the user has to
-      // open the app a second time to "wake up" notifications.
+      // Push the FCM token to the chat backend. The actual upload is gated
+      // inside NotificationService.maybeSendTokenToBackend() — it skips if
+      // the same token was already uploaded < 24h ago, and forces an upload
+      // on first authenticated launch (clearNotificationData wipes the
+      // metadata on logout). Safe to call on every app open.
       try {
-        await _authService.sendFCMTokenToBackend(3);
+        await _authService.sendFCMTokenToBackend();
       } catch (e) {
         debugPrint('⚠️ FCM token upload after auth failed: $e');
       }
@@ -189,11 +190,15 @@ class _MyAppState extends material.State<MyApp>
       // self-initialises if `Environment.callBackend == 'stream'` and a
       // STREAM_API_KEY is configured at build time — otherwise this is a
       // cheap no-op that keeps the WebRTC path the only active provider.
-      debugPrint('[STREAM-CALL] main: callBackend=${Environment.callBackend}  '
-          'isStreamCallBackend=${Environment.isStreamCallBackend}  '
-          'streamApiKey.len=${Environment.streamApiKey.length}');
+      debugPrint(
+        '[STREAM-CALL] main: callBackend=${Environment.callBackend}  '
+        'isStreamCallBackend=${Environment.isStreamCallBackend}  '
+        'streamApiKey.len=${Environment.streamApiKey.length}',
+      );
       if (Environment.isStreamCallBackend) {
-        debugPrint('[STREAM-CALL] main: kicking off StreamCallService().initialize()');
+        debugPrint(
+          '[STREAM-CALL] main: kicking off StreamCallService().initialize()',
+        );
         // ignore: unawaited_futures
         StreamCallService().initialize();
       }
@@ -222,8 +227,9 @@ class _MyAppState extends material.State<MyApp>
       // backend, the SDK + CallKit-style notification own the killed-launch
       // path, so skip this entirely.
       final callUtils = CallUtils();
-      final callDetails =
-          Environment.isStreamCallBackend ? null : await callUtils.getCallDetails();
+      final callDetails = Environment.isStreamCallBackend
+          ? null
+          : await callUtils.getCallDetails();
       final callStatus = callDetails?.callStatus;
       final callId = callDetails?.callId;
       final callerId = callDetails?.callerId;
@@ -299,6 +305,9 @@ class _MyAppState extends material.State<MyApp>
         } else {
           WakelockPlus.disable();
         }
+        // Re-run the version gate check on resume so a freshly-released
+        // mandatory update gates users without requiring a cold start.
+        VersionGateService().check();
         // NOTE: Do NOT re-open the native call screen here.
         // Doing so causes it to reopen every time the user presses back.
         // The call pill overlay gives the user a way to tap back into the call.
@@ -671,11 +680,16 @@ class _MyAppState extends material.State<MyApp>
           children: [child ?? const SizedBox.shrink(), const GlobalCallPill()],
         );
       },
-      home: _isLoading
-          ? _buildLoadingScreen()
-          : _isAuthenticated
-          ? MainScreen()
-          : LoginScreen(),
+      home: ValueListenableBuilder<VersionGateState>(
+        valueListenable: VersionGateService().state,
+        builder: (context, gate, _) {
+          if (gate.status == VersionGateStatus.blocked) {
+            return VersionGateScreen(state: gate);
+          }
+          if (_isLoading) return _buildLoadingScreen();
+          return _isAuthenticated ? MainScreen() : LoginScreen();
+        },
+      ),
       debugShowCheckedModeBanner: false,
     );
   }

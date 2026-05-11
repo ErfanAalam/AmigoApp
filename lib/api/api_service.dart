@@ -6,6 +6,7 @@ import 'clients/auth_client.dart';
 import 'clients/chat_client.dart';
 import 'clients/group_client.dart';
 import 'clients/user_client.dart';
+import 'clients/version_client.dart';
 import 'core/api_client.dart';
 
 /// Main API service that provides access to all domain-specific clients
@@ -15,6 +16,7 @@ class ApiService {
   late final ChatClient _chatClient;
   late final GroupClient _groupClient;
   late final UserClient _userClient;
+  late final VersionClient _versionClient;
   late final ApiClient _apiClient;
   late final Dio _dio;
   late final CookieService _cookieService;
@@ -44,6 +46,11 @@ class ApiService {
       authService: authService,
     );
     _userClient = UserClient(
+      dio: dio,
+      cookieService: cookieService,
+      authService: authService,
+    );
+    _versionClient = VersionClient(
       dio: dio,
       cookieService: cookieService,
       authService: authService,
@@ -85,5 +92,6 @@ class ApiService {
   ChatClient get chat => _chatClient;
   GroupClient get group => _groupClient;
   UserClient get user => _userClient;
+  VersionClient get version => _versionClient;
   ApiClient get client => _apiClient;
 }

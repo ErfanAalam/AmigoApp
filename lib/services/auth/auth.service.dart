@@ -160,36 +160,13 @@ class AuthService {
     }
   }
 
-  // Send FCM token to backend
-  Future<void> sendFCMTokenToBackend([int? retry]) async {
+  // Send FCM token to backend, gated by NotificationService's 24h/changed
+  // heuristic. Pass force: true to bypass the gate (e.g., right after login).
+  Future<void> sendFCMTokenToBackend({bool force = false}) async {
     try {
-      // Initialize notification service if not already done
-      await notificationService.initialize();
-
-      // Get the FCM token
-      final fcmToken = notificationService.fcmToken;
-
-      if (fcmToken != null && fcmToken.isNotEmpty) {
-        final result = await apiService.auth.updateFCMToken(fcmToken);
-        if (result.isSuccess) {
-          debugPrint('✅ FCM token sent to backend successfully');
-        } else {
-          if (retry == null || retry <= 0) {
-            debugPrint('❌ Failed to get FCM token after multiple attempts');
-            return;
-          }
-          await sendFCMTokenToBackend(retry - 1);
-        }
-      } else {
-        // Retry getting the token after a short delay
-        if (retry == null || retry <= 0) {
-          debugPrint('❌ Failed to get FCM token after multiple attempts');
-          return;
-        }
-        await sendFCMTokenToBackend(retry - 1);
-      }
+      await notificationService.maybeSendTokenToBackend(force: force);
     } catch (e) {
-      debugPrint('❌ Error sending FCM token');
+      debugPrint('❌ Error sending FCM token: $e');
     }
   }
 

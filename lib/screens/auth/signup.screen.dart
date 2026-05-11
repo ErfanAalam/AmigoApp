@@ -187,10 +187,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
 
       await UserUtils().saveUserDetails(UserModel.fromJson(userDetail));
 
-      // // Send FCM token to backend after successful signup
-      await authService.sendFCMTokenToBackend(3);
-
-      // Initialize authenticated user (this runs all the main.dart authenticated logic)
+      // FCM token upload happens inside initializeAuthenticatedUser().
       final appState = main.MyApp.appStateKey.currentState;
       if (appState != null && appState is main.AppStateInterface) {
         await (appState as main.AppStateInterface)

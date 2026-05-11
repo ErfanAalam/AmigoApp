@@ -83,6 +83,13 @@ class StreamCallService implements ICallBackend {
   StreamSubscription<Call?>? _incomingCallSub;
   StreamSubscription? _coreRingingSub;
   StreamSubscription? _connectionSub;
+  // Subscription to the CallKit-style notification's RingingEvent stream.
+  // We need this because stream_video_push_notification only forwards
+  // ActionCallAccept (via observeCoreRingingEvents) — ActionCallDecline is
+  // dropped on the floor, so the caller never finds out the user pressed
+  // "Decline" on the heads-up notification. We listen here and explicitly
+  // call `call.reject()` so the coordinator notifies the caller.
+  StreamSubscription<RingingEvent>? _ringingEventsSub;
   // Per-call diagnostic subscription — fires for every coordinator event the
   // SDK processes for this call (accept/reject/end/etc.). Lets us see the
   // exact event sequence when something goes sideways (ghost call,
@@ -92,6 +99,38 @@ class StreamCallService implements ICallBackend {
 
   bool _isInitialized = false;
   bool _isTerminating = false;
+
+  /// Whether the Flutter app is currently in the foreground.
+  ///
+  /// Used to decide whether the in-app `StreamCallRingtones` should play.
+  /// When the app is backgrounded the FCM-driven flutter_callkit_incoming
+  /// notification already plays the system ringtone — letting the in-app
+  /// driver also play it produces the duplicate ringing the user hits
+  /// when minimising the app while a call comes in.
+  ///
+  /// Reads `WidgetsBinding.instance.lifecycleState` at call time. That value
+  /// can be null very early in app boot (before the framework attaches), in
+  /// which case we treat it as foregrounded — that's the safe default for
+  /// initial route mounts driven from the cold-start consume helper.
+  bool get _isAppForeground {
+    final s = WidgetsBinding.instance.lifecycleState;
+    return s == null || s == AppLifecycleState.resumed;
+  }
+
+  /// Plays the incoming-call ringtone only when the app is foregrounded.
+  /// Logs the suppression reason so duplicate-ringtone bugs are diagnosable
+  /// from logs alone without having to instrument both call sites.
+  void _maybePlayIncomingRingtone(String origin) {
+    if (_isAppForeground) {
+      debugPrint('[STREAM-CALL]   ringtone($origin) → playIncoming (foreground)');
+      // ignore: unawaited_futures
+      StreamCallRingtones.instance.playIncoming();
+    } else {
+      debugPrint('[STREAM-CALL]   ringtone($origin) → SKIPPED — app is '
+          '${WidgetsBinding.instance.lifecycleState?.name ?? "unknown"}; '
+          'FCM/CallKit notification handles audio');
+    }
+  }
 
   // ---- ICallBackend surface ----------------------------------------------
 
@@ -500,8 +539,10 @@ class StreamCallService implements ICallBackend {
       _callStateSub?.cancel();
       _callStateSub = call.state.listen(_onCallStateChanged);
       // Play the system ringtone right now; don't wait for a state event.
-      // ignore: unawaited_futures
-      StreamCallRingtones.instance.playIncoming();
+      // Foreground-only — when the app is backgrounded/minimised the
+      // FCM-driven flutter_callkit_incoming notification plays the ringtone,
+      // and letting the in-app driver also play results in two ringtones.
+      _maybePlayIncomingRingtone('incomingCall');
       _maybePushCallScreen(call);
     });
 
@@ -521,6 +562,55 @@ class StreamCallService implements ICallBackend {
         _maybePushCallScreen(call);
       },
     );
+
+    // Decline-from-notification handler. The package's own subscriber
+    // ignores ActionCallDecline (it only cancels its event subscriptions),
+    // so without this the caller keeps ringing until call_timeout fires.
+    final pushManager = client.pushNotificationManager;
+    if (pushManager != null) {
+      debugPrint('[STREAM-CALL]   wiring ActionCallDecline listener on '
+          'pushManager.onCallEvent…');
+      _ringingEventsSub?.cancel();
+      _ringingEventsSub = pushManager.onCallEvent.listen((event) async {
+        // Trace EVERY event so it's obvious from logs whether the listener is
+        // firing at all when the user reports decline-from-notification not
+        // notifying the caller.
+        debugPrint('[STREAM-CALL] ⮕ pushManager.onCallEvent: '
+            '${event.runtimeType}');
+        if (event is! ActionCallDecline) return;
+        final cid = event.data.callCid;
+        debugPrint('[STREAM-CALL] ★ ActionCallDecline received cid=$cid');
+        if (cid == null || !cid.contains(':')) {
+          debugPrint('[STREAM-CALL]   ✗ cid missing/invalid — cannot reject');
+          return;
+        }
+        final colon = cid.indexOf(':');
+        final type = StreamCallType.fromString(cid.substring(0, colon));
+        final id = cid.substring(colon + 1);
+        debugPrint('[STREAM-CALL]   parsed cid → type=${type.value} id=$id');
+        try {
+          final call = client.makeCall(callType: type, id: id);
+          debugPrint('[STREAM-CALL]   calling call.reject()…');
+          final res = await call.reject();
+          debugPrint('[STREAM-CALL]   reject() returned success=${res.isSuccess}'
+              '${res.isSuccess ? "" : " err=${res.toString()}"}');
+          // Belt-and-braces: drop the lock-screen launcher notification too.
+          // Stream's call.ended/missed FCM normally clears it, but on a clean
+          // local decline we don't want to wait for that round-trip.
+          try {
+            await pushManager.endCallByCid(cid);
+            debugPrint('[STREAM-CALL]   endCallByCid($cid) ok');
+          } catch (e) {
+            debugPrint('[STREAM-CALL]   endCallByCid threw: $e');
+          }
+        } catch (e, st) {
+          debugPrint('[STREAM-CALL] ✗ reject from notification failed: $e\n$st');
+        }
+      });
+    } else {
+      debugPrint('[STREAM-CALL]   ⚠ pushManager is null — '
+          'ActionCallDecline cannot be wired');
+    }
 
     // Visibility into the coordinator WS. If we never see `connected` here,
     // the callee will never receive ringing events while the app is open.
@@ -610,10 +700,11 @@ class StreamCallService implements ICallBackend {
 
     // Drive ringtone playback off the SDK's status. Idempotent: each helper
     // no-ops if already in the right mode and stops the *other* tone first.
+    // Incoming uses the foreground-only guard so we don't double up with
+    // flutter_callkit_incoming's notification ringtone when backgrounded.
     final streamStatus = state.status;
     if (streamStatus is CallStatusIncoming && !streamStatus.acceptedByMe) {
-      // ignore: unawaited_futures
-      StreamCallRingtones.instance.playIncoming();
+      _maybePlayIncomingRingtone('callState');
     } else if (streamStatus is CallStatusOutgoing &&
         !streamStatus.acceptedByCallee) {
       // ignore: unawaited_futures
@@ -1156,12 +1247,14 @@ class StreamCallService implements ICallBackend {
     await _coreRingingSub?.cancel();
     await _connectionSub?.cancel();
     await _callEventsSub?.cancel();
+    await _ringingEventsSub?.cancel();
     _activeCallSub = null;
     _incomingCallSub = null;
     _callStateSub = null;
     _coreRingingSub = null;
     _connectionSub = null;
     _callEventsSub = null;
+    _ringingEventsSub = null;
     try {
       await _client?.disconnect();
     } catch (_) {}

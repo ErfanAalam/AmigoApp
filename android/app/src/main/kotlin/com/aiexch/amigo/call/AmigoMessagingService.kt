@@ -1,5 +1,6 @@
 package com.aiexch.amigo.call
 
+import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
@@ -51,6 +52,31 @@ class AmigoMessagingService : FlutterFirebaseMessagingService() {
             } catch (e: Exception) {
                 Log.w(TAG, "Audio mode reset failed: ${e.message}")
             }
+
+            // Mirror the call status into SharedPreferences so MainActivity's
+            // pre-super.onCreate check can apply lock-screen flags before the
+            // keyguard intercepts the launch from Stream's answer notification.
+            val streamType = message.data["type"]
+            when (streamType) {
+                "call.ring" -> {
+                    markStreamCallInFlight(message.data)
+                    // Only fire the lock-screen launcher when the device is
+                    // actually locked. On unlocked devices flutter_callkit_incoming's
+                    // existing heads-up handles the UI, and we don't want a
+                    // duplicate notification cluttering the tray.
+                    val km = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+                    if (km?.isKeyguardLocked == true) {
+                        fireStreamFullScreenLauncher(message.data)
+                    }
+                }
+                "call.missed", "call.ended" -> {
+                    clearCallDetails()
+                    try {
+                        CallNotificationManager.getInstance(this)
+                            .dismissStreamFullScreenLauncher()
+                    } catch (_: Exception) {}
+                }
+            }
         }
 
         if (type == "call") {
@@ -58,8 +84,51 @@ class AmigoMessagingService : FlutterFirebaseMessagingService() {
             // Do NOT call super — prevents Flutter background isolate from running for calls,
             // which avoids the MethodChannel-unavailable crash in terminated state
         } else {
-            // Chat messages and other types (incl. Stream Video pushes) handled by Flutter
+            // Chat messages, Stream Video pushes (incoming + missed + ended) all
+            // go through the Flutter background isolate. The ringtone duplication
+            // when the app is backgrounded is suppressed Dart-side instead — see
+            // the AppLifecycleState guards around StreamCallRingtones.playIncoming
+            // in stream_call.service.dart. That keeps the FCM/CallKit ringtone as
+            // the audible cue for backgrounded/killed state and lets the in-app
+            // ringtone play only when the user is actually looking at the app.
             super.onMessageReceived(message)
+        }
+    }
+
+    private fun fireStreamFullScreenLauncher(data: Map<String, String>) {
+        try {
+            val callCid = data["call_cid"] ?: return
+            val callerName = data["call_display_name"]
+                ?: data["created_by_display_name"]
+                ?: "Unknown"
+            val callerPfp = data["created_by_image"]?.takeIf { it.isNotEmpty() }
+            CallNotificationManager.getInstance(this)
+                .showStreamFullScreenLauncher(callCid, callerName, callerPfp)
+            Log.d(TAG, "fireStreamFullScreenLauncher: cid=$callCid (device locked)")
+        } catch (e: Exception) {
+            Log.w(TAG, "fireStreamFullScreenLauncher failed: ${e.message}")
+        }
+    }
+
+    private fun markStreamCallInFlight(data: Map<String, String>) {
+        try {
+            val callCid = data["call_cid"] ?: return
+            val callerName = data["call_display_name"]
+                ?: data["created_by_display_name"]
+                ?: "Unknown"
+            val callerPfp = data["created_by_image"]?.takeIf { it.isNotEmpty() }
+            val json = JSONObject().apply {
+                put("call_cid", callCid)
+                put("caller_name", callerName)
+                if (callerPfp != null) put("caller_profile_pic", callerPfp)
+                put("call_status", "ringing")
+                put("backend", "stream")
+            }
+            val prefs = getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+            prefs.edit().putString(CALL_DETAILS_KEY, json.toString()).apply()
+            Log.d(TAG, "markStreamCallInFlight: cid=$callCid")
+        } catch (e: Exception) {
+            Log.w(TAG, "markStreamCallInFlight failed: ${e.message}")
         }
     }
 

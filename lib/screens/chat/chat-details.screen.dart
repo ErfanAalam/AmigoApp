@@ -25,6 +25,7 @@ import '../../ui/snackbar.dart';
 import '../../utils/animations.utils.dart';
 import '../../utils/user.utils.dart';
 import 'dm/dm-media-links-docs.screen.dart';
+import 'dm/dm-messaging.screen.dart';
 
 /// Telegram-style chat details. Handles both DMs (`dm`) and groups (`group`),
 /// driven by which constructor arg is provided.
@@ -776,11 +777,14 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
     final userId = member['userId'].toString();
     final userName = (member['userName'] ?? member['name'] ?? '') as String;
     if (userId == _currentUser?.id) return; // no self-actions
-    if (!_isCurrentUserAdmin) return;
-    if (_isMemberCreator(userId)) return; // creator is untouchable
 
     final overlay = Overlay.of(anchor).context.findRenderObject() as RenderBox;
     final isAdmin = member['role'] == 'admin';
+    final canManage = _isCurrentUserAdmin && !_isMemberCreator(userId);
+
+    final messageLabel = userName.isNotEmpty
+        ? 'Message $userName'
+        : 'Message';
 
     final selected = await showBlurredPopup<_MemberAction>(
       context: anchor,
@@ -795,29 +799,40 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
       // top-left corner reads naturally for a finger-anchored menu.
       scaleAlignment: Alignment.topLeft,
       items: [
-        if (isAdmin)
-          const BlurredPopupAction(
-            value: _MemberAction.demote,
-            label: 'Remove admin',
-            icon: Icons.person_outline_rounded,
-          )
-        else
-          const BlurredPopupAction(
-            value: _MemberAction.promote,
-            label: 'Make admin',
-            icon: Icons.shield_outlined,
-          ),
-        const BlurredPopupSeparator(),
-        const BlurredPopupAction(
-          value: _MemberAction.remove,
-          label: 'Remove from group',
-          icon: Icons.person_remove_outlined,
-          style: BlurredPopupActionStyle.destructive,
+        BlurredPopupAction(
+          value: _MemberAction.message,
+          label: messageLabel,
+          icon: Icons.chat_bubble_outline_rounded,
         ),
+        if (canManage) ...[
+          const BlurredPopupSeparator(),
+          if (isAdmin)
+            const BlurredPopupAction(
+              value: _MemberAction.demote,
+              label: 'Remove admin',
+              icon: Icons.person_outline_rounded,
+            )
+          else
+            const BlurredPopupAction(
+              value: _MemberAction.promote,
+              label: 'Make admin',
+              icon: Icons.shield_outlined,
+            ),
+          const BlurredPopupSeparator(),
+          const BlurredPopupAction(
+            value: _MemberAction.remove,
+            label: 'Remove from group',
+            icon: Icons.person_remove_outlined,
+            style: BlurredPopupActionStyle.destructive,
+          ),
+        ],
       ],
     );
 
     switch (selected) {
+      case _MemberAction.message:
+        await _messageMember(member);
+        break;
       case _MemberAction.promote:
         await _promoteToAdmin(userId, userName);
         break;
@@ -829,6 +844,91 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
         break;
       case null:
         break;
+    }
+  }
+
+  /// Open (or create) a DM with the given group member, mirroring the
+  /// flow used by the contacts screen's `startConversation`.
+  Future<void> _messageMember(Map<String, dynamic> member) async {
+    final userId = member['userId'].toString();
+    if (userId.isEmpty || userId == _currentUser?.id) return;
+
+    // Prefer the locally cached user (has phone, role, etc.); fall back
+    // to a minimal model built from the group-member map.
+    UserModel? user = await _userRepo.getUserById(userId);
+    user ??= UserModel(
+      id: userId,
+      name: (member['userName'] ?? member['name'] ?? '') as String,
+      phone: '',
+      profilePic: member['profilePic'] as String?,
+      isOnline: _userStatusService.isUserOnline(userId),
+    );
+
+    try {
+      final result = await apiService.chat.createChat(userId);
+      if (!result.isSuccess || result.data == null) {
+        Snack.error('Failed to start chat: ${result.message}');
+        return;
+      }
+
+      await _userRepo.insertUser(user);
+
+      final data = result.data as Map<String, dynamic>;
+      final convId = data['id']?.toString() ?? '';
+
+      if (data['existing'] == true) {
+        final dm = await _conversationRepo.getDmByConversationId(convId);
+        if (!mounted) return;
+        if (dm == null) {
+          Snack.show(
+            'Cannot start conversation. The chat may be deleted. Try restoring the chat.',
+          );
+          return;
+        }
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => InnerChatPage(dm: dm)),
+        );
+        return;
+      }
+
+      final dm = DmModel(
+        chatId: convId,
+        recipientId: user.id,
+        recipientName: user.displayName,
+        recipientPhone: user.phone,
+        recipientProfilePic: user.profilePic,
+        unreadCount: 0,
+        isRecipientOnline: user.isOnline,
+        createdAt: data['created_at']?.toString() ?? '',
+      );
+
+      final conversation = ConversationModel(
+        id: convId,
+        type: 'dm',
+        unreadCount: 0,
+        createrId: data['creater_id']?.toString(),
+        createdAt: data['created_at']?.toString(),
+      );
+
+      await _conversationRepo.insertConversations([conversation]);
+      await _memberRepo.insertConversationMembers([
+        ConversationMemberModel(
+          chatId: convId,
+          userId: user.id,
+          role: 'member',
+          joinedAt: data['created_at']?.toString(),
+        ),
+      ]);
+      await ref.read(chatProvider.notifier).addNewDm(dm);
+
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => InnerChatPage(dm: dm)),
+      );
+    } catch (e) {
+      Snack.error('Failed to start chat: $e');
     }
   }
 
@@ -1539,4 +1639,4 @@ class _RoleBadge extends StatelessWidget {
   }
 }
 
-enum _MemberAction { promote, demote, remove }
+enum _MemberAction { message, promote, demote, remove }
