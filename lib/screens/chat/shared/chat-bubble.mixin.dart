@@ -309,8 +309,16 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
         fadeAnimation: messageFadeAnimations[message.id],
         context: context,
         buildMessageContent: buildMessageContent,
-        isMediaMessage: ChatHelpers.isMediaMessage,
-        buildMessageStatusTicks: buildMessageStatusTicks,
+        // Deleted messages always render as the placeholder text bubble — even
+        // if the original was a media message — so force the non-media layout
+        // for them.
+        isMediaMessage: (m) =>
+            !m.isDeleted && ChatHelpers.isMediaMessage(m),
+        // Deleted messages keep the time but drop the delivery/read ticks —
+        // the placeholder is a tombstone, not a live message.
+        buildMessageStatusTicks: (m) => m.isDeleted
+            ? const SizedBox.shrink()
+            : buildMessageStatusTicks(m),
         onResendFailedMessage: onResendFailedMessage,
         onDeleteFailedMessage: (messageId) async {
           if (canSetState) {
@@ -344,6 +352,22 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
   }
 
   Widget buildMessageContent(MessageModel message, bool isMyMessage) {
+    // Soft-deleted messages (deleted for everyone / by admin or staff) render
+    // a faint italic placeholder regardless of original type. The DB row is
+    // preserved so admin tooling can still surface the original body.
+    if (message.isDeleted) {
+      return Text(
+        'this message was deleted',
+        style: TextStyle(
+          color: (isMyMessage ? Colors.white : Colors.black87).withOpacity(0.6),
+          fontSize: 15,
+          height: 1.4,
+          fontStyle: FontStyle.italic,
+          fontWeight: FontWeight.w400,
+        ),
+      );
+    }
+
     if (message.type == MessageType.contact) {
       return ContactMessageWidget(
         contacts: parseContactsFromMessage(message),

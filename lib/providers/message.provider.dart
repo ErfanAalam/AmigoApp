@@ -11,8 +11,12 @@ import '../utils/user.utils.dart';
 /// Backed by a Drift watch query — the UI auto-rebuilds whenever any write
 /// path (WebSocket, long-polling, FCM background handler) inserts into SQLite.
 final messageStreamProvider =
-    StreamProvider.family<List<MessageModel>, String>((ref, convId) {
-  return MessageRepository().watchMessages(convId);
+    StreamProvider.family<List<MessageModel>, String>((ref, convId) async* {
+  final user = await UserUtils().getUserDetails();
+  yield* MessageRepository().watchMessages(
+    convId,
+    currentUserId: user?.id,
+  );
 });
 
 /// Reactive stream of DM conversations ordered by last activity.

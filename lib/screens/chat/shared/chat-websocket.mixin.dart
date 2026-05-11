@@ -294,21 +294,11 @@ mixin ChatWebSocketMixin<T extends ConsumerStatefulWidget>
   }
 
   void handleMessageDelete(DeleteMessagePayload payload) async {
-    final indicesToRemove = <int>[];
-    for (final msgId in payload.messageIds) {
-      final idx = messages.indexWhere((msg) => msg.id == msgId);
-      if (idx != -1) indicesToRemove.add(idx);
-    }
-    if (indicesToRemove.isEmpty) return;
-
-    // Remove descending so prior removes don't shift later indices.
-    indicesToRemove.sort((a, b) => b.compareTo(a));
-    if (!canSetState) return;
-    safeSetState(() {
-      for (final idx in indicesToRemove) {
-        messages.removeAt(idx);
-      }
-    });
+    // No-op — the global chat.provider.handleMessageDelete soft-deletes the
+    // Messages row, which fires the Drift watcher and updates the in-memory
+    // list with the deleted message still present so the bubble can render
+    // the "this message was deleted" placeholder. Removing from `messages`
+    // here would override that and make the bubble vanish.
   }
 
   void handleMessagePin(MessagePinPayload payload) async {

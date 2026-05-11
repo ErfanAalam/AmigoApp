@@ -219,7 +219,9 @@ mixin ChatSyncMixin<T extends ConsumerStatefulWidget>
     // Messages stream is the critical-path subscription — it drives the
     // first paint (`isLoading = false` on first emission). Subscribe now.
     messagesStreamSub?.cancel();
-    messagesStreamSub = messagesRepo.watchMessages(conversationId).listen(
+    messagesStreamSub = messagesRepo
+        .watchMessages(conversationId, currentUserId: currentUserId)
+        .listen(
       (msgs) {
         if (!canSetState) return;
         safeSetState(() {

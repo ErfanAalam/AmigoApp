@@ -601,8 +601,9 @@ class NotificationService {
         }
       }
 
-      // Delete messages from local DB
-      await _messageRepo.permanentlyDeleteMessages(deletedMessageIds);
+      // Soft-delete locally so the UI keeps the row and renders the
+      // "this message was deleted" placeholder.
+      await _messageRepo.deleteMessages(deletedMessageIds);
 
       // Get conversation to update unread count
       final conversation = await _conversationRepo.getConversationById(

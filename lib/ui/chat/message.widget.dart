@@ -461,41 +461,49 @@ class MessageBubble extends ConsumerWidget {
                     ),
                   ],
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Show sender name for group messages (non-my messages)
-                    if (config.isGroupChat && !config.isMyMessage) ...[
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4, bottom: 2),
-                        child: Text(
-                          config.message.senderName?.isNotEmpty ?? false
-                              ? config.message.senderName ?? ''
-                              : 'Unknown User',
-                          style: TextStyle(
-                            color: themeColor.primary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
+                // IntrinsicWidth makes the Column hug its widest non-Align
+                // child (sender name, body, reply preview). Without it the
+                // Align(centerRight) below would expand to the bubble's
+                // maxWidth and stretch the whole container.
+                child: IntrinsicWidth(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Show sender name for group messages (non-my messages)
+                      if (config.isGroupChat && !config.isMyMessage) ...[
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4, bottom: 2),
+                          child: Text(
+                            config.message.senderName?.isNotEmpty ?? false
+                                ? config.message.senderName ?? ''
+                                : 'Unknown User',
+                            style: TextStyle(
+                              color: themeColor.primary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
+                        ),
+                      ],
+                      // Reply message preview (if this is a reply)
+                      if (config.message.isReply) _buildReplyPreviewWithFetch(),
+
+                      // Message content (text, image, or video)
+                      config.buildMessageContent(
+                        config.message,
+                        config.isMyMessage,
+                      ),
+                      const SizedBox(height: 1),
+                      // Time and status row — right-aligned within the bubble.
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: _buildTimeAndStatusRowChildren(),
                         ),
                       ),
                     ],
-                    // Reply message preview (if this is a reply)
-                    if (config.message.isReply) _buildReplyPreviewWithFetch(),
-
-                    // Message content (text, image, or video)
-                    config.buildMessageContent(
-                      config.message,
-                      config.isMyMessage,
-                    ),
-                    const SizedBox(height: 1),
-                    // Time and status row
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: _buildTimeAndStatusRowChildren(),
-                    ),
-                  ],
+                  ),
                 ),
               ),
         // Reactions row below the bubble

@@ -1856,8 +1856,10 @@ class ChatNotifier extends Notifier<ChatState> {
         }
       }
 
-      // remove messages from local DB
-      await _messageRepo.permanentlyDeleteMessages(deletedMessageIds);
+      // Soft-delete locally so the UI keeps the row and renders the
+      // "this message was deleted" placeholder. Admin panels and history
+      // tooling can still read the original body via Messages.body.
+      await _messageRepo.deleteMessages(deletedMessageIds);
 
       final convFromDB = await _conversationsRepo.getConversationById(
         conversationId,

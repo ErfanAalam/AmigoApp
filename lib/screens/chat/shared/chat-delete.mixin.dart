@@ -63,16 +63,21 @@ mixin ChatDeleteMixin<T extends ConsumerStatefulWidget> on ConsumerState<T> {
       }
     }
 
-    // Optimistic UI removal.
-    if (canSetState) {
+    // For "delete for me", optimistically remove the message from the in-memory
+    // list — it should vanish for this user only. For "delete for everyone",
+    // we leave the row in place: the soft-delete write below flips
+    // Messages.deletedAt and the watcher restreams it with a "this message was
+    // deleted" placeholder, so removing it now would cause a brief flicker.
+    if (!deleteForEveryone && canSetState) {
       safeSetState(() {
         messages.removeWhere((m) => ids.contains(m.id));
       });
     }
 
     try {
-      // Local DB delete only happens for "for everyone" today; "for me"
-      // waits for the API to confirm before mutating the local row.
+      // Local DB soft-delete for "for everyone" — flips Messages.deletedAt so
+      // the watcher restreams the row and the UI renders the placeholder.
+      // "for me" routes through MessageInfo.deletedAt below.
       if (deleteForEveryone) {
         for (final id in ids) {
           await messagesRepo.deleteMessage(id);
@@ -136,8 +141,15 @@ mixin ChatDeleteMixin<T extends ConsumerStatefulWidget> on ConsumerState<T> {
         conversationId: conversationId,
       );
       if (result.isSuccess) {
-        for (final id in messageIds) {
-          await messagesRepo.deleteMessage(id);
+        final uid = currentUserId;
+        if (uid != null) {
+          for (final id in messageIds) {
+            await messagesRepo.markDeletedForMe(
+              messageId: id,
+              userId: uid,
+              chatId: conversationId,
+            );
+          }
         }
       } else {
         await _rehydrateAfterFailedDelete();

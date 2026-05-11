@@ -224,19 +224,40 @@ class MessageRepository {
   /// Watch messages for a conversation as a reactive Drift stream.
   /// The stream emits a new list whenever any message in this conversation
   /// is inserted, updated, or deleted in SQLite — including from FCM handlers.
-  Stream<List<MessageModel>> watchMessages(String conversationId) {
+  ///
+  /// Messages soft-deleted globally (Messages.deletedAt) are kept in the
+  /// stream so the UI can render a "this message was deleted" placeholder.
+  /// Per-user "delete for me" rows (MessageInfo.deletedAt for [currentUserId])
+  /// are filtered out so the message vanishes only for that user.
+  Stream<List<MessageModel>> watchMessages(
+    String conversationId, {
+    String? currentUserId,
+  }) {
     final db = sqliteDatabase.database;
 
-    final query = db.select(db.messages).join([
+    final uid = currentUserId;
+    final infoForUser = uid == null ? null : db.alias(db.messageInfo, 'mi_self');
+
+    final joins = <Join>[
       leftOuterJoin(db.users, db.users.id.equalsExp(db.messages.senderId)),
-    ])
-      ..where(
-        db.messages.chatId.equals(conversationId) &
-            db.messages.deletedAt.isNull(),
-      )
-      ..orderBy([
-        OrderingTerm(expression: db.messages.sentAt, mode: OrderingMode.asc),
-      ]);
+      if (infoForUser != null && uid != null)
+        leftOuterJoin(
+          infoForUser,
+          infoForUser.messageId.equalsExp(db.messages.id) &
+              infoForUser.userId.equals(uid),
+        ),
+    ];
+
+    final query = db.select(db.messages).join(joins)
+      ..where(db.messages.chatId.equals(conversationId));
+
+    if (infoForUser != null) {
+      query.where(infoForUser.deletedAt.isNull());
+    }
+
+    query.orderBy([
+      OrderingTerm(expression: db.messages.sentAt, mode: OrderingMode.asc),
+    ]);
 
     return query.watch().map((results) {
       return results.map((row) {
@@ -517,6 +538,41 @@ class MessageRepository {
             deletedAt: Value(DateTime.now().toIso8601String()),
           ),
         );
+  }
+
+  /// Mark a message as "deleted for me" by writing MessageInfo.deletedAt for
+  /// the given user. The Messages.deletedAt column (global "deleted for
+  /// everyone") is left untouched. watchMessages joins MessageInfo for the
+  /// current user and filters these rows out — so they vanish locally
+  /// without affecting other participants' view.
+  Future<SqliteResult<void>> markDeletedForMe({
+    required String messageId,
+    required String userId,
+    required String chatId,
+  }) async {
+    try {
+      final db = sqliteDatabase.database;
+      final timestamp = DateTime.now().toIso8601String();
+      final timestampSql = "'${timestamp.replaceAll("'", "''")}'";
+      await db.customInsert(
+        '''
+        INSERT INTO message_info (chat_id, message_id, user_id, deleted_at)
+        VALUES ('$chatId', '$messageId', '$userId', $timestampSql)
+        ON CONFLICT(message_id, user_id) DO UPDATE SET
+          chat_id = excluded.chat_id,
+          deleted_at = excluded.deleted_at
+        ''',
+        updates: {db.messageInfo},
+      );
+      return SqliteResult.success(message: 'Message marked deleted for user');
+    } catch (e) {
+      final errorCode = _extractSqliteErrorCode(e);
+      debugPrint('Error marking message deleted for user: $e');
+      return SqliteResult.error(
+        message: 'Failed to mark message deleted for user',
+        errorCode: errorCode,
+      );
+    }
   }
 
   /// Restore a deleted message
