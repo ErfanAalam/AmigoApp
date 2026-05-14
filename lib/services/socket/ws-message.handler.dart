@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import '../../db/repositories/user.repo.dart';
 import '../../types/socket.types.dart';
 import '../../utils/navigation-helper.util.dart';
 import '../user-status.service.dart';
@@ -88,6 +91,12 @@ class WebSocketMessageHandler {
   final StreamController<MessageReactPayload> _messageReactController =
       StreamController<MessageReactPayload>.broadcast();
 
+  // Profile updates from peers (name / profile pic changes)
+  final StreamController<UserUpdatePayload> _userUpdateController =
+      StreamController<UserUpdatePayload>.broadcast();
+
+  final UserRepository _userRepo = UserRepository();
+
   bool _isInitialized = false;
 
   /// Get stream for online status (type: 'connection:status')
@@ -166,6 +175,10 @@ class WebSocketMessageHandler {
   /// Get stream for emoji reactions (type: 'message:react')
   Stream<MessageReactPayload> get messageReactStream =>
       _messageReactController.stream;
+
+  /// Get stream for peer profile updates (type: 'user:update')
+  Stream<UserUpdatePayload> get userUpdateStream =>
+      _userUpdateController.stream;
 
   /// Add a message directly to the messageNewStream
   /// This is used by transports (like LongPollingTransport) to add synced messages
@@ -406,6 +419,14 @@ class WebSocketMessageHandler {
         case WSMessageType.messageForward:
           debugPrint('↩️ Message forward: ${message.type.value}');
           break;
+
+        case WSMessageType.userUpdate:
+          final payload = message.userUpdatePayload;
+          if (payload != null) {
+            await _applyUserUpdate(payload);
+            _userUpdateController.add(payload);
+          }
+          break;
       }
     } catch (e) {
       debugPrint('❌ Error handling WebSocket message');
@@ -467,6 +488,44 @@ class WebSocketMessageHandler {
     return joinConversationStream.where(
       (payload) => payload.convId == conversationId,
     );
+  }
+
+  /// Persist a peer's profile update locally and evict their stale PFP
+  /// from the on-disk image cache. Watchers of the Users table will
+  /// re-render automatically thanks to Drift's reactive streams.
+  Future<void> _applyUserUpdate(UserUpdatePayload payload) async {
+    try {
+      // Update name if provided
+      if (payload.name != null && payload.name!.isNotEmpty) {
+        await _userRepo.updateUserName(payload.userId, payload.name!);
+      }
+
+      // Update profile pic. Treat empty string the same as null so a user
+      // who clears their PFP locally also clears it for peers.
+      final newPic = payload.profilePic;
+      final normalizedPic =
+          (newPic == null || newPic.isEmpty) ? null : newPic;
+      // Only touch the PFP column when the server actually included a value
+      // — `name`-only updates leave profile_pic unchanged.
+      if (newPic != null) {
+        await _userRepo.updateUserProfilePic(payload.userId, normalizedPic);
+      }
+
+      // Evict the previous PFP from the disk + memory cache so widgets
+      // pick up the new one without a force restart. CachedNetworkImage
+      // is keyed by URL, so simply removing the stale URL is enough.
+      final previousPic = payload.previousProfilePic;
+      if (previousPic != null && previousPic.isNotEmpty) {
+        try {
+          await CachedNetworkImage.evictFromCache(previousPic);
+          await DefaultCacheManager().removeFile(previousPic);
+        } catch (e) {
+          debugPrint('⚠️ Failed to evict previous PFP from cache: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error applying user:update for ${payload.userId}: $e');
+    }
   }
 
   /// Show health check dialog
@@ -595,6 +654,8 @@ class WebSocketMessageHandler {
     _callErrorController.close();
     _callHoldController.close();
     _callMissedController.close();
+    _messageReactController.close();
+    _userUpdateController.close();
     _isInitialized = false;
   }
 }

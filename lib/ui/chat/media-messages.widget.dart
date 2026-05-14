@@ -129,7 +129,7 @@ Widget buildImageMessage(MediaMessageConfig config, WidgetRef ref) {
     return Text(
       'Image not available',
       style: TextStyle(
-        color: config.isMyMessage ? Colors.white70 : Colors.grey[600],
+        color: Colors.grey[600],
         fontSize: 14,
         fontStyle: FontStyle.italic,
       ),
@@ -155,7 +155,7 @@ Widget buildImageMessage(MediaMessageConfig config, WidgetRef ref) {
     return Text(
       'Image not available',
       style: TextStyle(
-        color: config.isMyMessage ? Colors.white70 : Colors.grey[600],
+        color: Colors.grey[600],
         fontSize: 14,
         fontStyle: FontStyle.italic,
       ),
@@ -166,14 +166,31 @@ Widget buildImageMessage(MediaMessageConfig config, WidgetRef ref) {
     child: Container(
       width: 200,
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: themeColor.primary, width: 4),
+        color: config.isMyMessage ? null : Colors.white,
+        gradient: config.isMyMessage
+            ? LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  themeColor.primaryExtraLight,
+                  themeColor.primaryPlusLight,
+                ],
+              )
+            : null,
+        border: Border.all(color: Colors.transparent, width: 4),
         borderRadius: BorderRadius.only(
           topLeft: const Radius.circular(14),
           topRight: const Radius.circular(14),
           bottomLeft: Radius.circular(config.isMyMessage ? 14 : 0),
           bottomRight: Radius.circular(config.isMyMessage ? 0 : 14),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(50),
+            blurRadius: 2,
+            offset: const Offset(0, 0.5),
+          ),
+        ],
       ),
       child: Stack(
         children: [
@@ -359,7 +376,7 @@ Widget buildVideoMessage(MediaMessageConfig config, WidgetRef ref) {
     return Text(
       'Video not available',
       style: TextStyle(
-        color: config.isMyMessage ? Colors.white70 : Colors.grey[600],
+        color: Colors.grey[600],
         fontSize: 14,
         fontStyle: FontStyle.italic,
       ),
@@ -385,7 +402,7 @@ Widget buildVideoMessage(MediaMessageConfig config, WidgetRef ref) {
     return Text(
       'Video not available',
       style: TextStyle(
-        color: config.isMyMessage ? Colors.white70 : Colors.grey[600],
+        color: Colors.grey[600],
         fontSize: 14,
         fontStyle: FontStyle.italic,
       ),
@@ -396,14 +413,31 @@ Widget buildVideoMessage(MediaMessageConfig config, WidgetRef ref) {
     child: Container(
       width: 200,
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: themeColor.primary, width: 4),
+        color: config.isMyMessage ? null : Colors.white,
+        gradient: config.isMyMessage
+            ? LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  themeColor.primaryExtraLight,
+                  themeColor.primaryPlusLight,
+                ],
+              )
+            : null,
+        border: Border.all(color: Colors.transparent, width: 4),
         borderRadius: BorderRadius.only(
           topLeft: const Radius.circular(14),
           topRight: const Radius.circular(14),
           bottomLeft: Radius.circular(config.isMyMessage ? 14 : 0),
           bottomRight: Radius.circular(config.isMyMessage ? 0 : 14),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(50),
+            blurRadius: 2,
+            offset: const Offset(0, 0.5),
+          ),
+        ],
       ),
       child: Stack(
         children: [
@@ -651,7 +685,7 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
     return Text(
       'Document not available',
       style: TextStyle(
-        color: config.isMyMessage ? themeColor.primary : Colors.grey[600],
+        color: Colors.grey[600],
         fontSize: 14,
         fontStyle: FontStyle.italic,
       ),
@@ -680,7 +714,7 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
     return Text(
       'Document not available',
       style: TextStyle(
-        color: config.isMyMessage ? Colors.white70 : Colors.grey[600],
+        color: Colors.grey[600],
         fontSize: 14,
         fontStyle: FontStyle.italic,
       ),
@@ -728,26 +762,28 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
                   width: 280,
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: config.isMyMessage
-                        ? themeColor.primary
-                        : Colors.white,
+                    color: config.isMyMessage ? null : Colors.white,
+                    gradient: config.isMyMessage
+                        ? LinearGradient(
+                            begin: Alignment.centerLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              themeColor.primaryExtraLight,
+                              themeColor.primaryPlusLight,
+                            ],
+                          )
+                        : null,
                     borderRadius: BorderRadius.only(
                       topLeft: const Radius.circular(14),
                       topRight: const Radius.circular(14),
                       bottomLeft: Radius.circular(config.isMyMessage ? 14 : 0),
                       bottomRight: Radius.circular(config.isMyMessage ? 0 : 14),
                     ),
-                    border: Border.all(
-                      color: config.isMyMessage
-                          ? themeColor.primary
-                          : Colors.grey[300]!,
-                      width: 1,
-                    ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withAlpha(5),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
+                        color: Colors.black.withAlpha(50),
+                        blurRadius: 2,
+                        offset: const Offset(0, 0.5),
                       ),
                     ],
                   ),
@@ -756,17 +792,13 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: config.isMyMessage
-                              ? themeColor.primary.withAlpha(25)
-                              : themeColor.primary.withAlpha(10),
+                          color: themeColor.primary.withAlpha(20),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Icon(
                           docIcon,
                           size: 24,
-                          color: config.isMyMessage
-                              ? Colors.white
-                              : themeColor.primary,
+                          color: themeColor.primary,
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -778,10 +810,8 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
                               (fileName != null && fileName.isNotEmpty)
                                   ? fileName
                                   : 'Document',
-                              style: TextStyle(
-                                color: config.isMyMessage
-                                    ? Colors.white
-                                    : Colors.black87,
+                              style: const TextStyle(
+                                color: Colors.black87,
                                 fontSize: 15,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -793,9 +823,7 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
                               Text(
                                 ChatHelpers.formatFileSize(fileSize),
                                 style: TextStyle(
-                                  color: config.isMyMessage
-                                      ? Colors.white
-                                      : Colors.grey[600],
+                                  color: Colors.grey[600],
                                   fontSize: 13,
                                   fontWeight: FontWeight.w400,
                                 ),
@@ -819,9 +847,7 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
                         Icon(
                           Icons.visibility,
                           size: 22,
-                          color: config.isMyMessage
-                              ? Colors.white
-                              : themeColor.primary,
+                          color: themeColor.primary,
                         ),
                     ],
                   ),
@@ -880,10 +906,8 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
                             ChatHelpers.formatMessageTime(
                               config.message.sentAt,
                             ),
-                            style: TextStyle(
-                              color: config.isMyMessage
-                                  ? Colors.white
-                                  : Colors.black,
+                            style: const TextStyle(
+                              color: Colors.white,
                               fontSize: 11,
                               fontWeight: FontWeight.w400,
                             ),
@@ -954,8 +978,8 @@ Widget buildDocumentMessage(MediaMessageConfig config, WidgetRef ref) {
         const SizedBox(height: 8),
         Text(
           config.message.body!,
-          style: TextStyle(
-            color: config.isMyMessage ? Colors.white : Colors.black87,
+          style: const TextStyle(
+            color: Colors.black87,
             fontSize: 16,
             height: 1.4,
           ),
@@ -972,7 +996,7 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
     return Text(
       'Audio not available',
       style: TextStyle(
-        color: config.isMyMessage ? Colors.white70 : Colors.grey[600],
+        color: Colors.grey[600],
         fontSize: 14,
         fontStyle: FontStyle.italic,
       ),
@@ -999,7 +1023,7 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
     return Text(
       'Audio not available',
       style: TextStyle(
-        color: config.isMyMessage ? Colors.white70 : Colors.grey[600],
+        color: Colors.grey[600],
         fontSize: 14,
         fontStyle: FontStyle.italic,
       ),
@@ -1056,13 +1080,30 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
                 width: 250,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: config.isMyMessage ? themeColor.primary : Colors.white,
+                  color: config.isMyMessage ? null : Colors.white,
+                  gradient: config.isMyMessage
+                      ? LinearGradient(
+                          begin: Alignment.centerLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            themeColor.primaryExtraLight,
+                            themeColor.primaryPlusLight,
+                          ],
+                        )
+                      : null,
                   borderRadius: BorderRadius.only(
                     topLeft: const Radius.circular(14),
                     topRight: const Radius.circular(14),
                     bottomLeft: Radius.circular(config.isMyMessage ? 14 : 0),
                     bottomRight: Radius.circular(config.isMyMessage ? 0 : 14),
                   ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withAlpha(50),
+                      blurRadius: 2,
+                      offset: const Offset(0, 0.5),
+                    ),
+                  ],
                 ),
                 child: Row(
                   children: [
@@ -1083,21 +1124,13 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
                           color: isPlaying
-                              ? (config.isMyMessage
-                                    ? Colors.white.withAlpha(40)
-                                    : Colors.blue.withAlpha(30))
-                              : (config.isMyMessage
-                                    ? Colors.white.withAlpha(20)
-                                    : Colors.grey[200]),
+                              ? themeColor.primary.withAlpha(30)
+                              : themeColor.primary.withAlpha(15),
                           borderRadius: BorderRadius.circular(100),
                           boxShadow: isPlaying
                               ? [
                                   BoxShadow(
-                                    color:
-                                        (config.isMyMessage
-                                                ? Colors.white
-                                                : Colors.blue)
-                                            .withAlpha(30),
+                                    color: themeColor.primary.withAlpha(30),
                                     blurRadius: 8,
                                     spreadRadius: 2,
                                   ),
@@ -1109,13 +1142,7 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
                           child: Icon(
                             isPlaying ? Icons.pause : Icons.play_arrow,
                             size: 20,
-                            color: isPlaying
-                                ? (config.isMyMessage
-                                      ? Colors.white
-                                      : Colors.blue[700])
-                                : (config.isMyMessage
-                                      ? Colors.white
-                                      : Colors.grey[700]),
+                            color: themeColor.primary,
                           ),
                         ),
                       ),
@@ -1136,9 +1163,7 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
                                 Icon(
                                   Icons.audiotrack,
                                   size: 16,
-                                  color: config.isMyMessage
-                                      ? Colors.white70
-                                      : Colors.grey[600],
+                                  color: Colors.grey[600],
                                 ),
                               const SizedBox(width: 8),
                               Expanded(
@@ -1146,17 +1171,13 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
                                   height: 3,
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(2),
-                                    color: config.isMyMessage
-                                        ? Colors.white30
-                                        : Colors.grey[300],
+                                    color: Colors.grey[300],
                                   ),
                                   child: LinearProgressIndicator(
                                     value: progressValue,
                                     backgroundColor: Colors.transparent,
                                     valueColor: AlwaysStoppedAnimation<Color>(
-                                      config.isMyMessage
-                                          ? Colors.white
-                                          : Colors.blue,
+                                      themeColor.primary,
                                     ),
                                     minHeight: 3,
                                   ),
@@ -1172,14 +1193,14 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
                                 Icon(
                                   Icons.star,
                                   size: 14,
-                                  color: Colors.yellow,
+                                  color: Colors.amber[600],
                                 ),
                               if (isUploading) ...[
                                 Spacer(),
                                 Text(
                                   "Uploading",
                                   style: TextStyle(
-                                    color: Colors.white,
+                                    color: Colors.grey[700],
                                     fontSize: 11,
                                     fontWeight: FontWeight.w500,
                                   ),
@@ -1224,9 +1245,7 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
                                     isPlaying ? position : duration,
                                   ),
                                   style: TextStyle(
-                                    color: config.isMyMessage
-                                        ? Colors.white70
-                                        : Colors.grey[600],
+                                    color: Colors.grey[600],
                                     fontSize: 12,
                                   ),
                                 ),
@@ -1236,7 +1255,7 @@ Widget buildAudioMessage(MediaMessageConfig config, WidgetRef ref) {
                                     config.message.sentAt,
                                   ),
                                   style: TextStyle(
-                                    color: Colors.white,
+                                    color: Colors.grey[600],
                                     fontSize: 11,
                                     fontWeight: FontWeight.w400,
                                   ),

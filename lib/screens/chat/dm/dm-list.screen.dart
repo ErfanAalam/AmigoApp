@@ -10,10 +10,12 @@ import '../../../providers/theme-color.provider.dart';
 import '../../../services/chat-prewarm.service.dart';
 import '../../../services/user-status.service.dart';
 import '../../../types/socket.types.dart';
+import '../../../ui/app-bar.widget.dart';
 import '../../../ui/chat.action-sheet.dart';
 import '../../../ui/chat/searchable-list.widget.dart';
 import '../../../ui/chat/user-profile.modal.dart';
 import '../../../utils/route-transitions.util.dart';
+import '../../contact/contact-list.screen.dart';
 import 'dm-messaging.screen.dart';
 
 class ChatsPage extends ConsumerStatefulWidget {
@@ -141,66 +143,23 @@ class ChatsPageState extends ConsumerState<ChatsPage>
   @override
   Widget build(BuildContext context) {
     final themeColor = ref.watch(themeColorProvider);
+    final view = View.of(context);
+    final systemNavInset = view.viewPadding.bottom / view.devicePixelRatio;
 
     return Scaffold(
-      appBar: PreferredSize(
-        preferredSize: Size.fromHeight(60),
-        child: AppBar(
-          backgroundColor: themeColor.primary,
-          leadingWidth: 60,
-          leading: Container(
-            margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
-            child: Container(
-              padding: EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.white.withAlpha(40),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                Icons.chat_bubble_rounded,
-                color: Colors.white,
-                size: 24,
-              ),
-            ),
+      backgroundColor: Colors.white,
+      appBar: AmigoAppBar(
+        title: 'AmigoChats',
+        actions: [
+          AmigoAppBarAction(
+            icon: Icons.refresh_rounded,
+            onPressed: _refreshConversations,
+            tooltip: 'Refresh',
           ),
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Amigo chats',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 20,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            Container(
-              margin: EdgeInsets.only(right: 16),
-              child: IconButton(
-                icon: Container(
-                  padding: EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withAlpha(40),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    Icons.refresh_rounded,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                ),
-                onPressed: () => _refreshConversations(),
-              ),
-            ),
-          ],
-        ),
+        ],
       ),
-
       body: SearchableListLayout(
+        backgroundColor: Colors.white,
         searchBar: SearchableListBar(
           controller: _searchController,
           hintText: 'Search chats',
@@ -209,13 +168,40 @@ class ChatsPageState extends ConsumerState<ChatsPage>
         ),
         content: _buildChatsContent(),
       ),
-      // floatingActionButton: FloatingActionButton(
-      //   onPressed: () {
-      //     // TODO: Implement new chat functionality
-      //   },
-      //   backgroundColor: Colors.teal,
-      //   child: Icon(Icons.chat, color: Colors.white),
-      // ),
+      floatingActionButton: Padding(
+        padding: EdgeInsets.only(bottom: 80 + systemNavInset),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(180),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withAlpha(30),
+                blurRadius: 5,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: FloatingActionButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ContactsPage()),
+              );
+            },
+            backgroundColor: themeColor.primary,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(100),
+            ),
+            tooltip: 'New chat',
+            child: const Icon(
+              Icons.person_add_rounded,
+              color: Colors.white,
+              size: 24,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -334,6 +320,15 @@ class ChatsPageState extends ConsumerState<ChatsPage>
     // Watch user status stream so this widget rebuilds when online status changes.
     // The actual per-user value is read from UserStatusService in _buildChatsList.
     ref.watch(userStatusStreamProvider);
+    // The DM list query watches the chats table only — peer profile/PFP
+    // changes write to the users table and don't wake that stream. So when
+    // a user:update event arrives we invalidate the provider to recompute
+    // the list with the fresh recipient name & profile pic.
+    ref.listen<AsyncValue<dynamic>>(userUpdateStreamProvider, (_, next) {
+      next.whenData((_) {
+        ref.invalidate(dmListStreamProvider);
+      });
+    });
 
     return dmListAsync.when(
       loading: () => _buildSkeletonLoader(),
@@ -643,7 +638,7 @@ class ChatListItem extends ConsumerWidget {
       decoration: BoxDecoration(
         color: isPinned ? themeColor.primary.withOpacity(0.05) : Colors.white,
         border: Border(
-          bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
+          // bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
           left: isPinned
               ? BorderSide(color: Colors.orange, width: 3)
               : BorderSide.none,

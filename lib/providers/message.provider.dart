@@ -4,7 +4,9 @@ import '../db/repositories/message.repo.dart';
 import '../models/conversations.model.dart';
 import '../models/group.model.dart';
 import '../models/message.model.dart';
+import '../services/socket/ws-message.handler.dart';
 import '../services/user-status.service.dart';
+import '../types/socket.types.dart';
 import '../utils/user.utils.dart';
 
 /// Reactive stream of messages for a specific conversation.
@@ -42,4 +44,12 @@ final groupListStreamProvider = StreamProvider<List<GroupModel>>((ref) {
 /// whenever any user goes online/offline without needing a DB write.
 final userStatusStreamProvider = StreamProvider<Map<String, bool>>((ref) {
   return UserStatusService().userStatusStream;
+});
+
+/// Reactive stream of peer profile updates (`user:update` WS event).
+/// Surfaces every name/profile-pic change so screens that derive their
+/// view from the local users table can invalidate themselves — Drift's
+/// chats-table watchers don't re-fire on users-table writes alone.
+final userUpdateStreamProvider = StreamProvider<UserUpdatePayload>((ref) {
+  return WebSocketMessageHandler().userUpdateStream;
 });

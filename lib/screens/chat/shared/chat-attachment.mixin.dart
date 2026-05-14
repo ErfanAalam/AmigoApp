@@ -6,7 +6,6 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../../../models/contact.model.dart';
 import '../../../types/socket.types.dart';
-import '../../../ui/chat/attachment.action-sheet.dart';
 import '../../../ui/chat/contact-selection.widget.dart';
 import '../../../utils/chat/attachments.utils.dart' as attachments;
 import '../image-editor.screen.dart';
@@ -23,20 +22,6 @@ mixin ChatAttachmentMixin<T extends StatefulWidget> on State<T> {
   TextEditingController get messageController;
   Future<void> sendMediaMessageToServer(File file, MessageType type);
   void sendMessage(MessageType type);
-
-  void showAttachmentModal() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) => AttachmentActionSheet(
-        onCameraTap: handleCameraAttachment,
-        onGalleryTap: handleGalleryAttachment,
-        onDocumentTap: handleDocumentAttachment,
-        onContactTap: handleContactAttachment,
-      ),
-    );
-  }
 
   Future<void> handleCameraAttachment() async {
     await attachments.handleCameraAttachment(

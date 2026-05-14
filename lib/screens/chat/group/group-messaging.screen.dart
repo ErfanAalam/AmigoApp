@@ -218,8 +218,6 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   @override
   bool get isGroupChat => true;
   @override
-  Color get nonMyMessageBackgroundColor => Colors.grey[100]!;
-  @override
   bool get useIntrinsicWidth => false;
   @override
   bool get useStackContainer => false;
@@ -392,8 +390,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   // searchMatches, currentMatchIndex, searchDebounceTimer, isInputFocused,
   // highlightedMessageId, highlightedMessageIds).
 
-  List<String> _messageRecommendations =
-      List<String>.from(kDefaultMessageRecommendations);
+  List<String> _messageRecommendations = List<String>.from(
+    kDefaultMessageRecommendations,
+  );
 
   // Swipe animation controllers, gesture state, and constants live on
   // ChatSwipeReplyMixin (swipeAnimationControllers, swipeAnimations,
@@ -583,7 +582,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundColor: Colors.white,
+              backgroundColor: themeColor.primary.withAlpha(20),
               child: Text(
                 widget.group.title.isNotEmpty
                     ? widget.group.title[0].toUpperCase()
@@ -603,7 +602,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                   Text(
                     widget.group.title,
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: Colors.black,
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
                     ),
@@ -746,6 +745,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   Widget _buildGroupOverflowMenu() {
     return BlurredPopupButton<String>(
       icon: Icons.more_vert,
+      iconColor: Colors.black,
       tooltip: 'More',
       menuMaxWidth: 220,
       itemsBuilder: () => [
@@ -952,7 +952,10 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       currentUserId: _currentUserDetails?.id ?? '',
       onSendMessage: sendMessage,
       onSendVoiceNote: sendVoiceNote,
-      onAttachmentTap: showAttachmentModal,
+      onPickGallery: handleGalleryAttachment,
+      onPickCamera: handleCameraAttachment,
+      onPickDocument: handleDocumentAttachment,
+      onPickContact: handleContactAttachment,
       onTyping: handleTyping,
       onCancelReply: cancelReply,
       focusNode: _messageFocusNode,

@@ -12,6 +12,7 @@ import '../../../providers/draft.provider.dart';
 import '../../../providers/theme-color.provider.dart';
 import '../../../services/chat-prewarm.service.dart';
 import '../../../types/socket.types.dart';
+import '../../../ui/app-bar.widget.dart';
 import '../../../ui/chat.action-sheet.dart';
 import '../../../ui/chat/searchable-list.widget.dart';
 import '../../../utils/route-transitions.util.dart';
@@ -101,61 +102,23 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
   @override
   Widget build(BuildContext context) {
     final themeColor = ref.watch(themeColorProvider);
+    final view = View.of(context);
+    final systemNavInset = view.viewPadding.bottom / view.devicePixelRatio;
 
     return Scaffold(
-      appBar: PreferredSize(
-        preferredSize: Size.fromHeight(60),
-        child: AppBar(
-          backgroundColor: themeColor.primary,
-          leadingWidth: 60,
-          leading: Container(
-            margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
-            child: Container(
-              padding: EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.white.withAlpha(40),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(Icons.groups_rounded, color: Colors.white, size: 24),
-            ),
+      backgroundColor: Colors.white,
+      appBar: AmigoAppBar(
+        title: 'Groups',
+        actions: [
+          AmigoAppBarAction(
+            icon: Icons.refresh_rounded,
+            onPressed: _refreshData,
+            tooltip: 'Refresh',
           ),
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Groups & Communities',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 20,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            Container(
-              margin: EdgeInsets.only(right: 16),
-              child: IconButton(
-                icon: Container(
-                  padding: EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withAlpha(40),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    Icons.refresh_rounded,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                ),
-                onPressed: () => _refreshData(),
-              ),
-            ),
-          ],
-        ),
+        ],
       ),
       body: SearchableListLayout(
+        backgroundColor: Colors.white,
         searchBar: SearchableListBar(
           controller: _searchController,
           hintText: 'Search groups...',
@@ -163,21 +126,44 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
         ),
         content: _buildContent(),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          // Navigate to create group page
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const CreateGroupPage()),
-          );
-
-          // If a group was created, refresh the data
-          if (result == true) {
-            _refreshData();
-          }
-        },
-        backgroundColor: themeColor.primary,
-        child: Icon(Icons.group_add, color: Colors.white),
+      floatingActionButton: Padding(
+        padding: EdgeInsets.only(bottom: 80 + systemNavInset),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(180),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withAlpha(30),
+                blurRadius: 5,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: FloatingActionButton(
+            onPressed: () async {
+              final result = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const CreateGroupPage(),
+                ),
+              );
+              if (result == true) {
+                _refreshData();
+              }
+            },
+            backgroundColor: themeColor.primary,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(100),
+            ),
+            tooltip: 'New group',
+            child: const Icon(
+              Icons.add_comment_rounded,
+              color: Colors.white,
+              size: 24,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -330,8 +316,7 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
 
           if (item is GroupModel) {
             final typingUsers =
-                chatState.typingConvUsers[item.chatId] ??
-                <TypingUser>{};
+                chatState.typingConvUsers[item.chatId] ?? <TypingUser>{};
 
             return GroupListItem(
               group: item,
@@ -556,7 +541,7 @@ class GroupListItem extends ConsumerWidget {
       decoration: BoxDecoration(
         color: isPinned ? themeColor.primary.withOpacity(0.05) : Colors.white,
         border: Border(
-          bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
+          // bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
           left: isPinned
               ? BorderSide(color: Colors.orange, width: 3)
               : BorderSide.none,
@@ -619,7 +604,7 @@ class GroupListItem extends ConsumerWidget {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 4),
+                    // const SizedBox(height: 4),
                     isTyping
                         ? _buildTypingIndicator(themeColor)
                         : Text(
@@ -654,12 +639,12 @@ class GroupListItem extends ConsumerWidget {
                     const SizedBox(height: 4),
                     Container(
                       padding: EdgeInsets.symmetric(
-                        horizontal: group.unreadCount.toString().length <= 2 ? 6 : 8,
+                        horizontal: group.unreadCount.toString().length <= 2
+                            ? 6
+                            : 8,
                         vertical: 1.3,
                       ),
-                      constraints: const BoxConstraints(
-                        minWidth: 20,
-                      ),
+                      constraints: const BoxConstraints(minWidth: 20),
                       decoration: BoxDecoration(
                         color: themeColor.primary,
                         borderRadius: BorderRadius.circular(12),

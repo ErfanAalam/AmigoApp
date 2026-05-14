@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../providers/chat-background.provider.dart';
 import '../../../providers/theme-color.provider.dart';
 import '../../../ui/chat/chat-pills.widget.dart';
 import '../../../ui/chat/pinned-message.widget.dart';
@@ -36,6 +40,7 @@ mixin ChatShellMixin<T extends ConsumerStatefulWidget>
     required Widget messageInput,
   }) {
     final themeColor = ref.watch(themeColorProvider);
+    final customBgPath = ref.watch(chatBackgroundProvider);
     final inSelection = selectedMessages.isNotEmpty;
 
     return Scaffold(
@@ -44,7 +49,7 @@ mixin ChatShellMixin<T extends ConsumerStatefulWidget>
         leading: IconButton(
           icon: Icon(
             inSelection ? Icons.close : Icons.arrow_back_rounded,
-            color: Colors.white,
+            color: Colors.black,
           ),
           onPressed: inSelection
               ? exitSelectionMode
@@ -55,29 +60,23 @@ mixin ChatShellMixin<T extends ConsumerStatefulWidget>
             : inSelection
             ? Text(
                 '${selectedMessages.length} selected',
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: themeColor.primary,
                   fontWeight: FontWeight.bold,
                   fontSize: 18,
                 ),
               )
             : appBarTitle,
-        flexibleSpace: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                themeColor.primaryDark,
-                themeColor.primary,
-                themeColor.primaryLight,
-              ],
-            ),
-          ),
-        ),
-        backgroundColor: themeColor.primary,
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
+        scrolledUnderElevation: 0,
         elevation: 0,
         titleSpacing: appBarTitleSpacing,
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.dark,
+          statusBarBrightness: Brightness.light,
+        ),
         actions: inSelection ? selectionModeActions : nonSelectionActions,
       ),
       body: SafeArea(
@@ -85,9 +84,13 @@ mixin ChatShellMixin<T extends ConsumerStatefulWidget>
           children: [
             Positioned.fill(
               child: Container(
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   image: DecorationImage(
-                    image: AssetImage('assets/images/chat_bg.jpg'),
+                    image:
+                        (customBgPath != null &&
+                            File(customBgPath).existsSync())
+                        ? FileImage(File(customBgPath)) as ImageProvider
+                        : const AssetImage('assets/images/chat_bg.jpg'),
                     fit: BoxFit.cover,
                   ),
                 ),

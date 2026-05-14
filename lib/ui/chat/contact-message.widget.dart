@@ -108,12 +108,9 @@ class ContactMessageWidget extends ConsumerWidget {
     return InkWell(
       onTap: () => _makePhoneCall(contact.phoneNumber),
       child: Container(
-        // margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: isMyMessage
-              ? Colors.white.withAlpha(30)
-              : themeColor.primary.withAlpha(50),
+          color: themeColor.primary.withAlpha(20),
           borderRadius: BorderRadius.all(Radius.circular(12)),
         ),
         child: Row(
@@ -124,15 +121,13 @@ class ContactMessageWidget extends ConsumerWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: isMyMessage
-                    ? Colors.white.withAlpha(35)
-                    : themeColor.primary.withAlpha(50),
+                color: themeColor.primary.withAlpha(40),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.person,
                 size: 22,
-                color: isMyMessage ? Colors.white : themeColor.primaryDark,
+                color: themeColor.primaryDark,
               ),
             ),
             // Contact info
@@ -142,10 +137,10 @@ class ContactMessageWidget extends ConsumerWidget {
                 children: [
                   Text(
                     contact.displayName,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
-                      color: isMyMessage ? Colors.white : Colors.black87,
+                      color: Colors.black87,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -156,9 +151,7 @@ class ContactMessageWidget extends ConsumerWidget {
                       Icon(
                         Icons.phone,
                         size: 14,
-                        color: isMyMessage
-                            ? Colors.white.withOpacity(0.8)
-                            : Colors.grey[600],
+                        color: Colors.grey[600],
                       ),
                       const SizedBox(width: 4),
                       Expanded(
@@ -166,9 +159,7 @@ class ContactMessageWidget extends ConsumerWidget {
                           contact.phoneNumber,
                           style: TextStyle(
                             fontSize: 13,
-                            color: isMyMessage
-                                ? Colors.white.withOpacity(0.9)
-                                : Colors.grey[700],
+                            color: Colors.grey[700],
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -183,7 +174,7 @@ class ContactMessageWidget extends ConsumerWidget {
             Icon(
               Icons.phone_outlined,
               size: 18,
-              color: isMyMessage ? Colors.white : themeColor.primary,
+              color: themeColor.primary,
             ),
           ],
         ),

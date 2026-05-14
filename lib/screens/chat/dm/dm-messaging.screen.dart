@@ -301,8 +301,9 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // searchMatches, currentMatchIndex, searchDebounceTimer, isInputFocused,
   // highlightedMessageId, highlightedMessageIds).
 
-  List<String> _messageRecommendations =
-      List<String>.from(kDefaultMessageRecommendations);
+  List<String> _messageRecommendations = List<String>.from(
+    kDefaultMessageRecommendations,
+  );
 
   // Sticky-date state lives on ChatScrollMixin (currentStickyDate, showStickyDate).
 
@@ -454,12 +455,18 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     return buildChatScaffold(
       appBarTitle: _buildAppBarTitle(themeColor),
       nonSelectionActions: [
-        if (_currentUserDetails?.callAccess == true)
+        if (_currentUserDetails?.callAccess == true) ...[
           IconButton(
-            icon: const Icon(Icons.call, color: Colors.white),
-            tooltip: 'Call',
-            onPressed: _confirmAndInitiateCall,
+            icon: const Icon(Icons.videocam_rounded, color: Colors.black),
+            tooltip: 'Video call',
+            onPressed: _confirmAndInitiateVideoCall,
           ),
+          IconButton(
+            icon: const Icon(Icons.call, color: Colors.black),
+            tooltip: 'Voice call',
+            onPressed: _confirmAndInitiateVoiceCall,
+          ),
+        ],
         _buildDmOverflowMenu(),
       ],
       selectionModeActions: buildSelectionModeActions(),
@@ -472,6 +479,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   Widget _buildDmOverflowMenu() {
     return BlurredPopupButton<String>(
       icon: Icons.more_vert,
+      iconColor: Colors.black,
       tooltip: 'More',
       menuMaxWidth: 200,
       itemsBuilder: () => const [
@@ -526,21 +534,44 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     }
   }
 
-  /// Asks the user whether to place a voice or video call (or cancel)
-  /// before initiating. Cheap insurance against the call icon being tapped
-  /// accidentally next to the message input, and the entry point for video
-  /// calls (no separate AppBar icon — keeps the bar uncluttered).
-  Future<void> _confirmAndInitiateCall() async {
-    final choice = await showBlurredCallTypePicker(
+  /// Confirms and starts a voice call. Both call types now have their own
+  /// AppBar button + dedicated confirmation dialog so users don't have to
+  /// tap through the legacy combined picker.
+  Future<void> _confirmAndInitiateVoiceCall() async {
+    final ok = await showBlurredConfirm(
       context: context,
-      recipientName: widget.dm.recipientName,
+      title: 'Voice call ${widget.dm.recipientName}?',
+      message:
+          'Start a voice call with ${widget.dm.recipientName}.',
+      confirmLabel: 'Call',
+      confirmIcon: Icons.call_rounded,
     );
-    if (choice == null || !mounted) return;
+    if (ok != true || !mounted) return;
     await _initiateCall(
       widget.dm.recipientId,
       widget.dm.recipientName,
       widget.dm.recipientProfilePic,
-      video: choice == CallTypeChoice.video,
+      video: false,
+    );
+  }
+
+  /// Confirms and starts a video call. Mirrors the voice flow but kicks
+  /// off `_initiateCall` with `video: true`.
+  Future<void> _confirmAndInitiateVideoCall() async {
+    final ok = await showBlurredConfirm(
+      context: context,
+      title: 'Video call ${widget.dm.recipientName}?',
+      message:
+          'Start a video call with ${widget.dm.recipientName}.',
+      confirmLabel: 'Call',
+      confirmIcon: Icons.videocam_rounded,
+    );
+    if (ok != true || !mounted) return;
+    await _initiateCall(
+      widget.dm.recipientId,
+      widget.dm.recipientName,
+      widget.dm.recipientProfilePic,
+      video: true,
     );
   }
 
@@ -552,65 +583,66 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Row(
           children: [
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: Colors.white,
-            backgroundImage: widget.dm.recipientProfilePic != null
-                ? CachedNetworkImageProvider(widget.dm.recipientProfilePic!)
-                : null,
-            child: widget.dm.recipientProfilePic == null
-                ? Text(
-                    widget.dm.recipientName.isNotEmpty
-                        ? widget.dm.recipientName[0].toUpperCase()
-                        : '?',
-                    style: TextStyle(
-                      color: themeColor.primary,
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: themeColor.primary.withAlpha(20),
+              backgroundImage: widget.dm.recipientProfilePic != null
+                  ? CachedNetworkImageProvider(widget.dm.recipientProfilePic!)
+                  : null,
+              child: widget.dm.recipientProfilePic == null
+                  ? Text(
+                      widget.dm.recipientName.isNotEmpty
+                          ? widget.dm.recipientName[0].toUpperCase()
+                          : '?',
+                      style: TextStyle(
+                        color: themeColor.primary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    )
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    widget.dm.recipientName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.black,
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
                     ),
-                  )
-                : null,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  widget.dm.recipientName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
                   ),
-                ),
-                StreamBuilder<Map<String, bool>>(
-                  stream: UserStatusService().userStatusStream,
-                  initialData: UserStatusService().onlineStatus,
-                  builder: (context, snapshot) {
-                    final isOnline = ref
-                        .read(chatProvider)
-                        .isUserOnline(widget.dm.recipientId, widget.dm.chatId);
-                    return Text(
-                      isOnline ? 'Online' : 'Offline',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: isOnline
-                            ? Colors.greenAccent[100]
-                            : Colors.red[100],
-                        fontSize: 12,
-                      ),
-                    );
-                  },
-                ),
-              ],
+                  StreamBuilder<Map<String, bool>>(
+                    stream: UserStatusService().userStatusStream,
+                    initialData: UserStatusService().onlineStatus,
+                    builder: (context, snapshot) {
+                      final isOnline = ref
+                          .read(chatProvider)
+                          .isUserOnline(
+                            widget.dm.recipientId,
+                            widget.dm.chatId,
+                          );
+                      return Text(
+                        isOnline ? 'Online' : 'Offline',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: isOnline ? Colors.green : Colors.grey,
+                          fontSize: 12,
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
         ),
       ),
     );
@@ -725,6 +757,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       }
     }
 
+    // "Delete for everyone" is only offered for the sender's own messages
+    // *and* only within 1 hour of the message being sent. After that it
+    // collapses to "Delete for me" so old messages can't be retracted.
+    final canDeleteForEveryone =
+        isMyMessage && _isWithinDeleteForEveryoneWindow(message.sentAt);
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -740,13 +778,21 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         onForward: () => forwardMessage(message),
         onSelect: () => enterSelectionMode(message.id),
         onDeleteForMe: () => deleteMessagesForMe([message.id]),
-        onDeleteForEveryone: isMyMessage
-            ? () => deleteMessages([message.id])
-            : null,
+        onDeleteForEveryone:
+            canDeleteForEveryone ? () => deleteMessages([message.id]) : null,
         onReact: (emoji) => reactToMessage(message, emoji),
         myReactions: myReactions,
       ),
     );
+  }
+
+  /// Whether `sentAt` is recent enough that the sender may still retract
+  /// the message for all participants. WhatsApp-style 1-hour window.
+  bool _isWithinDeleteForEveryoneWindow(String sentAt) {
+    final sent = DateTime.tryParse(sentAt);
+    if (sent == null) return false;
+    final age = DateTime.now().toUtc().difference(sent.toUtc());
+    return age <= const Duration(hours: 1);
   }
 
   MediaMessageConfig _buildMediaMessageConfig(
@@ -792,7 +838,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       currentUserId: _currentUserDetails?.id,
       onSendMessage: sendMessage,
       onSendVoiceNote: sendVoiceNote,
-      onAttachmentTap: showAttachmentModal,
+      onPickGallery: handleGalleryAttachment,
+      onPickCamera: handleCameraAttachment,
+      onPickDocument: handleDocumentAttachment,
+      onPickContact: handleContactAttachment,
       onTyping: handleTyping,
       onCancelReply: cancelReply,
       focusNode: _messageFocusNode,

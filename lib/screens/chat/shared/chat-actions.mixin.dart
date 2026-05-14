@@ -187,18 +187,18 @@ mixin ChatActionsMixin<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   List<Widget> buildSelectionModeActions({VoidCallback? onBulkDelete}) {
     return [
       IconButton(
-        icon: const Icon(Icons.star_border, color: Colors.white),
+        icon: const Icon(Icons.star_border, color: Colors.black),
         onPressed: bulkStarMessages,
         tooltip: 'Star messages',
       ),
       IconButton(
-        icon: const Icon(Icons.forward, color: Colors.white),
+        icon: const Icon(Icons.forward, color: Colors.black),
         onPressed: bulkForwardMessages,
         tooltip: 'Forward messages',
       ),
       if (onBulkDelete != null)
         IconButton(
-          icon: const Icon(Icons.delete_outline, color: Colors.white),
+          icon: const Icon(Icons.delete_outline, color: Colors.black),
           onPressed: onBulkDelete,
           tooltip: 'Delete messages',
         ),

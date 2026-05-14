@@ -9,6 +9,7 @@ import '../../api/api_service.dart';
 import '../../models/call.model.dart';
 import '../../providers/call.provider.dart';
 import '../../providers/theme-color.provider.dart';
+import '../../ui/app-bar.widget.dart';
 import '../../ui/snackbar.dart';
 
 class CallsPage extends ConsumerStatefulWidget {
@@ -265,64 +266,18 @@ class CallsPageState extends ConsumerState<CallsPage>
       }
     });
 
-    final themeColor = ref.watch(themeColorProvider);
-
     return Scaffold(
-      backgroundColor: Color(0xFFF8FAFB),
-
-      appBar: PreferredSize(
-        preferredSize: Size.fromHeight(60),
-        child: AppBar(
-          backgroundColor: themeColor.primary,
-          leadingWidth: 60,
-          leading: Container(
-            margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
-            child: Container(
-              padding: EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.white.withAlpha(40),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(Icons.call_rounded, color: Colors.white, size: 24),
-            ),
+      backgroundColor: Colors.white,
+      appBar: AmigoAppBar(
+        title: 'Calls',
+        actions: [
+          AmigoAppBarAction(
+            icon: Icons.refresh_rounded,
+            onPressed: () => _loadCallHistory(showLoading: false),
+            tooltip: 'Refresh',
           ),
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Call history',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 20,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            Container(
-              margin: EdgeInsets.only(right: 16),
-              child: IconButton(
-                icon: Container(
-                  padding: EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withAlpha(40),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    Icons.refresh_rounded,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                ),
-                onPressed: () => _loadCallHistory(showLoading: false),
-              ),
-            ),
-          ],
-        ),
+        ],
       ),
-
       body: RefreshIndicator(
         onRefresh: () => _loadCallHistory(showLoading: false),
         child: _buildBody(),

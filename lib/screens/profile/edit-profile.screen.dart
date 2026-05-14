@@ -1,10 +1,13 @@
 import 'package:amigo/utils/user.utils.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 
 import '../../api/api_service.dart';
+import '../../db/repositories/user.repo.dart';
 import '../../models/user.model.dart';
 import '../../providers/theme-color.provider.dart';
 import '../../ui/snackbar.dart';
@@ -93,6 +96,7 @@ class _EditProfileModalState extends ConsumerState<EditProfileModal> {
     });
 
     try {
+      final previousProfilePic = widget.userData['profile_pic'] as String?;
       Map<String, dynamic> updateData = {'name': _nameController.text.trim()};
 
       if (_selectedImage != null) {
@@ -113,12 +117,30 @@ class _EditProfileModalState extends ConsumerState<EditProfileModal> {
         updatedUserData['name'] = _nameController.text.trim();
         if (_selectedImage != null && updateData.containsKey('profile_pic')) {
           updatedUserData['profile_pic'] = updateData['profile_pic'];
+
+          // Evict the previous PFP from the on-disk image cache so any
+          // CachedNetworkImage that still holds the old URL refetches.
+          if (previousProfilePic != null && previousProfilePic.isNotEmpty) {
+            try {
+              await CachedNetworkImage.evictFromCache(previousProfilePic);
+              await DefaultCacheManager().removeFile(previousProfilePic);
+            } catch (_) {/* best-effort */}
+          }
         }
 
         widget.onProfileUpdated(updatedUserData);
 
         final updatedUser = UserModel.fromJson(updatedUserData);
         await UserUtils().updateUserDetails(updatedUser);
+
+        // Mirror the change into the local Drift users table so any
+        // screen that reads from it (e.g. DM list) updates in-place.
+        try {
+          final userId = updatedUserData['id'] as String?;
+          if (userId != null) {
+            await UserRepository().updateUser(updatedUser);
+          }
+        } catch (_) {/* best-effort */}
 
         Snack.success('Profile updated successfully!');
         Navigator.of(context).pop();

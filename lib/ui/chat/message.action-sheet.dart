@@ -277,62 +277,32 @@ class MessageActionSheet extends StatelessWidget {
   }
 
   Widget _buildDeleteOptions(BuildContext context) {
-    // If both delete options are available, show a delete button that opens a dialog
-    if (onDeleteForMe != null && onDeleteForEveryone != null) {
-      return MessageActionButton(
-        icon: Icons.delete_outline,
-        label: 'Delete',
-        color: Colors.red,
-        onTap: () {
-          Navigator.pop(context);
-          _showDeleteOptionsDialog(context);
-        },
-      );
+    // Sender's "delete for everyone" window has expired — only "delete for
+    // me" is offered. Admin-delete falls into the same single-option path.
+    final hasDeleteForMe = onDeleteForMe != null;
+    final hasDeleteForEveryone = onDeleteForEveryone != null;
+    final hasAdminDelete = isAdmin && onDelete != null;
+
+    if (!hasDeleteForMe && !hasDeleteForEveryone && !hasAdminDelete) {
+      return const SizedBox.shrink();
     }
 
-    // If only delete for me is available
-    if (onDeleteForMe != null) {
-      return MessageActionButton(
-        icon: Icons.delete_outline,
-        label: 'Delete',
-        color: Colors.red,
-        onTap: () {
-          Navigator.pop(context);
-          onDeleteForMe!();
-        },
-      );
-    }
-
-    // If only delete for everyone is available
-    if (onDeleteForEveryone != null) {
-      return MessageActionButton(
-        icon: Icons.delete_outline,
-        label: 'Delete for everyone',
-        color: Colors.red,
-        onTap: () {
-          Navigator.pop(context);
-          onDeleteForEveryone!();
-        },
-      );
-    }
-
-    // Admin delete (for groups)
-    if (isAdmin && onDelete != null) {
-      return MessageActionButton(
-        icon: Icons.delete_outline,
-        label: 'Delete',
-        color: Colors.red,
-        onTap: () {
-          Navigator.pop(context);
-          onDelete!();
-        },
-      );
-    }
-
-    return const SizedBox.shrink();
+    return MessageActionButton(
+      icon: Icons.delete_outline,
+      label: 'Delete',
+      color: Colors.red,
+      onTap: () {
+        Navigator.pop(context);
+        _showDeleteOptionsDialog(context);
+      },
+    );
   }
 
   void _showDeleteOptionsDialog(BuildContext context) {
+    final hasDeleteForMe = onDeleteForMe != null;
+    final hasDeleteForEveryone = onDeleteForEveryone != null;
+    final hasAdminDelete = isAdmin && onDelete != null;
+
     showDialog(
       context: context,
       barrierColor: Colors.black.withOpacity(0.3),
@@ -348,28 +318,40 @@ class MessageActionSheet extends StatelessWidget {
               'Delete Message',
               style: TextStyle(fontWeight: FontWeight.w600),
             ),
-            content: const Text('How would you like to delete this message?'),
+            content: Text(
+              hasDeleteForMe && hasDeleteForEveryone
+                  ? 'How would you like to delete this message?'
+                  : 'Are you sure you want to delete this message?',
+            ),
             actions: [
               TextButton(
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-                  onDeleteForMe?.call();
-                },
-                child: const Text('Delete for me'),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-                  onDeleteForEveryone?.call();
-                },
-                child: const Text('Delete for everyone'),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-                },
+                onPressed: () => Navigator.pop(dialogContext),
                 child: const Text('Cancel'),
               ),
+              if (hasDeleteForMe)
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(dialogContext);
+                    onDeleteForMe!();
+                  },
+                  child: const Text('Delete for me'),
+                ),
+              if (hasDeleteForEveryone)
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(dialogContext);
+                    onDeleteForEveryone!();
+                  },
+                  child: const Text('Delete for everyone'),
+                ),
+              if (hasAdminDelete && !hasDeleteForMe && !hasDeleteForEveryone)
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(dialogContext);
+                    onDelete!();
+                  },
+                  child: const Text('Delete'),
+                ),
             ],
           ),
         );

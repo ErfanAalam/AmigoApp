@@ -61,10 +61,6 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
   // ---- Conversation-shape config ----
   bool get isGroupChat;
 
-  /// Background colour for messages from other people. DM uses pure white
-  /// against a tinted background; group uses light grey.
-  Color get nonMyMessageBackgroundColor => Colors.white;
-
   /// Whether the bubble wraps content in `IntrinsicWidth`. DM does, group
   /// doesn't (group bubbles stretch to fill more horizontal space).
   bool get useIntrinsicWidth => true;
@@ -329,7 +325,6 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
           await messagesRepo.permanentlyDeleteMessage(messageId);
         },
         isGroupChat: isGroupChat,
-        nonMyMessageBackgroundColor: nonMyMessageBackgroundColor,
         useIntrinsicWidth: useIntrinsicWidth,
         useStackContainer: useStackContainer,
         currentUserId: currentUserId,
@@ -359,7 +354,7 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
       return Text(
         'this message was deleted',
         style: TextStyle(
-          color: (isMyMessage ? Colors.white : Colors.black87).withOpacity(0.6),
+          color: Colors.black54,
           fontSize: 15,
           height: 1.4,
           fontStyle: FontStyle.italic,
@@ -385,8 +380,8 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
     // Text / reply / forwarded all render as a plain text body.
     return Text(
       message.body ?? '',
-      style: TextStyle(
-        color: isMyMessage ? Colors.white : Colors.black87,
+      style: const TextStyle(
+        color: Colors.black87,
         fontSize: 16,
         height: 1.4,
         fontWeight: FontWeight.w500,

@@ -148,7 +148,8 @@ enum WSMessageType {
   socketPing('socket:ping'),
   socketPong('socket:pong'),
   socketError('socket:error'),
-  authForceLogout('auth:force_logout');
+  authForceLogout('auth:force_logout'),
+  userUpdate('user:update');
 
   final String value;
   const WSMessageType(this.value);
@@ -173,7 +174,8 @@ enum VitalWSMessageType {
   messagePin('message:pin'),
   messageForward('message:forward'),
   messageDelete('message:delete'),
-  messageReact('message:react');
+  messageReact('message:react'),
+  userUpdate('user:update');
 
   final String value;
   const VitalWSMessageType(this.value);
@@ -446,6 +448,46 @@ abstract class CallPayload with _$CallPayload {
       _$CallPayloadFromJson(json);
 }
 
+/// Sent when another user updates their profile (name and/or profile pic).
+/// Manual class — adding a freezed class would require re-running codegen
+/// on this file, which we want to keep an isolated change.
+class UserUpdatePayload {
+  final String userId;
+  final String? name;
+  final String? profilePic;
+  final String? previousProfilePic;
+  final DateTime updatedAt;
+
+  UserUpdatePayload({
+    required this.userId,
+    this.name,
+    this.profilePic,
+    this.previousProfilePic,
+    required this.updatedAt,
+  });
+
+  factory UserUpdatePayload.fromJson(Map<String, dynamic> json) {
+    return UserUpdatePayload(
+      userId: json['user_id'] as String,
+      name: json['name'] as String?,
+      profilePic: json['profile_pic'] as String?,
+      previousProfilePic: json['previous_profile_pic'] as String?,
+      updatedAt: json['updated_at'] != null
+          ? DateTime.tryParse(json['updated_at'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'user_id': userId,
+        if (name != null) 'name': name,
+        if (profilePic != null) 'profile_pic': profilePic,
+        if (previousProfilePic != null)
+          'previous_profile_pic': previousProfilePic,
+        'updated_at': updatedAt.toUtc().toIso8601String(),
+      };
+}
+
 @freezed
 abstract class MediaResponse with _$MediaResponse {
   const factory MediaResponse({
@@ -549,6 +591,8 @@ class WSMessage {
       case WSMessageType.socketError:
       case WSMessageType.authForceLogout:
         return MiscPayload.fromJson(json);
+      case WSMessageType.userUpdate:
+        return UserUpdatePayload.fromJson(json);
     }
   }
 
@@ -574,6 +618,7 @@ class WSMessage {
     if (payload is MessageReactPayload) return payload.toJson();
     if (payload is CallPayload) return payload.toJson();
     if (payload is ConversationActionPayload) return payload.toJson();
+    if (payload is UserUpdatePayload) return payload.toJson();
     return payload;
   }
 
@@ -606,4 +651,6 @@ class WSMessage {
       payload is CallPayload ? payload : null;
   ConversationActionPayload? get conversationActionPayload =>
       payload is ConversationActionPayload ? payload : null;
+  UserUpdatePayload? get userUpdatePayload =>
+      payload is UserUpdatePayload ? payload : null;
 }

@@ -132,8 +132,9 @@ mixin ChatSearchMixin<T extends StatefulWidget> on State<T> {
         return Container(
           height: 40,
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: const Color(0xFFF2F3F5),
             borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.grey.shade300, width: 0.6),
           ),
           child: Row(
             children: [

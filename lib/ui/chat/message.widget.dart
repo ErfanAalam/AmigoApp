@@ -50,8 +50,6 @@ class MessageBubbleConfig {
 
   // Configuration flags
   final bool isGroupChat; // true for group, false for DM
-  final Color
-  nonMyMessageBackgroundColor; // Colors.white for DM, Colors.grey[100] for group
   final bool useIntrinsicWidth; // true for DM, false for group
   final bool useStackContainer; // true for DM, false for group
 
@@ -85,7 +83,6 @@ class MessageBubbleConfig {
     this.onResendFailedMessage,
     this.onDeleteFailedMessage,
     required this.isGroupChat,
-    required this.nonMyMessageBackgroundColor,
     required this.useIntrinsicWidth,
     required this.useStackContainer,
     this.currentUserId,
@@ -214,7 +211,9 @@ class MessageBubble extends ConsumerWidget {
   Widget _buildReactionRow() {
     final reactions = config.reactions;
     if (reactions.isEmpty) return const SizedBox.shrink();
-    debugPrint('[ReactionRow] Rendering for msg=${config.message.id} isMyMsg=${config.isMyMessage} emojis=${reactions.keys.toList()}');
+    debugPrint(
+      '[ReactionRow] Rendering for msg=${config.message.id} isMyMsg=${config.isMyMessage} emojis=${reactions.keys.toList()}',
+    );
     return Transform.translate(
       offset: const Offset(0, -5),
       child: Padding(
@@ -255,8 +254,18 @@ class MessageBubble extends ConsumerWidget {
                           ),
                           decoration: BoxDecoration(
                             color: config.isMyMessage
-                                ? themeColor.primary
+                                ? null
                                 : Colors.grey[100],
+                            gradient: config.isMyMessage
+                                ? LinearGradient(
+                                    begin: Alignment.centerLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: [
+                                      themeColor.primaryExtraLight,
+                                      themeColor.primaryPlusLight,
+                                    ],
+                                  )
+                                : null,
                             borderRadius: const BorderRadius.only(
                               topLeft: Radius.circular(14),
                               topRight: Radius.circular(14),
@@ -300,9 +309,21 @@ class MessageBubble extends ConsumerWidget {
                   right: 8,
                 ),
                 decoration: BoxDecoration(
-                  color: config.isMyMessage
-                      ? themeColor.primary
-                      : config.nonMyMessageBackgroundColor,
+                  // color: config.isMyMessage
+                  //     ? themeColor.primaryExtraLight
+                  //     : Colors.white,
+                  color: config.isMyMessage ? null : Colors.white,
+                  gradient: config.isMyMessage
+                      ? LinearGradient(
+                          begin: Alignment.centerLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            themeColor.primaryExtraLight,
+                            themeColor.primaryPlusLight,
+                          ],
+                        )
+                      : null,
+
                   borderRadius: BorderRadius.only(
                     topLeft: const Radius.circular(14),
                     topRight: const Radius.circular(14),
@@ -311,9 +332,9 @@ class MessageBubble extends ConsumerWidget {
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
+                      color: Colors.black.withAlpha(50),
+                      blurRadius: 2,
+                      offset: const Offset(0, 0.5),
                     ),
                   ],
                 ),
@@ -414,9 +435,17 @@ class MessageBubble extends ConsumerWidget {
                         vertical: 8,
                       ),
                       decoration: BoxDecoration(
-                        color: config.isMyMessage
-                            ? themeColor.primary
-                            : Colors.grey[100],
+                        color: config.isMyMessage ? null : Colors.grey[100],
+                        gradient: config.isMyMessage
+                            ? LinearGradient(
+                                begin: Alignment.centerLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  themeColor.primaryExtraLight,
+                                  themeColor.primaryPlusLight,
+                                ],
+                              )
+                            : null,
                         borderRadius: BorderRadius.only(
                           topLeft: const Radius.circular(0),
                           topRight: const Radius.circular(0),
@@ -444,9 +473,20 @@ class MessageBubble extends ConsumerWidget {
                   right: 10,
                 ),
                 decoration: BoxDecoration(
-                  color: config.isMyMessage
-                      ? themeColor.primary
-                      : config.nonMyMessageBackgroundColor,
+                  // color: config.isMyMessage
+                  //     ? themeColor.primaryUltraLight
+                  //     : Colors.white,
+                  color: config.isMyMessage ? null : Colors.white,
+                  gradient: config.isMyMessage
+                      ? LinearGradient(
+                          begin: Alignment.centerLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            themeColor.primaryExtraLight,
+                            themeColor.primaryPlusLight,
+                          ],
+                        )
+                      : null,
                   borderRadius: BorderRadius.only(
                     topLeft: const Radius.circular(14),
                     topRight: const Radius.circular(14),
@@ -455,9 +495,9 @@ class MessageBubble extends ConsumerWidget {
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
+                      color: Colors.black.withAlpha(50),
+                      blurRadius: 2,
+                      offset: const Offset(0, 0.5),
                     ),
                   ],
                 ),
@@ -559,7 +599,7 @@ class MessageBubble extends ConsumerWidget {
         Text(
           config.messageTime.toLowerCase(),
           style: TextStyle(
-            color: config.isMyMessage ? Colors.white70 : Colors.grey[600],
+            color: Colors.grey[600],
             fontSize: 10,
             fontWeight: FontWeight.w400,
           ),
@@ -592,18 +632,12 @@ class MessageBubble extends ConsumerWidget {
           onTap: config.onReplyTap!,
           isGroupChat: config.isGroupChat,
           useFullWidth: !config.isGroupChat, // DM uses full width
-          myMessageBackgroundColor: config.isGroupChat
-              ? Colors.white.withAlpha(15)
-              : Colors.white.withAlpha(20),
-          otherMessageBackgroundColor: config.isGroupChat
-              ? (Colors.grey[200] ?? Colors.grey.shade200)
-              : (Colors.grey[100] ?? Colors.grey.shade100),
-          myMessageTextColor: config.isGroupChat
-              ? Colors.white
-              : Colors.white.withOpacity(0.8),
-          myMessageMediaColor: config.isGroupChat
-              ? Colors.white.withAlpha(80)
-              : Colors.white.withOpacity(0.8),
+          // Both my- and other-message bubbles are now light, so the inset
+          // reply chip uses a faintly darker tint of the bubble bg.
+          myMessageBackgroundColor: Colors.black.withOpacity(0.04),
+          otherMessageBackgroundColor: Colors.grey[100] ?? Colors.grey.shade100,
+          myMessageTextColor: Colors.black.withOpacity(0.7),
+          myMessageMediaColor: Colors.black.withOpacity(0.6),
           mediaText: config.isGroupChat ? '📎 media' : '📎 media ',
         ),
       );
@@ -999,12 +1033,7 @@ class ReplyPreview extends ConsumerWidget {
               ? config.myMessageBackgroundColor
               : config.otherMessageBackgroundColor,
           borderRadius: BorderRadius.circular(12),
-          border: Border(
-            left: BorderSide(
-              color: config.isMyMessage ? Colors.white : themeColor.primary,
-              width: 1,
-            ),
-          ),
+          border: Border(left: BorderSide(color: themeColor.primary, width: 2)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1014,7 +1043,7 @@ class ReplyPreview extends ConsumerWidget {
                   ? 'You'
                   : (config.replyMessage.senderName ?? 'Unknown User'),
               style: TextStyle(
-                color: config.isMyMessage ? Colors.white : themeColor.primary,
+                color: themeColor.primary,
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),

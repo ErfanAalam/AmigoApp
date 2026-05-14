@@ -42,10 +42,10 @@ class MessageRecommendations extends ConsumerWidget {
                       vertical: 5,
                     ),
                     decoration: BoxDecoration(
-                      color: themeColor.primary.withOpacity(0.1),
+                      color: Colors.white,
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: themeColor.primary.withOpacity(0.3),
+                        color: themeColor.primary.withAlpha(35),
                         width: 1,
                       ),
                     ),

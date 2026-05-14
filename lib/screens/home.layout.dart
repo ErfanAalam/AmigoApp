@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,13 +9,11 @@ import '../models/user.model.dart';
 import '../providers/chat.provider.dart';
 import '../providers/notification-badge.provider.dart';
 import '../providers/theme-color.provider.dart';
-import '../ui/badge.widget.dart';
 import '../utils/user.utils.dart';
 import 'call/call-logs.screen.dart';
 import 'chat/dm/dm-list.screen.dart';
 import 'chat/group/group-list.screen.dart';
-import 'contact/contact-list.screen.dart';
-import 'profile/profile-info.screen.dart';
+import 'settings/settings.screen.dart';
 
 class MainScreen extends ConsumerStatefulWidget {
   const MainScreen({super.key});
@@ -30,8 +31,6 @@ class _MainScreenState extends ConsumerState<MainScreen> {
   final apiService = ApiService();
 
   late final PageController _pageController;
-
-  // List of pages
   late final List<Widget> _pages;
 
   @override
@@ -42,9 +41,8 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     _pages = [
       ChatsPage(key: _chatsPageKey),
       GroupsPage(key: _groupsPageKey),
-      ContactsPage(),
       CallsPage(key: _callsPageKey),
-      ProfilePage(),
+      const SettingsPage(),
     ];
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -59,10 +57,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
   }
 
   void _loadUserDetails() async {
-    // Implement user details loading logic here
-
     final currentUser = await UserUtils().getUserDetails();
-
     if (currentUser == null) {
       final response = await apiService.user.getUser();
       if (response.isSuccess && response.hasData) {
@@ -75,28 +70,21 @@ class _MainScreenState extends ConsumerState<MainScreen> {
           'created_at': response.data!['created_at'],
           'call_access': response.data!['call_access'],
         };
-
         await UserUtils().saveUserDetails(UserModel.fromJson(userDetail));
       }
     }
   }
 
   void _onTabSelected(int index) {
-    setState(() {
-      _currentPageIndex = index;
-    });
-    // Use jumpToPage for immediate navigation when clicking tabs
-    // This prevents showing intermediate pages during navigation
+    setState(() => _currentPageIndex = index);
     _pageController.jumpToPage(index);
 
     if (index == 0) {
       _chatsPageKey.currentState?.onPageVisible();
     } else if (index == 1) {
       _groupsPageKey.currentState?.onPageVisible();
-    } else if (index == 3) {
+    } else if (index == 2) {
       _callsPageKey.currentState?.onPageVisible();
-      // Mark calls as seen when call screen is viewed
-      // ref.read(notificationBadgeProvider.notifier).markCallsAsSeen();
     }
   }
 
@@ -105,103 +93,273 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     final badgeState = ref.watch(notificationBadgeProvider);
     final unreadDMs = ref.watch(chatProvider).unreadDmCount;
     final unreadGroups = ref.watch(chatProvider).unreadGroupCount;
-    final themeColor = ref.watch(themeColorProvider);
 
     return Scaffold(
+      extendBody: true,
       body: PageView(
         controller: _pageController,
         children: _pages,
         onPageChanged: (index) {
-          setState(() {
-            _currentPageIndex = index;
-          });
-
+          setState(() => _currentPageIndex = index);
           if (index == 0) {
             _chatsPageKey.currentState?.onPageVisible();
           } else if (index == 1) {
             _groupsPageKey.currentState?.onPageVisible();
-          } else if (index == 3) {
+          } else if (index == 2) {
             _callsPageKey.currentState?.onPageVisible();
-            // Mark calls as seen when call screen is viewed
-            // ref.read(notificationBadgeProvider.notifier).markCallsAsSeen();
           }
         },
       ),
-      bottomNavigationBar: NavigationBar(
-        onDestinationSelected: _onTabSelected,
-        indicatorColor: themeColor.primary.withAlpha(20),
-        selectedIndex: _currentPageIndex,
-        backgroundColor: Colors.grey[100],
-        labelTextStyle: WidgetStateProperty.all(
-          const TextStyle(
-            fontSize: 14,
-            color: Colors.black,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        destinations: <Widget>[
-          NavigationDestination(
-            selectedIcon: BadgeWidget(
-              count: unreadDMs,
-              child: Icon(Icons.message, color: themeColor.primary),
-            ),
-            icon: BadgeWidget(
-              count: unreadDMs,
-              child: const Icon(
-                Icons.message_outlined,
-                color: Color.fromARGB(255, 65, 64, 64),
-              ),
-            ),
+      bottomNavigationBar: FloatingPillNavBar(
+        currentIndex: _currentPageIndex,
+        onTap: _onTabSelected,
+        items: [
+          FloatingPillNavItem(
+            icon: Icons.message_outlined,
+            selectedIcon: Icons.message_rounded,
             label: 'Chats',
+            badgeCount: unreadDMs,
           ),
-          NavigationDestination(
-            selectedIcon: BadgeWidget(
-              count: unreadGroups,
-              child: Icon(Icons.group, color: themeColor.primary),
-            ),
-            icon: BadgeWidget(
-              count: unreadGroups,
-              child: const Icon(
-                Icons.group_outlined,
-                color: Color.fromARGB(255, 65, 64, 64),
-              ),
-            ),
+          FloatingPillNavItem(
+            icon: Icons.group_outlined,
+            selectedIcon: Icons.group_rounded,
             label: 'Groups',
+            badgeCount: unreadGroups,
           ),
-          NavigationDestination(
-            selectedIcon: Icon(
-              Icons.contacts_rounded,
-              color: themeColor.primary,
-            ),
-            icon: const Icon(
-              Icons.contacts_outlined,
-              color: Color.fromARGB(255, 65, 64, 64),
-            ),
-            label: 'Contacts',
-          ),
-          NavigationDestination(
-            selectedIcon: BadgeWidget(
-              count: badgeState.callCount,
-              child: Icon(Icons.call, color: themeColor.primary),
-            ),
-            icon: BadgeWidget(
-              count: badgeState.callCount,
-              child: const Icon(
-                Icons.call_outlined,
-                color: Color.fromARGB(255, 65, 64, 64),
-              ),
-            ),
+          FloatingPillNavItem(
+            icon: Icons.call_outlined,
+            selectedIcon: Icons.call_rounded,
             label: 'Calls',
+            badgeCount: badgeState.callCount,
           ),
-          NavigationDestination(
-            selectedIcon: Icon(Icons.person_rounded, color: themeColor.primary),
-            icon: const Icon(
-              Icons.person_outline,
-              color: Color.fromARGB(255, 65, 64, 64),
-            ),
-            label: 'Profile',
+          const FloatingPillNavItem(
+            icon: Icons.settings_outlined,
+            selectedIcon: Icons.settings_rounded,
+            label: 'Settings',
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Frosted-glass floating pill bottom navigation bar — Telegram-style.
+class FloatingPillNavBar extends ConsumerWidget {
+  final int currentIndex;
+  final void Function(int) onTap;
+  final List<FloatingPillNavItem> items;
+
+  const FloatingPillNavBar({
+    super.key,
+    required this.currentIndex,
+    required this.onTap,
+    required this.items,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeColor = ref.watch(themeColorProvider);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: SafeArea(
+        top: false,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(32),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+            child: Container(
+              height: 60,
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha(80),
+                borderRadius: BorderRadius.circular(32),
+                border: Border.all(color: Colors.black.withAlpha(20), width: 1),
+                // boxShadow: [
+                //   BoxShadow(
+                //     color: Colors.black.withAlpha(10),
+                //     blurRadius: 24,
+                //     offset: const Offset(2, 8),
+                //   ),
+                // ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: List.generate(items.length, (index) {
+                  final item = items[index];
+                  final selected = index == currentIndex;
+                  return Expanded(
+                    key: ValueKey('nav-${item.label}'),
+                    child: _FloatingPillNavButton(
+                      key: ValueKey('nav-btn-${item.label}'),
+                      item: item,
+                      selected: selected,
+                      themeColor: themeColor.primary,
+                      onTap: () => onTap(index),
+                    ),
+                  );
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class FloatingPillNavItem {
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final int? badgeCount;
+
+  const FloatingPillNavItem({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    this.badgeCount,
+  });
+}
+
+class _FloatingPillNavButton extends StatefulWidget {
+  final FloatingPillNavItem item;
+  final bool selected;
+  final Color themeColor;
+  final VoidCallback onTap;
+
+  const _FloatingPillNavButton({
+    super.key,
+    required this.item,
+    required this.selected,
+    required this.themeColor,
+    required this.onTap,
+  });
+
+  @override
+  State<_FloatingPillNavButton> createState() => _FloatingPillNavButtonState();
+}
+
+class _FloatingPillNavButtonState extends State<_FloatingPillNavButton> {
+  static const Duration _pressDuration = Duration(milliseconds: 100);
+  static const Duration _releaseDuration = Duration(milliseconds: 1500);
+
+  bool _pressed = false;
+  bool _locked = false;
+  Timer? _lockTimer;
+
+  @override
+  void dispose() {
+    _lockTimer?.cancel();
+    super.dispose();
+  }
+
+  void _setPressed(bool v) {
+    if (_pressed == v) return;
+    setState(() => _pressed = v);
+  }
+
+  void _handleTapDown() {
+    if (_locked) return;
+    _setPressed(true);
+  }
+
+  void _handleTapCancel() {
+    if (_locked) return;
+    _setPressed(false);
+  }
+
+  void _handleTap() {
+    if (_locked) return;
+    _setPressed(false);
+    widget.onTap();
+    _locked = true;
+    _lockTimer?.cancel();
+    _lockTimer = Timer(_releaseDuration, () {
+      if (!mounted) return;
+      setState(() => _locked = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.selected ? widget.themeColor : const Color(0xFF6E6E73);
+    final count = widget.item.badgeCount ?? 0;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) => _handleTapDown(),
+      onTapCancel: _handleTapCancel,
+      onTap: _handleTap,
+      child: AnimatedScale(
+        scale: _pressed ? 0.9 : 1.0,
+        duration: _pressed ? _pressDuration : _releaseDuration,
+        curve: _pressed ? Curves.easeOut : Curves.elasticOut,
+        child: Container(
+          decoration: BoxDecoration(
+            color: widget.selected
+                ? widget.themeColor.withAlpha(15)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(32),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(
+                    widget.selected
+                        ? widget.item.selectedIcon
+                        : widget.item.icon,
+                    color: color,
+                    size: 22,
+                  ),
+                  if (count > 0)
+                    Positioned(
+                      right: -8,
+                      top: -4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 16,
+                          minHeight: 16,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.white, width: 1.5),
+                        ),
+                        child: Text(
+                          count > 99 ? '99+' : '$count',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 1),
+              Text(
+                widget.item.label,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: color,
+                  fontWeight: widget.selected
+                      ? FontWeight.w700
+                      : FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

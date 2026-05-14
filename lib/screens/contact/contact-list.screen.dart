@@ -17,6 +17,8 @@ import '../../providers/message.provider.dart';
 import '../../providers/theme-color.provider.dart';
 import '../../services/contact.service.dart';
 import '../../services/user-status.service.dart';
+import '../../ui/app-bar.widget.dart';
+import '../../ui/blurred-dialog.widget.dart';
 import '../../ui/snackbar.dart';
 import '../chat/dm/dm-messaging.screen.dart';
 
@@ -74,7 +76,8 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
   List<UserModel> _sortByName(List<UserModel> users) {
     final sorted = [...users];
     sorted.sort(
-      (a, b) => a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
+      (a, b) =>
+          a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
     );
     return sorted;
   }
@@ -88,7 +91,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
           _availableUsers = sorted;
           _filteredUsers = sorted;
         });
-        
+
         // If we have contacts loaded, update all existing users with contact names
         // This handles users that were already in database from DMs/groups
         if (_contacts.isNotEmpty) {
@@ -206,7 +209,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
     return await _contactService.fetchContacts();
   }
 
-  /// Get contacts in JSON format for backend API       
+  /// Get contacts in JSON format for backend API
   List<String> getContactsForBackend() {
     return _contacts.map((contact) => contact.phoneNumber).toList();
   }
@@ -224,12 +227,12 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
           phoneNumber: '',
         ),
       );
-      
+
       // If matching contact found, set username to contact's display name
       if (matchingContact.phoneNumber.isNotEmpty) {
         return user.copyWith(username: matchingContact.displayName);
       }
-      
+
       return user;
     }).toList();
   }
@@ -257,9 +260,9 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
     try {
       // Get all users from the database
       final allUsers = await _userRepository.getAllUsers();
-      
+
       if (allUsers.isEmpty) return;
-      
+
       // Match each user with contacts and update if match found
       for (final user in allUsers) {
         final matchingContact = _contacts.firstWhere(
@@ -271,7 +274,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
             phoneNumber: '',
           ),
         );
-        
+
         // If matching contact found, update username and preserve role
         if (matchingContact.phoneNumber.isNotEmpty) {
           await _userRepository.updateUserUsernameAndRole(
@@ -281,7 +284,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
           );
         }
       }
-      
+
       debugPrint('✅ Updated ${allUsers.length} users with contact names');
     } catch (e) {
       debugPrint('Error updating all users with contacts: $e');
@@ -331,7 +334,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return FindUserDialog(onUserSelected: startConversation);
+        return FindUserDialog(onUserSelected: _confirmAndStartConversation);
       },
     );
   }
@@ -413,6 +416,18 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
       // }
       Snack.error('Failed to open add contact: $e');
     }
+  }
+
+  Future<void> _confirmAndStartConversation(UserModel user) async {
+    final confirmed = await showBlurredConfirm(
+      context: context,
+      title: 'Start chat?',
+      message: 'Start a conversation with ${user.displayName}?',
+      confirmLabel: 'Start chat',
+      confirmIcon: Icons.chat_bubble_outline_rounded,
+    );
+    if (confirmed != true || !mounted) return;
+    startConversation(user);
   }
 
   void startConversation(UserModel user) async {
@@ -521,9 +536,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
         // }
       }
     } else {
-      Snack.error(
-        'Failed to create chat: ${result.message}',
-      );
+      Snack.error('Failed to create chat: ${result.message}');
       // if (mounted) {
       //   try {
       //     final messenger = ScaffoldMessenger.maybeOf(context);
@@ -554,120 +567,48 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
     return Stack(
       children: [
         Scaffold(
-          backgroundColor: Color(0xFFF8FAFB),
-          appBar: PreferredSize(
-            preferredSize: Size.fromHeight(60),
-            child: AppBar(
-              backgroundColor: themeColor.primary,
-              leadingWidth: 60,
-              leading: Container(
-                margin: EdgeInsets.only(left: 16, top: 8, bottom: 8),
-                child: Container(
-                  padding: EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withAlpha(40),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    Icons.contacts_rounded,
-                    color: Colors.white,
-                    size: 24,
-                  ),
-                ),
+          backgroundColor: Colors.white,
+          appBar: AmigoAppBar(
+            title: 'Contacts',
+            showBackButton: Navigator.of(context).canPop(),
+            actions: [
+              AmigoAppBarAction(
+                icon: Icons.search_rounded,
+                onPressed: _toggleSearch,
+                tooltip: 'Search',
               ),
-              title: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Contacts (${_availableUsers.length})',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 20,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ],
+              AmigoAppBarAction(
+                icon: Icons.person_add_alt_rounded,
+                onPressed: _showFindUserDialog,
+                tooltip: 'Add to Phone Contacts',
               ),
-              actions: [
-                Container(
-                  margin: EdgeInsets.only(right: 8),
-                  child: IconButton(
-                    icon: Container(
-                      padding: EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withAlpha(40),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(
-                        Icons.search_rounded,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ),
-                    onPressed: _toggleSearch,
-                  ),
-                ),
-                Container(
-                  margin: EdgeInsets.only(right: 8),
-                  child: IconButton(
-                    icon: Container(
-                      padding: EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withAlpha(40),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(
-                        Icons.person_add_alt_rounded,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ),
-                    onPressed: _openNativeAddContact,
-                    tooltip: 'Add to Phone Contacts',
-                  ),
-                ),
-                Container(
-                  margin: EdgeInsets.only(right: 16),
-                  child: IconButton(
-                    icon: Container(
-                      padding: EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withAlpha(40),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(
-                        Icons.refresh_rounded,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ),
-                    onPressed: _loadContactsAndUsers,
-                  ),
-                ),
-              ],
-            ),
+              AmigoAppBarAction(
+                icon: Icons.refresh_rounded,
+                onPressed: _loadContactsAndUsers,
+                tooltip: 'Refresh',
+              ),
+            ],
           ),
           floatingActionButton: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: themeColor.primary.withOpacity(0.4),
-                  blurRadius: 20,
-                  offset: Offset(0, 8),
-                ),
-              ],
+              // boxShadow: [
+              //   BoxShadow(
+              //     color: themeColor.primary.withOpacity(0.4),
+              //     blurRadius: 20,
+              //     offset: Offset(0, 8),
+              //   ),
+              // ],
             ),
             child: FloatingActionButton(
-              onPressed: _showFindUserDialog,
+              onPressed: _openNativeAddContact,
               backgroundColor: themeColor.primary,
               elevation: 0,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(100),
               ),
               child: Icon(
-                Icons.person_add_rounded,
+                Icons.add_ic_call_rounded,
                 color: Colors.white,
                 size: 24,
               ),
@@ -680,7 +621,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [Color(0xFFF8FAFB), Color(0xFFFFFFFF)],
+                  colors: [Color(0xFFFFFFFF), Color(0xFFFFFFFF)],
                 ),
               ),
               child: Column(
@@ -698,13 +639,13 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                   decoration: BoxDecoration(
                                     color: Colors.white,
                                     borderRadius: BorderRadius.circular(20),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withOpacity(0.05),
-                                        blurRadius: 20,
-                                        offset: Offset(0, 4),
-                                      ),
-                                    ],
+                                    // boxShadow: [
+                                    //   BoxShadow(
+                                    //     color: Colors.black.withOpacity(0.05),
+                                    //     blurRadius: 20,
+                                    //     offset: Offset(0, 4),
+                                    //   ),
+                                    // ],
                                   ),
                                   child: CircularProgressIndicator(
                                     valueColor: AlwaysStoppedAnimation<Color>(
@@ -810,22 +751,22 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                             ),
                           )
                         : ListView.builder(
-                            padding: EdgeInsets.all(16),
+                            padding: EdgeInsets.all(8),
                             itemCount: _filteredUsers.length,
                             itemBuilder: (context, index) {
                               final user = _filteredUsers[index];
                               return Container(
-                                margin: EdgeInsets.only(bottom: 8),
+                                // margin: EdgeInsets.only(bottom: 8),
                                 decoration: BoxDecoration(
                                   color: Colors.white,
-                                  borderRadius: BorderRadius.circular(16),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.04),
-                                      blurRadius: 10,
-                                      offset: Offset(0, 2),
-                                    ),
-                                  ],
+                                  // borderRadius: BorderRadius.circular(16),
+                                  // boxShadow: [
+                                  //   BoxShadow(
+                                  //     color: Colors.black.withOpacity(0.04),
+                                  //     blurRadius: 10,
+                                  //     offset: Offset(0, 2),
+                                  //   ),
+                                  // ],
                                 ),
                                 child: Material(
                                   color: Colors.transparent,
@@ -833,7 +774,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                   child: InkWell(
                                     borderRadius: BorderRadius.circular(16),
                                     onTap: () {
-                                      startConversation(user);
+                                      _confirmAndStartConversation(user);
                                     },
                                     child: Padding(
                                       padding: EdgeInsets.all(16),
@@ -846,14 +787,14 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                                 decoration: BoxDecoration(
                                                   borderRadius:
                                                       BorderRadius.circular(20),
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: themeColor.primary
-                                                          .withOpacity(0.2),
-                                                      blurRadius: 12,
-                                                      offset: Offset(0, 4),
-                                                    ),
-                                                  ],
+                                                  // boxShadow: [
+                                                  //   BoxShadow(
+                                                  //     color: themeColor.primary
+                                                  //         .withOpacity(0.2),
+                                                  //     blurRadius: 12,
+                                                  //     offset: Offset(0, 4),
+                                                  //   ),
+                                                  // ],
                                                 ),
                                                 child: CircleAvatar(
                                                   radius: 28,
@@ -869,13 +810,15 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                                   child: user.profilePic == null
                                                       ? Icon(
                                                           Icons.person_rounded,
-                                                          color: themeColor.primary,
+                                                          color: themeColor
+                                                              .primary,
                                                           size: 28,
                                                         )
                                                       : null,
                                                 ),
                                               ),
-                                              if (_userStatusService.isUserOnline(user.id))
+                                              if (_userStatusService
+                                                  .isUserOnline(user.id))
                                                 Positioned(
                                                   right: 0,
                                                   bottom: 0,
@@ -883,12 +826,20 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                                     width: 14,
                                                     height: 14,
                                                     decoration: BoxDecoration(
-                                                      color: const Color(0xFF4CAF50),
+                                                      color: const Color(
+                                                        0xFF4CAF50,
+                                                      ),
                                                       shape: BoxShape.circle,
-                                                      border: Border.all(color: Colors.white, width: 2.5),
+                                                      border: Border.all(
+                                                        color: Colors.white,
+                                                        width: 2.5,
+                                                      ),
                                                       boxShadow: [
                                                         BoxShadow(
-                                                          color: Colors.green.withOpacity(0.45),
+                                                          color: Colors.green
+                                                              .withOpacity(
+                                                                0.45,
+                                                              ),
                                                           blurRadius: 5,
                                                         ),
                                                       ],
@@ -932,7 +883,7 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
                                                   BorderRadius.circular(10),
                                             ),
                                             child: Icon(
-                                              Icons.chat_bubble_rounded,
+                                              Icons.chat_rounded,
                                               color: themeColor.primary,
                                               size: 20,
                                             ),
