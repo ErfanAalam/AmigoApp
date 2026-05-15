@@ -429,6 +429,9 @@ class ChatNotifier extends Notifier<ChatState> {
                   senderId: lastMsg['sender_id']?.toString() ?? '',
                   type: MessageType.fromString(lastMsg['type']?.toString()) ?? MessageType.text,
                   body: lastMsg['body']?.toString() ?? '',
+                  attachments: lastMsg['attachments'] is Map<String, dynamic>
+                      ? lastMsg['attachments'] as Map<String, dynamic>
+                      : null,
                   sentAt: lastMsg['sent_at']?.toString() ?? DateTime.now().toIso8601String(),
                 ));
               }
@@ -603,6 +606,9 @@ class ChatNotifier extends Notifier<ChatState> {
                     senderId: lastMsg['sender_id']?.toString() ?? '',
                     type: MessageType.fromString(lastMsg['type']?.toString()) ?? MessageType.text,
                     body: lastMsg['body']?.toString() ?? '',
+                    attachments: lastMsg['attachments'] is Map<String, dynamic>
+                        ? lastMsg['attachments'] as Map<String, dynamic>
+                        : null,
                     sentAt: lastMsg['sent_at']?.toString() ?? DateTime.now().toIso8601String(),
                   ));
                 }

@@ -120,6 +120,69 @@ mixin ChatVoiceRecordingMixin<T extends StatefulWidget>
     await voiceRecordingManager.cancelRecording();
   }
 
+  // ─────────────────────────────────────────────────────────────────
+  //  Inline (WhatsApp-style) recording API used by MessageInputContainer.
+  //  These bypass the [VoiceRecordingModal] entirely. The legacy modal
+  //  flow above ([sendVoiceNote], [showVoiceRecordingModal], etc.) is
+  //  kept intact as a fallback.
+  // ─────────────────────────────────────────────────────────────────
+
+  /// Stream of recording-duration ticks, exposed for the inline UI.
+  Stream<Duration> get inlineRecordingTimerStream =>
+      timerStreamController.stream;
+
+  /// Start a recording inline (no modal). Returns true on success.
+  /// Handles permission flow; returns false if mic permission was denied.
+  Future<bool> startInlineRecording() async {
+    final micStatus = await Permission.microphone.status;
+    if (!micStatus.isGranted) {
+      await checkAndRequestMicrophonePermission();
+      final newStatus = await Permission.microphone.status;
+      if (!newStatus.isGranted) return false;
+    }
+
+    await voiceRecordingManager.startRecording();
+    return voiceRecordingManager.isRecording;
+  }
+
+  /// Stop the inline recording and return the captured file metadata.
+  /// Returns null if the recording was too short / empty / failed (the
+  /// file is cleaned up automatically in that case).
+  Future<({String path, int sizeBytes, Duration duration})?>
+  stopInlineRecording() async {
+    return voiceRecordingManager.stopRecordingInline();
+  }
+
+  /// Cancel an in-progress inline recording (deletes the file).
+  Future<void> cancelInlineRecording() async {
+    await voiceRecordingManager.cancelRecordingInline();
+  }
+
+  /// Discard a previously-stopped recording (used when the user taps
+  /// the trash button in the preview state).
+  Future<void> discardInlineRecording(String path) async {
+    await voiceRecordingManager.discardRecordingAt(path);
+  }
+
+  /// Send a previously-stopped inline recording.
+  Future<void> sendInlineRecording(String path) async {
+    try {
+      final file = File(path);
+      if (!await file.exists()) {
+        showErrorDialog('Recording file not found. Please try again.');
+        return;
+      }
+      final size = await file.length();
+      if (size == 0) {
+        showErrorDialog('Recording is empty. Please try again.');
+        return;
+      }
+      await sendMediaMessageToServer(file, MessageType.audio);
+    } catch (e) {
+      showErrorDialog('Failed to send voice note. Please try again.');
+    }
+  }
+
   Future<void> sendRecordedVoice({MessageModel? failedMessage}) async {
     try {
       File? voiceFile;

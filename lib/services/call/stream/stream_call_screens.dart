@@ -260,9 +260,11 @@ class _StreamCallScreenState extends State<StreamCallScreen> {
     _pipArmed = shouldArm;
     if (shouldArm) {
       // OnLeavePiP arms the system to enter PiP automatically when the
-      // user backgrounds the app (Home gesture). Aspect-ratio matches the
-      // 16:9 video rendering area.
-      f.enable(const OnLeavePiP()).catchError((Object e) {
+      // user backgrounds the app (Home gesture). We request a portrait
+      // (9:16) aspect ratio — a tall PiP tile reads better when the
+      // remote feed is a person.
+      f.enable(const OnLeavePiP(aspectRatio: Rational.vertical()))
+          .catchError((Object e) {
         debugPrint('[STREAM-CALL]   PiP enable failed: $e');
         return PiPStatus.unavailable;
       });
@@ -876,9 +878,30 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
   Timer? _ticker;
   Duration _elapsed = Duration.zero;
 
+  // Real PiP state, driven by Floating's status stream. We used to derive
+  // this from MediaQuery width but Android's display-zoom setting can push
+  // the reported width below the legacy threshold on tablets and large
+  // phones, making the in-call UI collapse to PiP layout even when the
+  // call screen is fullscreen. The status stream reflects the OS's actual
+  // PiP state. `Floating()` is a singleton so this co-exists fine with the
+  // parent screen's arming logic.
+  final Floating? _floating = defaultTargetPlatform == TargetPlatform.android
+      ? Floating()
+      : null;
+  StreamSubscription<PiPStatus>? _pipStatusSub;
+  bool _isInPip = false;
+
   @override
   void initState() {
     super.initState();
+    final pipStream = _floating?.pipStatusStream;
+    if (pipStream != null) {
+      _pipStatusSub = pipStream.listen((status) {
+        if (!mounted) return;
+        final next = status == PiPStatus.enabled;
+        if (next != _isInPip) setState(() => _isInPip = next);
+      });
+    }
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       // Read the canonical "connected at" from the service so the on-screen
@@ -905,6 +928,7 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
   @override
   void dispose() {
     _ticker?.cancel();
+    _pipStatusSub?.cancel();
     super.dispose();
   }
 
@@ -941,12 +965,11 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
         final remoteName = _remoteName(state, fallback?.userName);
         final remoteAvatar = _remoteAvatar(state) ?? fallback?.userProfilePic;
 
-        // PiP detection — when launched into a small Android Picture-in-
-        // Picture window, the activity's reported size shrinks to ~200-300dp.
-        // We hide the top status bar and self-view to give the video grid
-        // (or remote avatar) the whole frame, and the control bar shrinks
-        // itself via its own MediaQuery check.
-        final isPip = MediaQuery.of(context).size.width < 360;
+        // PiP state comes from the Floating package's status stream — see
+        // `_pipStatusSub` in initState. In PiP we drop the top status bar,
+        // the self-view tile and the entire control bar so the remote
+        // video/avatar gets the whole tile.
+        final isPip = _isInPip;
 
         debugPrint('[STREAM-CALL] in-call build  '
             'callParticipants=${state.callParticipants.length} '
@@ -988,22 +1011,22 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
               ),
             ),
 
-            // Bottom controls. Tighter padding in PiP because every pixel
-            // of horizontal/vertical space matters at that size.
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: isPip
-                      ? const EdgeInsets.fromLTRB(8, 0, 8, 8)
-                      : const EdgeInsets.fromLTRB(20, 0, 20, 22),
-                  child: _ControlBar(call: widget.call, state: state),
+            // Bottom controls — hidden entirely in PiP. The PiP tile is
+            // too small to host any touch target; the user returns to
+            // full screen first and then interacts with the controls.
+            if (!isPip)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 22),
+                    child: _ControlBar(call: widget.call, state: state),
+                  ),
                 ),
               ),
-            ),
           ],
         );
       },
@@ -1204,80 +1227,79 @@ class _ControlBarState extends State<_ControlBar> {
 
   @override
   Widget build(BuildContext context) {
-    // Detect cramped windows (Picture-in-Picture) by viewport width. PiP
-    // launches the activity into a window that's typically 200-300 dp wide
-    // — anything below this threshold is "too small for full controls" so
-    // we collapse to mute + hangup only and shrink the buttons.
-    final width = MediaQuery.of(context).size.width;
-    final isPip = width < 360;
-    final pillSize = isPip ? 38.0 : 54.0;
-    final iconSize = isPip ? 18.0 : 24.0;
-    final padding = isPip
-        ? const EdgeInsets.symmetric(horizontal: 6, vertical: 6)
-        : const EdgeInsets.symmetric(horizontal: 12, vertical: 14);
-    final radius = isPip ? 20.0 : 28.0;
+    // The control bar is never rendered in PiP (the parent skips it), so
+    // sizing only has to handle in-call full-screen layouts. We pin the
+    // bar to at least 80% of the screen width so it reads as a real
+    // bottom bar, and cap it at `maxWidth` so it doesn't stretch
+    // edge-to-edge on tablets. If 80% of the screen exceeds the cap,
+    // the cap wins.
+    const maxWidth = 480.0;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final eightyPercent = screenWidth * 0.8;
+    final minWidth = eightyPercent > maxWidth ? maxWidth : eightyPercent;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          padding: padding,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.10),
-            borderRadius: BorderRadius.circular(radius),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.16),
-              width: 0.6,
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minWidth: minWidth, maxWidth: maxWidth),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(28),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.16),
+                  width: 0.6,
+                ),
+              ),
+              // Wrap (not Row) so the bar grows a second row when buttons
+              // don't fit horizontally — happens on narrower phones once
+              // the flip-camera button shows up alongside mute/speaker/
+              // video/hangup.
+              child: Wrap(
+                alignment: WrapAlignment.spaceEvenly,
+                runAlignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _PillButton(
+                    icon: _muted ? Icons.mic_off_rounded : Icons.mic_rounded,
+                    active: _muted,
+                    onTap: _toggleMute,
+                  ),
+                  _PillButton(
+                    icon: _speakerOn
+                        ? Icons.volume_up_rounded
+                        : Icons.hearing_rounded,
+                    active: _speakerOn,
+                    onTap: _toggleSpeaker,
+                  ),
+                  _PillButton(
+                    icon: _videoOn
+                        ? Icons.videocam_rounded
+                        : Icons.videocam_off_rounded,
+                    active: _videoOn,
+                    onTap: _toggleVideo,
+                  ),
+                  if (_videoOn)
+                    _PillButton(
+                      icon: Icons.cameraswitch_rounded,
+                      active: false,
+                      onTap: _flip,
+                    ),
+                  _PillButton(
+                    icon: Icons.call_end_rounded,
+                    active: true,
+                    color: const Color(0xFFE53935),
+                    onTap: _hangup,
+                  ),
+                ],
+              ),
             ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _PillButton(
-                icon: _muted ? Icons.mic_off_rounded : Icons.mic_rounded,
-                active: _muted,
-                onTap: _toggleMute,
-                size: pillSize,
-                iconSize: iconSize,
-              ),
-              if (!isPip)
-                _PillButton(
-                  icon: _speakerOn
-                      ? Icons.volume_up_rounded
-                      : Icons.hearing_rounded,
-                  active: _speakerOn,
-                  onTap: _toggleSpeaker,
-                  size: pillSize,
-                  iconSize: iconSize,
-                ),
-              if (!isPip)
-                _PillButton(
-                  icon: _videoOn
-                      ? Icons.videocam_rounded
-                      : Icons.videocam_off_rounded,
-                  active: _videoOn,
-                  onTap: _toggleVideo,
-                  size: pillSize,
-                  iconSize: iconSize,
-                ),
-              if (!isPip && _videoOn)
-                _PillButton(
-                  icon: Icons.cameraswitch_rounded,
-                  active: false,
-                  onTap: _flip,
-                  size: pillSize,
-                  iconSize: iconSize,
-                ),
-              _PillButton(
-                icon: Icons.call_end_rounded,
-                active: true,
-                color: const Color(0xFFE53935),
-                onTap: _hangup,
-                size: pillSize,
-                iconSize: iconSize,
-              ),
-            ],
           ),
         ),
       ),
@@ -1290,24 +1312,20 @@ class _PillButton extends StatelessWidget {
   final bool active;
   final VoidCallback onTap;
   final Color? color;
-  final double size;
-  final double iconSize;
 
   const _PillButton({
     required this.icon,
     required this.active,
     required this.onTap,
     this.color,
-    this.size = 54,
-    this.iconSize = 24,
   });
 
   @override
   Widget build(BuildContext context) {
-    final bg = color ?? (active ? Colors.white : Colors.white.withValues(alpha: 0.10));
-    final fg = color != null
-        ? Colors.white
-        : (active ? Colors.black : Colors.white);
+    final bg =
+        color ?? (active ? Colors.white : Colors.white.withValues(alpha: 0.10));
+    final fg =
+        color != null ? Colors.white : (active ? Colors.black : Colors.white);
     return Material(
       shape: const CircleBorder(),
       color: bg,
@@ -1315,9 +1333,9 @@ class _PillButton extends StatelessWidget {
         customBorder: const CircleBorder(),
         onTap: onTap,
         child: SizedBox(
-          width: size,
-          height: size,
-          child: Icon(icon, color: fg, size: iconSize),
+          width: 54,
+          height: 54,
+          child: Icon(icon, color: fg, size: 24),
         ),
       ),
     );

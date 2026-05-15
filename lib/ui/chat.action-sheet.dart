@@ -34,17 +34,18 @@ class ChatActionMenu extends StatelessWidget {
         : (group!.metadata?.lastMessage?.body ?? group!.lastMsgBody);
 
     return Container(
-      padding: EdgeInsets.only(bottom: 27),
+      margin: EdgeInsets.only(bottom: 5),
+      padding: EdgeInsets.only(bottom: 0),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(10),
-            blurRadius: 10,
-            offset: Offset(0, 5),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(20),
+        // boxShadow: [
+        //   BoxShadow(
+        //     color: Colors.black.withAlpha(10),
+        //     blurRadius: 10,
+        //     offset: Offset(0, 5),
+        //   ),
+        // ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -53,17 +54,21 @@ class ChatActionMenu extends StatelessWidget {
           Container(
             padding: EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.teal.withAlpha(10),
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(12),
-                topRight: Radius.circular(12),
-              ),
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              // border: Border.fromBorderSide(
+              //   BorderSide(color: Colors.grey[200]!, width: 1),
+              // ),
+              // only(
+              //   topLeft: Radius.circular(12),
+              //   topRight: Radius.circular(12),
+              // ),
             ),
             child: Row(
               children: [
                 CircleAvatar(
                   radius: 20,
-                  backgroundColor: Colors.teal[100],
+                  backgroundColor: Colors.black.withAlpha(10),
                   backgroundImage: isDm && displayPic != null
                       ? NetworkImage(displayPic)
                       : null,
@@ -120,6 +125,8 @@ class ChatActionMenu extends StatelessWidget {
             ),
           ),
 
+          _buildDivider(),
+
           // Action Items
           _buildActionItem(
             icon: isPinned ? Icons.push_pin : Icons.push_pin_outlined,
@@ -129,8 +136,7 @@ class ChatActionMenu extends StatelessWidget {
             onTap: () => onActionSelected(isPinned ? 'unpin' : 'pin'),
           ),
 
-          _buildDivider(),
-
+          // _buildDivider(),
           _buildActionItem(
             icon: isMuted ? Icons.volume_up : Icons.volume_off,
             title: isMuted ? 'Unmute Chat' : 'Mute Chat',
@@ -141,8 +147,7 @@ class ChatActionMenu extends StatelessWidget {
             onTap: () => onActionSelected(isMuted ? 'unmute' : 'mute'),
           ),
 
-          _buildDivider(),
-
+          // _buildDivider(),
           _buildActionItem(
             icon: isFavorite ? Icons.favorite : Icons.favorite_border,
             title: isFavorite ? 'Remove Favorite' : 'Add to Favorites',
@@ -154,7 +159,7 @@ class ChatActionMenu extends StatelessWidget {
 
           // Only show delete action for DMs, not for groups
           if (isDm) ...[
-            _buildDivider(),
+            // _buildDivider(),
             _buildActionItem(
               icon: Icons.delete_outline,
               title: 'Delete Chat',
@@ -211,15 +216,15 @@ class ChatActionMenu extends StatelessWidget {
                       color: isDestructive ? Colors.red : Colors.black87,
                     ),
                   ),
-                  SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                  ),
+                  // SizedBox(height: 2),
+                  // Text(
+                  //   subtitle,
+                  //   style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  // ),
                 ],
               ),
             ),
-            Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey[400]),
+            // Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey[400]),
           ],
         ),
       ),
@@ -227,12 +232,7 @@ class ChatActionMenu extends StatelessWidget {
   }
 
   Widget _buildDivider() {
-    return Divider(
-      height: 1,
-      indent: 16,
-      endIndent: 16,
-      color: Colors.grey[200],
-    );
+    return Divider(height: 1, indent: 0, endIndent: 0, color: Colors.grey[200]);
   }
 
   String _getInitials(String name) {

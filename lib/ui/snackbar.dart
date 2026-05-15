@@ -175,7 +175,7 @@ class _SnackOverlayState extends State<_SnackOverlay>
               }
             },
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(20),
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
                 child: Container(
@@ -188,9 +188,9 @@ class _SnackOverlayState extends State<_SnackOverlay>
                         .withAlpha(150)
                         .withLuminance(0.96),
                     // color: Colors.white.withAlpha(150),
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: widget.backgroundColor.withAlpha(150),
+                      color: widget.backgroundColor.withAlpha(50),
                       width: 1,
                     ),
                   ),
@@ -213,7 +213,7 @@ class _SnackOverlayState extends State<_SnackOverlay>
                           padding: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
                             color: widget.backgroundColor.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(50),
                           ),
                           child: Icon(
                             m.Icons.close_rounded,
@@ -262,7 +262,8 @@ class TaskSnack {
       return '';
     }
 
-    final entryId = id ?? 'task-${DateTime.now().microsecondsSinceEpoch}-${_counter++}';
+    final entryId =
+        id ?? 'task-${DateTime.now().microsecondsSinceEpoch}-${_counter++}';
 
     // If it already exists, just update the message and keep loading
     final existing = _entries[entryId];
@@ -297,11 +298,7 @@ class TaskSnack {
   }
 
   /// Resolve one (or all) snackbars into success/failure, triggering auto hide.
-  static void resolve({
-    String? id,
-    required bool isSuccess,
-    String? message,
-  }) {
+  static void resolve({String? id, required bool isSuccess, String? message}) {
     if (id != null) {
       _entries[id]?.state?.resolve(isSuccess: isSuccess, message: message);
       return;
@@ -406,16 +403,15 @@ class _TaskSnackOverlayState extends State<_TaskSnackOverlay>
       vsync: this,
     );
 
-    _fadeAnimation = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
-    );
+    _fadeAnimation = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
 
     _slideAnimation = Tween<Offset>(
       begin: const Offset(0, 1),
       end: Offset.zero,
-    ).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
-    );
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
 
     _controller.forward();
     _scheduleAutoDismissIfNeeded();
@@ -489,10 +485,7 @@ class _TaskSnackOverlayState extends State<_TaskSnackOverlay>
       return SizedBox(
         width: 22,
         height: 22,
-        child: m.CircularProgressIndicator(
-          strokeWidth: 2.5,
-          color: _tone,
-        ),
+        child: m.CircularProgressIndicator(strokeWidth: 2.5, color: _tone),
       );
     }
 
@@ -529,7 +522,7 @@ class _TaskSnackOverlayState extends State<_TaskSnackOverlay>
             child: FadeTransition(
               opacity: _fadeAnimation,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(20),
                 child: BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
                   child: Container(
@@ -539,11 +532,8 @@ class _TaskSnackOverlayState extends State<_TaskSnackOverlay>
                     ),
                     decoration: BoxDecoration(
                       color: _tone.withAlpha(150).withLuminance(0.96),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: _tone.withAlpha(150),
-                        width: 1,
-                      ),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: _tone.withAlpha(50), width: 1),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -567,7 +557,7 @@ class _TaskSnackOverlayState extends State<_TaskSnackOverlay>
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
                               color: _tone.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(50),
                             ),
                             child: Icon(
                               m.Icons.close_rounded,

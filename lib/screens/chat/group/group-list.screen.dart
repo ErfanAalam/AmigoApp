@@ -13,7 +13,9 @@ import '../../../providers/theme-color.provider.dart';
 import '../../../services/chat-prewarm.service.dart';
 import '../../../types/socket.types.dart';
 import '../../../ui/app-bar.widget.dart';
+// ignore: unused_import
 import '../../../ui/chat.action-sheet.dart';
+import '../../../ui/blurred-popup.widget.dart';
 import '../../../ui/chat/searchable-list.widget.dart';
 import '../../../utils/route-transitions.util.dart';
 import 'community-group-list.screen.dart';
@@ -60,17 +62,57 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
     ref.read(chatProvider.notifier).loadConvsFromServer();
   }
 
-  /// Show group chat actions bottom sheet
-  Future<void> _showGroupChatActions(GroupModel group) async {
-    final action = await ChatActionBottomSheet.show(
-      context: context,
-      group: group,
-      isPinned: group.isPinned ?? false,
-      isMuted: group.isMuted ?? false,
-      isFavorite: group.isFavorite ?? false,
+  /// Show group chat actions as a blurred popup anchored to the long-pressed
+  /// row. Replaces the legacy [ChatActionBottomSheet] sheet — kept on disk
+  /// for future reuse but no longer wired.
+  Future<void> _showGroupChatActions(
+    GroupModel group,
+    BuildContext anchor,
+  ) async {
+    final isPinned = group.isPinned;
+    final isMuted = group.isMuted;
+    final isFavorite = group.isFavorite;
+
+    final overlayBox =
+        Navigator.of(anchor).overlay?.context.findRenderObject() as RenderBox?;
+    final box = anchor.findRenderObject() as RenderBox?;
+    if (overlayBox == null || box == null) return;
+
+    final position = RelativeRect.fromRect(
+      Rect.fromPoints(
+        box.localToGlobal(Offset.zero, ancestor: overlayBox),
+        box.localToGlobal(
+          box.size.bottomRight(Offset.zero),
+          ancestor: overlayBox,
+        ),
+      ),
+      Offset.zero & overlayBox.size,
     );
 
-    if (action != null) {
+    final action = await showBlurredPopup<String>(
+      context: anchor,
+      position: position,
+      scaleAlignment: Alignment.topCenter,
+      items: [
+        BlurredPopupAction<String>(
+          label: isPinned ? 'Unpin Chat' : 'Pin Chat',
+          icon: isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+          value: isPinned ? 'unpin' : 'pin',
+        ),
+        BlurredPopupAction<String>(
+          label: isMuted ? 'Unmute Chat' : 'Mute Chat',
+          icon: isMuted ? Icons.volume_up : Icons.volume_off,
+          value: isMuted ? 'unmute' : 'mute',
+        ),
+        BlurredPopupAction<String>(
+          label: isFavorite ? 'Remove Favorite' : 'Add to Favorites',
+          icon: isFavorite ? Icons.favorite : Icons.favorite_border,
+          value: isFavorite ? 'unfavorite' : 'favorite',
+        ),
+      ],
+    );
+
+    if (action != null && mounted) {
       await _handleGroupChatAction(action, group);
     }
   }
@@ -325,7 +367,7 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
               isPinned: item.isPinned ?? false,
               isMuted: item.isMuted ?? false,
               isFavorite: item.isFavorite ?? false,
-              onLongPress: () => _showGroupChatActions(item),
+              onLongPress: (anchor) => _showGroupChatActions(item, anchor),
               onTap: () async {
                 // Kick off the first-batch DB read while the route
                 // transition animates so the screen has a snapshot ready
@@ -384,7 +426,9 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
 class GroupListItem extends ConsumerWidget {
   final GroupModel group;
   final VoidCallback onTap;
-  final VoidCallback? onLongPress;
+  // Receives the row's local context so the caller can anchor a blurred
+  // popup to the long-pressed row's bounds.
+  final void Function(BuildContext anchor)? onLongPress;
   final Set<TypingUser> typingUsers;
   final String conversationId;
   final bool isPinned;
@@ -547,9 +591,11 @@ class GroupListItem extends ConsumerWidget {
               : BorderSide.none,
         ),
       ),
-      child: InkWell(
+      child: Builder(builder: (rowContext) => InkWell(
         onTap: onTap,
-        onLongPress: onLongPress,
+        onLongPress: onLongPress == null
+            ? null
+            : () => onLongPress!(rowContext),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
@@ -665,7 +711,7 @@ class GroupListItem extends ConsumerWidget {
             ],
           ),
         ),
-      ),
+      )),
     );
   }
 

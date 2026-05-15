@@ -697,6 +697,119 @@ class VoiceRecordingManager {
     return _recordingPath;
   }
 
+  // ─────────────────────────────────────────────────────────────────
+  //  Inline (WhatsApp-style) recording API
+  //  These do NOT touch any modal / Navigator state. They are meant
+  //  to be driven directly by an in-place UI in the input container.
+  // ─────────────────────────────────────────────────────────────────
+
+  /// Stop the recorder unconditionally (no min-duration check, no error
+  /// dialogs, no navigator pop). Returns the captured file path along with
+  /// its size in bytes if the file is valid; otherwise deletes the file
+  /// and returns null. Safe to call when not currently recording.
+  Future<({String path, int sizeBytes, Duration duration})?>
+  stopRecordingInline() async {
+    // Always cancel the timer first to prevent it from continuing.
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+
+    if (!_isRecording) {
+      return null;
+    }
+
+    final capturedDuration = _recordingDuration;
+
+    String? recordingPath;
+    try {
+      // Tiny delay so the last audio frames are flushed.
+      await Future.delayed(const Duration(milliseconds: 100));
+      recordingPath = await _recorder.stopRecorder();
+      _zigzagAnimationController.stop();
+      // Wait for the file to be fully written.
+      await Future.delayed(const Duration(milliseconds: 200));
+    } catch (e) {
+      debugPrint('❌ Error stopping inline voice recording: $e');
+    }
+
+    _isRecording = false;
+    if (_mounted()) _setState();
+
+    if (recordingPath == null) {
+      _recordingPath = null;
+      return null;
+    }
+
+    final file = File(recordingPath);
+    final exists = await file.exists();
+    final size = exists ? await file.length() : 0;
+
+    // Reject empty / corrupt recordings (delete to keep tmp clean).
+    if (!exists || size < 1000) {
+      try {
+        if (exists) await file.delete();
+      } catch (_) {}
+      _recordingPath = null;
+      return null;
+    }
+
+    _recordingPath = recordingPath;
+    return (path: recordingPath, sizeBytes: size, duration: capturedDuration);
+  }
+
+  /// Cancel the in-progress recording without touching navigator state.
+  /// Mirrors [cancelRecording] but skips the modal pop.
+  Future<void> cancelRecordingInline() async {
+    try {
+      if (_isRecording) {
+        await _recorder.stopRecorder();
+        _zigzagAnimationController.stop();
+      }
+
+      _recordingTimer?.cancel();
+      _recordingTimer = null;
+
+      // Delete the recording file if it exists.
+      if (_recordingPath != null) {
+        final file = File(_recordingPath!);
+        if (await file.exists()) {
+          try {
+            await file.delete();
+          } catch (_) {}
+        }
+      }
+
+      _recordingDuration = Duration.zero;
+      _timerStreamController.add(_recordingDuration);
+
+      if (_mounted()) {
+        _setState();
+        _isRecording = false;
+        _recordingPath = null;
+      } else {
+        _isRecording = false;
+        _recordingPath = null;
+      }
+    } catch (e) {
+      debugPrint('❌ Error cancelling inline voice recording: $e');
+    }
+  }
+
+  /// Discard a previously-stopped recording at [path] (for use after
+  /// [stopRecordingInline] when the user taps the trash button in preview).
+  Future<void> discardRecordingAt(String path) async {
+    try {
+      final file = File(path);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error discarding recording at $path: $e');
+    }
+    if (_recordingPath == path) {
+      _recordingPath = null;
+    }
+  }
+
   /// Dispose all resources
   Future<void> dispose() async {
     _recordingTimer?.cancel();

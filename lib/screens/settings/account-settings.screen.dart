@@ -1,3 +1,4 @@
+import 'package:amigo/ui/blurred-dialog.widget.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -51,8 +52,18 @@ class _AccountSettingsScreenState extends ConsumerState<AccountSettingsScreen> {
     try {
       final d = DateTime.parse(raw).toLocal();
       const months = [
-        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
       ];
       return '${months[d.month - 1]} ${d.day}, ${d.year}';
     } catch (_) {
@@ -76,8 +87,10 @@ class _AccountSettingsScreenState extends ConsumerState<AccountSettingsScreen> {
         },
       ),
       transitionBuilder: (context, animation, _, child) {
-        final curved =
-            CurvedAnimation(parent: animation, curve: Curves.easeOut);
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOut,
+        );
         return FadeTransition(
           opacity: curved,
           child: ScaleTransition(
@@ -90,33 +103,41 @@ class _AccountSettingsScreenState extends ConsumerState<AccountSettingsScreen> {
   }
 
   Future<void> _logout() async {
-    final themeColor = ref.read(themeColorProvider);
-    final shouldLogout = await showDialog<bool>(
+    // final themeColor = ref.read(themeColorProvider);
+    final shouldLogout = await showBlurredConfirm(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: const Text('Log out'),
-        content: const Text('Are you sure you want to log out?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(color: themeColor.primary),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text(
-              'Log out',
-              style: TextStyle(color: Colors.red),
-            ),
-          ),
-        ],
-      ),
+      title: 'Log out',
+      message: 'Are you sure you want to log out?',
+      confirmLabel: 'Log out',
+      confirmIcon: Icons.logout_rounded,
+      destructive: true,
     );
+    // final shouldLogout = await showDialog<bool>(
+    //   context: context,
+    //   builder: (context) => AlertDialog(
+    //     shape: RoundedRectangleBorder(
+    //       borderRadius: BorderRadius.circular(16),
+    //     ),
+    //     title: const Text('Log out'),
+    //     content: const Text('Are you sure you want to log out?'),
+    //     actions: [
+    //       TextButton(
+    //         onPressed: () => Navigator.pop(context, false),
+    //         child: Text(
+    //           'Cancel',
+    //           style: TextStyle(color: themeColor.primary),
+    //         ),
+    //       ),
+    //       TextButton(
+    //         onPressed: () => Navigator.pop(context, true),
+    //         child: const Text(
+    //           'Log out',
+    //           style: TextStyle(color: Colors.red),
+    //         ),
+    //       ),
+    //     ],
+    //   ),
+    // );
 
     if (shouldLogout != true || !mounted) return;
     await AuthService().logout();
@@ -167,8 +188,8 @@ class _AccountSettingsScreenState extends ConsumerState<AccountSettingsScreen> {
                           children: [
                             CircleAvatar(
                               radius: 44,
-                              backgroundColor:
-                                  themeColor.primaryLight.withOpacity(0.4),
+                              backgroundColor: themeColor.primaryLight
+                                  .withOpacity(0.4),
                               backgroundImage: (pic != null && pic.isNotEmpty)
                                   ? CachedNetworkImageProvider(pic)
                                   : null,
@@ -247,8 +268,7 @@ class _AccountSettingsScreenState extends ConsumerState<AccountSettingsScreen> {
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(20),
                           ),
-                          backgroundColor:
-                              themeColor.primary.withOpacity(0.08),
+                          backgroundColor: themeColor.primary.withOpacity(0.08),
                         ),
                       ),
                     ],

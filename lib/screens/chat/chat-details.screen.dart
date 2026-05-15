@@ -79,8 +79,7 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
   StreamSubscription<List<GroupMember>>? _membersSub;
 
   // Member search (groups only)
-  final TextEditingController _memberSearchController =
-      TextEditingController();
+  final TextEditingController _memberSearchController = TextEditingController();
   String _memberSearch = '';
 
   // ─── Convenience getters ─────────────────────────────────────────────────
@@ -125,8 +124,7 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
     final q = _memberSearch.trim().toLowerCase();
     if (q.isEmpty) return _members;
     return _members.where((m) {
-      final name =
-          ((m['userName'] ?? m['name'] ?? '') as String).toLowerCase();
+      final name = ((m['userName'] ?? m['name'] ?? '') as String).toLowerCase();
       return name.contains(q);
     }).toList();
   }
@@ -782,9 +780,7 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
     final isAdmin = member['role'] == 'admin';
     final canManage = _isCurrentUserAdmin && !_isMemberCreator(userId);
 
-    final messageLabel = userName.isNotEmpty
-        ? 'Message $userName'
-        : 'Message';
+    final messageLabel = userName.isNotEmpty ? 'Message $userName' : 'Message';
 
     final selected = await showBlurredPopup<_MemberAction>(
       context: anchor,
@@ -982,7 +978,8 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
               // DMs always show Delete (soft-delete → moves to "deleted
               // chats"). Groups only show Delete for admin/creator —
               // regular members no longer have a destructive action here.
-              final canDelete = !isGroup || _isCurrentUserAdmin || _isCurrentUserCreator;
+              final canDelete =
+                  !isGroup || _isCurrentUserAdmin || _isCurrentUserCreator;
               return [
                 BlurredPopupAction(
                   value: 'favorite',
@@ -1184,7 +1181,7 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.04),
@@ -1207,11 +1204,8 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
                 physics: const NeverScrollableScrollPhysics(),
                 padding: EdgeInsets.zero,
                 itemCount: visible.length,
-                separatorBuilder: (_, __) => Divider(
-                  height: 1,
-                  indent: 64,
-                  color: Colors.grey.shade100,
-                ),
+                separatorBuilder: (_, __) =>
+                    Divider(height: 1, indent: 64, color: Colors.grey.shade100),
                 itemBuilder: (context, i) {
                   final member = visible[i];
                   return _buildMemberTile(member, themeColor);
@@ -1317,11 +1311,7 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
       padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
       child: Column(
         children: [
-          Icon(
-            Icons.search_off_rounded,
-            size: 36,
-            color: Colors.grey.shade400,
-          ),
+          Icon(Icons.search_off_rounded, size: 36, color: Colors.grey.shade400),
           const SizedBox(height: 8),
           Text(
             'No members match "${_memberSearch.trim()}"',
@@ -1423,7 +1413,7 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.04),
@@ -1435,7 +1425,7 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(20),
             onTap: _navigateToMedia,
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -1445,7 +1435,7 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
                       color: themeColor.primaryLight.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(50),
                     ),
                     child: Icon(
                       Icons.photo_library_outlined,
@@ -1569,15 +1559,16 @@ class _ActionCard extends StatelessWidget {
     final disabled = onTap == null;
     return Material(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(20),
       elevation: 0,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(20),
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 16),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.04),

@@ -11,7 +11,10 @@ import '../../../services/chat-prewarm.service.dart';
 import '../../../services/user-status.service.dart';
 import '../../../types/socket.types.dart';
 import '../../../ui/app-bar.widget.dart';
+// ignore: unused_import
 import '../../../ui/chat.action-sheet.dart';
+import '../../../ui/blurred-dialog.widget.dart';
+import '../../../ui/blurred-popup.widget.dart';
 import '../../../ui/chat/searchable-list.widget.dart';
 import '../../../ui/chat/user-profile.modal.dart';
 import '../../../utils/route-transitions.util.dart';
@@ -67,41 +70,76 @@ class ChatsPageState extends ConsumerState<ChatsPage>
   }
 
   /// Show delete confirmation dialog
-  Future<bool?> _showDeleteConfirmation(String userName) async {
-    return await showDialog<bool>(
+  Future<bool?> _showDeleteConfirmation(String userName) {
+    return showBlurredConfirm(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text('Delete Chat'),
-        content: Text(
+      title: 'Delete Chat',
+      message:
           'Are you sure you want to delete the chat with $userName? You can restore it from your profile.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('CANCEL'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('DELETE'),
-          ),
-        ],
-      ),
+      confirmLabel: 'Delete',
+      confirmIcon: Icons.delete_outline,
+      destructive: true,
     );
   }
 
-  /// Show chat actions bottom sheet
-  Future<void> _showChatActions(DmModel conversation) async {
-    final action = await ChatActionBottomSheet.show(
-      context: context,
-      dm: conversation,
-      isPinned: conversation.isPinned ?? false,
-      isMuted: conversation.isMuted ?? false,
-      isFavorite: conversation.isFavorite ?? false,
+  /// Show chat actions as a blurred popup anchored to the long-pressed row.
+  /// Replaces the legacy [ChatActionBottomSheet] sheet — kept on disk for
+  /// future reuse but no longer wired.
+  Future<void> _showChatActions(
+    DmModel conversation,
+    BuildContext anchor,
+  ) async {
+    final isPinned = conversation.isPinned;
+    final isMuted = conversation.isMuted;
+    final isFavorite = conversation.isFavorite;
+
+    final overlayBox =
+        Navigator.of(anchor).overlay?.context.findRenderObject() as RenderBox?;
+    final box = anchor.findRenderObject() as RenderBox?;
+    if (overlayBox == null || box == null) return;
+
+    final position = RelativeRect.fromRect(
+      Rect.fromPoints(
+        box.localToGlobal(Offset.zero, ancestor: overlayBox),
+        box.localToGlobal(
+          box.size.bottomRight(Offset.zero),
+          ancestor: overlayBox,
+        ),
+      ),
+      Offset.zero & overlayBox.size,
     );
 
-    if (action != null) {
+    final action = await showBlurredPopup<String>(
+      context: anchor,
+      position: position,
+      scaleAlignment: Alignment.topCenter,
+      items: [
+        BlurredPopupAction<String>(
+          label: isPinned ? 'Unpin Chat' : 'Pin Chat',
+          icon: isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+          value: isPinned ? 'unpin' : 'pin',
+        ),
+        BlurredPopupAction<String>(
+          label: isMuted ? 'Unmute Chat' : 'Mute Chat',
+          icon: isMuted ? Icons.volume_up : Icons.volume_off,
+          value: isMuted ? 'unmute' : 'mute',
+        ),
+        BlurredPopupAction<String>(
+          label: isFavorite ? 'Remove Favorite' : 'Add to Favorites',
+          icon: isFavorite ? Icons.favorite : Icons.favorite_border,
+          value: isFavorite ? 'unfavorite' : 'favorite',
+        ),
+        const BlurredPopupSeparator(),
+        const BlurredPopupAction<String>(
+          label: 'Delete Chat',
+          icon: Icons.delete_outline,
+          value: 'delete',
+          style: BlurredPopupActionStyle.destructive,
+        ),
+      ],
+    );
+
+    if (action != null && mounted) {
       await _handleChatAction(action, conversation);
     }
   }
@@ -398,7 +436,7 @@ class ChatsPageState extends ConsumerState<ChatsPage>
             isPinned: conversation.isPinned ?? false,
             isMuted: conversation.isMuted ?? false,
             isFavorite: conversation.isFavorite ?? false,
-            onLongPress: () => _showChatActions(conversation),
+            onLongPress: (anchor) => _showChatActions(conversation, anchor),
             conversationId: conversation.chatId,
             onAvatarTap: () async {
               final result = await UserProfileModal.show(
@@ -459,7 +497,9 @@ class ChatsPageState extends ConsumerState<ChatsPage>
 class ChatListItem extends ConsumerWidget {
   final DmModel conversation;
   final VoidCallback onTap;
-  final VoidCallback? onLongPress;
+  // Receives the row's local context so the caller can anchor a blurred
+  // popup to the long-pressed row's bounds.
+  final void Function(BuildContext anchor)? onLongPress;
   final VoidCallback? onAvatarTap;
   final bool isTyping;
   final String? typingUserName;
@@ -644,7 +684,7 @@ class ChatListItem extends ConsumerWidget {
               : BorderSide.none,
         ),
       ),
-      child: ListTile(
+      child: Builder(builder: (rowContext) => ListTile(
         leading: GestureDetector(
           onTap: onAvatarTap,
           child: _buildAvatar(themeColor),
@@ -699,10 +739,12 @@ class ChatListItem extends ConsumerWidget {
               ),
         trailing: _buildUnreadCounts(timeText, hasUnreadMessages, themeColor),
         onTap: onTap,
-        onLongPress: onLongPress,
+        onLongPress: onLongPress == null
+            ? null
+            : () => onLongPress!(rowContext),
         dense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      ),
+      )),
     );
   }
 

@@ -837,7 +837,16 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       replyToMessageData: replyToMessageData,
       currentUserId: _currentUserDetails?.id,
       onSendMessage: sendMessage,
+      // Legacy modal flow — left wired so it can be re-enabled by
+      // unsetting the inline-recording callbacks below.
       onSendVoiceNote: sendVoiceNote,
+      // ── New inline (WhatsApp-style) recording flow ─────────────────
+      onStartInlineRecording: startInlineRecording,
+      onStopInlineRecording: stopInlineRecording,
+      onCancelInlineRecording: cancelInlineRecording,
+      onSendInlineRecording: sendInlineRecording,
+      onDiscardInlineRecording: discardInlineRecording,
+      inlineRecordingTimerStream: inlineRecordingTimerStream,
       onPickGallery: handleGalleryAttachment,
       onPickCamera: handleCameraAttachment,
       onPickDocument: handleDocumentAttachment,

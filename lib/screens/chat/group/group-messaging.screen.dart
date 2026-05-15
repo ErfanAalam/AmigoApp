@@ -16,8 +16,10 @@ import '../../../api/api_service.dart';
 import '../../../db/repositories/conversation-member.repo.dart';
 import '../../../db/repositories/message-status.repo.dart';
 import '../../../models/community.model.dart';
+import '../../../models/conversations.model.dart';
 import '../../../models/group.model.dart';
 import '../../../models/user.model.dart';
+import '../../../providers/call.provider.dart';
 import '../../../providers/chat.provider.dart';
 import '../../../providers/draft.provider.dart';
 import '../../../providers/theme-color.provider.dart';
@@ -32,6 +34,9 @@ import '../../../ui/chat/input-container.widget.dart';
 import '../../../ui/chat/media-messages.widget.dart';
 import '../../../ui/chat/message.action-sheet.dart';
 import '../../../ui/chat/message-recommendations.widget.dart';
+import '../../../ui/chat/sender-profile.sheet.dart';
+import '../../../ui/snackbar.dart';
+import '../dm/dm-messaging.screen.dart';
 import '../../../utils/animations.utils.dart';
 import '../../../utils/chat/audio-playback.utils.dart';
 import '../../../utils/chat/chat-helpers.utils.dart';
@@ -234,6 +239,9 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   MessageRepository get messagesRepo => _messagesRepo;
   @override
   UserRepository get userRepo => _userRepo;
+  @override
+  void Function(MessageModel message)? get onSenderNameTap =>
+      _openSenderProfile;
   @override
   Future<void> Function(String) get onResendFailedMessage =>
       resendFailedMessage;
@@ -951,7 +959,16 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       replyToMessageData: replyToMessageData,
       currentUserId: _currentUserDetails?.id ?? '',
       onSendMessage: sendMessage,
+      // Legacy modal flow — left wired so it can be re-enabled by
+      // unsetting the inline-recording callbacks below.
       onSendVoiceNote: sendVoiceNote,
+      // ── New inline (WhatsApp-style) recording flow ─────────────────
+      onStartInlineRecording: startInlineRecording,
+      onStopInlineRecording: stopInlineRecording,
+      onCancelInlineRecording: cancelInlineRecording,
+      onSendInlineRecording: sendInlineRecording,
+      onDiscardInlineRecording: discardInlineRecording,
+      inlineRecordingTimerStream: inlineRecordingTimerStream,
       onPickGallery: handleGalleryAttachment,
       onPickCamera: handleCameraAttachment,
       onPickDocument: handleDocumentAttachment,
@@ -984,5 +1001,159 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
       typingDotAnimations: _typingDotAnimations,
       isGroupChat: true,
     );
+  }
+
+  // ── Sender profile sheet ────────────────────────────────────────────────
+
+  /// Opens the WhatsApp-style profile sheet when the sender-name label above
+  /// an other-user bubble is tapped. Resolves the user from local DB so the
+  /// avatar / display name reflect the latest contact rename.
+  Future<void> _openSenderProfile(MessageModel message) async {
+    final senderId = message.senderId;
+    if (senderId == null || senderId.isEmpty) return;
+    if (senderId == _currentUserDetails?.id) return;
+
+    final user = await _userRepo.getUserById(senderId);
+    if (!mounted) return;
+
+    final displayName =
+        user?.displayName ?? (message.senderName ?? 'Unknown User');
+    final profilePic = user?.profilePic ?? message.senderProfilePic;
+
+    SenderProfileSheet.show(
+      context: context,
+      profilePic: profilePic,
+      displayName: displayName,
+      showCallActions: _currentUserDetails?.callAccess ?? true,
+      onMessage: () {
+        Navigator.pop(context);
+        _openDmWithMember(
+          userId: senderId,
+          fallbackName: displayName,
+          fallbackPic: profilePic,
+        );
+      },
+      onAudioCall: () {
+        Navigator.pop(context);
+        _initiateCallWithMember(
+          userId: senderId,
+          userName: displayName,
+          userProfilePic: profilePic,
+          video: false,
+        );
+      },
+      onVideoCall: () {
+        Navigator.pop(context);
+        _initiateCallWithMember(
+          userId: senderId,
+          userName: displayName,
+          userProfilePic: profilePic,
+          video: true,
+        );
+      },
+    );
+  }
+
+  /// Open (or create) a DM with a group member. Mirrors the flow used by
+  /// the contacts screen and `chat-details.screen.dart`'s `_messageMember`.
+  Future<void> _openDmWithMember({
+    required String userId,
+    required String fallbackName,
+    required String? fallbackPic,
+  }) async {
+    UserModel? user = await _userRepo.getUserById(userId);
+    user ??= UserModel(
+      id: userId,
+      name: fallbackName,
+      phone: '',
+      profilePic: fallbackPic,
+    );
+
+    try {
+      final result = await apiService.chat.createChat(userId);
+      if (!result.isSuccess || result.data == null) {
+        if (mounted) Snack.error('Failed to start chat: ${result.message}');
+        return;
+      }
+
+      await _userRepo.insertUser(user);
+
+      final data = result.data as Map<String, dynamic>;
+      final convId = data['id']?.toString() ?? '';
+
+      if (data['existing'] == true) {
+        final dm = await _conversationRepo.getDmByConversationId(convId);
+        if (!mounted) return;
+        if (dm == null) {
+          Snack.show(
+            'Cannot start conversation. The chat may be deleted. Try restoring the chat.',
+          );
+          return;
+        }
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => InnerChatPage(dm: dm)),
+        );
+        return;
+      }
+
+      final dm = DmModel(
+        chatId: convId,
+        recipientId: user.id,
+        recipientName: user.displayName,
+        recipientPhone: user.phone,
+        recipientProfilePic: user.profilePic,
+        unreadCount: 0,
+        isRecipientOnline: user.isOnline,
+        createdAt: data['created_at']?.toString() ?? '',
+      );
+
+      final conversation = ConversationModel(
+        id: convId,
+        type: 'dm',
+        unreadCount: 0,
+        createrId: data['creater_id']?.toString(),
+        createdAt: data['created_at']?.toString(),
+      );
+
+      await _conversationRepo.insertConversations([conversation]);
+      await _conversationMemberRepo.insertConversationMembers([
+        ConversationMemberModel(
+          chatId: convId,
+          userId: user.id,
+          role: 'member',
+          joinedAt: data['created_at']?.toString(),
+        ),
+      ]);
+      await ref.read(chatProvider.notifier).addNewDm(dm);
+
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => InnerChatPage(dm: dm)),
+      );
+    } catch (e) {
+      if (mounted) Snack.error('Failed to start chat: $e');
+    }
+  }
+
+  /// Place an audio / video call directly from the sender profile sheet.
+  Future<void> _initiateCallWithMember({
+    required String userId,
+    required String userName,
+    required String? userProfilePic,
+    required bool video,
+  }) async {
+    try {
+      await ref
+          .read(callServiceProvider.notifier)
+          .initiateCall(userId, userName, userProfilePic, video: video);
+    } catch (e) {
+      if (mounted) {
+        Snack.error(
+          'Failed to start call: Please check your internet connection',
+        );
+      }
+    }
   }
 }

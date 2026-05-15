@@ -73,6 +73,10 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
   /// bubble uses its full member-aware lookup instead.
   String? get conversationUserId => null;
 
+  /// Group host overrides this to open the sender profile sheet on tap of the
+  /// "<Name>" label above an other-user bubble. DM returns null (no label).
+  void Function(MessageModel message)? get onSenderNameTap => null;
+
   // ---- Host-provided helpers ----
 
   /// Renders the per-host status ticks (DM is a simple sent/delivered/read
@@ -342,6 +346,7 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
             builder: (_) => AllReactorsSheet(reactions: reactions),
           );
         },
+        onSenderNameTap: onSenderNameTap,
       ),
     );
   }

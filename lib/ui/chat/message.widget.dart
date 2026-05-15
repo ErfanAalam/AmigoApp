@@ -62,6 +62,10 @@ class MessageBubbleConfig {
   final void Function(Map<String, dynamic> reactions)? onShowReactionUsers;
   final Map<String, dynamic> reactions;
 
+  // Group-only: tap the sender-name label above an other-user bubble to open
+  // the sender profile sheet. Null in DM and for own messages.
+  final void Function(MessageModel message)? onSenderNameTap;
+
   MessageBubbleConfig({
     required this.message,
     required this.isMyMessage,
@@ -93,6 +97,7 @@ class MessageBubbleConfig {
     this.onReact,
     this.onShowReactionUsers,
     this.reactions = const {},
+    this.onSenderNameTap,
   });
 }
 
@@ -253,9 +258,7 @@ class MessageBubble extends ConsumerWidget {
                             bottom: 10,
                           ),
                           decoration: BoxDecoration(
-                            color: config.isMyMessage
-                                ? null
-                                : Colors.grey[100],
+                            color: config.isMyMessage ? null : Colors.white,
                             gradient: config.isMyMessage
                                 ? LinearGradient(
                                     begin: Alignment.centerLeft,
@@ -415,15 +418,14 @@ class MessageBubble extends ConsumerWidget {
                         top: 8,
                         bottom: 4,
                       ),
-                      child: Text(
-                        config.message.senderName?.isNotEmpty ?? false
+                      child: _SenderNameLabel(
+                        name: config.message.senderName?.isNotEmpty ?? false
                             ? config.message.senderName ?? ''
                             : 'Unknown User',
-                        style: TextStyle(
-                          color: themeColor.primary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
+                        color: themeColor.primary,
+                        onTap: config.onSenderNameTap == null
+                            ? null
+                            : () => config.onSenderNameTap!(config.message),
                       ),
                     ),
                   ],
@@ -513,15 +515,14 @@ class MessageBubble extends ConsumerWidget {
                       if (config.isGroupChat && !config.isMyMessage) ...[
                         Padding(
                           padding: const EdgeInsets.only(top: 4, bottom: 2),
-                          child: Text(
-                            config.message.senderName?.isNotEmpty ?? false
+                          child: _SenderNameLabel(
+                            name: config.message.senderName?.isNotEmpty ?? false
                                 ? config.message.senderName ?? ''
                                 : 'Unknown User',
-                            style: TextStyle(
-                              color: themeColor.primary,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
+                            color: themeColor.primary,
+                            onTap: config.onSenderNameTap == null
+                                ? null
+                                : () => config.onSenderNameTap!(config.message),
                           ),
                         ),
                       ],
@@ -634,10 +635,10 @@ class MessageBubble extends ConsumerWidget {
           useFullWidth: !config.isGroupChat, // DM uses full width
           // Both my- and other-message bubbles are now light, so the inset
           // reply chip uses a faintly darker tint of the bubble bg.
-          myMessageBackgroundColor: Colors.black.withOpacity(0.04),
-          otherMessageBackgroundColor: Colors.grey[100] ?? Colors.grey.shade100,
-          myMessageTextColor: Colors.black.withOpacity(0.7),
-          myMessageMediaColor: Colors.black.withOpacity(0.6),
+          myMessageBackgroundColor: Colors.white.withAlpha(50),
+          otherMessageBackgroundColor: Colors.black.withAlpha(10),
+          myMessageTextColor: Colors.black.withAlpha(150),
+          myMessageMediaColor: Colors.black.withAlpha(150),
           mediaText: config.isGroupChat ? '📎 media' : '📎 media ',
         ),
       );
@@ -1081,6 +1082,31 @@ class ReplyPreview extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Tappable sender-name label rendered above a group bubble for other users.
+/// Falls back to a plain `Text` when `onTap` is null so DM and own-message
+/// bubbles get the same visual without a hit target.
+class _SenderNameLabel extends StatelessWidget {
+  final String name;
+  final Color color;
+  final VoidCallback? onTap;
+
+  const _SenderNameLabel({required this.name, required this.color, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final textWidget = Text(
+      name,
+      style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700),
+    );
+    if (onTap == null) return textWidget;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: textWidget,
     );
   }
 }

@@ -329,7 +329,7 @@ class _FloatingPillNavButtonState extends State<_FloatingPillNavButton> {
                           minHeight: 16,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.red,
+                          color: widget.themeColor,
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(color: Colors.white, width: 1.5),
                         ),

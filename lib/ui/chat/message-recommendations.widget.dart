@@ -23,43 +23,46 @@ class MessageRecommendations extends ConsumerWidget {
 
     return Container(
       // margin: const EdgeInsets.only(bottom: 0),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 2),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
-          spacing: 8,
+          spacing: 0,
           children: recommendations.map((recommendation) {
             return ClipRRect(
               borderRadius: BorderRadius.circular(20),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                child: InkWell(
-                  onTap: () => onRecommendationTap(recommendation),
-                  borderRadius: BorderRadius.circular(20),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 15,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: themeColor.primary.withAlpha(35),
-                        width: 1,
+              child:
+                  // BackdropFilter(
+                  //   filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                  //   child:
+                  InkWell(
+                    onTap: () => onRecommendationTap(recommendation),
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      margin: const EdgeInsets.only(left: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 15,
+                        vertical: 4,
                       ),
-                    ),
-                    child: Text(
-                      recommendation,
-                      style: TextStyle(
-                        color: themeColor.primary,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: themeColor.primary.withAlpha(35),
+                          width: 1,
+                        ),
+                      ),
+                      child: Text(
+                        recommendation,
+                        style: TextStyle(
+                          color: themeColor.primary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ),
+              // ),
             );
           }).toList(),
         ),
