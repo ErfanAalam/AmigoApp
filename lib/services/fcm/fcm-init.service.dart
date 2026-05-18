@@ -8,7 +8,6 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
-import 'package:permission_handler/permission_handler.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
@@ -532,6 +531,7 @@ class NotificationService {
             : null,
         repliedTo: chatPayload.repliedTo,
         sentAt: chatPayload.sentAt.toIso8601String(),
+        expiresAt: chatPayload.expiresAt?.toIso8601String(),
       );
 
       // Store in local database

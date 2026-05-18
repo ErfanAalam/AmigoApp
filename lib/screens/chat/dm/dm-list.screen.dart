@@ -15,6 +15,7 @@ import '../../../ui/app-bar.widget.dart';
 import '../../../ui/chat.action-sheet.dart';
 import '../../../ui/blurred-dialog.widget.dart';
 import '../../../ui/blurred-popup.widget.dart';
+import '../../../ui/chat/disappearing-timer-badge.widget.dart';
 import '../../../ui/chat/searchable-list.widget.dart';
 import '../../../ui/chat/user-profile.modal.dart';
 import '../../../utils/route-transitions.util.dart';
@@ -749,7 +750,9 @@ class ChatListItem extends ConsumerWidget {
   }
 
   Widget _buildAvatar(ColorTheme themeColor) {
+    final hasDisappearing = (conversation.disappearingAfterSec ?? 0) > 0;
     return Stack(
+      clipBehavior: Clip.none,
       children: [
         CircleAvatar(
           radius: 25,
@@ -782,6 +785,15 @@ class ChatListItem extends ConsumerWidget {
                 border: Border.all(color: Colors.white, width: 2),
               ),
             ),
+          ),
+        // Disappearing-messages badge — top-right of the DP. Placement
+        // mirrors WhatsApp's clock affordance and is far enough from the
+        // online dot to avoid visual collision.
+        if (hasDisappearing)
+          Positioned(
+            right: -2,
+            top: -2,
+            child: DisappearingTimerBadge(color: themeColor.primary),
           ),
       ],
     );

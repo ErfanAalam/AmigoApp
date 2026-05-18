@@ -15,6 +15,7 @@ import '../../models/group.model.dart';
 import '../../models/user.model.dart';
 import '../../providers/chat.provider.dart';
 import '../../providers/theme-color.provider.dart';
+import '../../services/socket/ws-message.handler.dart';
 import '../../services/user-status.service.dart';
 import '../../types/socket.types.dart';
 import '../../ui/blurred-dialog.widget.dart';
@@ -77,6 +78,12 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
   /// the chat provider applies WS `member_added` / `removed` /
   /// `promoted` / `demoted` events). Null for DMs.
   StreamSubscription<List<GroupMember>>? _membersSub;
+
+  /// Disappearing-messages duration on this chat. Loaded from local DB on
+  /// init and kept in sync via [_disappearingSub] when peers change it.
+  /// null = feature off.
+  int? _disappearingAfterSec;
+  StreamSubscription<ConversationDisappearingPayload>? _disappearingSub;
 
   // Member search (groups only)
   final TextEditingController _memberSearchController = TextEditingController();
@@ -188,10 +195,21 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
       if (q != _memberSearch) setState(() => _memberSearch = q);
     });
 
+    // Subscribe to remote disappearing-setting changes so the tile updates
+    // when a peer toggles the duration. The WS handler has already persisted
+    // the new value into the conversations table by the time this fires.
+    _disappearingSub = WebSocketMessageHandler().conversationDisappearingStream
+        .where((p) => p.convId == conversationId)
+        .listen((p) {
+          if (!mounted) return;
+          setState(() => _disappearingAfterSec = p.durationSec);
+        });
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       await Future.wait([
         _loadCurrentUser(),
+        _loadDisappearingSetting(),
         if (isGroup) _loadCreatorId() else _loadRecipientInfo(),
       ]);
       if (!mounted) return;
@@ -229,8 +247,129 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
   @override
   void dispose() {
     _membersSub?.cancel();
+    _disappearingSub?.cancel();
     _memberSearchController.dispose();
     super.dispose();
+  }
+
+  // ─── Disappearing-messages ───────────────────────────────────────────────
+
+  Future<void> _loadDisappearingSetting() async {
+    try {
+      final conv = await _conversationRepo.getConversationById(conversationId);
+      if (!mounted) return;
+      setState(() => _disappearingAfterSec = conv?.disappearingAfterSec);
+    } catch (e) {
+      debugPrint('chat-details: load disappearing failed: $e');
+    }
+  }
+
+  /// Pre-defined durations matching the backend's ALLOWED_DURATIONS set.
+  /// Order matters — drives the picker layout (off → shortest → longest).
+  ///
+  /// TEMPORARY: the 2-minute row exists to make the feature testable in a
+  /// single sitting — verifies the sweeper fan-out, view-layer filter, and
+  /// chat_meta refresh end-to-end. Remove before GA along with the matching
+  /// 120s entry in disappearing.service.ts:ALLOWED_DURATIONS.
+  static const List<({int? sec, String label})> _disappearingOptions = [
+    (sec: null, label: 'Off'),
+    // (sec: 120, label: '2 minutes (test)'),
+    (sec: 24 * 60 * 60, label: '24 hours'),
+    (sec: 7 * 24 * 60 * 60, label: '7 days'),
+    (sec: 90 * 24 * 60 * 60, label: '90 days'),
+  ];
+
+  String _disappearingLabelFor(int? sec) {
+    for (final o in _disappearingOptions) {
+      if (o.sec == sec) return o.label;
+    }
+    return 'Custom';
+  }
+
+  Future<void> _onTapDisappearing(ColorTheme themeColor) async {
+    final current = _disappearingAfterSec;
+    final picked = await showModalBottomSheet<({int? sec, bool clear})>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 12),
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20),
+              child: Text(
+                'Disappearing messages',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Text(
+                'New messages sent to this chat will disappear after the '
+                'selected duration. Already-sent messages are not affected.',
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+              ),
+            ),
+            const SizedBox(height: 12),
+            for (final o in _disappearingOptions)
+              RadioListTile<int?>(
+                value: o.sec,
+                groupValue: current,
+                onChanged: (v) => Navigator.of(ctx).pop((sec: v, clear: false)),
+                title: Text(o.label),
+                activeColor: themeColor.primary,
+                controlAffinity: ListTileControlAffinity.trailing,
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (picked == null || !mounted) return;
+    if (picked.sec == current) return; // no-op
+
+    setState(() => _busy = true);
+    final result = await apiService.chat.setChatDisappearing(
+      conversationId: conversationId,
+      durationSec: picked.sec,
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+
+    final ok = result.isSuccess;
+    if (ok) {
+      // Server broadcasts the change back, but our own session won't see the
+      // WS echo (it's broadcast-only to the conversation). Apply locally too.
+      setState(() => _disappearingAfterSec = picked.sec);
+      try {
+        await _conversationRepo.setDisappearingAfterSec(
+          conversationId,
+          picked.sec,
+        );
+      } catch (e) {
+        debugPrint('chat-details: persist disappearing failed: $e');
+      }
+    } else {
+      Snack.error('Could not update disappearing messages');
+    }
   }
 
   // ─── Data loading ────────────────────────────────────────────────────────
@@ -1052,6 +1191,12 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
             StaggeredSlideFadeItem(
               index: isGroup ? 2 : 1,
               staggerDelayMs: 80,
+              child: _buildDisappearingNavCard(themeColor),
+            ),
+            const SizedBox(height: 12),
+            StaggeredSlideFadeItem(
+              index: isGroup ? 3 : 2,
+              staggerDelayMs: 80,
               child: _buildMediaNavCard(themeColor),
             ),
           ],
@@ -1399,6 +1544,78 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
               else if (isAdmin)
                 _RoleBadge(label: 'Admin', color: themeColor.primary),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ─── Disappearing-messages nav card ──────────────────────────────────────
+
+  Widget _buildDisappearingNavCard(ColorTheme themeColor) {
+    final isOn = _disappearingAfterSec != null;
+    final trailingLabel = _disappearingLabelFor(_disappearingAfterSec);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: _busy ? null : () => _onTapDisappearing(themeColor),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: themeColor.primaryLight.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(50),
+                    ),
+                    child: Icon(
+                      Icons.timer_outlined,
+                      color: themeColor.primary,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Text(
+                      'Disappearing messages',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    trailingLabel,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isOn ? themeColor.primary : Colors.grey.shade500,
+                      fontWeight: isOn ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: Colors.grey.shade400,
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),

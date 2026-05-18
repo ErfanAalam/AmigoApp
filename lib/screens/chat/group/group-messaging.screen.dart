@@ -29,6 +29,7 @@ import '../../../services/media-cache.service.dart';
 import '../../../services/socket/transport.manager.dart';
 import '../../../services/socket/ws-message.handler.dart';
 import '../../../types/socket.types.dart';
+import '../../../ui/chat/disappearing-timer-badge.widget.dart';
 import '../../../ui/chat/group-readby.modal.dart';
 import '../../../ui/chat/input-container.widget.dart';
 import '../../../ui/chat/media-messages.widget.dart';
@@ -576,6 +577,17 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   }
 
   Widget _buildAppBarTitle(themeColor) {
+    // Re-derive from chatProvider so live WS updates to disappearing-messages
+    // reflect on the app-bar badge without needing the user to re-enter.
+    final liveGroup = ref
+        .watch(chatProvider)
+        .groupList
+        .firstWhere(
+          (g) => g.chatId == widget.group.chatId,
+          orElse: () => widget.group,
+        );
+    final hasDisappearing = (liveGroup.disappearingAfterSec ?? 0) > 0;
+
     return InkWell(
       borderRadius: BorderRadius.circular(14),
       onTap: () => Navigator.push(
@@ -588,19 +600,33 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Row(
           children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: themeColor.primary.withAlpha(20),
-              child: Text(
-                widget.group.title.isNotEmpty
-                    ? widget.group.title[0].toUpperCase()
-                    : '?',
-                style: TextStyle(
-                  color: themeColor.primary,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: themeColor.primary.withAlpha(20),
+                  child: Text(
+                    widget.group.title.isNotEmpty
+                        ? widget.group.title[0].toUpperCase()
+                        : '?',
+                    style: TextStyle(
+                      color: themeColor.primary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
                 ),
-              ),
+                if (hasDisappearing)
+                  Positioned(
+                    right: -2,
+                    top: -2,
+                    child: DisappearingTimerBadge(
+                      color: themeColor.primary,
+                      size: 12,
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(width: 12),
             Expanded(

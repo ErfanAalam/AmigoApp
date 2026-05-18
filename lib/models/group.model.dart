@@ -23,6 +23,9 @@ abstract class GroupModel with _$GroupModel {
     @JsonKey(name: 'is_muted') @Default(false) bool isMuted,
     @JsonKey(name: 'is_favorite') @Default(false) bool isFavorite,
     @JsonKey(name: 'joined_at') @Default('') String joinedAt,
+    // Disappearing-messages duration in seconds; null = off. Mirrors the
+    // chats table column. Drives the avatar timer-badge + input-border UI.
+    @JsonKey(name: 'disappearing_after_sec') int? disappearingAfterSec,
   }) = _GroupModel;
 
   factory GroupModel.fromJson(Map<String, dynamic> json) =>
@@ -45,6 +48,8 @@ abstract class GroupModel with _$GroupModel {
       'is_muted': json['is_muted'] ?? json['isMuted'] ?? false,
       'is_favorite': json['is_favorite'] ?? json['isFavorite'] ?? false,
       'joined_at': json['joined_at'] ?? json['joinedAt'] ?? '',
+      'disappearing_after_sec':
+          json['disappearing_after_sec'] ?? json['disappearingAfterSec'],
     };
   }
 

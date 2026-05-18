@@ -16,6 +16,7 @@ import '../../../ui/app-bar.widget.dart';
 // ignore: unused_import
 import '../../../ui/chat.action-sheet.dart';
 import '../../../ui/blurred-popup.widget.dart';
+import '../../../ui/chat/disappearing-timer-badge.widget.dart';
 import '../../../ui/chat/searchable-list.widget.dart';
 import '../../../utils/route-transitions.util.dart';
 import 'community-group-list.screen.dart';
@@ -600,14 +601,28 @@ class GroupListItem extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
             children: [
-              // Avatar with proper constraints
+              // Avatar with proper constraints — Stack so the disappearing
+              // timer badge can overlay the top-right when the chat has the
+              // feature enabled. clipBehavior=none lets the badge bleed past
+              // the SizedBox bounds (matches the DM list's affordance).
               SizedBox(
                 width: 48,
                 height: 48,
-                child: CircleAvatar(
-                  radius: 24,
-                  backgroundColor: themeColor.primaryLight.withOpacity(0.3),
-                  child: Icon(Icons.group, color: themeColor.primary, size: 22),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    CircleAvatar(
+                      radius: 24,
+                      backgroundColor: themeColor.primaryLight.withOpacity(0.3),
+                      child: Icon(Icons.group, color: themeColor.primary, size: 22),
+                    ),
+                    if ((group.disappearingAfterSec ?? 0) > 0)
+                      Positioned(
+                        right: -2,
+                        top: -2,
+                        child: DisappearingTimerBadge(color: themeColor.primary),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(width: 16),

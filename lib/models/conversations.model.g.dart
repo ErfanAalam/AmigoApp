@@ -22,6 +22,7 @@ _ChatModel _$ChatModelFromJson(Map<String, dynamic> json) => _ChatModel(
   createdAt: json['created_at'] as String?,
   updatedAt: json['updated_at'] as String?,
   needSync: json['need_sync'] as bool? ?? true,
+  disappearingAfterSec: (json['disappearing_after_sec'] as num?)?.toInt(),
 );
 
 Map<String, dynamic> _$ChatModelToJson(_ChatModel instance) =>
@@ -41,6 +42,7 @@ Map<String, dynamic> _$ChatModelToJson(_ChatModel instance) =>
       'created_at': instance.createdAt,
       'updated_at': instance.updatedAt,
       'need_sync': instance.needSync,
+      'disappearing_after_sec': instance.disappearingAfterSec,
     };
 
 _DmModel _$DmModelFromJson(Map<String, dynamic> json) => _DmModel(
@@ -61,6 +63,7 @@ _DmModel _$DmModelFromJson(Map<String, dynamic> json) => _DmModel(
   isMuted: json['is_muted'] as bool? ?? false,
   isFavorite: json['is_favorite'] as bool? ?? false,
   createdAt: json['created_at'] as String,
+  disappearingAfterSec: (json['disappearing_after_sec'] as num?)?.toInt(),
 );
 
 Map<String, dynamic> _$DmModelToJson(_DmModel instance) => <String, dynamic>{
@@ -81,6 +84,7 @@ Map<String, dynamic> _$DmModelToJson(_DmModel instance) => <String, dynamic>{
   'is_muted': instance.isMuted,
   'is_favorite': instance.isFavorite,
   'created_at': instance.createdAt,
+  'disappearing_after_sec': instance.disappearingAfterSec,
 };
 
 _ChatMemberModel _$ChatMemberModelFromJson(Map<String, dynamic> json) =>

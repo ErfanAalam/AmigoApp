@@ -40,7 +40,9 @@ class AuthScaffold extends StatelessWidget {
                     ),
                     child: Center(
                       child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: kAuthMaxWidth),
+                        constraints: const BoxConstraints(
+                          maxWidth: kAuthMaxWidth,
+                        ),
                         child: child,
                       ),
                     ),
@@ -271,8 +273,11 @@ class CountryCodeButton extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 2),
-                Icon(Icons.keyboard_arrow_down,
-                    size: 18, color: Colors.grey[600]),
+                Icon(
+                  Icons.keyboard_arrow_down,
+                  size: 18,
+                  color: Colors.grey[600],
+                ),
               ],
             ),
           ),
@@ -375,8 +380,7 @@ class AuthLinkRow extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Text(prefix,
-            style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+        Text(prefix, style: TextStyle(color: Colors.grey[600], fontSize: 13)),
         GestureDetector(
           onTap: onTap,
           child: Text(

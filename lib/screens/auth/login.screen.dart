@@ -142,7 +142,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
         final appState = main.MyApp.appStateKey.currentState;
         if (appState != null && appState is main.AppStateInterface) {
-          await (appState as main.AppStateInterface).initializeAuthenticatedUser();
+          await (appState as main.AppStateInterface)
+              .initializeAuthenticatedUser();
         }
 
         if (mounted) {
@@ -210,7 +211,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
         final appState = main.MyApp.appStateKey.currentState;
         if (appState != null && appState is main.AppStateInterface) {
-          await (appState as main.AppStateInterface).initializeAuthenticatedUser();
+          await (appState as main.AppStateInterface)
+              .initializeAuthenticatedUser();
         }
 
         if (mounted) {
@@ -288,7 +290,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 15),
           AuthHeader(
             title: 'Amigo Chats',
             subtitle: !_isPhoneSubmitted
@@ -296,7 +298,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 : 'Enter the code we just sent.',
             theme: themeColor,
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 20),
           AuthCard(
             theme: themeColor,
             child: AnimatedSize(

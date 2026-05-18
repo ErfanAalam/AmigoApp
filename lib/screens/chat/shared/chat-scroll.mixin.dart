@@ -79,8 +79,27 @@ mixin ChatScrollMixin<T extends ConsumerStatefulWidget>
   /// DM uses the default; group overrides to 1000 to load earlier.
   int get loadMoreDistanceFromTop => 200;
 
-  List<MessageModel> get displayMessages =>
+  /// Source list before disappearing-messages filtering. Use this when you
+  /// need authoritative indices for mutations (e.g. ack updates) — those keys
+  /// off message id, but loops that rely on index/length need the unfiltered
+  /// list to stay consistent with the on-disk row set.
+  List<MessageModel> get rawDisplayMessages =>
       isInJumpMode ? jumpMessages : messages;
+
+  /// Render-only view: hides messages whose disappearing deadline has already
+  /// passed so the UI clears them the moment the timer ticks past expires_at,
+  /// without waiting for the server's message:delete event to roundtrip.
+  /// The authoritative soft-delete still arrives via the WS handler — this is
+  /// purely a view predicate, no DB writes happen here.
+  /// See chat-sync.mixin._disappearingTicker for the rebuild driver.
+  List<MessageModel> get displayMessages {
+    final src = rawDisplayMessages;
+    if (src.isEmpty) return src;
+    final now = DateTime.now();
+    // Fast path: if no row has expiresAt set, skip the allocation.
+    if (!src.any((m) => m.expiresAt != null)) return src;
+    return src.where((m) => !m.isExpiredAt(now)).toList(growable: false);
+  }
 
   /// Owned by ChatSwipeReplyMixin; gestures gate on this to avoid starting
   /// a swipe-reply while the list is mid-scroll. Hosts that don't mix in

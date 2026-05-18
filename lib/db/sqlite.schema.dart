@@ -73,6 +73,9 @@ class Chats extends Table {
   TextColumn get createdAt => text().nullable()();
   TextColumn get updatedAt => text().nullable()();
   BoolColumn get needSync => boolean().withDefault(const Constant(true))();
+  // Disappearing-messages: null = off. Mirrors chats.disappearing_after_sec
+  // on the server. Updated by the conversation:disappearing WS event.
+  IntColumn get disappearingAfterSec => integer().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -105,6 +108,12 @@ class Messages extends Table {
       text().nullable().map(const JsonMapConverter())();
   TextColumn get sentAt => text()();
   TextColumn get deletedAt => text().nullable()();
+  // Disappearing-messages deadline; null = never expires. Server stamps
+  // this at insert time and ships it on the message:new broadcast. The
+  // view layer filters expired-but-not-yet-deleted messages from the list;
+  // the row is only actually soft-deleted when the server's message:delete
+  // event arrives.
+  TextColumn get expiresAt => text().nullable()();
   BoolColumn get isFailed =>
       boolean().withDefault(const Constant(false))(); // client-only
 
@@ -154,7 +163,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration {

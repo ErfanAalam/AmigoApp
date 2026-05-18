@@ -100,6 +100,20 @@ class ChatClient extends BaseApiClient {
     return post('/chat/revive-chat/$conversationId');
   }
 
+  /// Set/clear the disappearing-messages duration on a chat.
+  /// [durationSec] = null clears the setting (off).
+  /// Backend accepts the WhatsApp-style presets: 24h / 7d / 90d. Anything
+  /// else gets rejected at the endpoint with HTTP 400.
+  Future<ApiResult<dynamic>> setChatDisappearing({
+    required String conversationId,
+    required int? durationSec,
+  }) async {
+    return post(
+      '/chat/disappearing/$conversationId',
+      data: {'duration_sec': durationSec},
+    );
+  }
+
   /// Mark message as delivered
   Future<ApiResult<dynamic>> markMessageDelivered({
     required String messageId,

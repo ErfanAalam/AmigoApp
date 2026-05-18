@@ -20,7 +20,11 @@ mixin _$MessageModel {
 // the original message to be paged into local DB. Untyped on purpose —
 // we transiently use it to upsert a row into the messages table on
 // insert, then it's not needed again.
-@JsonKey(name: 'replied_to_message') Map<String, dynamic>? get repliedToMessage;@JsonKey(fromJson: _messageTypeFromJson, toJson: _messageTypeToJson) MessageType get type; String? get body; Map<String, dynamic>? get attachments;@JsonKey(name: 'local_media_path') String? get localMediaPath;@JsonKey(name: 'is_failed') bool get isFailed;@JsonKey(name: 'sent_at') String get sentAt;@JsonKey(name: 'deleted_at') String? get deletedAt;
+@JsonKey(name: 'replied_to_message') Map<String, dynamic>? get repliedToMessage;@JsonKey(fromJson: _messageTypeFromJson, toJson: _messageTypeToJson) MessageType get type; String? get body; Map<String, dynamic>? get attachments;@JsonKey(name: 'local_media_path') String? get localMediaPath;@JsonKey(name: 'is_failed') bool get isFailed;@JsonKey(name: 'sent_at') String get sentAt;@JsonKey(name: 'deleted_at') String? get deletedAt;// Disappearing-messages deadline (ISO-8601). Server stamps this on
+// message:new when the chat has the feature enabled. The view layer
+// filters expired-but-not-deleted rows; the row is only soft-deleted
+// when the server's message:delete event arrives.
+@JsonKey(name: 'expires_at') String? get expiresAt;
 /// Create a copy of MessageModel
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -33,16 +37,16 @@ $MessageModelCopyWith<MessageModel> get copyWith => _$MessageModelCopyWithImpl<M
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is MessageModel&&(identical(other.id, id) || other.id == id)&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.senderId, senderId) || other.senderId == senderId)&&(identical(other.senderName, senderName) || other.senderName == senderName)&&(identical(other.senderProfilePic, senderProfilePic) || other.senderProfilePic == senderProfilePic)&&(identical(other.repliedTo, repliedTo) || other.repliedTo == repliedTo)&&const DeepCollectionEquality().equals(other.repliedToMessage, repliedToMessage)&&(identical(other.type, type) || other.type == type)&&(identical(other.body, body) || other.body == body)&&const DeepCollectionEquality().equals(other.attachments, attachments)&&(identical(other.localMediaPath, localMediaPath) || other.localMediaPath == localMediaPath)&&(identical(other.isFailed, isFailed) || other.isFailed == isFailed)&&(identical(other.sentAt, sentAt) || other.sentAt == sentAt)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is MessageModel&&(identical(other.id, id) || other.id == id)&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.senderId, senderId) || other.senderId == senderId)&&(identical(other.senderName, senderName) || other.senderName == senderName)&&(identical(other.senderProfilePic, senderProfilePic) || other.senderProfilePic == senderProfilePic)&&(identical(other.repliedTo, repliedTo) || other.repliedTo == repliedTo)&&const DeepCollectionEquality().equals(other.repliedToMessage, repliedToMessage)&&(identical(other.type, type) || other.type == type)&&(identical(other.body, body) || other.body == body)&&const DeepCollectionEquality().equals(other.attachments, attachments)&&(identical(other.localMediaPath, localMediaPath) || other.localMediaPath == localMediaPath)&&(identical(other.isFailed, isFailed) || other.isFailed == isFailed)&&(identical(other.sentAt, sentAt) || other.sentAt == sentAt)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt)&&(identical(other.expiresAt, expiresAt) || other.expiresAt == expiresAt));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,chatId,senderId,senderName,senderProfilePic,repliedTo,const DeepCollectionEquality().hash(repliedToMessage),type,body,const DeepCollectionEquality().hash(attachments),localMediaPath,isFailed,sentAt,deletedAt);
+int get hashCode => Object.hash(runtimeType,id,chatId,senderId,senderName,senderProfilePic,repliedTo,const DeepCollectionEquality().hash(repliedToMessage),type,body,const DeepCollectionEquality().hash(attachments),localMediaPath,isFailed,sentAt,deletedAt,expiresAt);
 
 @override
 String toString() {
-  return 'MessageModel(id: $id, chatId: $chatId, senderId: $senderId, senderName: $senderName, senderProfilePic: $senderProfilePic, repliedTo: $repliedTo, repliedToMessage: $repliedToMessage, type: $type, body: $body, attachments: $attachments, localMediaPath: $localMediaPath, isFailed: $isFailed, sentAt: $sentAt, deletedAt: $deletedAt)';
+  return 'MessageModel(id: $id, chatId: $chatId, senderId: $senderId, senderName: $senderName, senderProfilePic: $senderProfilePic, repliedTo: $repliedTo, repliedToMessage: $repliedToMessage, type: $type, body: $body, attachments: $attachments, localMediaPath: $localMediaPath, isFailed: $isFailed, sentAt: $sentAt, deletedAt: $deletedAt, expiresAt: $expiresAt)';
 }
 
 
@@ -53,7 +57,7 @@ abstract mixin class $MessageModelCopyWith<$Res>  {
   factory $MessageModelCopyWith(MessageModel value, $Res Function(MessageModel) _then) = _$MessageModelCopyWithImpl;
 @useResult
 $Res call({
- String id,@JsonKey(name: 'chat_id') String chatId,@JsonKey(name: 'sender_id') String? senderId,@JsonKey(name: 'sender_name') String? senderName,@JsonKey(name: 'sender_profile_pic') String? senderProfilePic,@JsonKey(name: 'replied_to') String? repliedTo,@JsonKey(name: 'replied_to_message') Map<String, dynamic>? repliedToMessage,@JsonKey(fromJson: _messageTypeFromJson, toJson: _messageTypeToJson) MessageType type, String? body, Map<String, dynamic>? attachments,@JsonKey(name: 'local_media_path') String? localMediaPath,@JsonKey(name: 'is_failed') bool isFailed,@JsonKey(name: 'sent_at') String sentAt,@JsonKey(name: 'deleted_at') String? deletedAt
+ String id,@JsonKey(name: 'chat_id') String chatId,@JsonKey(name: 'sender_id') String? senderId,@JsonKey(name: 'sender_name') String? senderName,@JsonKey(name: 'sender_profile_pic') String? senderProfilePic,@JsonKey(name: 'replied_to') String? repliedTo,@JsonKey(name: 'replied_to_message') Map<String, dynamic>? repliedToMessage,@JsonKey(fromJson: _messageTypeFromJson, toJson: _messageTypeToJson) MessageType type, String? body, Map<String, dynamic>? attachments,@JsonKey(name: 'local_media_path') String? localMediaPath,@JsonKey(name: 'is_failed') bool isFailed,@JsonKey(name: 'sent_at') String sentAt,@JsonKey(name: 'deleted_at') String? deletedAt,@JsonKey(name: 'expires_at') String? expiresAt
 });
 
 
@@ -70,7 +74,7 @@ class _$MessageModelCopyWithImpl<$Res>
 
 /// Create a copy of MessageModel
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? chatId = null,Object? senderId = freezed,Object? senderName = freezed,Object? senderProfilePic = freezed,Object? repliedTo = freezed,Object? repliedToMessage = freezed,Object? type = null,Object? body = freezed,Object? attachments = freezed,Object? localMediaPath = freezed,Object? isFailed = null,Object? sentAt = null,Object? deletedAt = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? chatId = null,Object? senderId = freezed,Object? senderName = freezed,Object? senderProfilePic = freezed,Object? repliedTo = freezed,Object? repliedToMessage = freezed,Object? type = null,Object? body = freezed,Object? attachments = freezed,Object? localMediaPath = freezed,Object? isFailed = null,Object? sentAt = null,Object? deletedAt = freezed,Object? expiresAt = freezed,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,chatId: null == chatId ? _self.chatId : chatId // ignore: cast_nullable_to_non_nullable
@@ -86,6 +90,7 @@ as Map<String, dynamic>?,localMediaPath: freezed == localMediaPath ? _self.local
 as String?,isFailed: null == isFailed ? _self.isFailed : isFailed // ignore: cast_nullable_to_non_nullable
 as bool,sentAt: null == sentAt ? _self.sentAt : sentAt // ignore: cast_nullable_to_non_nullable
 as String,deletedAt: freezed == deletedAt ? _self.deletedAt : deletedAt // ignore: cast_nullable_to_non_nullable
+as String?,expiresAt: freezed == expiresAt ? _self.expiresAt : expiresAt // ignore: cast_nullable_to_non_nullable
 as String?,
   ));
 }
@@ -171,10 +176,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id, @JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'sender_id')  String? senderId, @JsonKey(name: 'sender_name')  String? senderName, @JsonKey(name: 'sender_profile_pic')  String? senderProfilePic, @JsonKey(name: 'replied_to')  String? repliedTo, @JsonKey(name: 'replied_to_message')  Map<String, dynamic>? repliedToMessage, @JsonKey(fromJson: _messageTypeFromJson, toJson: _messageTypeToJson)  MessageType type,  String? body,  Map<String, dynamic>? attachments, @JsonKey(name: 'local_media_path')  String? localMediaPath, @JsonKey(name: 'is_failed')  bool isFailed, @JsonKey(name: 'sent_at')  String sentAt, @JsonKey(name: 'deleted_at')  String? deletedAt)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id, @JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'sender_id')  String? senderId, @JsonKey(name: 'sender_name')  String? senderName, @JsonKey(name: 'sender_profile_pic')  String? senderProfilePic, @JsonKey(name: 'replied_to')  String? repliedTo, @JsonKey(name: 'replied_to_message')  Map<String, dynamic>? repliedToMessage, @JsonKey(fromJson: _messageTypeFromJson, toJson: _messageTypeToJson)  MessageType type,  String? body,  Map<String, dynamic>? attachments, @JsonKey(name: 'local_media_path')  String? localMediaPath, @JsonKey(name: 'is_failed')  bool isFailed, @JsonKey(name: 'sent_at')  String sentAt, @JsonKey(name: 'deleted_at')  String? deletedAt, @JsonKey(name: 'expires_at')  String? expiresAt)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _MessageModel() when $default != null:
-return $default(_that.id,_that.chatId,_that.senderId,_that.senderName,_that.senderProfilePic,_that.repliedTo,_that.repliedToMessage,_that.type,_that.body,_that.attachments,_that.localMediaPath,_that.isFailed,_that.sentAt,_that.deletedAt);case _:
+return $default(_that.id,_that.chatId,_that.senderId,_that.senderName,_that.senderProfilePic,_that.repliedTo,_that.repliedToMessage,_that.type,_that.body,_that.attachments,_that.localMediaPath,_that.isFailed,_that.sentAt,_that.deletedAt,_that.expiresAt);case _:
   return orElse();
 
 }
@@ -192,10 +197,10 @@ return $default(_that.id,_that.chatId,_that.senderId,_that.senderName,_that.send
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id, @JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'sender_id')  String? senderId, @JsonKey(name: 'sender_name')  String? senderName, @JsonKey(name: 'sender_profile_pic')  String? senderProfilePic, @JsonKey(name: 'replied_to')  String? repliedTo, @JsonKey(name: 'replied_to_message')  Map<String, dynamic>? repliedToMessage, @JsonKey(fromJson: _messageTypeFromJson, toJson: _messageTypeToJson)  MessageType type,  String? body,  Map<String, dynamic>? attachments, @JsonKey(name: 'local_media_path')  String? localMediaPath, @JsonKey(name: 'is_failed')  bool isFailed, @JsonKey(name: 'sent_at')  String sentAt, @JsonKey(name: 'deleted_at')  String? deletedAt)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id, @JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'sender_id')  String? senderId, @JsonKey(name: 'sender_name')  String? senderName, @JsonKey(name: 'sender_profile_pic')  String? senderProfilePic, @JsonKey(name: 'replied_to')  String? repliedTo, @JsonKey(name: 'replied_to_message')  Map<String, dynamic>? repliedToMessage, @JsonKey(fromJson: _messageTypeFromJson, toJson: _messageTypeToJson)  MessageType type,  String? body,  Map<String, dynamic>? attachments, @JsonKey(name: 'local_media_path')  String? localMediaPath, @JsonKey(name: 'is_failed')  bool isFailed, @JsonKey(name: 'sent_at')  String sentAt, @JsonKey(name: 'deleted_at')  String? deletedAt, @JsonKey(name: 'expires_at')  String? expiresAt)  $default,) {final _that = this;
 switch (_that) {
 case _MessageModel():
-return $default(_that.id,_that.chatId,_that.senderId,_that.senderName,_that.senderProfilePic,_that.repliedTo,_that.repliedToMessage,_that.type,_that.body,_that.attachments,_that.localMediaPath,_that.isFailed,_that.sentAt,_that.deletedAt);case _:
+return $default(_that.id,_that.chatId,_that.senderId,_that.senderName,_that.senderProfilePic,_that.repliedTo,_that.repliedToMessage,_that.type,_that.body,_that.attachments,_that.localMediaPath,_that.isFailed,_that.sentAt,_that.deletedAt,_that.expiresAt);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -212,10 +217,10 @@ return $default(_that.id,_that.chatId,_that.senderId,_that.senderName,_that.send
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id, @JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'sender_id')  String? senderId, @JsonKey(name: 'sender_name')  String? senderName, @JsonKey(name: 'sender_profile_pic')  String? senderProfilePic, @JsonKey(name: 'replied_to')  String? repliedTo, @JsonKey(name: 'replied_to_message')  Map<String, dynamic>? repliedToMessage, @JsonKey(fromJson: _messageTypeFromJson, toJson: _messageTypeToJson)  MessageType type,  String? body,  Map<String, dynamic>? attachments, @JsonKey(name: 'local_media_path')  String? localMediaPath, @JsonKey(name: 'is_failed')  bool isFailed, @JsonKey(name: 'sent_at')  String sentAt, @JsonKey(name: 'deleted_at')  String? deletedAt)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id, @JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'sender_id')  String? senderId, @JsonKey(name: 'sender_name')  String? senderName, @JsonKey(name: 'sender_profile_pic')  String? senderProfilePic, @JsonKey(name: 'replied_to')  String? repliedTo, @JsonKey(name: 'replied_to_message')  Map<String, dynamic>? repliedToMessage, @JsonKey(fromJson: _messageTypeFromJson, toJson: _messageTypeToJson)  MessageType type,  String? body,  Map<String, dynamic>? attachments, @JsonKey(name: 'local_media_path')  String? localMediaPath, @JsonKey(name: 'is_failed')  bool isFailed, @JsonKey(name: 'sent_at')  String sentAt, @JsonKey(name: 'deleted_at')  String? deletedAt, @JsonKey(name: 'expires_at')  String? expiresAt)?  $default,) {final _that = this;
 switch (_that) {
 case _MessageModel() when $default != null:
-return $default(_that.id,_that.chatId,_that.senderId,_that.senderName,_that.senderProfilePic,_that.repliedTo,_that.repliedToMessage,_that.type,_that.body,_that.attachments,_that.localMediaPath,_that.isFailed,_that.sentAt,_that.deletedAt);case _:
+return $default(_that.id,_that.chatId,_that.senderId,_that.senderName,_that.senderProfilePic,_that.repliedTo,_that.repliedToMessage,_that.type,_that.body,_that.attachments,_that.localMediaPath,_that.isFailed,_that.sentAt,_that.deletedAt,_that.expiresAt);case _:
   return null;
 
 }
@@ -227,7 +232,7 @@ return $default(_that.id,_that.chatId,_that.senderId,_that.senderName,_that.send
 @JsonSerializable()
 
 class _MessageModel extends MessageModel {
-  const _MessageModel({required this.id, @JsonKey(name: 'chat_id') required this.chatId, @JsonKey(name: 'sender_id') this.senderId, @JsonKey(name: 'sender_name') this.senderName, @JsonKey(name: 'sender_profile_pic') this.senderProfilePic, @JsonKey(name: 'replied_to') this.repliedTo, @JsonKey(name: 'replied_to_message') final  Map<String, dynamic>? repliedToMessage, @JsonKey(fromJson: _messageTypeFromJson, toJson: _messageTypeToJson) this.type = MessageType.text, this.body, final  Map<String, dynamic>? attachments, @JsonKey(name: 'local_media_path') this.localMediaPath, @JsonKey(name: 'is_failed') this.isFailed = false, @JsonKey(name: 'sent_at') required this.sentAt, @JsonKey(name: 'deleted_at') this.deletedAt}): _repliedToMessage = repliedToMessage,_attachments = attachments,super._();
+  const _MessageModel({required this.id, @JsonKey(name: 'chat_id') required this.chatId, @JsonKey(name: 'sender_id') this.senderId, @JsonKey(name: 'sender_name') this.senderName, @JsonKey(name: 'sender_profile_pic') this.senderProfilePic, @JsonKey(name: 'replied_to') this.repliedTo, @JsonKey(name: 'replied_to_message') final  Map<String, dynamic>? repliedToMessage, @JsonKey(fromJson: _messageTypeFromJson, toJson: _messageTypeToJson) this.type = MessageType.text, this.body, final  Map<String, dynamic>? attachments, @JsonKey(name: 'local_media_path') this.localMediaPath, @JsonKey(name: 'is_failed') this.isFailed = false, @JsonKey(name: 'sent_at') required this.sentAt, @JsonKey(name: 'deleted_at') this.deletedAt, @JsonKey(name: 'expires_at') this.expiresAt}): _repliedToMessage = repliedToMessage,_attachments = attachments,super._();
   factory _MessageModel.fromJson(Map<String, dynamic> json) => _$MessageModelFromJson(json);
 
 @override final  String id;
@@ -270,6 +275,11 @@ class _MessageModel extends MessageModel {
 @override@JsonKey(name: 'is_failed') final  bool isFailed;
 @override@JsonKey(name: 'sent_at') final  String sentAt;
 @override@JsonKey(name: 'deleted_at') final  String? deletedAt;
+// Disappearing-messages deadline (ISO-8601). Server stamps this on
+// message:new when the chat has the feature enabled. The view layer
+// filters expired-but-not-deleted rows; the row is only soft-deleted
+// when the server's message:delete event arrives.
+@override@JsonKey(name: 'expires_at') final  String? expiresAt;
 
 /// Create a copy of MessageModel
 /// with the given fields replaced by the non-null parameter values.
@@ -284,16 +294,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _MessageModel&&(identical(other.id, id) || other.id == id)&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.senderId, senderId) || other.senderId == senderId)&&(identical(other.senderName, senderName) || other.senderName == senderName)&&(identical(other.senderProfilePic, senderProfilePic) || other.senderProfilePic == senderProfilePic)&&(identical(other.repliedTo, repliedTo) || other.repliedTo == repliedTo)&&const DeepCollectionEquality().equals(other._repliedToMessage, _repliedToMessage)&&(identical(other.type, type) || other.type == type)&&(identical(other.body, body) || other.body == body)&&const DeepCollectionEquality().equals(other._attachments, _attachments)&&(identical(other.localMediaPath, localMediaPath) || other.localMediaPath == localMediaPath)&&(identical(other.isFailed, isFailed) || other.isFailed == isFailed)&&(identical(other.sentAt, sentAt) || other.sentAt == sentAt)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _MessageModel&&(identical(other.id, id) || other.id == id)&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.senderId, senderId) || other.senderId == senderId)&&(identical(other.senderName, senderName) || other.senderName == senderName)&&(identical(other.senderProfilePic, senderProfilePic) || other.senderProfilePic == senderProfilePic)&&(identical(other.repliedTo, repliedTo) || other.repliedTo == repliedTo)&&const DeepCollectionEquality().equals(other._repliedToMessage, _repliedToMessage)&&(identical(other.type, type) || other.type == type)&&(identical(other.body, body) || other.body == body)&&const DeepCollectionEquality().equals(other._attachments, _attachments)&&(identical(other.localMediaPath, localMediaPath) || other.localMediaPath == localMediaPath)&&(identical(other.isFailed, isFailed) || other.isFailed == isFailed)&&(identical(other.sentAt, sentAt) || other.sentAt == sentAt)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt)&&(identical(other.expiresAt, expiresAt) || other.expiresAt == expiresAt));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,chatId,senderId,senderName,senderProfilePic,repliedTo,const DeepCollectionEquality().hash(_repliedToMessage),type,body,const DeepCollectionEquality().hash(_attachments),localMediaPath,isFailed,sentAt,deletedAt);
+int get hashCode => Object.hash(runtimeType,id,chatId,senderId,senderName,senderProfilePic,repliedTo,const DeepCollectionEquality().hash(_repliedToMessage),type,body,const DeepCollectionEquality().hash(_attachments),localMediaPath,isFailed,sentAt,deletedAt,expiresAt);
 
 @override
 String toString() {
-  return 'MessageModel(id: $id, chatId: $chatId, senderId: $senderId, senderName: $senderName, senderProfilePic: $senderProfilePic, repliedTo: $repliedTo, repliedToMessage: $repliedToMessage, type: $type, body: $body, attachments: $attachments, localMediaPath: $localMediaPath, isFailed: $isFailed, sentAt: $sentAt, deletedAt: $deletedAt)';
+  return 'MessageModel(id: $id, chatId: $chatId, senderId: $senderId, senderName: $senderName, senderProfilePic: $senderProfilePic, repliedTo: $repliedTo, repliedToMessage: $repliedToMessage, type: $type, body: $body, attachments: $attachments, localMediaPath: $localMediaPath, isFailed: $isFailed, sentAt: $sentAt, deletedAt: $deletedAt, expiresAt: $expiresAt)';
 }
 
 
@@ -304,7 +314,7 @@ abstract mixin class _$MessageModelCopyWith<$Res> implements $MessageModelCopyWi
   factory _$MessageModelCopyWith(_MessageModel value, $Res Function(_MessageModel) _then) = __$MessageModelCopyWithImpl;
 @override @useResult
 $Res call({
- String id,@JsonKey(name: 'chat_id') String chatId,@JsonKey(name: 'sender_id') String? senderId,@JsonKey(name: 'sender_name') String? senderName,@JsonKey(name: 'sender_profile_pic') String? senderProfilePic,@JsonKey(name: 'replied_to') String? repliedTo,@JsonKey(name: 'replied_to_message') Map<String, dynamic>? repliedToMessage,@JsonKey(fromJson: _messageTypeFromJson, toJson: _messageTypeToJson) MessageType type, String? body, Map<String, dynamic>? attachments,@JsonKey(name: 'local_media_path') String? localMediaPath,@JsonKey(name: 'is_failed') bool isFailed,@JsonKey(name: 'sent_at') String sentAt,@JsonKey(name: 'deleted_at') String? deletedAt
+ String id,@JsonKey(name: 'chat_id') String chatId,@JsonKey(name: 'sender_id') String? senderId,@JsonKey(name: 'sender_name') String? senderName,@JsonKey(name: 'sender_profile_pic') String? senderProfilePic,@JsonKey(name: 'replied_to') String? repliedTo,@JsonKey(name: 'replied_to_message') Map<String, dynamic>? repliedToMessage,@JsonKey(fromJson: _messageTypeFromJson, toJson: _messageTypeToJson) MessageType type, String? body, Map<String, dynamic>? attachments,@JsonKey(name: 'local_media_path') String? localMediaPath,@JsonKey(name: 'is_failed') bool isFailed,@JsonKey(name: 'sent_at') String sentAt,@JsonKey(name: 'deleted_at') String? deletedAt,@JsonKey(name: 'expires_at') String? expiresAt
 });
 
 
@@ -321,7 +331,7 @@ class __$MessageModelCopyWithImpl<$Res>
 
 /// Create a copy of MessageModel
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? chatId = null,Object? senderId = freezed,Object? senderName = freezed,Object? senderProfilePic = freezed,Object? repliedTo = freezed,Object? repliedToMessage = freezed,Object? type = null,Object? body = freezed,Object? attachments = freezed,Object? localMediaPath = freezed,Object? isFailed = null,Object? sentAt = null,Object? deletedAt = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? chatId = null,Object? senderId = freezed,Object? senderName = freezed,Object? senderProfilePic = freezed,Object? repliedTo = freezed,Object? repliedToMessage = freezed,Object? type = null,Object? body = freezed,Object? attachments = freezed,Object? localMediaPath = freezed,Object? isFailed = null,Object? sentAt = null,Object? deletedAt = freezed,Object? expiresAt = freezed,}) {
   return _then(_MessageModel(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,chatId: null == chatId ? _self.chatId : chatId // ignore: cast_nullable_to_non_nullable
@@ -337,6 +347,7 @@ as Map<String, dynamic>?,localMediaPath: freezed == localMediaPath ? _self.local
 as String?,isFailed: null == isFailed ? _self.isFailed : isFailed // ignore: cast_nullable_to_non_nullable
 as bool,sentAt: null == sentAt ? _self.sentAt : sentAt // ignore: cast_nullable_to_non_nullable
 as String,deletedAt: freezed == deletedAt ? _self.deletedAt : deletedAt // ignore: cast_nullable_to_non_nullable
+as String?,expiresAt: freezed == expiresAt ? _self.expiresAt : expiresAt // ignore: cast_nullable_to_non_nullable
 as String?,
   ));
 }

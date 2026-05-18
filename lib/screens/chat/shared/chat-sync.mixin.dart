@@ -56,6 +56,12 @@ mixin ChatSyncMixin<T extends ConsumerStatefulWidget>
   StreamSubscription<Map<String, MessageStatusType>>?
       deliveryStatusSubscription;
 
+  /// Drives view-layer re-evaluation of disappearing-messages so expired rows
+  /// vanish without waiting for the server's message:delete event. The actual
+  /// soft-delete is applied by handleMessageDelete when the server event
+  /// arrives — this timer only nudges setState so [displayMessages] re-filters.
+  Timer? _disappearingTicker;
+
   /// Reactions emoji → [{user_id, ...}] keyed by message id. Surfaced via
   /// the Drift stream from the [MessageStatusRepository].
   Map<String, Map<String, dynamic>> reactionsByMessage = {};
@@ -215,6 +221,16 @@ mixin ChatSyncMixin<T extends ConsumerStatefulWidget>
         });
       });
     }
+
+    // 30s heartbeat so the view-layer disappearing filter re-runs even when
+    // the messages stream is otherwise idle. No DB writes — just setState.
+    _disappearingTicker?.cancel();
+    _disappearingTicker = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!canSetState) return;
+      // Empty setState fn is fine: displayMessages reads DateTime.now() each
+      // build so the predicate re-evaluates on rebuild.
+      safeSetState(() {});
+    });
 
     // Messages stream is the critical-path subscription — it drives the
     // first paint (`isLoading = false` on first emission). Subscribe now.
@@ -556,5 +572,6 @@ mixin ChatSyncMixin<T extends ConsumerStatefulWidget>
     messagesStreamSub?.cancel();
     reactionsSubscription?.cancel();
     deliveryStatusSubscription?.cancel();
+    _disappearingTicker?.cancel();
   }
 }

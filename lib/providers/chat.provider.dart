@@ -187,6 +187,8 @@ class ChatNotifier extends Notifier<ChatState> {
   StreamSubscription<ConvJoinPayload>? _joinConvSubscription;
   StreamSubscription<ConversationActionPayload>?
   _conversationActionSubscription;
+  StreamSubscription<ConversationDisappearingPayload>?
+  _disappearingSubscription;
 
   final Map<String, Timer?> _typingTimers = {};
   bool _listenersSetup = false;
@@ -456,6 +458,7 @@ class ChatNotifier extends Notifier<ChatState> {
                 isFavorite: false,
                 isMuted: false,
                 createdAt: groupModel.joinedAt,
+                disappearingAfterSec: enrichedGroup.disappearingAfterSec,
               );
               convs.add(convModel);
             }
@@ -627,6 +630,9 @@ class ChatNotifier extends Notifier<ChatState> {
                   unreadCount: json['unreadCount'] is int ? json['unreadCount'] : 0,
                   isRecipientOnline: false,
                   createdAt: json['joinedAt']?.toString() ?? '',
+                  disappearingAfterSec: json['disappearingAfterSec'] is int
+                      ? json['disappearingAfterSec'] as int
+                      : null,
                 );
               }
               return null;
@@ -702,6 +708,12 @@ class ChatNotifier extends Notifier<ChatState> {
                   isFavorite: json['isFavorite'] == true,
                   isMuted: json['isMuted'] == true,
                   createdAt: json['joinedAt']?.toString(),
+                  // Hydrate disappearing-messages setting on fresh login so the
+                  // input-border / avatar-badge UI shows the correct state
+                  // before any WS event arrives.
+                  disappearingAfterSec: json['disappearingAfterSec'] is int
+                      ? json['disappearingAfterSec'] as int
+                      : null,
                 );
               }
               return null;
@@ -1180,6 +1192,37 @@ class ChatNotifier extends Notifier<ChatState> {
         debugPrint('❌ Conversation join/leave stream error: $error');
       },
     );
+
+    // Disappearing-messages setting changes from peers. The WS handler has
+    // already written the new duration into the local Chats table by the
+    // time this fires — we just need to refresh in-memory state.dmList /
+    // groupList so list tiles and the messaging screen's appbar/input-border
+    // re-render without waiting for a chat-list refresh.
+    _disappearingSubscription =
+        _messageHandler.conversationDisappearingStream.listen(
+      _handleConversationDisappearing,
+      onError: (error) {
+        debugPrint('❌ Conversation disappearing stream error: $error');
+      },
+    );
+  }
+
+  void _handleConversationDisappearing(ConversationDisappearingPayload p) {
+    final dmIdx = state.dmList.indexWhere((d) => d.chatId == p.convId);
+    if (dmIdx != -1) {
+      final updated = List<DmModel>.from(state.dmList);
+      updated[dmIdx] =
+          updated[dmIdx].copyWith(disappearingAfterSec: p.durationSec);
+      state = state.copyWith(dmList: updated);
+      return;
+    }
+    final grIdx = state.groupList.indexWhere((g) => g.chatId == p.convId);
+    if (grIdx != -1) {
+      final updated = List<GroupModel>.from(state.groupList);
+      updated[grIdx] =
+          updated[grIdx].copyWith(disappearingAfterSec: p.durationSec);
+      state = state.copyWith(groupList: updated);
+    }
   }
 
   /// Handle typing message
@@ -2156,6 +2199,7 @@ class ChatNotifier extends Notifier<ChatState> {
     _messageReactSubscription?.cancel();
     _onlineStatusSubscription?.cancel();
     _conversationActionSubscription?.cancel();
+    _disappearingSubscription?.cancel();
 
     for (final timer in _typingTimers.values) {
       timer?.cancel();

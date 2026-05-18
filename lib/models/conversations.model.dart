@@ -21,6 +21,9 @@ abstract class ChatModel with _$ChatModel {
     @JsonKey(name: 'created_at') String? createdAt,
     @JsonKey(name: 'updated_at') String? updatedAt,
     @JsonKey(name: 'need_sync') @Default(true) bool needSync,
+    // Disappearing-messages duration in seconds; null = off. Updated by the
+    // conversation:disappearing WS event.
+    @JsonKey(name: 'disappearing_after_sec') int? disappearingAfterSec,
   }) = _ChatModel;
 
   factory ChatModel.fromJson(Map<String, dynamic> json) =>
@@ -51,6 +54,9 @@ abstract class DmModel with _$DmModel {
     @JsonKey(name: 'is_muted') @Default(false) bool isMuted,
     @JsonKey(name: 'is_favorite') @Default(false) bool isFavorite,
     @JsonKey(name: 'created_at') required String createdAt,
+    // Disappearing-messages duration in seconds; null = off. Mirrors the
+    // chats table column. Drives the avatar timer-badge + input-border UI.
+    @JsonKey(name: 'disappearing_after_sec') int? disappearingAfterSec,
   }) = _DmModel;
 
   factory DmModel.fromJson(Map<String, dynamic> json) =>

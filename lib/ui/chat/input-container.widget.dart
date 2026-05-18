@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../models/community.model.dart';
 import '../../models/group.model.dart';
+import '../../providers/chat.provider.dart';
 import '../../providers/theme-color.provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -624,12 +625,42 @@ class _MessageInputContainerState extends ConsumerState<MessageInputContainer>
     return '${mb.toStringAsFixed(2)} MB';
   }
 
+  /// Resolve the chat's current disappearing-messages duration. The initial
+  /// widget.dm/group snapshot can be stale by the time a peer toggles the
+  /// setting mid-session, so we re-read from chatProvider where the WS
+  /// handler keeps the in-memory list current.
+  int? _currentDisappearingSec() {
+    final chatId = widget.dm?.chatId ?? widget.group?.chatId;
+    if (chatId == null) return null;
+    final state = ref.watch(chatProvider);
+    for (final d in state.dmList) {
+      if (d.chatId == chatId) return d.disappearingAfterSec;
+    }
+    for (final g in state.groupList) {
+      if (g.chatId == chatId) return g.disappearingAfterSec;
+    }
+    // Fall back to the widget snapshot if state hasn't loaded this chat yet.
+    return widget.dm?.disappearingAfterSec ??
+        widget.group?.disappearingAfterSec;
+  }
+
+  String _humanDuration(int sec) {
+    if (sec < 60) return '$sec seconds';
+    if (sec < 3600) return '${(sec / 60).round()} minutes';
+    if (sec == 86400) return '24 hours';
+    if (sec % 86400 == 0) return '${sec ~/ 86400} days';
+    if (sec % 3600 == 0) return '${sec ~/ 3600} hours';
+    return '$sec seconds';
+  }
+
   @override
   Widget build(BuildContext context) {
     final themeColor = ref.watch(themeColorProvider);
     final isCommunityGroupActive = _isCommunityGroupActive();
     final shouldDisableSending =
         widget.isCommunityGroup && !isCommunityGroupActive;
+    final disappearingSec = _currentDisappearingSec();
+    final isDisappearingOn = disappearingSec != null && disappearingSec > 0;
 
     return Column(
       children: [
@@ -712,115 +743,133 @@ class _MessageInputContainerState extends ConsumerState<MessageInputContainer>
                 children: [
                   // ── Input pill: emoji • text • attachment ───────────
                   Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: shouldDisableSending
-                            ? Colors.grey[200]
-                            : Colors.white,
-                        borderRadius: BorderRadius.circular(28),
-                        border: Border.all(
-                          color: Colors.grey.shade300,
-                          width: 0.6,
+                    // The solid border drops when disappearing-messages is on
+                    // and we paint a dashed outline via foregroundPainter
+                    // instead — keeps the rest of the pill (shadow, radius,
+                    // bg) identical so layout doesn't shift.
+                    child: CustomPaint(
+                      foregroundPainter: isDisappearingOn
+                          ? _DashedRRectBorderPainter(
+                              color: themeColor.primary.withAlpha(150),
+                              radius: 28,
+                              strokeWidth: 1.4,
+                              dashLength: 5,
+                              gapLength: 3.5,
+                            )
+                          : null,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: shouldDisableSending
+                              ? Colors.grey[200]
+                              : Colors.white,
+                          borderRadius: BorderRadius.circular(28),
+                          border: isDisappearingOn
+                              ? null
+                              : Border.all(
+                                  color: Colors.grey.shade300,
+                                  width: 0.6,
+                                ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withAlpha(15),
+                              blurRadius: 4,
+                              offset: const Offset(0, 1),
+                            ),
+                          ],
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withAlpha(15),
-                            blurRadius: 4,
-                            offset: const Offset(0, 1),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          // Emoji ↔ keyboard toggle
-                          IconButton(
-                            icon: Icon(
-                              _showEmojiPanel
-                                  ? Icons.keyboard_outlined
-                                  : Icons.sentiment_satisfied_alt_outlined,
-                              color: shouldDisableSending
-                                  ? Colors.grey[400]
-                                  : (_showEmojiPanel
-                                        ? themeColor.primary
-                                        : Colors.grey[600]),
-                            ),
-                            onPressed: shouldDisableSending
-                                ? null
-                                : _toggleEmojiPanel,
-                            splashRadius: 22,
-                          ),
-                          Expanded(
-                            child: TextField(
-                              controller: widget.messageController,
-                              focusNode: widget.focusNode,
-                              enabled: !shouldDisableSending,
-                              decoration: InputDecoration(
-                                hintText: shouldDisableSending
-                                    ? 'Messaging is disabled outside active hours'
-                                    : 'Message',
-                                hintStyle: TextStyle(
-                                  color: Colors.grey[600],
-                                  fontSize: 16,
-                                ),
-                                border: InputBorder.none,
-                                enabledBorder: InputBorder.none,
-                                focusedBorder: InputBorder.none,
-                                isDense: true,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                  vertical: 12,
-                                ),
-                              ),
-                              style: const TextStyle(
-                                fontSize: 16,
-                                color: Color(0xFF1F2329),
-                              ),
-                              maxLines: 6,
-                              minLines: 1,
-                              textInputAction: TextInputAction.newline,
-                              textCapitalization: TextCapitalization.sentences,
-                              onChanged: shouldDisableSending
-                                  ? null
-                                  : (value) {
-                                      if (widget.onTyping != null) {
-                                        widget.onTyping!(value);
-                                      }
-                                      if (widget.onFocusChange != null) {
-                                        widget.onFocusChange!(
-                                          widget.focusNode?.hasFocus ?? false,
-                                        );
-                                      }
-                                    },
-                              onTap: () {
-                                if (_showEmojiPanel) {
-                                  setState(() => _showEmojiPanel = false);
-                                }
-                                if (widget.onFocusChange != null) {
-                                  widget.onFocusChange!(true);
-                                }
-                              },
-                            ),
-                          ),
-                          // Attachment (paperclip, slightly tilted like Telegram)
-                          IconButton(
-                            icon: Transform.rotate(
-                              angle: -0.6,
-                              child: Icon(
-                                Icons.attach_file_rounded,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            // Emoji ↔ keyboard toggle
+                            IconButton(
+                              icon: Icon(
+                                _showEmojiPanel
+                                    ? Icons.keyboard_outlined
+                                    : Icons.sentiment_satisfied_alt_outlined,
                                 color: shouldDisableSending
                                     ? Colors.grey[400]
-                                    : (_attachmentMenuVisible
+                                    : (_showEmojiPanel
                                           ? themeColor.primary
-                                          : Colors.grey[700]),
+                                          : Colors.grey[600]),
+                              ),
+                              onPressed: shouldDisableSending
+                                  ? null
+                                  : _toggleEmojiPanel,
+                              splashRadius: 22,
+                            ),
+                            Expanded(
+                              child: TextField(
+                                controller: widget.messageController,
+                                focusNode: widget.focusNode,
+                                enabled: !shouldDisableSending,
+                                decoration: InputDecoration(
+                                  hintText: shouldDisableSending
+                                      ? 'Messaging is disabled outside active hours'
+                                      : 'Message',
+                                  hintStyle: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 16,
+                                  ),
+                                  border: InputBorder.none,
+                                  enabledBorder: InputBorder.none,
+                                  focusedBorder: InputBorder.none,
+                                  isDense: true,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 12,
+                                  ),
+                                ),
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  color: Color(0xFF1F2329),
+                                ),
+                                maxLines: 6,
+                                minLines: 1,
+                                textInputAction: TextInputAction.newline,
+                                textCapitalization:
+                                    TextCapitalization.sentences,
+                                onChanged: shouldDisableSending
+                                    ? null
+                                    : (value) {
+                                        if (widget.onTyping != null) {
+                                          widget.onTyping!(value);
+                                        }
+                                        if (widget.onFocusChange != null) {
+                                          widget.onFocusChange!(
+                                            widget.focusNode?.hasFocus ?? false,
+                                          );
+                                        }
+                                      },
+                                onTap: () {
+                                  if (_showEmojiPanel) {
+                                    setState(() => _showEmojiPanel = false);
+                                  }
+                                  if (widget.onFocusChange != null) {
+                                    widget.onFocusChange!(true);
+                                  }
+                                },
                               ),
                             ),
-                            onPressed: shouldDisableSending
-                                ? null
-                                : _toggleAttachmentMenu,
-                            splashRadius: 22,
-                          ),
-                        ],
+                            // Attachment (paperclip, slightly tilted like Telegram)
+                            IconButton(
+                              icon: Transform.rotate(
+                                angle: -0.6,
+                                child: Icon(
+                                  Icons.attach_file_rounded,
+                                  color: shouldDisableSending
+                                      ? Colors.grey[400]
+                                      : (_attachmentMenuVisible
+                                            ? themeColor.primary
+                                            : Colors.grey[700]),
+                                ),
+                              ),
+                              onPressed: shouldDisableSending
+                                  ? null
+                                  : _toggleAttachmentMenu,
+                              splashRadius: 22,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -862,6 +911,29 @@ class _MessageInputContainerState extends ConsumerState<MessageInputContainer>
             ],
           ),
         ),
+
+        // Helper text under the input — only shown while disappearing is on.
+        // Padding matches the input pill's horizontal inset (8) plus a small
+        // shoulder so it visually hangs off the pill's left edge.
+        if (isDisappearingOn)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.schedule_send_rounded,
+                  size: 12,
+                  color: themeColor.primary,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'Messages will disappear after ${_humanDuration(disappearingSec)}',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+                ),
+              ],
+            ),
+          ),
 
         // ── Emoji panel (sits where the keyboard would be) ────────────
         if (_showEmojiPanel)
@@ -1535,4 +1607,64 @@ class _AttachmentTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Paints a dashed outline around a rounded rectangle — used as the
+/// foreground painter on the message input pill when the chat has
+/// disappearing-messages turned on. The dashes wrap a rounded rect at the
+/// `radius` corner, with the dash run computed in equal arc-length steps so
+/// dashes don't bunch up at the corners.
+class _DashedRRectBorderPainter extends CustomPainter {
+  final Color color;
+  final double radius;
+  final double strokeWidth;
+  final double dashLength;
+  final double gapLength;
+
+  _DashedRRectBorderPainter({
+    required this.color,
+    required this.radius,
+    required this.strokeWidth,
+    required this.dashLength,
+    required this.gapLength,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    // Inset by half the stroke so the dashes sit on the edge, not clipped.
+    final inset = strokeWidth / 2;
+    final rect = Rect.fromLTWH(
+      inset,
+      inset,
+      size.width - 2 * inset,
+      size.height - 2 * inset,
+    );
+    final rr = RRect.fromRectAndRadius(rect, Radius.circular(radius - inset));
+
+    final path = Path()..addRRect(rr);
+    final pm = path.computeMetrics().toList();
+    final step = dashLength + gapLength;
+    for (final metric in pm) {
+      double distance = 0;
+      while (distance < metric.length) {
+        final end = (distance + dashLength).clamp(0, metric.length).toDouble();
+        canvas.drawPath(metric.extractPath(distance, end), paint);
+        distance += step;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedRRectBorderPainter old) =>
+      old.color != color ||
+      old.radius != radius ||
+      old.strokeWidth != strokeWidth ||
+      old.dashLength != dashLength ||
+      old.gapLength != gapLength;
 }

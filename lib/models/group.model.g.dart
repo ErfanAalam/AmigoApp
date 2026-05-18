@@ -26,6 +26,7 @@ _GroupModel _$GroupModelFromJson(Map<String, dynamic> json) => _GroupModel(
   isMuted: json['is_muted'] as bool? ?? false,
   isFavorite: json['is_favorite'] as bool? ?? false,
   joinedAt: json['joined_at'] as String? ?? '',
+  disappearingAfterSec: (json['disappearing_after_sec'] as num?)?.toInt(),
 );
 
 Map<String, dynamic> _$GroupModelToJson(_GroupModel instance) =>
@@ -45,6 +46,7 @@ Map<String, dynamic> _$GroupModelToJson(_GroupModel instance) =>
       'is_muted': instance.isMuted,
       'is_favorite': instance.isFavorite,
       'joined_at': instance.joinedAt,
+      'disappearing_after_sec': instance.disappearingAfterSec,
     };
 
 _GroupMember _$GroupMemberFromJson(Map<String, dynamic> json) => _GroupMember(

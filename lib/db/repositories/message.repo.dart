@@ -48,6 +48,7 @@ class MessageRepository {
       isFailed: message.isFailed,
       sentAt: message.sentAt,
       deletedAt: message.deletedAt,
+      expiresAt: message.expiresAt,
     );
   }
 
@@ -64,6 +65,7 @@ class MessageRepository {
       isFailed: Value(message.isFailed),
       sentAt: message.sentAt,
       deletedAt: Value(message.deletedAt),
+      expiresAt: Value(message.expiresAt),
     );
   }
 

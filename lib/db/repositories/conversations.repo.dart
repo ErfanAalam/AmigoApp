@@ -80,6 +80,16 @@ class ConversationRepository {
       createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
       updatedAt: conv.updatedAt,
       needSync: conv.needSync,
+      disappearingAfterSec: conv.disappearingAfterSec,
+    );
+  }
+
+  /// Set or clear the disappearing-messages duration on a conversation.
+  /// Idempotent — called from the conversation:disappearing WS handler.
+  Future<void> setDisappearingAfterSec(String chatId, int? durationSec) async {
+    final db = sqliteDatabase.database;
+    await (db.update(db.chats)..where((t) => t.id.equals(chatId))).write(
+      ChatsCompanion(disappearingAfterSec: Value(durationSec)),
     );
   }
 
@@ -111,6 +121,7 @@ class ConversationRepository {
           isMuted: Value(conv.isMuted),
           isFavorite: Value(conv.isFavorite),
           updatedAt: Value(conv.updatedAt),
+          disappearingAfterSec: Value(conv.disappearingAfterSec),
         );
         b.insert(db.chats, convCompanion, mode: InsertMode.insertOrIgnore);
       }
@@ -183,6 +194,7 @@ class ConversationRepository {
         conversation.updatedAt ?? DateTime.now().toIso8601String(),
       ),
       needSync: Value(conversation.needSync),
+      disappearingAfterSec: Value(conversation.disappearingAfterSec),
     );
 
     await db.update(db.chats).replace(companion);
@@ -501,6 +513,7 @@ class ConversationRepository {
               isMuted: conv.isMuted,
               isFavorite: conv.isFavorite,
               createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
+              disappearingAfterSec: conv.disappearingAfterSec,
             ));
           }
           return result;
@@ -571,6 +584,7 @@ class ConversationRepository {
               isFavorite: conv.isFavorite,
               joinedAt: currentUserMemberInfo?.joinedAt ??
                   DateTime.now().toIso8601String(),
+              disappearingAfterSec: conv.disappearingAfterSec,
             ));
           }
           return result;
@@ -669,6 +683,7 @@ class ConversationRepository {
         isMuted: conv.isMuted,
         isFavorite: conv.isFavorite,
         createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
+        disappearingAfterSec: conv.disappearingAfterSec,
       );
 
       result.add(dmModel);
@@ -766,6 +781,7 @@ class ConversationRepository {
         isMuted: conv.isMuted,
         isFavorite: conv.isFavorite,
         createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
+        disappearingAfterSec: conv.disappearingAfterSec,
       );
 
       result.add(dmModel);
@@ -851,6 +867,7 @@ class ConversationRepository {
       isMuted: conv.isMuted,
       isFavorite: conv.isFavorite,
       createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
+      disappearingAfterSec: conv.disappearingAfterSec,
     );
   }
 
@@ -926,6 +943,7 @@ class ConversationRepository {
         isFavorite: conv.isFavorite,
         joinedAt:
             currentUserMemberInfo?.joinedAt ?? DateTime.now().toIso8601String(),
+        disappearingAfterSec: conv.disappearingAfterSec,
       );
 
       result.add(groupModel);
@@ -997,6 +1015,7 @@ class ConversationRepository {
       isFavorite: conv.isFavorite,
       joinedAt:
           currentUserMemberInfo?.joinedAt ?? DateTime.now().toIso8601String(),
+      disappearingAfterSec: conv.disappearingAfterSec,
     );
   }
 
@@ -1145,6 +1164,7 @@ class ConversationRepository {
       isFavorite: conv.isFavorite,
       joinedAt:
           currentUserMemberInfo?.joinedAt ?? DateTime.now().toIso8601String(),
+      disappearingAfterSec: conv.disappearingAfterSec,
     );
   }
 }

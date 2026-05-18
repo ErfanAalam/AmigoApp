@@ -133,6 +133,7 @@ enum WSMessageType {
   messageForward('message:forward'),
   messageDelete('message:delete'),
   messageReact('message:react'),
+  conversationDisappearing('conversation:disappearing'),
   callInit('call:init'),
   callInitAck('call:init:ack'),
   callOffer('call:offer'),
@@ -175,6 +176,7 @@ enum VitalWSMessageType {
   messageForward('message:forward'),
   messageDelete('message:delete'),
   messageReact('message:react'),
+  conversationDisappearing('conversation:disappearing'),
   userUpdate('user:update');
 
   final String value;
@@ -271,6 +273,9 @@ abstract class ChatMessagePayload with _$ChatMessagePayload {
     // DB lookup falling through to "empty".
     @JsonKey(name: 'replied_to_message') Map<String, dynamic>? repliedToMessage,
     @JsonKey(name: 'sent_at') required DateTime sentAt,
+    // Disappearing-messages deadline (server-stamped on broadcast). Null when
+    // the chat has the feature off. Persisted onto the local messages row.
+    @JsonKey(name: 'expires_at') DateTime? expiresAt,
   }) = _ChatMessagePayload;
   factory ChatMessagePayload.fromJson(Map<String, dynamic> json) =>
       _$ChatMessagePayloadFromJson(json);
@@ -448,6 +453,41 @@ abstract class CallPayload with _$CallPayload {
       _$CallPayloadFromJson(json);
 }
 
+/// Sent when a user changes the disappearing-messages duration on a chat.
+/// `durationSec == null` means the feature was turned off. Manual class for
+/// the same reason as [UserUpdatePayload] — avoids tangling freezed codegen.
+class ConversationDisappearingPayload {
+  final String convId;
+  final String actorId;
+  final int? durationSec;
+  final DateTime changedAt;
+
+  ConversationDisappearingPayload({
+    required this.convId,
+    required this.actorId,
+    required this.durationSec,
+    required this.changedAt,
+  });
+
+  factory ConversationDisappearingPayload.fromJson(Map<String, dynamic> json) {
+    return ConversationDisappearingPayload(
+      convId: json['conv_id'] as String,
+      actorId: json['actor_id'] as String,
+      durationSec: (json['duration_sec'] as num?)?.toInt(),
+      changedAt: json['changed_at'] != null
+          ? DateTime.tryParse(json['changed_at'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'conv_id': convId,
+        'actor_id': actorId,
+        'duration_sec': durationSec,
+        'changed_at': changedAt.toUtc().toIso8601String(),
+      };
+}
+
 /// Sent when another user updates their profile (name and/or profile pic).
 /// Manual class — adding a freezed class would require re-running codegen
 /// on this file, which we want to keep an isolated change.
@@ -593,6 +633,8 @@ class WSMessage {
         return MiscPayload.fromJson(json);
       case WSMessageType.userUpdate:
         return UserUpdatePayload.fromJson(json);
+      case WSMessageType.conversationDisappearing:
+        return ConversationDisappearingPayload.fromJson(json);
     }
   }
 
@@ -619,6 +661,7 @@ class WSMessage {
     if (payload is CallPayload) return payload.toJson();
     if (payload is ConversationActionPayload) return payload.toJson();
     if (payload is UserUpdatePayload) return payload.toJson();
+    if (payload is ConversationDisappearingPayload) return payload.toJson();
     return payload;
   }
 
@@ -653,4 +696,6 @@ class WSMessage {
       payload is ConversationActionPayload ? payload : null;
   UserUpdatePayload? get userUpdatePayload =>
       payload is UserUpdatePayload ? payload : null;
+  ConversationDisappearingPayload? get conversationDisappearingPayload =>
+      payload is ConversationDisappearingPayload ? payload : null;
 }

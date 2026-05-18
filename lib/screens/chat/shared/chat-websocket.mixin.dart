@@ -199,6 +199,7 @@ mixin ChatWebSocketMixin<T extends ConsumerStatefulWidget>
         repliedToMessage: payload.repliedToMessage,
         type: payload.msgType,
         sentAt: payload.sentAt.toIso8601String(),
+        expiresAt: payload.expiresAt?.toIso8601String(),
       );
 
       // Echo of our own optimistic send: replace the placeholder with the

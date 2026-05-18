@@ -47,6 +47,9 @@ _ChatMessagePayload _$ChatMessagePayloadFromJson(Map<String, dynamic> json) =>
       repliedTo: json['replied_to'] as String?,
       repliedToMessage: json['replied_to_message'] as Map<String, dynamic>?,
       sentAt: DateTime.parse(json['sent_at'] as String),
+      expiresAt: json['expires_at'] == null
+          ? null
+          : DateTime.parse(json['expires_at'] as String),
     );
 
 Map<String, dynamic> _$ChatMessagePayloadToJson(_ChatMessagePayload instance) =>
@@ -60,6 +63,7 @@ Map<String, dynamic> _$ChatMessagePayloadToJson(_ChatMessagePayload instance) =>
       'replied_to': instance.repliedTo,
       'replied_to_message': instance.repliedToMessage,
       'sent_at': instance.sentAt.toIso8601String(),
+      'expires_at': instance.expiresAt?.toIso8601String(),
     };
 
 _MessageSentAckPayload _$MessageSentAckPayloadFromJson(

@@ -37,6 +37,11 @@ abstract class MessageModel with _$MessageModel {
     @JsonKey(name: 'is_failed') @Default(false) bool isFailed,
     @JsonKey(name: 'sent_at') required String sentAt,
     @JsonKey(name: 'deleted_at') String? deletedAt,
+    // Disappearing-messages deadline (ISO-8601). Server stamps this on
+    // message:new when the chat has the feature enabled. The view layer
+    // filters expired-but-not-deleted rows; the row is only soft-deleted
+    // when the server's message:delete event arrives.
+    @JsonKey(name: 'expires_at') String? expiresAt,
   }) = _MessageModel;
 
   factory MessageModel.fromJson(Map<String, dynamic> json) =>
@@ -69,6 +74,17 @@ abstract class MessageModel with _$MessageModel {
   bool get isReply => repliedTo != null;
   bool get isForwardedMessage => type == MessageType.forwarded;
   bool get isDeleted => deletedAt != null;
+
+  /// Returns true when this message has a disappearing deadline that has
+  /// already passed. Used by the view layer to hide expired messages until
+  /// the authoritative server-side message:delete event arrives. The local
+  /// row is intentionally NOT soft-deleted here — see chat.provider docs.
+  bool isExpiredAt(DateTime now) {
+    final exp = expiresAt;
+    if (exp == null) return false;
+    final dt = DateTime.tryParse(exp);
+    return dt != null && !dt.isAfter(now);
+  }
 }
 
 @freezed

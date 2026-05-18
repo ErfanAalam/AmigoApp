@@ -583,6 +583,7 @@ Future<void> _storeMessageFromPayloadBackground(
           : null,
       repliedTo: chatPayload.repliedTo,
       sentAt: chatPayload.sentAt.toIso8601String(),
+      expiresAt: chatPayload.expiresAt?.toIso8601String(),
     );
 
     // Store in local database

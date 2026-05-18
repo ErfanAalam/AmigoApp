@@ -31,6 +31,7 @@ import '../../../types/socket.types.dart';
 import '../../../ui/blurred-dialog.widget.dart';
 import '../../../ui/blurred-popup.widget.dart';
 import '../../../ui/snackbar.dart';
+import '../../../ui/chat/disappearing-timer-badge.widget.dart';
 import '../../../ui/chat/input-container.widget.dart';
 import '../../../ui/chat/media-messages.widget.dart';
 import '../../../ui/chat/message.action-sheet.dart';
@@ -576,6 +577,18 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   }
 
   Widget _buildAppBarTitle(themeColor) {
+    // Read the latest DM from chatProvider so the disappearing badge tracks
+    // peer-initiated WS toggles without needing the user to back out and
+    // re-enter the screen.
+    final liveDm = ref
+        .watch(chatProvider)
+        .dmList
+        .firstWhere(
+          (d) => d.chatId == widget.dm.chatId,
+          orElse: () => widget.dm,
+        );
+    final hasDisappearing = (liveDm.disappearingAfterSec ?? 0) > 0;
+
     return InkWell(
       borderRadius: BorderRadius.circular(14),
       onTap: _openDmDetails,
@@ -583,24 +596,38 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Row(
           children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: themeColor.primary.withAlpha(20),
-              backgroundImage: widget.dm.recipientProfilePic != null
-                  ? CachedNetworkImageProvider(widget.dm.recipientProfilePic!)
-                  : null,
-              child: widget.dm.recipientProfilePic == null
-                  ? Text(
-                      widget.dm.recipientName.isNotEmpty
-                          ? widget.dm.recipientName[0].toUpperCase()
-                          : '?',
-                      style: TextStyle(
-                        color: themeColor.primary,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    )
-                  : null,
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: themeColor.primary.withAlpha(20),
+                  backgroundImage: widget.dm.recipientProfilePic != null
+                      ? CachedNetworkImageProvider(widget.dm.recipientProfilePic!)
+                      : null,
+                  child: widget.dm.recipientProfilePic == null
+                      ? Text(
+                          widget.dm.recipientName.isNotEmpty
+                              ? widget.dm.recipientName[0].toUpperCase()
+                              : '?',
+                          style: TextStyle(
+                            color: themeColor.primary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        )
+                      : null,
+                ),
+                if (hasDisappearing)
+                  Positioned(
+                    right: -2,
+                    top: -2,
+                    child: DisappearingTimerBadge(
+                      color: themeColor.primary,
+                      size: 12,
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(width: 12),
             Expanded(

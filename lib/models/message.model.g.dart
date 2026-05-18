@@ -24,6 +24,7 @@ _MessageModel _$MessageModelFromJson(Map<String, dynamic> json) =>
       isFailed: json['is_failed'] as bool? ?? false,
       sentAt: json['sent_at'] as String,
       deletedAt: json['deleted_at'] as String?,
+      expiresAt: json['expires_at'] as String?,
     );
 
 Map<String, dynamic> _$MessageModelToJson(_MessageModel instance) =>
@@ -42,6 +43,7 @@ Map<String, dynamic> _$MessageModelToJson(_MessageModel instance) =>
       'is_failed': instance.isFailed,
       'sent_at': instance.sentAt,
       'deleted_at': instance.deletedAt,
+      'expires_at': instance.expiresAt,
     };
 
 _MessagesAroundResponse _$MessagesAroundResponseFromJson(

@@ -1670,6 +1670,16 @@ class $ChatsTable extends Chats with TableInfo<$ChatsTable, Chat> {
     ),
     defaultValue: const Constant(true),
   );
+  static const VerificationMeta _disappearingAfterSecMeta =
+      const VerificationMeta('disappearingAfterSec');
+  @override
+  late final GeneratedColumn<int> disappearingAfterSec = GeneratedColumn<int>(
+    'disappearing_after_sec',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1687,6 +1697,7 @@ class $ChatsTable extends Chats with TableInfo<$ChatsTable, Chat> {
     createdAt,
     updatedAt,
     needSync,
+    disappearingAfterSec,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1797,6 +1808,15 @@ class $ChatsTable extends Chats with TableInfo<$ChatsTable, Chat> {
         needSync.isAcceptableOrUnknown(data['need_sync']!, _needSyncMeta),
       );
     }
+    if (data.containsKey('disappearing_after_sec')) {
+      context.handle(
+        _disappearingAfterSecMeta,
+        disappearingAfterSec.isAcceptableOrUnknown(
+          data['disappearing_after_sec']!,
+          _disappearingAfterSecMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -1866,6 +1886,10 @@ class $ChatsTable extends Chats with TableInfo<$ChatsTable, Chat> {
         DriftSqlType.bool,
         data['${effectivePrefix}need_sync'],
       )!,
+      disappearingAfterSec: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}disappearing_after_sec'],
+      ),
     );
   }
 
@@ -1891,6 +1915,7 @@ class Chat extends DataClass implements Insertable<Chat> {
   final String? createdAt;
   final String? updatedAt;
   final bool needSync;
+  final int? disappearingAfterSec;
   const Chat({
     required this.id,
     required this.type,
@@ -1907,6 +1932,7 @@ class Chat extends DataClass implements Insertable<Chat> {
     this.createdAt,
     this.updatedAt,
     required this.needSync,
+    this.disappearingAfterSec,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1944,6 +1970,9 @@ class Chat extends DataClass implements Insertable<Chat> {
       map['updated_at'] = Variable<String>(updatedAt);
     }
     map['need_sync'] = Variable<bool>(needSync);
+    if (!nullToAbsent || disappearingAfterSec != null) {
+      map['disappearing_after_sec'] = Variable<int>(disappearingAfterSec);
+    }
     return map;
   }
 
@@ -1982,6 +2011,9 @@ class Chat extends DataClass implements Insertable<Chat> {
           ? const Value.absent()
           : Value(updatedAt),
       needSync: Value(needSync),
+      disappearingAfterSec: disappearingAfterSec == null && nullToAbsent
+          ? const Value.absent()
+          : Value(disappearingAfterSec),
     );
   }
 
@@ -2006,6 +2038,9 @@ class Chat extends DataClass implements Insertable<Chat> {
       createdAt: serializer.fromJson<String?>(json['createdAt']),
       updatedAt: serializer.fromJson<String?>(json['updatedAt']),
       needSync: serializer.fromJson<bool>(json['needSync']),
+      disappearingAfterSec: serializer.fromJson<int?>(
+        json['disappearingAfterSec'],
+      ),
     );
   }
   @override
@@ -2027,6 +2062,7 @@ class Chat extends DataClass implements Insertable<Chat> {
       'createdAt': serializer.toJson<String?>(createdAt),
       'updatedAt': serializer.toJson<String?>(updatedAt),
       'needSync': serializer.toJson<bool>(needSync),
+      'disappearingAfterSec': serializer.toJson<int?>(disappearingAfterSec),
     };
   }
 
@@ -2046,6 +2082,7 @@ class Chat extends DataClass implements Insertable<Chat> {
     Value<String?> createdAt = const Value.absent(),
     Value<String?> updatedAt = const Value.absent(),
     bool? needSync,
+    Value<int?> disappearingAfterSec = const Value.absent(),
   }) => Chat(
     id: id ?? this.id,
     type: type ?? this.type,
@@ -2062,6 +2099,9 @@ class Chat extends DataClass implements Insertable<Chat> {
     createdAt: createdAt.present ? createdAt.value : this.createdAt,
     updatedAt: updatedAt.present ? updatedAt.value : this.updatedAt,
     needSync: needSync ?? this.needSync,
+    disappearingAfterSec: disappearingAfterSec.present
+        ? disappearingAfterSec.value
+        : this.disappearingAfterSec,
   );
   Chat copyWithCompanion(ChatsCompanion data) {
     return Chat(
@@ -2086,6 +2126,9 @@ class Chat extends DataClass implements Insertable<Chat> {
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       needSync: data.needSync.present ? data.needSync.value : this.needSync,
+      disappearingAfterSec: data.disappearingAfterSec.present
+          ? data.disappearingAfterSec.value
+          : this.disappearingAfterSec,
     );
   }
 
@@ -2106,7 +2149,8 @@ class Chat extends DataClass implements Insertable<Chat> {
           ..write('isMuted: $isMuted, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
-          ..write('needSync: $needSync')
+          ..write('needSync: $needSync, ')
+          ..write('disappearingAfterSec: $disappearingAfterSec')
           ..write(')'))
         .toString();
   }
@@ -2128,6 +2172,7 @@ class Chat extends DataClass implements Insertable<Chat> {
     createdAt,
     updatedAt,
     needSync,
+    disappearingAfterSec,
   );
   @override
   bool operator ==(Object other) =>
@@ -2147,7 +2192,8 @@ class Chat extends DataClass implements Insertable<Chat> {
           other.isMuted == this.isMuted &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt &&
-          other.needSync == this.needSync);
+          other.needSync == this.needSync &&
+          other.disappearingAfterSec == this.disappearingAfterSec);
 }
 
 class ChatsCompanion extends UpdateCompanion<Chat> {
@@ -2166,6 +2212,7 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
   final Value<String?> createdAt;
   final Value<String?> updatedAt;
   final Value<bool> needSync;
+  final Value<int?> disappearingAfterSec;
   final Value<int> rowid;
   const ChatsCompanion({
     this.id = const Value.absent(),
@@ -2183,6 +2230,7 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.needSync = const Value.absent(),
+    this.disappearingAfterSec = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   ChatsCompanion.insert({
@@ -2201,6 +2249,7 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.needSync = const Value.absent(),
+    this.disappearingAfterSec = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        type = Value(type);
@@ -2220,6 +2269,7 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     Expression<String>? createdAt,
     Expression<String>? updatedAt,
     Expression<bool>? needSync,
+    Expression<int>? disappearingAfterSec,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2238,6 +2288,8 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (needSync != null) 'need_sync': needSync,
+      if (disappearingAfterSec != null)
+        'disappearing_after_sec': disappearingAfterSec,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2258,6 +2310,7 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     Value<String?>? createdAt,
     Value<String?>? updatedAt,
     Value<bool>? needSync,
+    Value<int?>? disappearingAfterSec,
     Value<int>? rowid,
   }) {
     return ChatsCompanion(
@@ -2276,6 +2329,7 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       needSync: needSync ?? this.needSync,
+      disappearingAfterSec: disappearingAfterSec ?? this.disappearingAfterSec,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2328,6 +2382,9 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     if (needSync.present) {
       map['need_sync'] = Variable<bool>(needSync.value);
     }
+    if (disappearingAfterSec.present) {
+      map['disappearing_after_sec'] = Variable<int>(disappearingAfterSec.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2352,6 +2409,7 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('needSync: $needSync, ')
+          ..write('disappearingAfterSec: $disappearingAfterSec, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2977,6 +3035,17 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _expiresAtMeta = const VerificationMeta(
+    'expiresAt',
+  );
+  @override
+  late final GeneratedColumn<String> expiresAt = GeneratedColumn<String>(
+    'expires_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _isFailedMeta = const VerificationMeta(
     'isFailed',
   );
@@ -3003,6 +3072,7 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     attachments,
     sentAt,
     deletedAt,
+    expiresAt,
     isFailed,
   ];
   @override
@@ -3070,6 +3140,12 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
       );
     }
+    if (data.containsKey('expires_at')) {
+      context.handle(
+        _expiresAtMeta,
+        expiresAt.isAcceptableOrUnknown(data['expires_at']!, _expiresAtMeta),
+      );
+    }
     if (data.containsKey('is_failed')) {
       context.handle(
         _isFailedMeta,
@@ -3123,6 +3199,10 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         DriftSqlType.string,
         data['${effectivePrefix}deleted_at'],
       ),
+      expiresAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}expires_at'],
+      ),
       isFailed: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}is_failed'],
@@ -3149,6 +3229,7 @@ class Message extends DataClass implements Insertable<Message> {
   final Map<String, dynamic>? attachments;
   final String sentAt;
   final String? deletedAt;
+  final String? expiresAt;
   final bool isFailed;
   const Message({
     required this.id,
@@ -3160,6 +3241,7 @@ class Message extends DataClass implements Insertable<Message> {
     this.attachments,
     required this.sentAt,
     this.deletedAt,
+    this.expiresAt,
     required this.isFailed,
   });
   @override
@@ -3186,6 +3268,9 @@ class Message extends DataClass implements Insertable<Message> {
     if (!nullToAbsent || deletedAt != null) {
       map['deleted_at'] = Variable<String>(deletedAt);
     }
+    if (!nullToAbsent || expiresAt != null) {
+      map['expires_at'] = Variable<String>(expiresAt);
+    }
     map['is_failed'] = Variable<bool>(isFailed);
     return map;
   }
@@ -3209,6 +3294,9 @@ class Message extends DataClass implements Insertable<Message> {
       deletedAt: deletedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(deletedAt),
+      expiresAt: expiresAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(expiresAt),
       isFailed: Value(isFailed),
     );
   }
@@ -3230,6 +3318,7 @@ class Message extends DataClass implements Insertable<Message> {
       ),
       sentAt: serializer.fromJson<String>(json['sentAt']),
       deletedAt: serializer.fromJson<String?>(json['deletedAt']),
+      expiresAt: serializer.fromJson<String?>(json['expiresAt']),
       isFailed: serializer.fromJson<bool>(json['isFailed']),
     );
   }
@@ -3246,6 +3335,7 @@ class Message extends DataClass implements Insertable<Message> {
       'attachments': serializer.toJson<Map<String, dynamic>?>(attachments),
       'sentAt': serializer.toJson<String>(sentAt),
       'deletedAt': serializer.toJson<String?>(deletedAt),
+      'expiresAt': serializer.toJson<String?>(expiresAt),
       'isFailed': serializer.toJson<bool>(isFailed),
     };
   }
@@ -3260,6 +3350,7 @@ class Message extends DataClass implements Insertable<Message> {
     Value<Map<String, dynamic>?> attachments = const Value.absent(),
     String? sentAt,
     Value<String?> deletedAt = const Value.absent(),
+    Value<String?> expiresAt = const Value.absent(),
     bool? isFailed,
   }) => Message(
     id: id ?? this.id,
@@ -3271,6 +3362,7 @@ class Message extends DataClass implements Insertable<Message> {
     attachments: attachments.present ? attachments.value : this.attachments,
     sentAt: sentAt ?? this.sentAt,
     deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    expiresAt: expiresAt.present ? expiresAt.value : this.expiresAt,
     isFailed: isFailed ?? this.isFailed,
   );
   Message copyWithCompanion(MessagesCompanion data) {
@@ -3286,6 +3378,7 @@ class Message extends DataClass implements Insertable<Message> {
           : this.attachments,
       sentAt: data.sentAt.present ? data.sentAt.value : this.sentAt,
       deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      expiresAt: data.expiresAt.present ? data.expiresAt.value : this.expiresAt,
       isFailed: data.isFailed.present ? data.isFailed.value : this.isFailed,
     );
   }
@@ -3302,6 +3395,7 @@ class Message extends DataClass implements Insertable<Message> {
           ..write('attachments: $attachments, ')
           ..write('sentAt: $sentAt, ')
           ..write('deletedAt: $deletedAt, ')
+          ..write('expiresAt: $expiresAt, ')
           ..write('isFailed: $isFailed')
           ..write(')'))
         .toString();
@@ -3318,6 +3412,7 @@ class Message extends DataClass implements Insertable<Message> {
     attachments,
     sentAt,
     deletedAt,
+    expiresAt,
     isFailed,
   );
   @override
@@ -3333,6 +3428,7 @@ class Message extends DataClass implements Insertable<Message> {
           other.attachments == this.attachments &&
           other.sentAt == this.sentAt &&
           other.deletedAt == this.deletedAt &&
+          other.expiresAt == this.expiresAt &&
           other.isFailed == this.isFailed);
 }
 
@@ -3346,6 +3442,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   final Value<Map<String, dynamic>?> attachments;
   final Value<String> sentAt;
   final Value<String?> deletedAt;
+  final Value<String?> expiresAt;
   final Value<bool> isFailed;
   final Value<int> rowid;
   const MessagesCompanion({
@@ -3358,6 +3455,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.attachments = const Value.absent(),
     this.sentAt = const Value.absent(),
     this.deletedAt = const Value.absent(),
+    this.expiresAt = const Value.absent(),
     this.isFailed = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -3371,6 +3469,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.attachments = const Value.absent(),
     required String sentAt,
     this.deletedAt = const Value.absent(),
+    this.expiresAt = const Value.absent(),
     this.isFailed = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
@@ -3387,6 +3486,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Expression<String>? attachments,
     Expression<String>? sentAt,
     Expression<String>? deletedAt,
+    Expression<String>? expiresAt,
     Expression<bool>? isFailed,
     Expression<int>? rowid,
   }) {
@@ -3400,6 +3500,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       if (attachments != null) 'attachments': attachments,
       if (sentAt != null) 'sent_at': sentAt,
       if (deletedAt != null) 'deleted_at': deletedAt,
+      if (expiresAt != null) 'expires_at': expiresAt,
       if (isFailed != null) 'is_failed': isFailed,
       if (rowid != null) 'rowid': rowid,
     });
@@ -3415,6 +3516,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Value<Map<String, dynamic>?>? attachments,
     Value<String>? sentAt,
     Value<String?>? deletedAt,
+    Value<String?>? expiresAt,
     Value<bool>? isFailed,
     Value<int>? rowid,
   }) {
@@ -3428,6 +3530,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       attachments: attachments ?? this.attachments,
       sentAt: sentAt ?? this.sentAt,
       deletedAt: deletedAt ?? this.deletedAt,
+      expiresAt: expiresAt ?? this.expiresAt,
       isFailed: isFailed ?? this.isFailed,
       rowid: rowid ?? this.rowid,
     );
@@ -3465,6 +3568,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     if (deletedAt.present) {
       map['deleted_at'] = Variable<String>(deletedAt.value);
     }
+    if (expiresAt.present) {
+      map['expires_at'] = Variable<String>(expiresAt.value);
+    }
     if (isFailed.present) {
       map['is_failed'] = Variable<bool>(isFailed.value);
     }
@@ -3486,6 +3592,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
           ..write('attachments: $attachments, ')
           ..write('sentAt: $sentAt, ')
           ..write('deletedAt: $deletedAt, ')
+          ..write('expiresAt: $expiresAt, ')
           ..write('isFailed: $isFailed, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -5063,6 +5170,7 @@ typedef $$ChatsTableCreateCompanionBuilder =
       Value<String?> createdAt,
       Value<String?> updatedAt,
       Value<bool> needSync,
+      Value<int?> disappearingAfterSec,
       Value<int> rowid,
     });
 typedef $$ChatsTableUpdateCompanionBuilder =
@@ -5082,6 +5190,7 @@ typedef $$ChatsTableUpdateCompanionBuilder =
       Value<String?> createdAt,
       Value<String?> updatedAt,
       Value<bool> needSync,
+      Value<int?> disappearingAfterSec,
       Value<int> rowid,
     });
 
@@ -5165,6 +5274,11 @@ class $$ChatsTableFilterComposer extends Composer<_$AppDatabase, $ChatsTable> {
 
   ColumnFilters<bool> get needSync => $composableBuilder(
     column: $table.needSync,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get disappearingAfterSec => $composableBuilder(
+    column: $table.disappearingAfterSec,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -5252,6 +5366,11 @@ class $$ChatsTableOrderingComposer
     column: $table.needSync,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get disappearingAfterSec => $composableBuilder(
+    column: $table.disappearingAfterSec,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$ChatsTableAnnotationComposer
@@ -5313,6 +5432,11 @@ class $$ChatsTableAnnotationComposer
 
   GeneratedColumn<bool> get needSync =>
       $composableBuilder(column: $table.needSync, builder: (column) => column);
+
+  GeneratedColumn<int> get disappearingAfterSec => $composableBuilder(
+    column: $table.disappearingAfterSec,
+    builder: (column) => column,
+  );
 }
 
 class $$ChatsTableTableManager
@@ -5358,6 +5482,7 @@ class $$ChatsTableTableManager
                 Value<String?> createdAt = const Value.absent(),
                 Value<String?> updatedAt = const Value.absent(),
                 Value<bool> needSync = const Value.absent(),
+                Value<int?> disappearingAfterSec = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ChatsCompanion(
                 id: id,
@@ -5375,6 +5500,7 @@ class $$ChatsTableTableManager
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 needSync: needSync,
+                disappearingAfterSec: disappearingAfterSec,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -5394,6 +5520,7 @@ class $$ChatsTableTableManager
                 Value<String?> createdAt = const Value.absent(),
                 Value<String?> updatedAt = const Value.absent(),
                 Value<bool> needSync = const Value.absent(),
+                Value<int?> disappearingAfterSec = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ChatsCompanion.insert(
                 id: id,
@@ -5411,6 +5538,7 @@ class $$ChatsTableTableManager
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 needSync: needSync,
+                disappearingAfterSec: disappearingAfterSec,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -5707,6 +5835,7 @@ typedef $$MessagesTableCreateCompanionBuilder =
       Value<Map<String, dynamic>?> attachments,
       required String sentAt,
       Value<String?> deletedAt,
+      Value<String?> expiresAt,
       Value<bool> isFailed,
       Value<int> rowid,
     });
@@ -5721,6 +5850,7 @@ typedef $$MessagesTableUpdateCompanionBuilder =
       Value<Map<String, dynamic>?> attachments,
       Value<String> sentAt,
       Value<String?> deletedAt,
+      Value<String?> expiresAt,
       Value<bool> isFailed,
       Value<int> rowid,
     });
@@ -5784,6 +5914,11 @@ class $$MessagesTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<String> get expiresAt => $composableBuilder(
+    column: $table.expiresAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<bool> get isFailed => $composableBuilder(
     column: $table.isFailed,
     builder: (column) => ColumnFilters(column),
@@ -5844,6 +5979,11 @@ class $$MessagesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get expiresAt => $composableBuilder(
+    column: $table.expiresAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<bool> get isFailed => $composableBuilder(
     column: $table.isFailed,
     builder: (column) => ColumnOrderings(column),
@@ -5889,6 +6029,9 @@ class $$MessagesTableAnnotationComposer
   GeneratedColumn<String> get deletedAt =>
       $composableBuilder(column: $table.deletedAt, builder: (column) => column);
 
+  GeneratedColumn<String> get expiresAt =>
+      $composableBuilder(column: $table.expiresAt, builder: (column) => column);
+
   GeneratedColumn<bool> get isFailed =>
       $composableBuilder(column: $table.isFailed, builder: (column) => column);
 }
@@ -5930,6 +6073,7 @@ class $$MessagesTableTableManager
                 Value<Map<String, dynamic>?> attachments = const Value.absent(),
                 Value<String> sentAt = const Value.absent(),
                 Value<String?> deletedAt = const Value.absent(),
+                Value<String?> expiresAt = const Value.absent(),
                 Value<bool> isFailed = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MessagesCompanion(
@@ -5942,6 +6086,7 @@ class $$MessagesTableTableManager
                 attachments: attachments,
                 sentAt: sentAt,
                 deletedAt: deletedAt,
+                expiresAt: expiresAt,
                 isFailed: isFailed,
                 rowid: rowid,
               ),
@@ -5956,6 +6101,7 @@ class $$MessagesTableTableManager
                 Value<Map<String, dynamic>?> attachments = const Value.absent(),
                 required String sentAt,
                 Value<String?> deletedAt = const Value.absent(),
+                Value<String?> expiresAt = const Value.absent(),
                 Value<bool> isFailed = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MessagesCompanion.insert(
@@ -5968,6 +6114,7 @@ class $$MessagesTableTableManager
                 attachments: attachments,
                 sentAt: sentAt,
                 deletedAt: deletedAt,
+                expiresAt: expiresAt,
                 isFailed: isFailed,
                 rowid: rowid,
               ),

@@ -553,7 +553,9 @@ mixin _$ChatMessagePayload {
  String get id;@JsonKey(name: 'conv_id') String get convId;@JsonKey(name: 'sender_id') String get senderId;@JsonKey(name: 'msg_type')@MessageTypeConverter() MessageType get msgType; String? get body; dynamic get attachments;@JsonKey(name: 'replied_to') String? get repliedTo;// Pre-warmed compact preview of the replied-to message, attached by the
 // server so the receiver can render the reply container without a local
 // DB lookup falling through to "empty".
-@JsonKey(name: 'replied_to_message') Map<String, dynamic>? get repliedToMessage;@JsonKey(name: 'sent_at') DateTime get sentAt;
+@JsonKey(name: 'replied_to_message') Map<String, dynamic>? get repliedToMessage;@JsonKey(name: 'sent_at') DateTime get sentAt;// Disappearing-messages deadline (server-stamped on broadcast). Null when
+// the chat has the feature off. Persisted onto the local messages row.
+@JsonKey(name: 'expires_at') DateTime? get expiresAt;
 /// Create a copy of ChatMessagePayload
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -566,16 +568,16 @@ $ChatMessagePayloadCopyWith<ChatMessagePayload> get copyWith => _$ChatMessagePay
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ChatMessagePayload&&(identical(other.id, id) || other.id == id)&&(identical(other.convId, convId) || other.convId == convId)&&(identical(other.senderId, senderId) || other.senderId == senderId)&&(identical(other.msgType, msgType) || other.msgType == msgType)&&(identical(other.body, body) || other.body == body)&&const DeepCollectionEquality().equals(other.attachments, attachments)&&(identical(other.repliedTo, repliedTo) || other.repliedTo == repliedTo)&&const DeepCollectionEquality().equals(other.repliedToMessage, repliedToMessage)&&(identical(other.sentAt, sentAt) || other.sentAt == sentAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ChatMessagePayload&&(identical(other.id, id) || other.id == id)&&(identical(other.convId, convId) || other.convId == convId)&&(identical(other.senderId, senderId) || other.senderId == senderId)&&(identical(other.msgType, msgType) || other.msgType == msgType)&&(identical(other.body, body) || other.body == body)&&const DeepCollectionEquality().equals(other.attachments, attachments)&&(identical(other.repliedTo, repliedTo) || other.repliedTo == repliedTo)&&const DeepCollectionEquality().equals(other.repliedToMessage, repliedToMessage)&&(identical(other.sentAt, sentAt) || other.sentAt == sentAt)&&(identical(other.expiresAt, expiresAt) || other.expiresAt == expiresAt));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,convId,senderId,msgType,body,const DeepCollectionEquality().hash(attachments),repliedTo,const DeepCollectionEquality().hash(repliedToMessage),sentAt);
+int get hashCode => Object.hash(runtimeType,id,convId,senderId,msgType,body,const DeepCollectionEquality().hash(attachments),repliedTo,const DeepCollectionEquality().hash(repliedToMessage),sentAt,expiresAt);
 
 @override
 String toString() {
-  return 'ChatMessagePayload(id: $id, convId: $convId, senderId: $senderId, msgType: $msgType, body: $body, attachments: $attachments, repliedTo: $repliedTo, repliedToMessage: $repliedToMessage, sentAt: $sentAt)';
+  return 'ChatMessagePayload(id: $id, convId: $convId, senderId: $senderId, msgType: $msgType, body: $body, attachments: $attachments, repliedTo: $repliedTo, repliedToMessage: $repliedToMessage, sentAt: $sentAt, expiresAt: $expiresAt)';
 }
 
 
@@ -586,7 +588,7 @@ abstract mixin class $ChatMessagePayloadCopyWith<$Res>  {
   factory $ChatMessagePayloadCopyWith(ChatMessagePayload value, $Res Function(ChatMessagePayload) _then) = _$ChatMessagePayloadCopyWithImpl;
 @useResult
 $Res call({
- String id,@JsonKey(name: 'conv_id') String convId,@JsonKey(name: 'sender_id') String senderId,@JsonKey(name: 'msg_type')@MessageTypeConverter() MessageType msgType, String? body, dynamic attachments,@JsonKey(name: 'replied_to') String? repliedTo,@JsonKey(name: 'replied_to_message') Map<String, dynamic>? repliedToMessage,@JsonKey(name: 'sent_at') DateTime sentAt
+ String id,@JsonKey(name: 'conv_id') String convId,@JsonKey(name: 'sender_id') String senderId,@JsonKey(name: 'msg_type')@MessageTypeConverter() MessageType msgType, String? body, dynamic attachments,@JsonKey(name: 'replied_to') String? repliedTo,@JsonKey(name: 'replied_to_message') Map<String, dynamic>? repliedToMessage,@JsonKey(name: 'sent_at') DateTime sentAt,@JsonKey(name: 'expires_at') DateTime? expiresAt
 });
 
 
@@ -603,7 +605,7 @@ class _$ChatMessagePayloadCopyWithImpl<$Res>
 
 /// Create a copy of ChatMessagePayload
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? convId = null,Object? senderId = null,Object? msgType = null,Object? body = freezed,Object? attachments = freezed,Object? repliedTo = freezed,Object? repliedToMessage = freezed,Object? sentAt = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? convId = null,Object? senderId = null,Object? msgType = null,Object? body = freezed,Object? attachments = freezed,Object? repliedTo = freezed,Object? repliedToMessage = freezed,Object? sentAt = null,Object? expiresAt = freezed,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,convId: null == convId ? _self.convId : convId // ignore: cast_nullable_to_non_nullable
@@ -614,7 +616,8 @@ as String?,attachments: freezed == attachments ? _self.attachments : attachments
 as dynamic,repliedTo: freezed == repliedTo ? _self.repliedTo : repliedTo // ignore: cast_nullable_to_non_nullable
 as String?,repliedToMessage: freezed == repliedToMessage ? _self.repliedToMessage : repliedToMessage // ignore: cast_nullable_to_non_nullable
 as Map<String, dynamic>?,sentAt: null == sentAt ? _self.sentAt : sentAt // ignore: cast_nullable_to_non_nullable
-as DateTime,
+as DateTime,expiresAt: freezed == expiresAt ? _self.expiresAt : expiresAt // ignore: cast_nullable_to_non_nullable
+as DateTime?,
   ));
 }
 
@@ -699,10 +702,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id, @JsonKey(name: 'conv_id')  String convId, @JsonKey(name: 'sender_id')  String senderId, @JsonKey(name: 'msg_type')@MessageTypeConverter()  MessageType msgType,  String? body,  dynamic attachments, @JsonKey(name: 'replied_to')  String? repliedTo, @JsonKey(name: 'replied_to_message')  Map<String, dynamic>? repliedToMessage, @JsonKey(name: 'sent_at')  DateTime sentAt)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id, @JsonKey(name: 'conv_id')  String convId, @JsonKey(name: 'sender_id')  String senderId, @JsonKey(name: 'msg_type')@MessageTypeConverter()  MessageType msgType,  String? body,  dynamic attachments, @JsonKey(name: 'replied_to')  String? repliedTo, @JsonKey(name: 'replied_to_message')  Map<String, dynamic>? repliedToMessage, @JsonKey(name: 'sent_at')  DateTime sentAt, @JsonKey(name: 'expires_at')  DateTime? expiresAt)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _ChatMessagePayload() when $default != null:
-return $default(_that.id,_that.convId,_that.senderId,_that.msgType,_that.body,_that.attachments,_that.repliedTo,_that.repliedToMessage,_that.sentAt);case _:
+return $default(_that.id,_that.convId,_that.senderId,_that.msgType,_that.body,_that.attachments,_that.repliedTo,_that.repliedToMessage,_that.sentAt,_that.expiresAt);case _:
   return orElse();
 
 }
@@ -720,10 +723,10 @@ return $default(_that.id,_that.convId,_that.senderId,_that.msgType,_that.body,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id, @JsonKey(name: 'conv_id')  String convId, @JsonKey(name: 'sender_id')  String senderId, @JsonKey(name: 'msg_type')@MessageTypeConverter()  MessageType msgType,  String? body,  dynamic attachments, @JsonKey(name: 'replied_to')  String? repliedTo, @JsonKey(name: 'replied_to_message')  Map<String, dynamic>? repliedToMessage, @JsonKey(name: 'sent_at')  DateTime sentAt)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id, @JsonKey(name: 'conv_id')  String convId, @JsonKey(name: 'sender_id')  String senderId, @JsonKey(name: 'msg_type')@MessageTypeConverter()  MessageType msgType,  String? body,  dynamic attachments, @JsonKey(name: 'replied_to')  String? repliedTo, @JsonKey(name: 'replied_to_message')  Map<String, dynamic>? repliedToMessage, @JsonKey(name: 'sent_at')  DateTime sentAt, @JsonKey(name: 'expires_at')  DateTime? expiresAt)  $default,) {final _that = this;
 switch (_that) {
 case _ChatMessagePayload():
-return $default(_that.id,_that.convId,_that.senderId,_that.msgType,_that.body,_that.attachments,_that.repliedTo,_that.repliedToMessage,_that.sentAt);case _:
+return $default(_that.id,_that.convId,_that.senderId,_that.msgType,_that.body,_that.attachments,_that.repliedTo,_that.repliedToMessage,_that.sentAt,_that.expiresAt);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -740,10 +743,10 @@ return $default(_that.id,_that.convId,_that.senderId,_that.msgType,_that.body,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id, @JsonKey(name: 'conv_id')  String convId, @JsonKey(name: 'sender_id')  String senderId, @JsonKey(name: 'msg_type')@MessageTypeConverter()  MessageType msgType,  String? body,  dynamic attachments, @JsonKey(name: 'replied_to')  String? repliedTo, @JsonKey(name: 'replied_to_message')  Map<String, dynamic>? repliedToMessage, @JsonKey(name: 'sent_at')  DateTime sentAt)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id, @JsonKey(name: 'conv_id')  String convId, @JsonKey(name: 'sender_id')  String senderId, @JsonKey(name: 'msg_type')@MessageTypeConverter()  MessageType msgType,  String? body,  dynamic attachments, @JsonKey(name: 'replied_to')  String? repliedTo, @JsonKey(name: 'replied_to_message')  Map<String, dynamic>? repliedToMessage, @JsonKey(name: 'sent_at')  DateTime sentAt, @JsonKey(name: 'expires_at')  DateTime? expiresAt)?  $default,) {final _that = this;
 switch (_that) {
 case _ChatMessagePayload() when $default != null:
-return $default(_that.id,_that.convId,_that.senderId,_that.msgType,_that.body,_that.attachments,_that.repliedTo,_that.repliedToMessage,_that.sentAt);case _:
+return $default(_that.id,_that.convId,_that.senderId,_that.msgType,_that.body,_that.attachments,_that.repliedTo,_that.repliedToMessage,_that.sentAt,_that.expiresAt);case _:
   return null;
 
 }
@@ -755,7 +758,7 @@ return $default(_that.id,_that.convId,_that.senderId,_that.msgType,_that.body,_t
 @JsonSerializable()
 
 class _ChatMessagePayload implements ChatMessagePayload {
-  const _ChatMessagePayload({required this.id, @JsonKey(name: 'conv_id') required this.convId, @JsonKey(name: 'sender_id') required this.senderId, @JsonKey(name: 'msg_type')@MessageTypeConverter() required this.msgType, this.body, this.attachments, @JsonKey(name: 'replied_to') this.repliedTo, @JsonKey(name: 'replied_to_message') final  Map<String, dynamic>? repliedToMessage, @JsonKey(name: 'sent_at') required this.sentAt}): _repliedToMessage = repliedToMessage;
+  const _ChatMessagePayload({required this.id, @JsonKey(name: 'conv_id') required this.convId, @JsonKey(name: 'sender_id') required this.senderId, @JsonKey(name: 'msg_type')@MessageTypeConverter() required this.msgType, this.body, this.attachments, @JsonKey(name: 'replied_to') this.repliedTo, @JsonKey(name: 'replied_to_message') final  Map<String, dynamic>? repliedToMessage, @JsonKey(name: 'sent_at') required this.sentAt, @JsonKey(name: 'expires_at') this.expiresAt}): _repliedToMessage = repliedToMessage;
   factory _ChatMessagePayload.fromJson(Map<String, dynamic> json) => _$ChatMessagePayloadFromJson(json);
 
 @override final  String id;
@@ -781,6 +784,9 @@ class _ChatMessagePayload implements ChatMessagePayload {
 }
 
 @override@JsonKey(name: 'sent_at') final  DateTime sentAt;
+// Disappearing-messages deadline (server-stamped on broadcast). Null when
+// the chat has the feature off. Persisted onto the local messages row.
+@override@JsonKey(name: 'expires_at') final  DateTime? expiresAt;
 
 /// Create a copy of ChatMessagePayload
 /// with the given fields replaced by the non-null parameter values.
@@ -795,16 +801,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ChatMessagePayload&&(identical(other.id, id) || other.id == id)&&(identical(other.convId, convId) || other.convId == convId)&&(identical(other.senderId, senderId) || other.senderId == senderId)&&(identical(other.msgType, msgType) || other.msgType == msgType)&&(identical(other.body, body) || other.body == body)&&const DeepCollectionEquality().equals(other.attachments, attachments)&&(identical(other.repliedTo, repliedTo) || other.repliedTo == repliedTo)&&const DeepCollectionEquality().equals(other._repliedToMessage, _repliedToMessage)&&(identical(other.sentAt, sentAt) || other.sentAt == sentAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ChatMessagePayload&&(identical(other.id, id) || other.id == id)&&(identical(other.convId, convId) || other.convId == convId)&&(identical(other.senderId, senderId) || other.senderId == senderId)&&(identical(other.msgType, msgType) || other.msgType == msgType)&&(identical(other.body, body) || other.body == body)&&const DeepCollectionEquality().equals(other.attachments, attachments)&&(identical(other.repliedTo, repliedTo) || other.repliedTo == repliedTo)&&const DeepCollectionEquality().equals(other._repliedToMessage, _repliedToMessage)&&(identical(other.sentAt, sentAt) || other.sentAt == sentAt)&&(identical(other.expiresAt, expiresAt) || other.expiresAt == expiresAt));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,convId,senderId,msgType,body,const DeepCollectionEquality().hash(attachments),repliedTo,const DeepCollectionEquality().hash(_repliedToMessage),sentAt);
+int get hashCode => Object.hash(runtimeType,id,convId,senderId,msgType,body,const DeepCollectionEquality().hash(attachments),repliedTo,const DeepCollectionEquality().hash(_repliedToMessage),sentAt,expiresAt);
 
 @override
 String toString() {
-  return 'ChatMessagePayload(id: $id, convId: $convId, senderId: $senderId, msgType: $msgType, body: $body, attachments: $attachments, repliedTo: $repliedTo, repliedToMessage: $repliedToMessage, sentAt: $sentAt)';
+  return 'ChatMessagePayload(id: $id, convId: $convId, senderId: $senderId, msgType: $msgType, body: $body, attachments: $attachments, repliedTo: $repliedTo, repliedToMessage: $repliedToMessage, sentAt: $sentAt, expiresAt: $expiresAt)';
 }
 
 
@@ -815,7 +821,7 @@ abstract mixin class _$ChatMessagePayloadCopyWith<$Res> implements $ChatMessageP
   factory _$ChatMessagePayloadCopyWith(_ChatMessagePayload value, $Res Function(_ChatMessagePayload) _then) = __$ChatMessagePayloadCopyWithImpl;
 @override @useResult
 $Res call({
- String id,@JsonKey(name: 'conv_id') String convId,@JsonKey(name: 'sender_id') String senderId,@JsonKey(name: 'msg_type')@MessageTypeConverter() MessageType msgType, String? body, dynamic attachments,@JsonKey(name: 'replied_to') String? repliedTo,@JsonKey(name: 'replied_to_message') Map<String, dynamic>? repliedToMessage,@JsonKey(name: 'sent_at') DateTime sentAt
+ String id,@JsonKey(name: 'conv_id') String convId,@JsonKey(name: 'sender_id') String senderId,@JsonKey(name: 'msg_type')@MessageTypeConverter() MessageType msgType, String? body, dynamic attachments,@JsonKey(name: 'replied_to') String? repliedTo,@JsonKey(name: 'replied_to_message') Map<String, dynamic>? repliedToMessage,@JsonKey(name: 'sent_at') DateTime sentAt,@JsonKey(name: 'expires_at') DateTime? expiresAt
 });
 
 
@@ -832,7 +838,7 @@ class __$ChatMessagePayloadCopyWithImpl<$Res>
 
 /// Create a copy of ChatMessagePayload
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? convId = null,Object? senderId = null,Object? msgType = null,Object? body = freezed,Object? attachments = freezed,Object? repliedTo = freezed,Object? repliedToMessage = freezed,Object? sentAt = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? convId = null,Object? senderId = null,Object? msgType = null,Object? body = freezed,Object? attachments = freezed,Object? repliedTo = freezed,Object? repliedToMessage = freezed,Object? sentAt = null,Object? expiresAt = freezed,}) {
   return _then(_ChatMessagePayload(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,convId: null == convId ? _self.convId : convId // ignore: cast_nullable_to_non_nullable
@@ -843,7 +849,8 @@ as String?,attachments: freezed == attachments ? _self.attachments : attachments
 as dynamic,repliedTo: freezed == repliedTo ? _self.repliedTo : repliedTo // ignore: cast_nullable_to_non_nullable
 as String?,repliedToMessage: freezed == repliedToMessage ? _self._repliedToMessage : repliedToMessage // ignore: cast_nullable_to_non_nullable
 as Map<String, dynamic>?,sentAt: null == sentAt ? _self.sentAt : sentAt // ignore: cast_nullable_to_non_nullable
-as DateTime,
+as DateTime,expiresAt: freezed == expiresAt ? _self.expiresAt : expiresAt // ignore: cast_nullable_to_non_nullable
+as DateTime?,
   ));
 }
 

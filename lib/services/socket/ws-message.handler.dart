@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import '../../db/repositories/conversations.repo.dart';
 import '../../db/repositories/user.repo.dart';
 import '../../types/socket.types.dart';
 import '../../utils/navigation-helper.util.dart';
@@ -95,7 +96,13 @@ class WebSocketMessageHandler {
   final StreamController<UserUpdatePayload> _userUpdateController =
       StreamController<UserUpdatePayload>.broadcast();
 
+  // Disappearing-messages duration changes from peers
+  final StreamController<ConversationDisappearingPayload>
+  _conversationDisappearingController =
+      StreamController<ConversationDisappearingPayload>.broadcast();
+
   final UserRepository _userRepo = UserRepository();
+  final ConversationRepository _convRepo = ConversationRepository();
 
   bool _isInitialized = false;
 
@@ -179,6 +186,11 @@ class WebSocketMessageHandler {
   /// Get stream for peer profile updates (type: 'user:update')
   Stream<UserUpdatePayload> get userUpdateStream =>
       _userUpdateController.stream;
+
+  /// Get stream for disappearing-messages setting changes
+  /// (type: 'conversation:disappearing')
+  Stream<ConversationDisappearingPayload> get conversationDisappearingStream =>
+      _conversationDisappearingController.stream;
 
   /// Add a message directly to the messageNewStream
   /// This is used by transports (like LongPollingTransport) to add synced messages
@@ -427,6 +439,24 @@ class WebSocketMessageHandler {
             _userUpdateController.add(payload);
           }
           break;
+
+        case WSMessageType.conversationDisappearing:
+          // Persist the new duration locally so any future message:new with
+          // expires_at is consistent with the chat's setting, and surface the
+          // change on the stream for the chat-details UI to update.
+          final payload = message.conversationDisappearingPayload;
+          if (payload != null) {
+            try {
+              await _convRepo.setDisappearingAfterSec(
+                payload.convId,
+                payload.durationSec,
+              );
+            } catch (e) {
+              debugPrint('⚠️ setDisappearingAfterSec failed: $e');
+            }
+            _conversationDisappearingController.add(payload);
+          }
+          break;
       }
     } catch (e) {
       debugPrint('❌ Error handling WebSocket message');
@@ -656,6 +686,7 @@ class WebSocketMessageHandler {
     _callMissedController.close();
     _messageReactController.close();
     _userUpdateController.close();
+    _conversationDisappearingController.close();
     _isInitialized = false;
   }
 }
