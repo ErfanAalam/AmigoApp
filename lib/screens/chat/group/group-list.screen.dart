@@ -365,9 +365,9 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
               group: item,
               typingUsers: typingUsers,
               conversationId: item.chatId,
-              isPinned: item.isPinned ?? false,
-              isMuted: item.isMuted ?? false,
-              isFavorite: item.isFavorite ?? false,
+              isPinned: item.isPinned,
+              isMuted: item.isMuted,
+              isFavorite: item.isFavorite,
               onLongPress: (anchor) => _showGroupChatActions(item, anchor),
               onTap: () async {
                 // Kick off the first-batch DB read while the route
@@ -582,151 +582,176 @@ class GroupListItem extends ConsumerWidget {
     final themeColor = ref.watch(themeColorProvider);
 
     return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
       height: 80,
       decoration: BoxDecoration(
-        color: isPinned ? themeColor.primary.withOpacity(0.05) : Colors.white,
-        border: Border(
-          // bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
-          left: isPinned
-              ? BorderSide(color: Colors.orange, width: 3)
-              : BorderSide.none,
-        ),
+        color: isPinned ? themeColor.primary.withAlpha(10) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        // border: Border(
+        //   // bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
+        //   left: isPinned
+        //       ? BorderSide(color: Colors.orange, width: 3)
+        //       : BorderSide.none,
+        // ),
       ),
-      child: Builder(builder: (rowContext) => InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress == null
-            ? null
-            : () => onLongPress!(rowContext),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              // Avatar with proper constraints — Stack so the disappearing
-              // timer badge can overlay the top-right when the chat has the
-              // feature enabled. clipBehavior=none lets the badge bleed past
-              // the SizedBox bounds (matches the DM list's affordance).
-              SizedBox(
-                width: 48,
-                height: 48,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    CircleAvatar(
-                      radius: 24,
-                      backgroundColor: themeColor.primaryLight.withOpacity(0.3),
-                      child: Icon(Icons.group, color: themeColor.primary, size: 22),
-                    ),
-                    if ((group.disappearingAfterSec ?? 0) > 0)
-                      Positioned(
-                        right: -2,
-                        top: -2,
-                        child: DisappearingTimerBadge(color: themeColor.primary),
+      child: Builder(
+        builder: (rowContext) => InkWell(
+          onTap: onTap,
+          onLongPress: onLongPress == null
+              ? null
+              : () => onLongPress!(rowContext),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                // Avatar with proper constraints — Stack so the disappearing
+                // timer badge can overlay the top-right when the chat has the
+                // feature enabled. clipBehavior=none lets the badge bleed past
+                // the SizedBox bounds (matches the DM list's affordance).
+                SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      CircleAvatar(
+                        radius: 24,
+                        backgroundColor: themeColor.primaryLight.withOpacity(
+                          0.3,
+                        ),
+                        backgroundImage:
+                            (group.profilePic != null &&
+                                group.profilePic!.isNotEmpty)
+                            ? CachedNetworkImageProvider(group.profilePic!)
+                            : null,
+                        child:
+                            (group.profilePic == null ||
+                                group.profilePic!.isEmpty)
+                            ? Icon(
+                                Icons.group,
+                                color: themeColor.primary,
+                                size: 22,
+                              )
+                            : null,
                       ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 16),
-              // Content area
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Row(
-                      children: [
-                        if (isPinned) ...[
-                          Icon(Icons.push_pin, size: 16, color: Colors.orange),
-                          SizedBox(width: 4),
-                        ],
-                        if (isMuted) ...[
-                          Icon(
-                            Icons.volume_off,
-                            size: 16,
-                            color: Colors.grey[600],
-                          ),
-                          SizedBox(width: 4),
-                        ],
-                        if (isFavorite) ...[
-                          Icon(Icons.favorite, size: 16, color: Colors.pink),
-                          SizedBox(width: 4),
-                        ],
-                        Expanded(
-                          child: Text(
-                            group.title,
-                            style: TextStyle(
-                              fontWeight: hasUnreadMessages
-                                  ? FontWeight.bold
-                                  : FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                      if ((group.disappearingAfterSec ?? 0) > 0)
+                        Positioned(
+                          right: -2,
+                          top: -2,
+                          child: DisappearingTimerBadge(
+                            color: themeColor.primary,
                           ),
                         ),
-                      ],
-                    ),
-                    // const SizedBox(height: 4),
-                    isTyping
-                        ? _buildTypingIndicator(themeColor)
-                        : Text(
-                            displayText,
-                            style: TextStyle(
-                              color: draft != null && draft.isNotEmpty
-                                  ? Colors.green[600]
-                                  : Colors.grey[600],
-                              fontSize: 14,
-                              fontStyle: FontStyle.normal,
-                              fontWeight: draft != null && draft.isNotEmpty
-                                  ? FontWeight.w600
-                                  : FontWeight.normal,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                  ],
-                ),
-              ),
-              // Trailing area
-              Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    timeText,
-                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                    ],
                   ),
-                  if (hasUnreadMessages) ...[
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: group.unreadCount.toString().length <= 2
-                            ? 6
-                            : 8,
-                        vertical: 1.3,
+                ),
+                const SizedBox(width: 16),
+                // Content area
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Row(
+                        children: [
+                          if (isPinned) ...[
+                            Icon(
+                              Icons.push_pin,
+                              size: 16,
+                              color: Colors.deepOrange,
+                            ),
+                            SizedBox(width: 4),
+                          ],
+                          if (isMuted) ...[
+                            Icon(
+                              Icons.volume_off,
+                              size: 16,
+                              color: Colors.grey[600],
+                            ),
+                            SizedBox(width: 4),
+                          ],
+                          if (isFavorite) ...[
+                            Icon(Icons.favorite, size: 16, color: Colors.pink),
+                            SizedBox(width: 4),
+                          ],
+                          Expanded(
+                            child: Text(
+                              group.title,
+                              style: TextStyle(
+                                fontWeight: hasUnreadMessages
+                                    ? FontWeight.bold
+                                    : FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
-                      constraints: const BoxConstraints(minWidth: 20),
-                      decoration: BoxDecoration(
-                        color: themeColor.primary,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        group.unreadCount.toString(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
+                      // const SizedBox(height: 4),
+                      isTyping
+                          ? _buildTypingIndicator(themeColor)
+                          : Text(
+                              displayText,
+                              style: TextStyle(
+                                color: draft != null && draft.isNotEmpty
+                                    ? Colors.green[600]
+                                    : Colors.grey[600],
+                                fontSize: 14,
+                                fontStyle: FontStyle.normal,
+                                fontWeight: draft != null && draft.isNotEmpty
+                                    ? FontWeight.w600
+                                    : FontWeight.normal,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                    ],
+                  ),
+                ),
+                // Trailing area
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      timeText,
+                      style: TextStyle(color: Colors.grey[500], fontSize: 12),
                     ),
+                    if (hasUnreadMessages) ...[
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: group.unreadCount.toString().length <= 2
+                              ? 6
+                              : 8,
+                          vertical: 1.3,
+                        ),
+                        constraints: const BoxConstraints(minWidth: 20),
+                        decoration: BoxDecoration(
+                          color: themeColor.primary,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          group.unreadCount.toString(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ],
                   ],
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
-      )),
+      ),
     );
   }
 

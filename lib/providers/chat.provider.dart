@@ -450,11 +450,12 @@ class ChatNotifier extends Notifier<ChatState> {
                 id: enrichedGroup.chatId,
                 type: "group",
                 title: enrichedGroup.title,
+                profilePic: enrichedGroup.profilePic,
                 createrId: group['createrId']?.toString(),
                 unreadCount: enrichedGroup.unreadCount,
                 lastMsgId: enrichedGroup.lastMsgId,
                 pinnedMsgId: enrichedGroup.pinnedMsgId,
-                isPinned: false,
+                pinnedAt: null,
                 isFavorite: false,
                 isMuted: false,
                 createdAt: groupModel.joinedAt,
@@ -528,7 +529,7 @@ class ChatNotifier extends Notifier<ChatState> {
           final conv = groupConvStatusMap[group.chatId];
           if (conv != null) {
             return group.copyWith(
-              isPinned: conv.isPinned,
+              pinnedAt: conv.pinnedAt,
               isMuted: conv.isMuted,
               isFavorite: conv.isFavorite,
             );
@@ -704,7 +705,11 @@ class ChatNotifier extends Notifier<ChatState> {
                   lastMsgAt: lastMsg?['sent_at']?.toString() ?? json['lastMsgAt']?.toString(),
                   pinnedMsgId: json['pinnedMsgId']?.toString(),
                   deletedAt: json['deletedAt']?.toString(),
-                  isPinned: json['isPinned'] == true,
+                  // Pin state is client-only — never coming back from the
+                  // server today. Leave pinnedAt null on fresh fetches; the
+                  // insertOrIgnore path in insertConversations preserves any
+                  // existing pin timestamp on rows that are already local.
+                  pinnedAt: null,
                   isFavorite: json['isFavorite'] == true,
                   isMuted: json['isMuted'] == true,
                   createdAt: json['joinedAt']?.toString(),
@@ -756,11 +761,17 @@ class ChatNotifier extends Notifier<ChatState> {
         .toList();
 
     filteredConversations.sort((a, b) {
-      final aPinned = a.isPinned;
-      final bPinned = b.isPinned;
-
-      if (aPinned && !bPinned) return -1;
-      if (!aPinned && bPinned) return 1;
+      // Pinned chats always sort above non-pinned chats. Within the pinned
+      // group, order by pinnedAt DESC (most-recently-pinned at the top) so
+      // new pins land on top and the position is stable against any new
+      // messages that arrive on those chats afterwards.
+      final aPinnedAt = a.pinnedAt;
+      final bPinnedAt = b.pinnedAt;
+      if (aPinnedAt != null && bPinnedAt == null) return -1;
+      if (aPinnedAt == null && bPinnedAt != null) return 1;
+      if (aPinnedAt != null && bPinnedAt != null) {
+        return DateTime.parse(bPinnedAt).compareTo(DateTime.parse(aPinnedAt));
+      }
 
       final aHasMessage = a.lastMsgAt != null && a.lastMsgAt!.isNotEmpty;
       final bHasMessage = b.lastMsgAt != null && b.lastMsgAt!.isNotEmpty;
@@ -795,11 +806,14 @@ class ChatNotifier extends Notifier<ChatState> {
     final filteredGroups = byId.values.toList();
 
     filteredGroups.sort((a, b) {
-      final aPinned = a.isPinned;
-      final bPinned = b.isPinned;
-
-      if (aPinned && !bPinned) return -1;
-      if (!aPinned && bPinned) return 1;
+      // See filterAndSortConversations for the pinnedAt-first rationale.
+      final aPinnedAt = a.pinnedAt;
+      final bPinnedAt = b.pinnedAt;
+      if (aPinnedAt != null && bPinnedAt == null) return -1;
+      if (aPinnedAt == null && bPinnedAt != null) return 1;
+      if (aPinnedAt != null && bPinnedAt != null) {
+        return DateTime.parse(bPinnedAt).compareTo(DateTime.parse(aPinnedAt));
+      }
 
       final aHasMessage = a.lastMsgAt != null && a.lastMsgAt!.isNotEmpty;
       final bHasMessage = b.lastMsgAt != null && b.lastMsgAt!.isNotEmpty;
@@ -995,13 +1009,17 @@ class ChatNotifier extends Notifier<ChatState> {
 
         switch (action) {
           case 'pin':
+            // Stamp pinnedAt with the same wall clock we just wrote to SQLite
+            // so the optimistic in-memory list sorts identically to the next
+            // Drift emission (both should land this row at the very top of
+            // the pinned section).
+            final now = DateTime.now().toUtc().toIso8601String();
             await _conversationsRepo.togglePin(conversationId, true);
-
-            updatedConversation = conv.copyWith(isPinned: !conv.isPinned);
+            updatedConversation = conv.copyWith(pinnedAt: now);
             break;
           case 'unpin':
             await _conversationsRepo.togglePin(conversationId, false);
-            updatedConversation = conv.copyWith(isPinned: !conv.isPinned);
+            updatedConversation = conv.copyWith(pinnedAt: null);
             break;
           case 'mute':
             await _conversationsRepo.toggleMute(conversationId, true);
@@ -1058,13 +1076,14 @@ class ChatNotifier extends Notifier<ChatState> {
 
         switch (action) {
           case 'pin':
+            // See DM 'pin' case — stamp the same now() the repo persists.
+            final now = DateTime.now().toUtc().toIso8601String();
             await _conversationsRepo.togglePin(conversationId, true);
-
-            updatedGroup = group.copyWith(isPinned: !group.isPinned);
+            updatedGroup = group.copyWith(pinnedAt: now);
             break;
           case 'unpin':
             await _conversationsRepo.togglePin(conversationId, false);
-            updatedGroup = group.copyWith(isPinned: !group.isPinned);
+            updatedGroup = group.copyWith(pinnedAt: null);
             break;
           case 'mute':
             await _conversationsRepo.toggleMute(conversationId, true);
@@ -1730,7 +1749,6 @@ class ChatNotifier extends Notifier<ChatState> {
           recipientPhone: message.createrPhone,
           isRecipientOnline: true,
           unreadCount: 0,
-          isPinned: false,
           isFavorite: false,
           isMuted: false,
           createdAt: message.joinedAt.toIso8601String(),
@@ -1742,7 +1760,6 @@ class ChatNotifier extends Notifier<ChatState> {
           createrId: message.createrId,
           unreadCount: 0,
           pinnedMsgId: null,
-          isPinned: false,
           isFavorite: false,
           isMuted: false,
           createdAt: message.joinedAt.toIso8601String(),
@@ -1783,7 +1800,6 @@ class ChatNotifier extends Notifier<ChatState> {
           chatId: convId,
           title: message.title ?? 'New Group',
           unreadCount: 0,
-          isPinned: false,
           isFavorite: false,
           isMuted: false,
           joinedAt: message.joinedAt.toIso8601String(),
@@ -1796,7 +1812,6 @@ class ChatNotifier extends Notifier<ChatState> {
           createrId: message.createrId,
           unreadCount: 0,
           pinnedMsgId: null,
-          isPinned: false,
           isFavorite: false,
           isMuted: false,
           createdAt: message.joinedAt.toIso8601String(),
@@ -2105,6 +2120,14 @@ class ChatNotifier extends Notifier<ChatState> {
             activeConvId: clearedActive,
           );
           return;
+        case ConversationActionType.chatDetailsUpdate:
+          // Title/pfp updates land here. The WS handler has already written
+          // the new values into the local `chats` row, and Drift watchers
+          // re-emit, so the group list / AppBars repaint automatically.
+          // Nothing for the provider to do beyond falling through to the
+          // system-message insert below so the chat history records the
+          // change like every other conversation action.
+          break;
       }
 
       // Look up actor info from cache

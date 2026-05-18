@@ -434,9 +434,9 @@ class ChatsPageState extends ConsumerState<ChatsPage>
             conversation: conversation,
             isTyping: isTyping,
             isOnline: _userStatusService.isUserOnline(conversation.recipientId),
-            isPinned: conversation.isPinned ?? false,
-            isMuted: conversation.isMuted ?? false,
-            isFavorite: conversation.isFavorite ?? false,
+            isPinned: conversation.isPinned,
+            isMuted: conversation.isMuted,
+            isFavorite: conversation.isFavorite,
             onLongPress: (anchor) => _showChatActions(conversation, anchor),
             conversationId: conversation.chatId,
             onAvatarTap: () async {
@@ -675,77 +675,84 @@ class ChatListItem extends ConsumerWidget {
         : _formatTime(conversation.createdAt);
 
     return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
       height: 80,
       decoration: BoxDecoration(
-        color: isPinned ? themeColor.primary.withOpacity(0.05) : Colors.white,
-        border: Border(
-          // bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
-          left: isPinned
-              ? BorderSide(color: Colors.orange, width: 3)
-              : BorderSide.none,
+        color: isPinned ? themeColor.primary.withAlpha(10) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        // border: Border(
+        //   // bottom: BorderSide(color: Colors.grey[300]!, width: 0.5),
+        //   bottom: isPinned
+        //       ? BorderSide(color: themeColor.primary.withAlpha(200), width: 1)
+        //       : BorderSide.none,
+        // ),
+      ),
+      child: Builder(
+        builder: (rowContext) => ListTile(
+          leading: GestureDetector(
+            onTap: onAvatarTap,
+            child: _buildAvatar(themeColor),
+          ),
+          title: Row(
+            children: [
+              if (isPinned) ...[
+                Icon(Icons.push_pin, size: 16, color: Colors.deepOrange),
+                SizedBox(width: 4),
+              ],
+              if (isMuted) ...[
+                Icon(Icons.volume_off, size: 16, color: Colors.grey[600]),
+                SizedBox(width: 4),
+              ],
+              if (isFavorite) ...[
+                Icon(Icons.favorite, size: 16, color: Colors.pink),
+                SizedBox(width: 4),
+              ],
+              Expanded(
+                child: Text(
+                  conversation.recipientName,
+                  style: TextStyle(
+                    fontWeight: hasUnreadMessages
+                        ? FontWeight.bold
+                        : FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          subtitle: isTyping
+              ? _buildTypingIndicator(themeColor)
+              : Text(
+                  draft != null && draft.isNotEmpty
+                      ? 'Draft: $lastMessageText'
+                      : lastMessageText,
+                  style: TextStyle(
+                    color: draft != null && draft.isNotEmpty
+                        ? Colors.green[600]
+                        : (isMuted ? Colors.grey[400] : Colors.grey[600]),
+                    fontSize: 14,
+                    fontStyle: FontStyle.normal,
+                    fontWeight: draft != null && draft.isNotEmpty
+                        ? FontWeight.w600
+                        : FontWeight.normal,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+          trailing: _buildUnreadCounts(timeText, hasUnreadMessages, themeColor),
+          onTap: onTap,
+          onLongPress: onLongPress == null
+              ? null
+              : () => onLongPress!(rowContext),
+          dense: true,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 8,
+          ),
         ),
       ),
-      child: Builder(builder: (rowContext) => ListTile(
-        leading: GestureDetector(
-          onTap: onAvatarTap,
-          child: _buildAvatar(themeColor),
-        ),
-        title: Row(
-          children: [
-            if (isPinned) ...[
-              Icon(Icons.push_pin, size: 16, color: Colors.orange),
-              SizedBox(width: 4),
-            ],
-            if (isMuted) ...[
-              Icon(Icons.volume_off, size: 16, color: Colors.grey[600]),
-              SizedBox(width: 4),
-            ],
-            if (isFavorite) ...[
-              Icon(Icons.favorite, size: 16, color: Colors.pink),
-              SizedBox(width: 4),
-            ],
-            Expanded(
-              child: Text(
-                conversation.recipientName,
-                style: TextStyle(
-                  fontWeight: hasUnreadMessages
-                      ? FontWeight.bold
-                      : FontWeight.bold,
-                  fontSize: 16,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-        subtitle: isTyping
-            ? _buildTypingIndicator(themeColor)
-            : Text(
-                draft != null && draft.isNotEmpty
-                    ? 'Draft: $lastMessageText'
-                    : lastMessageText,
-                style: TextStyle(
-                  color: draft != null && draft.isNotEmpty
-                      ? Colors.green[600]
-                      : (isMuted ? Colors.grey[400] : Colors.grey[600]),
-                  fontSize: 14,
-                  fontStyle: FontStyle.normal,
-                  fontWeight: draft != null && draft.isNotEmpty
-                      ? FontWeight.w600
-                      : FontWeight.normal,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-        trailing: _buildUnreadCounts(timeText, hasUnreadMessages, themeColor),
-        onTap: onTap,
-        onLongPress: onLongPress == null
-            ? null
-            : () => onLongPress!(rowContext),
-        dense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      )),
     );
   }
 

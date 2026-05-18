@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -73,9 +74,7 @@ class AppearanceScreen extends ConsumerWidget {
                     onTap: () {
                       Navigator.pop(sheetCtx);
                       Future.delayed(const Duration(milliseconds: 200), () {
-                        ref
-                            .read(themeColorProvider.notifier)
-                            .setTheme(theme);
+                        ref.read(themeColorProvider.notifier).setTheme(theme);
                         Snack.show('Theme changed to ${theme.name}');
                       });
                     },
@@ -121,8 +120,12 @@ class AppearanceScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeColor = ref.watch(themeColorProvider);
-    final bgPath = ref.watch(chatBackgroundProvider);
+    final bg = ref.watch(chatBackgroundProvider);
+    final bgPath = bg.path;
     final hasCustomBg = bgPath != null && File(bgPath).existsSync();
+    final imageProvider = hasCustomBg
+        ? FileImage(File(bgPath)) as ImageProvider
+        : const AssetImage('assets/images/chat_bg.jpg');
 
     return Scaffold(
       backgroundColor: const Color(0xFFF2F3F5),
@@ -157,19 +160,35 @@ class AppearanceScreen extends ConsumerWidget {
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 12),
             height: 200,
+            clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(14),
-              image: DecorationImage(
-                image: hasCustomBg
-                    ? FileImage(File(bgPath)) as ImageProvider
-                    : const AssetImage('assets/images/chat_bg.jpg'),
-                fit: BoxFit.cover,
-              ),
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: Container(color: Colors.white.withAlpha(60)),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (bg.blur)
+                  ClipRect(
+                    child: ImageFiltered(
+                      imageFilter: ui.ImageFilter.blur(
+                        sigmaX: 18,
+                        sigmaY: 18,
+                        tileMode: TileMode.mirror,
+                      ),
+                      child: Transform.scale(
+                        scale: 1.15,
+                        child: Image(image: imageProvider, fit: BoxFit.cover),
+                      ),
+                    ),
+                  )
+                else
+                  Image(image: imageProvider, fit: BoxFit.cover),
+                if (bg.brightness < 1.0)
+                  Container(
+                    color: Colors.black.withOpacity(1.0 - bg.brightness),
+                  ),
+              ],
             ),
           ),
           const SizedBox(height: 12),
@@ -202,6 +221,157 @@ class AppearanceScreen extends ConsumerWidget {
                   },
                 ),
             ],
+          ),
+          SettingsCard(
+            children: [
+              _BrightnessSliderTile(
+                brightness: bg.brightness,
+                accent: themeColor.primary,
+                onChanged: (value) => ref
+                    .read(chatBackgroundProvider.notifier)
+                    .setBrightness(value),
+              ),
+              _BlurToggleTile(
+                enabled: bg.blur,
+                accent: themeColor.primary,
+                onChanged: (value) =>
+                    ref.read(chatBackgroundProvider.notifier).setBlur(value),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BrightnessSliderTile extends StatelessWidget {
+  final double brightness;
+  final Color accent;
+  final ValueChanged<double> onChanged;
+
+  const _BrightnessSliderTile({
+    required this.brightness,
+    required this.accent,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final percent = (brightness * 100).round();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFB300),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.brightness_6_outlined,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Brightness',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.black87,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '$percent%',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 3,
+                    activeTrackColor: accent,
+                    thumbColor: accent,
+                    overlayColor: accent.withOpacity(0.15),
+                    inactiveTrackColor: Colors.grey.shade300,
+                  ),
+                  child: Slider(
+                    min: 0.3,
+                    max: 1.0,
+                    value: brightness.clamp(0.3, 1.0),
+                    onChanged: onChanged,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BlurToggleTile extends StatelessWidget {
+  final bool enabled;
+  final Color accent;
+  final ValueChanged<bool> onChanged;
+
+  const _BlurToggleTile({
+    required this.enabled,
+    required this.accent,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: const Color(0xFF5E5CE6),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.blur_on_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 16),
+          const Expanded(
+            child: Text(
+              'Blur background',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.black87,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Switch.adaptive(
+            value: enabled,
+            activeColor: accent,
+            onChanged: onChanged,
           ),
         ],
       ),

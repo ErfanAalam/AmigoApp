@@ -68,13 +68,14 @@ class ConversationRepository {
       id: conv.id,
       type: conv.type,
       title: conv.title,
+      profilePic: conv.profilePic,
       createrId: conv.createrId,
       lastMsgId: conv.lastMsgId,
       lastMsgAt: conv.lastMsgAt,
       pinnedMsgId: conv.pinnedMsgId,
       unreadCount: conv.unreadCount,
       deletedAt: conv.deletedAt,
-      isPinned: conv.isPinned,
+      pinnedAt: conv.pinnedAt,
       isMuted: conv.isMuted,
       isFavorite: conv.isFavorite,
       createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
@@ -93,9 +94,36 @@ class ConversationRepository {
     );
   }
 
+  /// Patch the title on a chat row. Drift watchers re-emit, so subscribed
+  /// AppBars / list rows redraw without an explicit refresh.
+  Future<void> updateChatTitle(String chatId, String title) async {
+    final db = sqliteDatabase.database;
+    await (db.update(db.chats)..where((t) => t.id.equals(chatId))).write(
+      ChatsCompanion(title: Value(title)),
+    );
+  }
+
+  /// Patch the profile pic on a chat row. Pass null to clear it. Drift
+  /// watchers re-emit, so subscribed AppBars / list rows redraw.
+  Future<void> updateChatProfilePic(String chatId, String? profilePic) async {
+    final db = sqliteDatabase.database;
+    await (db.update(db.chats)..where((t) => t.id.equals(chatId))).write(
+      ChatsCompanion(profilePic: Value(profilePic)),
+    );
+  }
+
+  /// Reactive single-row watcher for a chat — emits on every change to the
+  /// row so AppBars (group-list, group-messaging, chat-details) auto-rebuild
+  /// when chat_details:update applies new title/profilePic to local DB.
+  Stream<Chat?> watchChatById(String chatId) {
+    final db = sqliteDatabase.database;
+    return (db.select(db.chats)..where((t) => t.id.equals(chatId)))
+        .watchSingleOrNull();
+  }
+
   /// Bulk insert conversations atomically. Uses InsertMode.insertOrIgnore so
   /// re-inserting an existing chat row preserves the user's local-only flags
-  /// (isPinned/isMuted/isFavorite) instead of being clobbered by server data
+  /// (pinnedAt/isMuted/isFavorite) instead of being clobbered by server data
   /// that doesn't carry them. db.batch wraps the whole thing in one
   /// transaction → one Drift watch emit, no partial loads, no per-row throws.
   Future<void> insertConversations(
@@ -110,6 +138,7 @@ class ConversationRepository {
           id: conv.id,
           type: conv.type,
           title: Value(conv.title),
+          profilePic: Value(conv.profilePic),
           createrId: Value(conv.createrId),
           lastMsgId: Value(conv.lastMsgId),
           lastMsgAt: Value(conv.lastMsgAt),
@@ -117,7 +146,7 @@ class ConversationRepository {
           unreadCount: Value(conv.unreadCount ?? 0),
           createdAt: Value(conv.createdAt),
           deletedAt: Value(conv.deletedAt),
-          isPinned: Value(conv.isPinned),
+          pinnedAt: Value(conv.pinnedAt),
           isMuted: Value(conv.isMuted),
           isFavorite: Value(conv.isFavorite),
           updatedAt: Value(conv.updatedAt),
@@ -180,6 +209,7 @@ class ConversationRepository {
       id: Value(conversation.id),
       type: Value(conversation.type),
       title: Value(conversation.title),
+      profilePic: Value(conversation.profilePic),
       createrId: Value(conversation.createrId),
       lastMsgId: Value(conversation.lastMsgId),
       lastMsgAt: Value(conversation.lastMsgAt),
@@ -187,7 +217,7 @@ class ConversationRepository {
       unreadCount: Value(conversation.unreadCount ?? 0),
       createdAt: Value(conversation.createdAt),
       deletedAt: Value(conversation.deletedAt),
-      isPinned: Value(conversation.isPinned),
+      pinnedAt: Value(conversation.pinnedAt),
       isMuted: Value(conversation.isMuted),
       isFavorite: Value(conversation.isFavorite),
       updatedAt: Value(
@@ -302,15 +332,19 @@ class ConversationRepository {
     await updateUnreadCount(conversationId, 0);
   }
 
-  /// Toggle pin status of a conversation
+  /// Toggle pin status of a conversation. Stamps pinnedAt with now() to pin
+  /// (which also drives the pinned-list ordering — most-recently-pinned wins),
+  /// or nulls it out to unpin. Does NOT touch updatedAt, since pinning must
+  /// not promote a chat in the activity-sorted unpinned list.
   Future<void> togglePin(String conversationId, bool isPinned) async {
     final db = sqliteDatabase.database;
     await (db.update(
       db.chats,
     )..where((t) => t.id.equals(conversationId))).write(
       ChatsCompanion(
-        isPinned: Value(isPinned),
-        updatedAt: Value(DateTime.now().toIso8601String()),
+        pinnedAt: Value(
+          isPinned ? DateTime.now().toUtc().toIso8601String() : null,
+        ),
       ),
     );
   }
@@ -341,14 +375,14 @@ class ConversationRepository {
     );
   }
 
-  /// Get pinned conversations
+  /// Get pinned conversations, ordered with most-recently-pinned first.
   Future<List<ConversationModel>> getPinnedConversations() async {
     final db = sqliteDatabase.database;
 
     final query = db.select(db.chats)
-      ..where((t) => t.isPinned.equals(true))
+      ..where((t) => t.pinnedAt.isNotNull())
       ..orderBy([
-        (t) => OrderingTerm(expression: t.updatedAt, mode: OrderingMode.desc),
+        (t) => OrderingTerm(expression: t.pinnedAt, mode: OrderingMode.desc),
       ]);
 
     final conversations = await query.get();
@@ -436,7 +470,17 @@ class ConversationRepository {
 
     return (db.select(db.chats)
           ..where((t) => t.type.equals('dm') & t.deletedAt.isNull())
+          // pinnedAt DESC NULLS LAST keeps pinned chats on top, ordered by
+          // most-recently-pinned first; non-pinned chats (NULL) fall through
+          // to the activity tie-breakers below. A new message bumps updatedAt
+          // but never reshuffles pinned rows, since their pinnedAt is set and
+          // stable until the user unpins.
           ..orderBy([
+            (t) => OrderingTerm(
+              expression: t.pinnedAt,
+              mode: OrderingMode.desc,
+              nulls: NullsOrder.last,
+            ),
             (t) => OrderingTerm(
               expression: t.updatedAt,
               mode: OrderingMode.desc,
@@ -509,7 +553,7 @@ class ConversationRepository {
               unreadCount: conv.unreadCount,
               isRecipientOnline: recipientUser.isOnline,
               deletedAt: conv.deletedAt,
-              isPinned: conv.isPinned,
+              pinnedAt: conv.pinnedAt,
               isMuted: conv.isMuted,
               isFavorite: conv.isFavorite,
               createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
@@ -526,7 +570,13 @@ class ConversationRepository {
 
     return (db.select(db.chats)
           ..where((t) => t.type.equals('group'))
+          // See watchDmConversations for the pinnedAt-first ordering rationale.
           ..orderBy([
+            (t) => OrderingTerm(
+              expression: t.pinnedAt,
+              mode: OrderingMode.desc,
+              nulls: NullsOrder.last,
+            ),
             (t) => OrderingTerm(
               expression: t.updatedAt,
               mode: OrderingMode.desc,
@@ -572,6 +622,7 @@ class ConversationRepository {
             result.add(GroupModel(
               chatId: conv.id,
               title: conv.title ?? 'Group Chat',
+              profilePic: conv.profilePic,
               pinnedMsgId: conv.pinnedMsgId,
               lastMsgId: lastMsgId,
               lastMsgType: lastMessageType,
@@ -579,7 +630,7 @@ class ConversationRepository {
               lastMsgAt: lastMessageAt,
               role: currentUserMemberInfo?.role,
               unreadCount: conv.unreadCount ?? 0,
-              isPinned: conv.isPinned,
+              pinnedAt: conv.pinnedAt,
               isMuted: conv.isMuted,
               isFavorite: conv.isFavorite,
               joinedAt: currentUserMemberInfo?.joinedAt ??
@@ -679,7 +730,7 @@ class ConversationRepository {
         unreadCount: conv.unreadCount,
         isRecipientOnline: recipientUser.isOnline,
         deletedAt: conv.deletedAt,
-        isPinned: conv.isPinned,
+        pinnedAt: conv.pinnedAt,
         isMuted: conv.isMuted,
         isFavorite: conv.isFavorite,
         createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
@@ -777,7 +828,7 @@ class ConversationRepository {
         unreadCount: conv.unreadCount,
         isRecipientOnline: recipientUser.isOnline,
         deletedAt: conv.deletedAt,
-        isPinned: conv.isPinned,
+        pinnedAt: conv.pinnedAt,
         isMuted: conv.isMuted,
         isFavorite: conv.isFavorite,
         createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
@@ -863,7 +914,7 @@ class ConversationRepository {
       unreadCount: conv.unreadCount,
       isRecipientOnline: recipientUser.isOnline,
       deletedAt: conv.deletedAt,
-      isPinned: conv.isPinned,
+      pinnedAt: conv.pinnedAt,
       isMuted: conv.isMuted,
       isFavorite: conv.isFavorite,
       createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
@@ -931,6 +982,7 @@ class ConversationRepository {
       final groupModel = GroupModel(
         chatId: conv.id,
         title: conv.title ?? 'Group Chat',
+        profilePic: conv.profilePic,
         pinnedMsgId: conv.pinnedMsgId,
         lastMsgId: lastMsgId,
         lastMsgType: lastMessageType,
@@ -938,7 +990,7 @@ class ConversationRepository {
         lastMsgAt: lastMessageAt,
         role: currentUserMemberInfo?.role,
         unreadCount: conv.unreadCount ?? 0,
-        isPinned: conv.isPinned,
+        pinnedAt: conv.pinnedAt,
         isMuted: conv.isMuted,
         isFavorite: conv.isFavorite,
         joinedAt:
@@ -1003,6 +1055,7 @@ class ConversationRepository {
     return GroupModel(
       chatId: conv.id,
       title: conv.title ?? 'Group Chat',
+      profilePic: conv.profilePic,
       pinnedMsgId: conv.pinnedMsgId,
       lastMsgId: lastMsgId,
       lastMsgType: lastMessageType,
@@ -1010,7 +1063,7 @@ class ConversationRepository {
       lastMsgAt: lastMessageAt,
       role: currentUserMemberInfo?.role,
       unreadCount: conv.unreadCount ?? 0,
-      isPinned: conv.isPinned,
+      pinnedAt: conv.pinnedAt,
       isMuted: conv.isMuted,
       isFavorite: conv.isFavorite,
       joinedAt:
@@ -1151,6 +1204,7 @@ class ConversationRepository {
     return GroupModel(
       chatId: conv.id,
       title: conv.title ?? 'Group Chat',
+      profilePic: conv.profilePic,
       members: members,
       pinnedMsgId: conv.pinnedMsgId,
       lastMsgId: lastMsgId,
@@ -1159,7 +1213,7 @@ class ConversationRepository {
       lastMsgAt: lastMessageAt,
       role: currentUserMemberInfo?.role,
       unreadCount: conv.unreadCount ?? 0,
-      isPinned: conv.isPinned,
+      pinnedAt: conv.pinnedAt,
       isMuted: conv.isMuted,
       isFavorite: conv.isFavorite,
       joinedAt:

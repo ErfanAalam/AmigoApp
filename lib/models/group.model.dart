@@ -10,6 +10,7 @@ abstract class GroupModel with _$GroupModel {
   const factory GroupModel({
     @JsonKey(name: 'chat_id') required String chatId,
     @Default('') String title,
+    @JsonKey(name: 'profile_pic') String? profilePic,
     List<GroupMember>? members,
     GroupMetadata? metadata,
     @JsonKey(name: 'last_msg_id') String? lastMsgId,
@@ -19,7 +20,9 @@ abstract class GroupModel with _$GroupModel {
     @JsonKey(name: 'pinned_msg_id') String? pinnedMsgId,
     String? role,
     @JsonKey(name: 'unread_count') @Default(0) int unreadCount,
-    @JsonKey(name: 'is_pinned') @Default(false) bool isPinned,
+    // Client-only pin-to-top. Null = unpinned. Pinned chats sort above
+    // non-pinned chats by descending pinnedAt — most recently pinned first.
+    @JsonKey(name: 'pinned_at') String? pinnedAt,
     @JsonKey(name: 'is_muted') @Default(false) bool isMuted,
     @JsonKey(name: 'is_favorite') @Default(false) bool isFavorite,
     @JsonKey(name: 'joined_at') @Default('') String joinedAt,
@@ -35,6 +38,7 @@ abstract class GroupModel with _$GroupModel {
     return <String, dynamic>{
       'chat_id': json['chat_id'] ?? json['conversationId'] ?? '',
       'title': json['title'] ?? '',
+      'profile_pic': json['profile_pic'] ?? json['profilePic'],
       'members': json['members'],
       'metadata': json['metadata'],
       'last_msg_id': json['last_msg_id'] ?? json['lastMsgId'],
@@ -44,7 +48,7 @@ abstract class GroupModel with _$GroupModel {
       'pinned_msg_id': json['pinned_msg_id'] ?? json['pinnedMsgId'],
       'role': json['role'],
       'unread_count': json['unread_count'] ?? json['unreadCount'] ?? 0,
-      'is_pinned': json['is_pinned'] ?? json['isPinned'] ?? false,
+      'pinned_at': json['pinned_at'] ?? json['pinnedAt'],
       'is_muted': json['is_muted'] ?? json['isMuted'] ?? false,
       'is_favorite': json['is_favorite'] ?? json['isFavorite'] ?? false,
       'joined_at': json['joined_at'] ?? json['joinedAt'] ?? '',
@@ -52,6 +56,8 @@ abstract class GroupModel with _$GroupModel {
           json['disappearing_after_sec'] ?? json['disappearingAfterSec'],
     };
   }
+
+  bool get isPinned => pinnedAt != null;
 
   int get memberCount => members?.length ?? 0;
 

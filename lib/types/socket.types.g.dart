@@ -203,12 +203,18 @@ _ConversationActionPayload _$ConversationActionPayloadFromJson(
   action: const ConversationActionTypeConverter().fromJson(
     json['action'] as String,
   ),
-  members: (json['members'] as List<dynamic>)
-      .map((e) => MembersType.fromJson(e as Map<String, dynamic>))
-      .toList(),
+  members:
+      (json['members'] as List<dynamic>?)
+          ?.map((e) => MembersType.fromJson(e as Map<String, dynamic>))
+          .toList() ??
+      const <MembersType>[],
   actorId: json['actor_id'] as String?,
   message: json['message'] as String,
   actionAt: DateTime.parse(json['action_at'] as String),
+  title: json['title'] as String?,
+  profilePic: json['profile_pic'] as String?,
+  previousProfilePic: json['previous_profile_pic'] as String?,
+  profilePicChanged: json['profile_pic_changed'] as bool? ?? false,
 );
 
 Map<String, dynamic> _$ConversationActionPayloadToJson(
@@ -222,6 +228,10 @@ Map<String, dynamic> _$ConversationActionPayloadToJson(
   'actor_id': instance.actorId,
   'message': instance.message,
   'action_at': instance.actionAt.toIso8601String(),
+  'title': instance.title,
+  'profile_pic': instance.profilePic,
+  'previous_profile_pic': instance.previousProfilePic,
+  'profile_pic_changed': instance.profilePicChanged,
 };
 
 _MiscPayload _$MiscPayloadFromJson(Map<String, dynamic> json) => _MiscPayload(

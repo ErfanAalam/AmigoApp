@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../db/repositories/conversations.repo.dart';
 import '../db/repositories/message.repo.dart';
+import '../db/sqlite.schema.dart';
 import '../models/conversations.model.dart';
 import '../models/group.model.dart';
 import '../models/message.model.dart';
@@ -37,6 +38,15 @@ final dmListStreamProvider = StreamProvider<List<DmModel>>((ref) async* {
 /// Reactive stream of group conversations ordered by last activity.
 final groupListStreamProvider = StreamProvider<List<GroupModel>>((ref) {
   return ConversationRepository().watchGroupConversations();
+});
+
+/// Reactive watcher of a single chat row by id — emits whenever the row
+/// changes. Lets AppBars (group-list rows, group-messaging header, chat-
+/// details hero) repaint live when `chat_details:update` rewrites title or
+/// profile pic in local DB.
+final chatByIdStreamProvider =
+    StreamProvider.family<Chat?, String>((ref, chatId) {
+  return ConversationRepository().watchChatById(chatId);
 });
 
 /// Reactive stream of user online status map.

@@ -5,17 +5,22 @@ part 'conversations.model.g.dart';
 
 @freezed
 abstract class ChatModel with _$ChatModel {
+  const ChatModel._();
+
   const factory ChatModel({
     required String id,
     required String type,
     String? title,
+    @JsonKey(name: 'profile_pic') String? profilePic,
     @JsonKey(name: 'creater_id') String? createrId,
     @JsonKey(name: 'unread_count') int? unreadCount,
     @JsonKey(name: 'last_msg_id') String? lastMsgId,
     @JsonKey(name: 'last_msg_at') String? lastMsgAt,
     @JsonKey(name: 'pinned_msg_id') String? pinnedMsgId,
     @JsonKey(name: 'deleted_at') String? deletedAt,
-    @JsonKey(name: 'is_pinned') @Default(false) bool isPinned,
+    // Client-only pin-to-top. Null = unpinned. Pinned chats sort above
+    // non-pinned chats by descending pinnedAt — most recently pinned first.
+    @JsonKey(name: 'pinned_at') String? pinnedAt,
     @JsonKey(name: 'is_favorite') @Default(false) bool isFavorite,
     @JsonKey(name: 'is_muted') @Default(false) bool isMuted,
     @JsonKey(name: 'created_at') String? createdAt,
@@ -28,6 +33,8 @@ abstract class ChatModel with _$ChatModel {
 
   factory ChatModel.fromJson(Map<String, dynamic> json) =>
       _$ChatModelFromJson(json);
+
+  bool get isPinned => pinnedAt != null;
 }
 
 // Back-compat alias so the many screen/provider references keep compiling
@@ -36,6 +43,8 @@ typedef ConversationModel = ChatModel;
 
 @freezed
 abstract class DmModel with _$DmModel {
+  const DmModel._();
+
   const factory DmModel({
     @JsonKey(name: 'chat_id') required String chatId,
     @JsonKey(name: 'recipient_id') required String recipientId,
@@ -50,7 +59,7 @@ abstract class DmModel with _$DmModel {
     @JsonKey(name: 'unread_count') int? unreadCount,
     @JsonKey(name: 'is_online') @Default(false) bool isRecipientOnline,
     @JsonKey(name: 'deleted_at') String? deletedAt,
-    @JsonKey(name: 'is_pinned') @Default(false) bool isPinned,
+    @JsonKey(name: 'pinned_at') String? pinnedAt,
     @JsonKey(name: 'is_muted') @Default(false) bool isMuted,
     @JsonKey(name: 'is_favorite') @Default(false) bool isFavorite,
     @JsonKey(name: 'created_at') required String createdAt,
@@ -61,6 +70,8 @@ abstract class DmModel with _$DmModel {
 
   factory DmModel.fromJson(Map<String, dynamic> json) =>
       _$DmModelFromJson(json);
+
+  bool get isPinned => pinnedAt != null;
 }
 
 @freezed

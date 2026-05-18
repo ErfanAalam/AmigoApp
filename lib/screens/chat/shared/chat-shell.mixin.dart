@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -40,7 +41,8 @@ mixin ChatShellMixin<T extends ConsumerStatefulWidget>
     required Widget messageInput,
   }) {
     final themeColor = ref.watch(themeColorProvider);
-    final customBgPath = ref.watch(chatBackgroundProvider);
+    final bg = ref.watch(chatBackgroundProvider);
+    final customBgPath = bg.path;
     final inSelection = selectedMessages.isNotEmpty;
 
     return Scaffold(
@@ -83,38 +85,39 @@ mixin ChatShellMixin<T extends ConsumerStatefulWidget>
         child: Stack(
           children: [
             Positioned.fill(
-              child: Container(
-                decoration: BoxDecoration(
-                  image: DecorationImage(
-                    image:
-                        (customBgPath != null &&
-                            File(customBgPath).existsSync())
-                        ? FileImage(File(customBgPath)) as ImageProvider
-                        : const AssetImage('assets/images/chat_bg.jpg'),
-                    fit: BoxFit.cover,
-                  ),
-                ),
+              child: _ChatBackgroundLayer(
+                imageProvider:
+                    (customBgPath != null && File(customBgPath).existsSync())
+                    ? FileImage(File(customBgPath)) as ImageProvider
+                    : const AssetImage('assets/images/chat_bg.jpg'),
+                brightness: bg.brightness,
+                blur: bg.blur,
               ),
-            ),
-            Positioned.fill(
-              child: Container(color: Colors.white.withAlpha(100)),
             ),
             Column(
               children: [
-                if (pinnedMessage != null && pinnedMessage!.id.isNotEmpty)
-                  PinnedMessageSection(
-                    pinnedMessage: messages.firstWhere(
-                      (m) => m.id == pinnedMessage?.id,
-                      orElse: () => pinnedMessage!,
-                    ),
-                    currentUserId: currentUserId,
-                    onTap: () => scrollToMessage(pinnedMessage?.id ?? ''),
-                    onUnpin: () => togglePinMessage(pinnedMessage!),
-                  ),
                 Expanded(child: buildMessagesList()),
                 messageInput,
               ],
             ),
+            // Floating pinned bar — overlays the messages list so its
+            // BackdropFilter blurs the bubbles scrolling underneath, not
+            // just the chat background.
+            if (pinnedMessage != null && pinnedMessage!.id.isNotEmpty)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: PinnedMessageSection(
+                  pinnedMessage: messages.firstWhere(
+                    (m) => m.id == pinnedMessage?.id,
+                    orElse: () => pinnedMessage!,
+                  ),
+                  currentUserId: currentUserId,
+                  onTap: () => scrollToMessage(pinnedMessage?.id ?? ''),
+                  onUnpin: () => togglePinMessage(pinnedMessage!),
+                ),
+              ),
             if (isLoadingTargetMessage)
               const Positioned(
                 top: 10,
@@ -190,6 +193,45 @@ mixin ChatShellMixin<T extends ConsumerStatefulWidget>
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ChatBackgroundLayer extends StatelessWidget {
+  final ImageProvider imageProvider;
+  final double brightness;
+  final bool blur;
+
+  const _ChatBackgroundLayer({
+    required this.imageProvider,
+    required this.brightness,
+    required this.blur,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Widget image = Image(image: imageProvider, fit: BoxFit.cover);
+    if (blur) {
+      // Scale up + clip so the blur's edge fade lands outside the
+      // visible area instead of producing a light halo on the borders.
+      image = ClipRect(
+        child: ImageFiltered(
+          imageFilter: ui.ImageFilter.blur(
+            sigmaX: 18,
+            sigmaY: 18,
+            tileMode: TileMode.mirror,
+          ),
+          child: Transform.scale(scale: 1.15, child: image),
+        ),
+      );
+    }
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        image,
+        if (brightness < 1.0)
+          Container(color: Colors.black.withOpacity(1.0 - brightness)),
+      ],
     );
   }
 }

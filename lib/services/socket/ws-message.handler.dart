@@ -249,6 +249,16 @@ class WebSocketMessageHandler {
         case WSMessageType.conversationAction:
           final actionPayload = message.conversationActionPayload;
           if (actionPayload != null) {
+            // chat_details:update is a metadata change on the chat row
+            // itself — apply to local DB so Drift watchers (group-list,
+            // group AppBar, chat-details) re-emit and the UI updates in
+            // place. The conv_action stream is still fired so legacy
+            // listeners (e.g. chat provider) don't break.
+            if (actionPayload.action ==
+                ConversationActionType.chatDetailsUpdate) {
+              await _applyChatDetailsUpdate(actionPayload);
+            }
+
             _conversationActionController.add(actionPayload);
 
             // Push a synthetic system ChatMessagePayload so message listeners update in-place
@@ -555,6 +565,41 @@ class WebSocketMessageHandler {
       }
     } catch (e) {
       debugPrint('❌ Error applying user:update for ${payload.userId}: $e');
+    }
+  }
+
+  /// Persist a chat_details:update locally and evict the previous group pfp
+  /// from the image cache. Drift watchers on the chats row re-emit, so any
+  /// AppBar / list tile subscribed via watchChatById / watchGroupConversations
+  /// repaints with the new title or avatar without any setState plumbing.
+  Future<void> _applyChatDetailsUpdate(
+    ConversationActionPayload payload,
+  ) async {
+    try {
+      if (payload.title != null) {
+        await _convRepo.updateChatTitle(payload.convId, payload.title!);
+      }
+
+      if (payload.profilePicChanged) {
+        final newPic = payload.profilePic;
+        final normalizedPic =
+            (newPic == null || newPic.isEmpty) ? null : newPic;
+        await _convRepo.updateChatProfilePic(payload.convId, normalizedPic);
+
+        final previousPic = payload.previousProfilePic;
+        if (previousPic != null && previousPic.isNotEmpty) {
+          try {
+            await CachedNetworkImage.evictFromCache(previousPic);
+            await DefaultCacheManager().removeFile(previousPic);
+          } catch (e) {
+            debugPrint('⚠️ Failed to evict previous group pfp: $e');
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint(
+        '❌ Error applying chat_details:update for ${payload.convId}: $e',
+      );
     }
   }
 

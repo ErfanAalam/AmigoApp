@@ -9,6 +9,7 @@ part of 'group.model.dart';
 _GroupModel _$GroupModelFromJson(Map<String, dynamic> json) => _GroupModel(
   chatId: json['chat_id'] as String,
   title: json['title'] as String? ?? '',
+  profilePic: json['profile_pic'] as String?,
   members: (json['members'] as List<dynamic>?)
       ?.map((e) => GroupMember.fromJson(e as Map<String, dynamic>))
       .toList(),
@@ -22,7 +23,7 @@ _GroupModel _$GroupModelFromJson(Map<String, dynamic> json) => _GroupModel(
   pinnedMsgId: json['pinned_msg_id'] as String?,
   role: json['role'] as String?,
   unreadCount: (json['unread_count'] as num?)?.toInt() ?? 0,
-  isPinned: json['is_pinned'] as bool? ?? false,
+  pinnedAt: json['pinned_at'] as String?,
   isMuted: json['is_muted'] as bool? ?? false,
   isFavorite: json['is_favorite'] as bool? ?? false,
   joinedAt: json['joined_at'] as String? ?? '',
@@ -33,6 +34,7 @@ Map<String, dynamic> _$GroupModelToJson(_GroupModel instance) =>
     <String, dynamic>{
       'chat_id': instance.chatId,
       'title': instance.title,
+      'profile_pic': instance.profilePic,
       'members': instance.members,
       'metadata': instance.metadata,
       'last_msg_id': instance.lastMsgId,
@@ -42,7 +44,7 @@ Map<String, dynamic> _$GroupModelToJson(_GroupModel instance) =>
       'pinned_msg_id': instance.pinnedMsgId,
       'role': instance.role,
       'unread_count': instance.unreadCount,
-      'is_pinned': instance.isPinned,
+      'pinned_at': instance.pinnedAt,
       'is_muted': instance.isMuted,
       'is_favorite': instance.isFavorite,
       'joined_at': instance.joinedAt,

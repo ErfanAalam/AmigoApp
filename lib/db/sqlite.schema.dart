@@ -59,6 +59,9 @@ class Chats extends Table {
   TextColumn get id => text()(); // UUID
   TextColumn get type => text()(); // 'dm' or 'group' or 'community_group'
   TextColumn get title => text().nullable()();
+  // Group avatar URL. Null for DMs (use peer's users.profilePic instead).
+  // Updated by the chat_details:update WS event.
+  TextColumn get profilePic => text().nullable()();
   TextColumn get createrId => text().nullable()();
   IntColumn get unreadCount =>
       integer().withDefault(const Constant(0)).nullable()();
@@ -66,8 +69,10 @@ class Chats extends Table {
   TextColumn get lastMsgAt => text().nullable()();
   TextColumn get pinnedMsgId => text().nullable()();
   TextColumn get deletedAt => text().nullable()();
-  BoolColumn get isPinned =>
-      boolean().withDefault(const Constant(false))(); // client-only pin-to-top
+  // Client-only pin-to-top. Null = not pinned; timestamp = when it was pinned.
+  // The list view sorts pinned chats above non-pinned, with most-recently-pinned
+  // first. Activity on a chat (new message etc.) cannot reshuffle pinned rows.
+  TextColumn get pinnedAt => text().nullable()();
   BoolColumn get isFavorite => boolean().withDefault(const Constant(false))();
   BoolColumn get isMuted => boolean().withDefault(const Constant(false))();
   TextColumn get createdAt => text().nullable()();
@@ -163,7 +168,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 13;
 
   @override
   MigrationStrategy get migration {
@@ -173,8 +178,6 @@ class AppDatabase extends _$AppDatabase {
         await _createIndices(m);
       },
       onUpgrade: (Migrator m, int from, int to) async {
-        // Production rollout is handled by client-directed uninstall + reinstall,
-        // so onUpgrade only runs in local dev (hot-reload across schema bumps).
         // Drop every known table (legacy + current), then recreate fresh.
         const tables = <String>[
           // Legacy v≤6
@@ -226,10 +229,13 @@ class AppDatabase extends _$AppDatabase {
     return LazyDatabase(() async {
       final dir = await getApplicationSupportDirectory();
       final file = File(p.join(dir.path, 'amigo_chats.db'));
-      return NativeDatabase.createInBackground(file, setup: (db) {
-        db.execute('PRAGMA journal_mode=WAL');
-        db.execute('PRAGMA busy_timeout=5000');
-      });
+      return NativeDatabase.createInBackground(
+        file,
+        setup: (db) {
+          db.execute('PRAGMA journal_mode=WAL');
+          db.execute('PRAGMA busy_timeout=5000');
+        },
+      );
     });
   }
 }

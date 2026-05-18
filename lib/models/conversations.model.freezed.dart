@@ -15,7 +15,9 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$ChatModel {
 
- String get id; String get type; String? get title;@JsonKey(name: 'creater_id') String? get createrId;@JsonKey(name: 'unread_count') int? get unreadCount;@JsonKey(name: 'last_msg_id') String? get lastMsgId;@JsonKey(name: 'last_msg_at') String? get lastMsgAt;@JsonKey(name: 'pinned_msg_id') String? get pinnedMsgId;@JsonKey(name: 'deleted_at') String? get deletedAt;@JsonKey(name: 'is_pinned') bool get isPinned;@JsonKey(name: 'is_favorite') bool get isFavorite;@JsonKey(name: 'is_muted') bool get isMuted;@JsonKey(name: 'created_at') String? get createdAt;@JsonKey(name: 'updated_at') String? get updatedAt;@JsonKey(name: 'need_sync') bool get needSync;// Disappearing-messages duration in seconds; null = off. Updated by the
+ String get id; String get type; String? get title;@JsonKey(name: 'profile_pic') String? get profilePic;@JsonKey(name: 'creater_id') String? get createrId;@JsonKey(name: 'unread_count') int? get unreadCount;@JsonKey(name: 'last_msg_id') String? get lastMsgId;@JsonKey(name: 'last_msg_at') String? get lastMsgAt;@JsonKey(name: 'pinned_msg_id') String? get pinnedMsgId;@JsonKey(name: 'deleted_at') String? get deletedAt;// Client-only pin-to-top. Null = unpinned. Pinned chats sort above
+// non-pinned chats by descending pinnedAt — most recently pinned first.
+@JsonKey(name: 'pinned_at') String? get pinnedAt;@JsonKey(name: 'is_favorite') bool get isFavorite;@JsonKey(name: 'is_muted') bool get isMuted;@JsonKey(name: 'created_at') String? get createdAt;@JsonKey(name: 'updated_at') String? get updatedAt;@JsonKey(name: 'need_sync') bool get needSync;// Disappearing-messages duration in seconds; null = off. Updated by the
 // conversation:disappearing WS event.
 @JsonKey(name: 'disappearing_after_sec') int? get disappearingAfterSec;
 /// Create a copy of ChatModel
@@ -30,16 +32,16 @@ $ChatModelCopyWith<ChatModel> get copyWith => _$ChatModelCopyWithImpl<ChatModel>
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ChatModel&&(identical(other.id, id) || other.id == id)&&(identical(other.type, type) || other.type == type)&&(identical(other.title, title) || other.title == title)&&(identical(other.createrId, createrId) || other.createrId == createrId)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.lastMsgId, lastMsgId) || other.lastMsgId == lastMsgId)&&(identical(other.lastMsgAt, lastMsgAt) || other.lastMsgAt == lastMsgAt)&&(identical(other.pinnedMsgId, pinnedMsgId) || other.pinnedMsgId == pinnedMsgId)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt)&&(identical(other.isPinned, isPinned) || other.isPinned == isPinned)&&(identical(other.isFavorite, isFavorite) || other.isFavorite == isFavorite)&&(identical(other.isMuted, isMuted) || other.isMuted == isMuted)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt)&&(identical(other.needSync, needSync) || other.needSync == needSync)&&(identical(other.disappearingAfterSec, disappearingAfterSec) || other.disappearingAfterSec == disappearingAfterSec));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ChatModel&&(identical(other.id, id) || other.id == id)&&(identical(other.type, type) || other.type == type)&&(identical(other.title, title) || other.title == title)&&(identical(other.profilePic, profilePic) || other.profilePic == profilePic)&&(identical(other.createrId, createrId) || other.createrId == createrId)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.lastMsgId, lastMsgId) || other.lastMsgId == lastMsgId)&&(identical(other.lastMsgAt, lastMsgAt) || other.lastMsgAt == lastMsgAt)&&(identical(other.pinnedMsgId, pinnedMsgId) || other.pinnedMsgId == pinnedMsgId)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt)&&(identical(other.pinnedAt, pinnedAt) || other.pinnedAt == pinnedAt)&&(identical(other.isFavorite, isFavorite) || other.isFavorite == isFavorite)&&(identical(other.isMuted, isMuted) || other.isMuted == isMuted)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt)&&(identical(other.needSync, needSync) || other.needSync == needSync)&&(identical(other.disappearingAfterSec, disappearingAfterSec) || other.disappearingAfterSec == disappearingAfterSec));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,type,title,createrId,unreadCount,lastMsgId,lastMsgAt,pinnedMsgId,deletedAt,isPinned,isFavorite,isMuted,createdAt,updatedAt,needSync,disappearingAfterSec);
+int get hashCode => Object.hash(runtimeType,id,type,title,profilePic,createrId,unreadCount,lastMsgId,lastMsgAt,pinnedMsgId,deletedAt,pinnedAt,isFavorite,isMuted,createdAt,updatedAt,needSync,disappearingAfterSec);
 
 @override
 String toString() {
-  return 'ChatModel(id: $id, type: $type, title: $title, createrId: $createrId, unreadCount: $unreadCount, lastMsgId: $lastMsgId, lastMsgAt: $lastMsgAt, pinnedMsgId: $pinnedMsgId, deletedAt: $deletedAt, isPinned: $isPinned, isFavorite: $isFavorite, isMuted: $isMuted, createdAt: $createdAt, updatedAt: $updatedAt, needSync: $needSync, disappearingAfterSec: $disappearingAfterSec)';
+  return 'ChatModel(id: $id, type: $type, title: $title, profilePic: $profilePic, createrId: $createrId, unreadCount: $unreadCount, lastMsgId: $lastMsgId, lastMsgAt: $lastMsgAt, pinnedMsgId: $pinnedMsgId, deletedAt: $deletedAt, pinnedAt: $pinnedAt, isFavorite: $isFavorite, isMuted: $isMuted, createdAt: $createdAt, updatedAt: $updatedAt, needSync: $needSync, disappearingAfterSec: $disappearingAfterSec)';
 }
 
 
@@ -50,7 +52,7 @@ abstract mixin class $ChatModelCopyWith<$Res>  {
   factory $ChatModelCopyWith(ChatModel value, $Res Function(ChatModel) _then) = _$ChatModelCopyWithImpl;
 @useResult
 $Res call({
- String id, String type, String? title,@JsonKey(name: 'creater_id') String? createrId,@JsonKey(name: 'unread_count') int? unreadCount,@JsonKey(name: 'last_msg_id') String? lastMsgId,@JsonKey(name: 'last_msg_at') String? lastMsgAt,@JsonKey(name: 'pinned_msg_id') String? pinnedMsgId,@JsonKey(name: 'deleted_at') String? deletedAt,@JsonKey(name: 'is_pinned') bool isPinned,@JsonKey(name: 'is_favorite') bool isFavorite,@JsonKey(name: 'is_muted') bool isMuted,@JsonKey(name: 'created_at') String? createdAt,@JsonKey(name: 'updated_at') String? updatedAt,@JsonKey(name: 'need_sync') bool needSync,@JsonKey(name: 'disappearing_after_sec') int? disappearingAfterSec
+ String id, String type, String? title,@JsonKey(name: 'profile_pic') String? profilePic,@JsonKey(name: 'creater_id') String? createrId,@JsonKey(name: 'unread_count') int? unreadCount,@JsonKey(name: 'last_msg_id') String? lastMsgId,@JsonKey(name: 'last_msg_at') String? lastMsgAt,@JsonKey(name: 'pinned_msg_id') String? pinnedMsgId,@JsonKey(name: 'deleted_at') String? deletedAt,@JsonKey(name: 'pinned_at') String? pinnedAt,@JsonKey(name: 'is_favorite') bool isFavorite,@JsonKey(name: 'is_muted') bool isMuted,@JsonKey(name: 'created_at') String? createdAt,@JsonKey(name: 'updated_at') String? updatedAt,@JsonKey(name: 'need_sync') bool needSync,@JsonKey(name: 'disappearing_after_sec') int? disappearingAfterSec
 });
 
 
@@ -67,19 +69,20 @@ class _$ChatModelCopyWithImpl<$Res>
 
 /// Create a copy of ChatModel
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? type = null,Object? title = freezed,Object? createrId = freezed,Object? unreadCount = freezed,Object? lastMsgId = freezed,Object? lastMsgAt = freezed,Object? pinnedMsgId = freezed,Object? deletedAt = freezed,Object? isPinned = null,Object? isFavorite = null,Object? isMuted = null,Object? createdAt = freezed,Object? updatedAt = freezed,Object? needSync = null,Object? disappearingAfterSec = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? type = null,Object? title = freezed,Object? profilePic = freezed,Object? createrId = freezed,Object? unreadCount = freezed,Object? lastMsgId = freezed,Object? lastMsgAt = freezed,Object? pinnedMsgId = freezed,Object? deletedAt = freezed,Object? pinnedAt = freezed,Object? isFavorite = null,Object? isMuted = null,Object? createdAt = freezed,Object? updatedAt = freezed,Object? needSync = null,Object? disappearingAfterSec = freezed,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,type: null == type ? _self.type : type // ignore: cast_nullable_to_non_nullable
 as String,title: freezed == title ? _self.title : title // ignore: cast_nullable_to_non_nullable
+as String?,profilePic: freezed == profilePic ? _self.profilePic : profilePic // ignore: cast_nullable_to_non_nullable
 as String?,createrId: freezed == createrId ? _self.createrId : createrId // ignore: cast_nullable_to_non_nullable
 as String?,unreadCount: freezed == unreadCount ? _self.unreadCount : unreadCount // ignore: cast_nullable_to_non_nullable
 as int?,lastMsgId: freezed == lastMsgId ? _self.lastMsgId : lastMsgId // ignore: cast_nullable_to_non_nullable
 as String?,lastMsgAt: freezed == lastMsgAt ? _self.lastMsgAt : lastMsgAt // ignore: cast_nullable_to_non_nullable
 as String?,pinnedMsgId: freezed == pinnedMsgId ? _self.pinnedMsgId : pinnedMsgId // ignore: cast_nullable_to_non_nullable
 as String?,deletedAt: freezed == deletedAt ? _self.deletedAt : deletedAt // ignore: cast_nullable_to_non_nullable
-as String?,isPinned: null == isPinned ? _self.isPinned : isPinned // ignore: cast_nullable_to_non_nullable
-as bool,isFavorite: null == isFavorite ? _self.isFavorite : isFavorite // ignore: cast_nullable_to_non_nullable
+as String?,pinnedAt: freezed == pinnedAt ? _self.pinnedAt : pinnedAt // ignore: cast_nullable_to_non_nullable
+as String?,isFavorite: null == isFavorite ? _self.isFavorite : isFavorite // ignore: cast_nullable_to_non_nullable
 as bool,isMuted: null == isMuted ? _self.isMuted : isMuted // ignore: cast_nullable_to_non_nullable
 as bool,createdAt: freezed == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
 as String?,updatedAt: freezed == updatedAt ? _self.updatedAt : updatedAt // ignore: cast_nullable_to_non_nullable
@@ -170,10 +173,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String type,  String? title, @JsonKey(name: 'creater_id')  String? createrId, @JsonKey(name: 'unread_count')  int? unreadCount, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId, @JsonKey(name: 'deleted_at')  String? deletedAt, @JsonKey(name: 'is_pinned')  bool isPinned, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'is_muted')  bool isMuted, @JsonKey(name: 'created_at')  String? createdAt, @JsonKey(name: 'updated_at')  String? updatedAt, @JsonKey(name: 'need_sync')  bool needSync, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String type,  String? title, @JsonKey(name: 'profile_pic')  String? profilePic, @JsonKey(name: 'creater_id')  String? createrId, @JsonKey(name: 'unread_count')  int? unreadCount, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId, @JsonKey(name: 'deleted_at')  String? deletedAt, @JsonKey(name: 'pinned_at')  String? pinnedAt, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'is_muted')  bool isMuted, @JsonKey(name: 'created_at')  String? createdAt, @JsonKey(name: 'updated_at')  String? updatedAt, @JsonKey(name: 'need_sync')  bool needSync, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _ChatModel() when $default != null:
-return $default(_that.id,_that.type,_that.title,_that.createrId,_that.unreadCount,_that.lastMsgId,_that.lastMsgAt,_that.pinnedMsgId,_that.deletedAt,_that.isPinned,_that.isFavorite,_that.isMuted,_that.createdAt,_that.updatedAt,_that.needSync,_that.disappearingAfterSec);case _:
+return $default(_that.id,_that.type,_that.title,_that.profilePic,_that.createrId,_that.unreadCount,_that.lastMsgId,_that.lastMsgAt,_that.pinnedMsgId,_that.deletedAt,_that.pinnedAt,_that.isFavorite,_that.isMuted,_that.createdAt,_that.updatedAt,_that.needSync,_that.disappearingAfterSec);case _:
   return orElse();
 
 }
@@ -191,10 +194,10 @@ return $default(_that.id,_that.type,_that.title,_that.createrId,_that.unreadCoun
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String type,  String? title, @JsonKey(name: 'creater_id')  String? createrId, @JsonKey(name: 'unread_count')  int? unreadCount, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId, @JsonKey(name: 'deleted_at')  String? deletedAt, @JsonKey(name: 'is_pinned')  bool isPinned, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'is_muted')  bool isMuted, @JsonKey(name: 'created_at')  String? createdAt, @JsonKey(name: 'updated_at')  String? updatedAt, @JsonKey(name: 'need_sync')  bool needSync, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String type,  String? title, @JsonKey(name: 'profile_pic')  String? profilePic, @JsonKey(name: 'creater_id')  String? createrId, @JsonKey(name: 'unread_count')  int? unreadCount, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId, @JsonKey(name: 'deleted_at')  String? deletedAt, @JsonKey(name: 'pinned_at')  String? pinnedAt, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'is_muted')  bool isMuted, @JsonKey(name: 'created_at')  String? createdAt, @JsonKey(name: 'updated_at')  String? updatedAt, @JsonKey(name: 'need_sync')  bool needSync, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)  $default,) {final _that = this;
 switch (_that) {
 case _ChatModel():
-return $default(_that.id,_that.type,_that.title,_that.createrId,_that.unreadCount,_that.lastMsgId,_that.lastMsgAt,_that.pinnedMsgId,_that.deletedAt,_that.isPinned,_that.isFavorite,_that.isMuted,_that.createdAt,_that.updatedAt,_that.needSync,_that.disappearingAfterSec);case _:
+return $default(_that.id,_that.type,_that.title,_that.profilePic,_that.createrId,_that.unreadCount,_that.lastMsgId,_that.lastMsgAt,_that.pinnedMsgId,_that.deletedAt,_that.pinnedAt,_that.isFavorite,_that.isMuted,_that.createdAt,_that.updatedAt,_that.needSync,_that.disappearingAfterSec);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -211,10 +214,10 @@ return $default(_that.id,_that.type,_that.title,_that.createrId,_that.unreadCoun
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String type,  String? title, @JsonKey(name: 'creater_id')  String? createrId, @JsonKey(name: 'unread_count')  int? unreadCount, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId, @JsonKey(name: 'deleted_at')  String? deletedAt, @JsonKey(name: 'is_pinned')  bool isPinned, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'is_muted')  bool isMuted, @JsonKey(name: 'created_at')  String? createdAt, @JsonKey(name: 'updated_at')  String? updatedAt, @JsonKey(name: 'need_sync')  bool needSync, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String type,  String? title, @JsonKey(name: 'profile_pic')  String? profilePic, @JsonKey(name: 'creater_id')  String? createrId, @JsonKey(name: 'unread_count')  int? unreadCount, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId, @JsonKey(name: 'deleted_at')  String? deletedAt, @JsonKey(name: 'pinned_at')  String? pinnedAt, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'is_muted')  bool isMuted, @JsonKey(name: 'created_at')  String? createdAt, @JsonKey(name: 'updated_at')  String? updatedAt, @JsonKey(name: 'need_sync')  bool needSync, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)?  $default,) {final _that = this;
 switch (_that) {
 case _ChatModel() when $default != null:
-return $default(_that.id,_that.type,_that.title,_that.createrId,_that.unreadCount,_that.lastMsgId,_that.lastMsgAt,_that.pinnedMsgId,_that.deletedAt,_that.isPinned,_that.isFavorite,_that.isMuted,_that.createdAt,_that.updatedAt,_that.needSync,_that.disappearingAfterSec);case _:
+return $default(_that.id,_that.type,_that.title,_that.profilePic,_that.createrId,_that.unreadCount,_that.lastMsgId,_that.lastMsgAt,_that.pinnedMsgId,_that.deletedAt,_that.pinnedAt,_that.isFavorite,_that.isMuted,_that.createdAt,_that.updatedAt,_that.needSync,_that.disappearingAfterSec);case _:
   return null;
 
 }
@@ -225,20 +228,23 @@ return $default(_that.id,_that.type,_that.title,_that.createrId,_that.unreadCoun
 /// @nodoc
 @JsonSerializable()
 
-class _ChatModel implements ChatModel {
-  const _ChatModel({required this.id, required this.type, this.title, @JsonKey(name: 'creater_id') this.createrId, @JsonKey(name: 'unread_count') this.unreadCount, @JsonKey(name: 'last_msg_id') this.lastMsgId, @JsonKey(name: 'last_msg_at') this.lastMsgAt, @JsonKey(name: 'pinned_msg_id') this.pinnedMsgId, @JsonKey(name: 'deleted_at') this.deletedAt, @JsonKey(name: 'is_pinned') this.isPinned = false, @JsonKey(name: 'is_favorite') this.isFavorite = false, @JsonKey(name: 'is_muted') this.isMuted = false, @JsonKey(name: 'created_at') this.createdAt, @JsonKey(name: 'updated_at') this.updatedAt, @JsonKey(name: 'need_sync') this.needSync = true, @JsonKey(name: 'disappearing_after_sec') this.disappearingAfterSec});
+class _ChatModel extends ChatModel {
+  const _ChatModel({required this.id, required this.type, this.title, @JsonKey(name: 'profile_pic') this.profilePic, @JsonKey(name: 'creater_id') this.createrId, @JsonKey(name: 'unread_count') this.unreadCount, @JsonKey(name: 'last_msg_id') this.lastMsgId, @JsonKey(name: 'last_msg_at') this.lastMsgAt, @JsonKey(name: 'pinned_msg_id') this.pinnedMsgId, @JsonKey(name: 'deleted_at') this.deletedAt, @JsonKey(name: 'pinned_at') this.pinnedAt, @JsonKey(name: 'is_favorite') this.isFavorite = false, @JsonKey(name: 'is_muted') this.isMuted = false, @JsonKey(name: 'created_at') this.createdAt, @JsonKey(name: 'updated_at') this.updatedAt, @JsonKey(name: 'need_sync') this.needSync = true, @JsonKey(name: 'disappearing_after_sec') this.disappearingAfterSec}): super._();
   factory _ChatModel.fromJson(Map<String, dynamic> json) => _$ChatModelFromJson(json);
 
 @override final  String id;
 @override final  String type;
 @override final  String? title;
+@override@JsonKey(name: 'profile_pic') final  String? profilePic;
 @override@JsonKey(name: 'creater_id') final  String? createrId;
 @override@JsonKey(name: 'unread_count') final  int? unreadCount;
 @override@JsonKey(name: 'last_msg_id') final  String? lastMsgId;
 @override@JsonKey(name: 'last_msg_at') final  String? lastMsgAt;
 @override@JsonKey(name: 'pinned_msg_id') final  String? pinnedMsgId;
 @override@JsonKey(name: 'deleted_at') final  String? deletedAt;
-@override@JsonKey(name: 'is_pinned') final  bool isPinned;
+// Client-only pin-to-top. Null = unpinned. Pinned chats sort above
+// non-pinned chats by descending pinnedAt — most recently pinned first.
+@override@JsonKey(name: 'pinned_at') final  String? pinnedAt;
 @override@JsonKey(name: 'is_favorite') final  bool isFavorite;
 @override@JsonKey(name: 'is_muted') final  bool isMuted;
 @override@JsonKey(name: 'created_at') final  String? createdAt;
@@ -261,16 +267,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ChatModel&&(identical(other.id, id) || other.id == id)&&(identical(other.type, type) || other.type == type)&&(identical(other.title, title) || other.title == title)&&(identical(other.createrId, createrId) || other.createrId == createrId)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.lastMsgId, lastMsgId) || other.lastMsgId == lastMsgId)&&(identical(other.lastMsgAt, lastMsgAt) || other.lastMsgAt == lastMsgAt)&&(identical(other.pinnedMsgId, pinnedMsgId) || other.pinnedMsgId == pinnedMsgId)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt)&&(identical(other.isPinned, isPinned) || other.isPinned == isPinned)&&(identical(other.isFavorite, isFavorite) || other.isFavorite == isFavorite)&&(identical(other.isMuted, isMuted) || other.isMuted == isMuted)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt)&&(identical(other.needSync, needSync) || other.needSync == needSync)&&(identical(other.disappearingAfterSec, disappearingAfterSec) || other.disappearingAfterSec == disappearingAfterSec));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ChatModel&&(identical(other.id, id) || other.id == id)&&(identical(other.type, type) || other.type == type)&&(identical(other.title, title) || other.title == title)&&(identical(other.profilePic, profilePic) || other.profilePic == profilePic)&&(identical(other.createrId, createrId) || other.createrId == createrId)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.lastMsgId, lastMsgId) || other.lastMsgId == lastMsgId)&&(identical(other.lastMsgAt, lastMsgAt) || other.lastMsgAt == lastMsgAt)&&(identical(other.pinnedMsgId, pinnedMsgId) || other.pinnedMsgId == pinnedMsgId)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt)&&(identical(other.pinnedAt, pinnedAt) || other.pinnedAt == pinnedAt)&&(identical(other.isFavorite, isFavorite) || other.isFavorite == isFavorite)&&(identical(other.isMuted, isMuted) || other.isMuted == isMuted)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt)&&(identical(other.needSync, needSync) || other.needSync == needSync)&&(identical(other.disappearingAfterSec, disappearingAfterSec) || other.disappearingAfterSec == disappearingAfterSec));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,type,title,createrId,unreadCount,lastMsgId,lastMsgAt,pinnedMsgId,deletedAt,isPinned,isFavorite,isMuted,createdAt,updatedAt,needSync,disappearingAfterSec);
+int get hashCode => Object.hash(runtimeType,id,type,title,profilePic,createrId,unreadCount,lastMsgId,lastMsgAt,pinnedMsgId,deletedAt,pinnedAt,isFavorite,isMuted,createdAt,updatedAt,needSync,disappearingAfterSec);
 
 @override
 String toString() {
-  return 'ChatModel(id: $id, type: $type, title: $title, createrId: $createrId, unreadCount: $unreadCount, lastMsgId: $lastMsgId, lastMsgAt: $lastMsgAt, pinnedMsgId: $pinnedMsgId, deletedAt: $deletedAt, isPinned: $isPinned, isFavorite: $isFavorite, isMuted: $isMuted, createdAt: $createdAt, updatedAt: $updatedAt, needSync: $needSync, disappearingAfterSec: $disappearingAfterSec)';
+  return 'ChatModel(id: $id, type: $type, title: $title, profilePic: $profilePic, createrId: $createrId, unreadCount: $unreadCount, lastMsgId: $lastMsgId, lastMsgAt: $lastMsgAt, pinnedMsgId: $pinnedMsgId, deletedAt: $deletedAt, pinnedAt: $pinnedAt, isFavorite: $isFavorite, isMuted: $isMuted, createdAt: $createdAt, updatedAt: $updatedAt, needSync: $needSync, disappearingAfterSec: $disappearingAfterSec)';
 }
 
 
@@ -281,7 +287,7 @@ abstract mixin class _$ChatModelCopyWith<$Res> implements $ChatModelCopyWith<$Re
   factory _$ChatModelCopyWith(_ChatModel value, $Res Function(_ChatModel) _then) = __$ChatModelCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String type, String? title,@JsonKey(name: 'creater_id') String? createrId,@JsonKey(name: 'unread_count') int? unreadCount,@JsonKey(name: 'last_msg_id') String? lastMsgId,@JsonKey(name: 'last_msg_at') String? lastMsgAt,@JsonKey(name: 'pinned_msg_id') String? pinnedMsgId,@JsonKey(name: 'deleted_at') String? deletedAt,@JsonKey(name: 'is_pinned') bool isPinned,@JsonKey(name: 'is_favorite') bool isFavorite,@JsonKey(name: 'is_muted') bool isMuted,@JsonKey(name: 'created_at') String? createdAt,@JsonKey(name: 'updated_at') String? updatedAt,@JsonKey(name: 'need_sync') bool needSync,@JsonKey(name: 'disappearing_after_sec') int? disappearingAfterSec
+ String id, String type, String? title,@JsonKey(name: 'profile_pic') String? profilePic,@JsonKey(name: 'creater_id') String? createrId,@JsonKey(name: 'unread_count') int? unreadCount,@JsonKey(name: 'last_msg_id') String? lastMsgId,@JsonKey(name: 'last_msg_at') String? lastMsgAt,@JsonKey(name: 'pinned_msg_id') String? pinnedMsgId,@JsonKey(name: 'deleted_at') String? deletedAt,@JsonKey(name: 'pinned_at') String? pinnedAt,@JsonKey(name: 'is_favorite') bool isFavorite,@JsonKey(name: 'is_muted') bool isMuted,@JsonKey(name: 'created_at') String? createdAt,@JsonKey(name: 'updated_at') String? updatedAt,@JsonKey(name: 'need_sync') bool needSync,@JsonKey(name: 'disappearing_after_sec') int? disappearingAfterSec
 });
 
 
@@ -298,19 +304,20 @@ class __$ChatModelCopyWithImpl<$Res>
 
 /// Create a copy of ChatModel
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? type = null,Object? title = freezed,Object? createrId = freezed,Object? unreadCount = freezed,Object? lastMsgId = freezed,Object? lastMsgAt = freezed,Object? pinnedMsgId = freezed,Object? deletedAt = freezed,Object? isPinned = null,Object? isFavorite = null,Object? isMuted = null,Object? createdAt = freezed,Object? updatedAt = freezed,Object? needSync = null,Object? disappearingAfterSec = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? type = null,Object? title = freezed,Object? profilePic = freezed,Object? createrId = freezed,Object? unreadCount = freezed,Object? lastMsgId = freezed,Object? lastMsgAt = freezed,Object? pinnedMsgId = freezed,Object? deletedAt = freezed,Object? pinnedAt = freezed,Object? isFavorite = null,Object? isMuted = null,Object? createdAt = freezed,Object? updatedAt = freezed,Object? needSync = null,Object? disappearingAfterSec = freezed,}) {
   return _then(_ChatModel(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,type: null == type ? _self.type : type // ignore: cast_nullable_to_non_nullable
 as String,title: freezed == title ? _self.title : title // ignore: cast_nullable_to_non_nullable
+as String?,profilePic: freezed == profilePic ? _self.profilePic : profilePic // ignore: cast_nullable_to_non_nullable
 as String?,createrId: freezed == createrId ? _self.createrId : createrId // ignore: cast_nullable_to_non_nullable
 as String?,unreadCount: freezed == unreadCount ? _self.unreadCount : unreadCount // ignore: cast_nullable_to_non_nullable
 as int?,lastMsgId: freezed == lastMsgId ? _self.lastMsgId : lastMsgId // ignore: cast_nullable_to_non_nullable
 as String?,lastMsgAt: freezed == lastMsgAt ? _self.lastMsgAt : lastMsgAt // ignore: cast_nullable_to_non_nullable
 as String?,pinnedMsgId: freezed == pinnedMsgId ? _self.pinnedMsgId : pinnedMsgId // ignore: cast_nullable_to_non_nullable
 as String?,deletedAt: freezed == deletedAt ? _self.deletedAt : deletedAt // ignore: cast_nullable_to_non_nullable
-as String?,isPinned: null == isPinned ? _self.isPinned : isPinned // ignore: cast_nullable_to_non_nullable
-as bool,isFavorite: null == isFavorite ? _self.isFavorite : isFavorite // ignore: cast_nullable_to_non_nullable
+as String?,pinnedAt: freezed == pinnedAt ? _self.pinnedAt : pinnedAt // ignore: cast_nullable_to_non_nullable
+as String?,isFavorite: null == isFavorite ? _self.isFavorite : isFavorite // ignore: cast_nullable_to_non_nullable
 as bool,isMuted: null == isMuted ? _self.isMuted : isMuted // ignore: cast_nullable_to_non_nullable
 as bool,createdAt: freezed == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
 as String?,updatedAt: freezed == updatedAt ? _self.updatedAt : updatedAt // ignore: cast_nullable_to_non_nullable
@@ -327,7 +334,7 @@ as int?,
 /// @nodoc
 mixin _$DmModel {
 
-@JsonKey(name: 'chat_id') String get chatId;@JsonKey(name: 'recipient_id') String get recipientId;@JsonKey(name: 'recipient_name') String get recipientName;@JsonKey(name: 'recipient_phone') String get recipientPhone;@JsonKey(name: 'recipient_profile_pic') String? get recipientProfilePic;@JsonKey(name: 'last_msg_id') String? get lastMsgId;@JsonKey(name: 'last_msg_type') String? get lastMsgType;@JsonKey(name: 'last_msg_body') String? get lastMsgBody;@JsonKey(name: 'last_msg_at') String? get lastMsgAt;@JsonKey(name: 'pinned_msg_id') String? get pinnedMsgId;@JsonKey(name: 'unread_count') int? get unreadCount;@JsonKey(name: 'is_online') bool get isRecipientOnline;@JsonKey(name: 'deleted_at') String? get deletedAt;@JsonKey(name: 'is_pinned') bool get isPinned;@JsonKey(name: 'is_muted') bool get isMuted;@JsonKey(name: 'is_favorite') bool get isFavorite;@JsonKey(name: 'created_at') String get createdAt;// Disappearing-messages duration in seconds; null = off. Mirrors the
+@JsonKey(name: 'chat_id') String get chatId;@JsonKey(name: 'recipient_id') String get recipientId;@JsonKey(name: 'recipient_name') String get recipientName;@JsonKey(name: 'recipient_phone') String get recipientPhone;@JsonKey(name: 'recipient_profile_pic') String? get recipientProfilePic;@JsonKey(name: 'last_msg_id') String? get lastMsgId;@JsonKey(name: 'last_msg_type') String? get lastMsgType;@JsonKey(name: 'last_msg_body') String? get lastMsgBody;@JsonKey(name: 'last_msg_at') String? get lastMsgAt;@JsonKey(name: 'pinned_msg_id') String? get pinnedMsgId;@JsonKey(name: 'unread_count') int? get unreadCount;@JsonKey(name: 'is_online') bool get isRecipientOnline;@JsonKey(name: 'deleted_at') String? get deletedAt;@JsonKey(name: 'pinned_at') String? get pinnedAt;@JsonKey(name: 'is_muted') bool get isMuted;@JsonKey(name: 'is_favorite') bool get isFavorite;@JsonKey(name: 'created_at') String get createdAt;// Disappearing-messages duration in seconds; null = off. Mirrors the
 // chats table column. Drives the avatar timer-badge + input-border UI.
 @JsonKey(name: 'disappearing_after_sec') int? get disappearingAfterSec;
 /// Create a copy of DmModel
@@ -342,16 +349,16 @@ $DmModelCopyWith<DmModel> get copyWith => _$DmModelCopyWithImpl<DmModel>(this as
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is DmModel&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.recipientId, recipientId) || other.recipientId == recipientId)&&(identical(other.recipientName, recipientName) || other.recipientName == recipientName)&&(identical(other.recipientPhone, recipientPhone) || other.recipientPhone == recipientPhone)&&(identical(other.recipientProfilePic, recipientProfilePic) || other.recipientProfilePic == recipientProfilePic)&&(identical(other.lastMsgId, lastMsgId) || other.lastMsgId == lastMsgId)&&(identical(other.lastMsgType, lastMsgType) || other.lastMsgType == lastMsgType)&&(identical(other.lastMsgBody, lastMsgBody) || other.lastMsgBody == lastMsgBody)&&(identical(other.lastMsgAt, lastMsgAt) || other.lastMsgAt == lastMsgAt)&&(identical(other.pinnedMsgId, pinnedMsgId) || other.pinnedMsgId == pinnedMsgId)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.isRecipientOnline, isRecipientOnline) || other.isRecipientOnline == isRecipientOnline)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt)&&(identical(other.isPinned, isPinned) || other.isPinned == isPinned)&&(identical(other.isMuted, isMuted) || other.isMuted == isMuted)&&(identical(other.isFavorite, isFavorite) || other.isFavorite == isFavorite)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.disappearingAfterSec, disappearingAfterSec) || other.disappearingAfterSec == disappearingAfterSec));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is DmModel&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.recipientId, recipientId) || other.recipientId == recipientId)&&(identical(other.recipientName, recipientName) || other.recipientName == recipientName)&&(identical(other.recipientPhone, recipientPhone) || other.recipientPhone == recipientPhone)&&(identical(other.recipientProfilePic, recipientProfilePic) || other.recipientProfilePic == recipientProfilePic)&&(identical(other.lastMsgId, lastMsgId) || other.lastMsgId == lastMsgId)&&(identical(other.lastMsgType, lastMsgType) || other.lastMsgType == lastMsgType)&&(identical(other.lastMsgBody, lastMsgBody) || other.lastMsgBody == lastMsgBody)&&(identical(other.lastMsgAt, lastMsgAt) || other.lastMsgAt == lastMsgAt)&&(identical(other.pinnedMsgId, pinnedMsgId) || other.pinnedMsgId == pinnedMsgId)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.isRecipientOnline, isRecipientOnline) || other.isRecipientOnline == isRecipientOnline)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt)&&(identical(other.pinnedAt, pinnedAt) || other.pinnedAt == pinnedAt)&&(identical(other.isMuted, isMuted) || other.isMuted == isMuted)&&(identical(other.isFavorite, isFavorite) || other.isFavorite == isFavorite)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.disappearingAfterSec, disappearingAfterSec) || other.disappearingAfterSec == disappearingAfterSec));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,chatId,recipientId,recipientName,recipientPhone,recipientProfilePic,lastMsgId,lastMsgType,lastMsgBody,lastMsgAt,pinnedMsgId,unreadCount,isRecipientOnline,deletedAt,isPinned,isMuted,isFavorite,createdAt,disappearingAfterSec);
+int get hashCode => Object.hash(runtimeType,chatId,recipientId,recipientName,recipientPhone,recipientProfilePic,lastMsgId,lastMsgType,lastMsgBody,lastMsgAt,pinnedMsgId,unreadCount,isRecipientOnline,deletedAt,pinnedAt,isMuted,isFavorite,createdAt,disappearingAfterSec);
 
 @override
 String toString() {
-  return 'DmModel(chatId: $chatId, recipientId: $recipientId, recipientName: $recipientName, recipientPhone: $recipientPhone, recipientProfilePic: $recipientProfilePic, lastMsgId: $lastMsgId, lastMsgType: $lastMsgType, lastMsgBody: $lastMsgBody, lastMsgAt: $lastMsgAt, pinnedMsgId: $pinnedMsgId, unreadCount: $unreadCount, isRecipientOnline: $isRecipientOnline, deletedAt: $deletedAt, isPinned: $isPinned, isMuted: $isMuted, isFavorite: $isFavorite, createdAt: $createdAt, disappearingAfterSec: $disappearingAfterSec)';
+  return 'DmModel(chatId: $chatId, recipientId: $recipientId, recipientName: $recipientName, recipientPhone: $recipientPhone, recipientProfilePic: $recipientProfilePic, lastMsgId: $lastMsgId, lastMsgType: $lastMsgType, lastMsgBody: $lastMsgBody, lastMsgAt: $lastMsgAt, pinnedMsgId: $pinnedMsgId, unreadCount: $unreadCount, isRecipientOnline: $isRecipientOnline, deletedAt: $deletedAt, pinnedAt: $pinnedAt, isMuted: $isMuted, isFavorite: $isFavorite, createdAt: $createdAt, disappearingAfterSec: $disappearingAfterSec)';
 }
 
 
@@ -362,7 +369,7 @@ abstract mixin class $DmModelCopyWith<$Res>  {
   factory $DmModelCopyWith(DmModel value, $Res Function(DmModel) _then) = _$DmModelCopyWithImpl;
 @useResult
 $Res call({
-@JsonKey(name: 'chat_id') String chatId,@JsonKey(name: 'recipient_id') String recipientId,@JsonKey(name: 'recipient_name') String recipientName,@JsonKey(name: 'recipient_phone') String recipientPhone,@JsonKey(name: 'recipient_profile_pic') String? recipientProfilePic,@JsonKey(name: 'last_msg_id') String? lastMsgId,@JsonKey(name: 'last_msg_type') String? lastMsgType,@JsonKey(name: 'last_msg_body') String? lastMsgBody,@JsonKey(name: 'last_msg_at') String? lastMsgAt,@JsonKey(name: 'pinned_msg_id') String? pinnedMsgId,@JsonKey(name: 'unread_count') int? unreadCount,@JsonKey(name: 'is_online') bool isRecipientOnline,@JsonKey(name: 'deleted_at') String? deletedAt,@JsonKey(name: 'is_pinned') bool isPinned,@JsonKey(name: 'is_muted') bool isMuted,@JsonKey(name: 'is_favorite') bool isFavorite,@JsonKey(name: 'created_at') String createdAt,@JsonKey(name: 'disappearing_after_sec') int? disappearingAfterSec
+@JsonKey(name: 'chat_id') String chatId,@JsonKey(name: 'recipient_id') String recipientId,@JsonKey(name: 'recipient_name') String recipientName,@JsonKey(name: 'recipient_phone') String recipientPhone,@JsonKey(name: 'recipient_profile_pic') String? recipientProfilePic,@JsonKey(name: 'last_msg_id') String? lastMsgId,@JsonKey(name: 'last_msg_type') String? lastMsgType,@JsonKey(name: 'last_msg_body') String? lastMsgBody,@JsonKey(name: 'last_msg_at') String? lastMsgAt,@JsonKey(name: 'pinned_msg_id') String? pinnedMsgId,@JsonKey(name: 'unread_count') int? unreadCount,@JsonKey(name: 'is_online') bool isRecipientOnline,@JsonKey(name: 'deleted_at') String? deletedAt,@JsonKey(name: 'pinned_at') String? pinnedAt,@JsonKey(name: 'is_muted') bool isMuted,@JsonKey(name: 'is_favorite') bool isFavorite,@JsonKey(name: 'created_at') String createdAt,@JsonKey(name: 'disappearing_after_sec') int? disappearingAfterSec
 });
 
 
@@ -379,7 +386,7 @@ class _$DmModelCopyWithImpl<$Res>
 
 /// Create a copy of DmModel
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? chatId = null,Object? recipientId = null,Object? recipientName = null,Object? recipientPhone = null,Object? recipientProfilePic = freezed,Object? lastMsgId = freezed,Object? lastMsgType = freezed,Object? lastMsgBody = freezed,Object? lastMsgAt = freezed,Object? pinnedMsgId = freezed,Object? unreadCount = freezed,Object? isRecipientOnline = null,Object? deletedAt = freezed,Object? isPinned = null,Object? isMuted = null,Object? isFavorite = null,Object? createdAt = null,Object? disappearingAfterSec = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? chatId = null,Object? recipientId = null,Object? recipientName = null,Object? recipientPhone = null,Object? recipientProfilePic = freezed,Object? lastMsgId = freezed,Object? lastMsgType = freezed,Object? lastMsgBody = freezed,Object? lastMsgAt = freezed,Object? pinnedMsgId = freezed,Object? unreadCount = freezed,Object? isRecipientOnline = null,Object? deletedAt = freezed,Object? pinnedAt = freezed,Object? isMuted = null,Object? isFavorite = null,Object? createdAt = null,Object? disappearingAfterSec = freezed,}) {
   return _then(_self.copyWith(
 chatId: null == chatId ? _self.chatId : chatId // ignore: cast_nullable_to_non_nullable
 as String,recipientId: null == recipientId ? _self.recipientId : recipientId // ignore: cast_nullable_to_non_nullable
@@ -394,8 +401,8 @@ as String?,pinnedMsgId: freezed == pinnedMsgId ? _self.pinnedMsgId : pinnedMsgId
 as String?,unreadCount: freezed == unreadCount ? _self.unreadCount : unreadCount // ignore: cast_nullable_to_non_nullable
 as int?,isRecipientOnline: null == isRecipientOnline ? _self.isRecipientOnline : isRecipientOnline // ignore: cast_nullable_to_non_nullable
 as bool,deletedAt: freezed == deletedAt ? _self.deletedAt : deletedAt // ignore: cast_nullable_to_non_nullable
-as String?,isPinned: null == isPinned ? _self.isPinned : isPinned // ignore: cast_nullable_to_non_nullable
-as bool,isMuted: null == isMuted ? _self.isMuted : isMuted // ignore: cast_nullable_to_non_nullable
+as String?,pinnedAt: freezed == pinnedAt ? _self.pinnedAt : pinnedAt // ignore: cast_nullable_to_non_nullable
+as String?,isMuted: null == isMuted ? _self.isMuted : isMuted // ignore: cast_nullable_to_non_nullable
 as bool,isFavorite: null == isFavorite ? _self.isFavorite : isFavorite // ignore: cast_nullable_to_non_nullable
 as bool,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
 as String,disappearingAfterSec: freezed == disappearingAfterSec ? _self.disappearingAfterSec : disappearingAfterSec // ignore: cast_nullable_to_non_nullable
@@ -484,10 +491,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'recipient_id')  String recipientId, @JsonKey(name: 'recipient_name')  String recipientName, @JsonKey(name: 'recipient_phone')  String recipientPhone, @JsonKey(name: 'recipient_profile_pic')  String? recipientProfilePic, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_type')  String? lastMsgType, @JsonKey(name: 'last_msg_body')  String? lastMsgBody, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId, @JsonKey(name: 'unread_count')  int? unreadCount, @JsonKey(name: 'is_online')  bool isRecipientOnline, @JsonKey(name: 'deleted_at')  String? deletedAt, @JsonKey(name: 'is_pinned')  bool isPinned, @JsonKey(name: 'is_muted')  bool isMuted, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'created_at')  String createdAt, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'recipient_id')  String recipientId, @JsonKey(name: 'recipient_name')  String recipientName, @JsonKey(name: 'recipient_phone')  String recipientPhone, @JsonKey(name: 'recipient_profile_pic')  String? recipientProfilePic, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_type')  String? lastMsgType, @JsonKey(name: 'last_msg_body')  String? lastMsgBody, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId, @JsonKey(name: 'unread_count')  int? unreadCount, @JsonKey(name: 'is_online')  bool isRecipientOnline, @JsonKey(name: 'deleted_at')  String? deletedAt, @JsonKey(name: 'pinned_at')  String? pinnedAt, @JsonKey(name: 'is_muted')  bool isMuted, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'created_at')  String createdAt, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _DmModel() when $default != null:
-return $default(_that.chatId,_that.recipientId,_that.recipientName,_that.recipientPhone,_that.recipientProfilePic,_that.lastMsgId,_that.lastMsgType,_that.lastMsgBody,_that.lastMsgAt,_that.pinnedMsgId,_that.unreadCount,_that.isRecipientOnline,_that.deletedAt,_that.isPinned,_that.isMuted,_that.isFavorite,_that.createdAt,_that.disappearingAfterSec);case _:
+return $default(_that.chatId,_that.recipientId,_that.recipientName,_that.recipientPhone,_that.recipientProfilePic,_that.lastMsgId,_that.lastMsgType,_that.lastMsgBody,_that.lastMsgAt,_that.pinnedMsgId,_that.unreadCount,_that.isRecipientOnline,_that.deletedAt,_that.pinnedAt,_that.isMuted,_that.isFavorite,_that.createdAt,_that.disappearingAfterSec);case _:
   return orElse();
 
 }
@@ -505,10 +512,10 @@ return $default(_that.chatId,_that.recipientId,_that.recipientName,_that.recipie
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'recipient_id')  String recipientId, @JsonKey(name: 'recipient_name')  String recipientName, @JsonKey(name: 'recipient_phone')  String recipientPhone, @JsonKey(name: 'recipient_profile_pic')  String? recipientProfilePic, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_type')  String? lastMsgType, @JsonKey(name: 'last_msg_body')  String? lastMsgBody, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId, @JsonKey(name: 'unread_count')  int? unreadCount, @JsonKey(name: 'is_online')  bool isRecipientOnline, @JsonKey(name: 'deleted_at')  String? deletedAt, @JsonKey(name: 'is_pinned')  bool isPinned, @JsonKey(name: 'is_muted')  bool isMuted, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'created_at')  String createdAt, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'recipient_id')  String recipientId, @JsonKey(name: 'recipient_name')  String recipientName, @JsonKey(name: 'recipient_phone')  String recipientPhone, @JsonKey(name: 'recipient_profile_pic')  String? recipientProfilePic, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_type')  String? lastMsgType, @JsonKey(name: 'last_msg_body')  String? lastMsgBody, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId, @JsonKey(name: 'unread_count')  int? unreadCount, @JsonKey(name: 'is_online')  bool isRecipientOnline, @JsonKey(name: 'deleted_at')  String? deletedAt, @JsonKey(name: 'pinned_at')  String? pinnedAt, @JsonKey(name: 'is_muted')  bool isMuted, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'created_at')  String createdAt, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)  $default,) {final _that = this;
 switch (_that) {
 case _DmModel():
-return $default(_that.chatId,_that.recipientId,_that.recipientName,_that.recipientPhone,_that.recipientProfilePic,_that.lastMsgId,_that.lastMsgType,_that.lastMsgBody,_that.lastMsgAt,_that.pinnedMsgId,_that.unreadCount,_that.isRecipientOnline,_that.deletedAt,_that.isPinned,_that.isMuted,_that.isFavorite,_that.createdAt,_that.disappearingAfterSec);case _:
+return $default(_that.chatId,_that.recipientId,_that.recipientName,_that.recipientPhone,_that.recipientProfilePic,_that.lastMsgId,_that.lastMsgType,_that.lastMsgBody,_that.lastMsgAt,_that.pinnedMsgId,_that.unreadCount,_that.isRecipientOnline,_that.deletedAt,_that.pinnedAt,_that.isMuted,_that.isFavorite,_that.createdAt,_that.disappearingAfterSec);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -525,10 +532,10 @@ return $default(_that.chatId,_that.recipientId,_that.recipientName,_that.recipie
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'recipient_id')  String recipientId, @JsonKey(name: 'recipient_name')  String recipientName, @JsonKey(name: 'recipient_phone')  String recipientPhone, @JsonKey(name: 'recipient_profile_pic')  String? recipientProfilePic, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_type')  String? lastMsgType, @JsonKey(name: 'last_msg_body')  String? lastMsgBody, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId, @JsonKey(name: 'unread_count')  int? unreadCount, @JsonKey(name: 'is_online')  bool isRecipientOnline, @JsonKey(name: 'deleted_at')  String? deletedAt, @JsonKey(name: 'is_pinned')  bool isPinned, @JsonKey(name: 'is_muted')  bool isMuted, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'created_at')  String createdAt, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(name: 'chat_id')  String chatId, @JsonKey(name: 'recipient_id')  String recipientId, @JsonKey(name: 'recipient_name')  String recipientName, @JsonKey(name: 'recipient_phone')  String recipientPhone, @JsonKey(name: 'recipient_profile_pic')  String? recipientProfilePic, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_type')  String? lastMsgType, @JsonKey(name: 'last_msg_body')  String? lastMsgBody, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId, @JsonKey(name: 'unread_count')  int? unreadCount, @JsonKey(name: 'is_online')  bool isRecipientOnline, @JsonKey(name: 'deleted_at')  String? deletedAt, @JsonKey(name: 'pinned_at')  String? pinnedAt, @JsonKey(name: 'is_muted')  bool isMuted, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'created_at')  String createdAt, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)?  $default,) {final _that = this;
 switch (_that) {
 case _DmModel() when $default != null:
-return $default(_that.chatId,_that.recipientId,_that.recipientName,_that.recipientPhone,_that.recipientProfilePic,_that.lastMsgId,_that.lastMsgType,_that.lastMsgBody,_that.lastMsgAt,_that.pinnedMsgId,_that.unreadCount,_that.isRecipientOnline,_that.deletedAt,_that.isPinned,_that.isMuted,_that.isFavorite,_that.createdAt,_that.disappearingAfterSec);case _:
+return $default(_that.chatId,_that.recipientId,_that.recipientName,_that.recipientPhone,_that.recipientProfilePic,_that.lastMsgId,_that.lastMsgType,_that.lastMsgBody,_that.lastMsgAt,_that.pinnedMsgId,_that.unreadCount,_that.isRecipientOnline,_that.deletedAt,_that.pinnedAt,_that.isMuted,_that.isFavorite,_that.createdAt,_that.disappearingAfterSec);case _:
   return null;
 
 }
@@ -539,8 +546,8 @@ return $default(_that.chatId,_that.recipientId,_that.recipientName,_that.recipie
 /// @nodoc
 @JsonSerializable()
 
-class _DmModel implements DmModel {
-  const _DmModel({@JsonKey(name: 'chat_id') required this.chatId, @JsonKey(name: 'recipient_id') required this.recipientId, @JsonKey(name: 'recipient_name') required this.recipientName, @JsonKey(name: 'recipient_phone') required this.recipientPhone, @JsonKey(name: 'recipient_profile_pic') this.recipientProfilePic, @JsonKey(name: 'last_msg_id') this.lastMsgId, @JsonKey(name: 'last_msg_type') this.lastMsgType, @JsonKey(name: 'last_msg_body') this.lastMsgBody, @JsonKey(name: 'last_msg_at') this.lastMsgAt, @JsonKey(name: 'pinned_msg_id') this.pinnedMsgId, @JsonKey(name: 'unread_count') this.unreadCount, @JsonKey(name: 'is_online') this.isRecipientOnline = false, @JsonKey(name: 'deleted_at') this.deletedAt, @JsonKey(name: 'is_pinned') this.isPinned = false, @JsonKey(name: 'is_muted') this.isMuted = false, @JsonKey(name: 'is_favorite') this.isFavorite = false, @JsonKey(name: 'created_at') required this.createdAt, @JsonKey(name: 'disappearing_after_sec') this.disappearingAfterSec});
+class _DmModel extends DmModel {
+  const _DmModel({@JsonKey(name: 'chat_id') required this.chatId, @JsonKey(name: 'recipient_id') required this.recipientId, @JsonKey(name: 'recipient_name') required this.recipientName, @JsonKey(name: 'recipient_phone') required this.recipientPhone, @JsonKey(name: 'recipient_profile_pic') this.recipientProfilePic, @JsonKey(name: 'last_msg_id') this.lastMsgId, @JsonKey(name: 'last_msg_type') this.lastMsgType, @JsonKey(name: 'last_msg_body') this.lastMsgBody, @JsonKey(name: 'last_msg_at') this.lastMsgAt, @JsonKey(name: 'pinned_msg_id') this.pinnedMsgId, @JsonKey(name: 'unread_count') this.unreadCount, @JsonKey(name: 'is_online') this.isRecipientOnline = false, @JsonKey(name: 'deleted_at') this.deletedAt, @JsonKey(name: 'pinned_at') this.pinnedAt, @JsonKey(name: 'is_muted') this.isMuted = false, @JsonKey(name: 'is_favorite') this.isFavorite = false, @JsonKey(name: 'created_at') required this.createdAt, @JsonKey(name: 'disappearing_after_sec') this.disappearingAfterSec}): super._();
   factory _DmModel.fromJson(Map<String, dynamic> json) => _$DmModelFromJson(json);
 
 @override@JsonKey(name: 'chat_id') final  String chatId;
@@ -556,7 +563,7 @@ class _DmModel implements DmModel {
 @override@JsonKey(name: 'unread_count') final  int? unreadCount;
 @override@JsonKey(name: 'is_online') final  bool isRecipientOnline;
 @override@JsonKey(name: 'deleted_at') final  String? deletedAt;
-@override@JsonKey(name: 'is_pinned') final  bool isPinned;
+@override@JsonKey(name: 'pinned_at') final  String? pinnedAt;
 @override@JsonKey(name: 'is_muted') final  bool isMuted;
 @override@JsonKey(name: 'is_favorite') final  bool isFavorite;
 @override@JsonKey(name: 'created_at') final  String createdAt;
@@ -577,16 +584,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _DmModel&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.recipientId, recipientId) || other.recipientId == recipientId)&&(identical(other.recipientName, recipientName) || other.recipientName == recipientName)&&(identical(other.recipientPhone, recipientPhone) || other.recipientPhone == recipientPhone)&&(identical(other.recipientProfilePic, recipientProfilePic) || other.recipientProfilePic == recipientProfilePic)&&(identical(other.lastMsgId, lastMsgId) || other.lastMsgId == lastMsgId)&&(identical(other.lastMsgType, lastMsgType) || other.lastMsgType == lastMsgType)&&(identical(other.lastMsgBody, lastMsgBody) || other.lastMsgBody == lastMsgBody)&&(identical(other.lastMsgAt, lastMsgAt) || other.lastMsgAt == lastMsgAt)&&(identical(other.pinnedMsgId, pinnedMsgId) || other.pinnedMsgId == pinnedMsgId)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.isRecipientOnline, isRecipientOnline) || other.isRecipientOnline == isRecipientOnline)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt)&&(identical(other.isPinned, isPinned) || other.isPinned == isPinned)&&(identical(other.isMuted, isMuted) || other.isMuted == isMuted)&&(identical(other.isFavorite, isFavorite) || other.isFavorite == isFavorite)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.disappearingAfterSec, disappearingAfterSec) || other.disappearingAfterSec == disappearingAfterSec));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _DmModel&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.recipientId, recipientId) || other.recipientId == recipientId)&&(identical(other.recipientName, recipientName) || other.recipientName == recipientName)&&(identical(other.recipientPhone, recipientPhone) || other.recipientPhone == recipientPhone)&&(identical(other.recipientProfilePic, recipientProfilePic) || other.recipientProfilePic == recipientProfilePic)&&(identical(other.lastMsgId, lastMsgId) || other.lastMsgId == lastMsgId)&&(identical(other.lastMsgType, lastMsgType) || other.lastMsgType == lastMsgType)&&(identical(other.lastMsgBody, lastMsgBody) || other.lastMsgBody == lastMsgBody)&&(identical(other.lastMsgAt, lastMsgAt) || other.lastMsgAt == lastMsgAt)&&(identical(other.pinnedMsgId, pinnedMsgId) || other.pinnedMsgId == pinnedMsgId)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.isRecipientOnline, isRecipientOnline) || other.isRecipientOnline == isRecipientOnline)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt)&&(identical(other.pinnedAt, pinnedAt) || other.pinnedAt == pinnedAt)&&(identical(other.isMuted, isMuted) || other.isMuted == isMuted)&&(identical(other.isFavorite, isFavorite) || other.isFavorite == isFavorite)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.disappearingAfterSec, disappearingAfterSec) || other.disappearingAfterSec == disappearingAfterSec));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,chatId,recipientId,recipientName,recipientPhone,recipientProfilePic,lastMsgId,lastMsgType,lastMsgBody,lastMsgAt,pinnedMsgId,unreadCount,isRecipientOnline,deletedAt,isPinned,isMuted,isFavorite,createdAt,disappearingAfterSec);
+int get hashCode => Object.hash(runtimeType,chatId,recipientId,recipientName,recipientPhone,recipientProfilePic,lastMsgId,lastMsgType,lastMsgBody,lastMsgAt,pinnedMsgId,unreadCount,isRecipientOnline,deletedAt,pinnedAt,isMuted,isFavorite,createdAt,disappearingAfterSec);
 
 @override
 String toString() {
-  return 'DmModel(chatId: $chatId, recipientId: $recipientId, recipientName: $recipientName, recipientPhone: $recipientPhone, recipientProfilePic: $recipientProfilePic, lastMsgId: $lastMsgId, lastMsgType: $lastMsgType, lastMsgBody: $lastMsgBody, lastMsgAt: $lastMsgAt, pinnedMsgId: $pinnedMsgId, unreadCount: $unreadCount, isRecipientOnline: $isRecipientOnline, deletedAt: $deletedAt, isPinned: $isPinned, isMuted: $isMuted, isFavorite: $isFavorite, createdAt: $createdAt, disappearingAfterSec: $disappearingAfterSec)';
+  return 'DmModel(chatId: $chatId, recipientId: $recipientId, recipientName: $recipientName, recipientPhone: $recipientPhone, recipientProfilePic: $recipientProfilePic, lastMsgId: $lastMsgId, lastMsgType: $lastMsgType, lastMsgBody: $lastMsgBody, lastMsgAt: $lastMsgAt, pinnedMsgId: $pinnedMsgId, unreadCount: $unreadCount, isRecipientOnline: $isRecipientOnline, deletedAt: $deletedAt, pinnedAt: $pinnedAt, isMuted: $isMuted, isFavorite: $isFavorite, createdAt: $createdAt, disappearingAfterSec: $disappearingAfterSec)';
 }
 
 
@@ -597,7 +604,7 @@ abstract mixin class _$DmModelCopyWith<$Res> implements $DmModelCopyWith<$Res> {
   factory _$DmModelCopyWith(_DmModel value, $Res Function(_DmModel) _then) = __$DmModelCopyWithImpl;
 @override @useResult
 $Res call({
-@JsonKey(name: 'chat_id') String chatId,@JsonKey(name: 'recipient_id') String recipientId,@JsonKey(name: 'recipient_name') String recipientName,@JsonKey(name: 'recipient_phone') String recipientPhone,@JsonKey(name: 'recipient_profile_pic') String? recipientProfilePic,@JsonKey(name: 'last_msg_id') String? lastMsgId,@JsonKey(name: 'last_msg_type') String? lastMsgType,@JsonKey(name: 'last_msg_body') String? lastMsgBody,@JsonKey(name: 'last_msg_at') String? lastMsgAt,@JsonKey(name: 'pinned_msg_id') String? pinnedMsgId,@JsonKey(name: 'unread_count') int? unreadCount,@JsonKey(name: 'is_online') bool isRecipientOnline,@JsonKey(name: 'deleted_at') String? deletedAt,@JsonKey(name: 'is_pinned') bool isPinned,@JsonKey(name: 'is_muted') bool isMuted,@JsonKey(name: 'is_favorite') bool isFavorite,@JsonKey(name: 'created_at') String createdAt,@JsonKey(name: 'disappearing_after_sec') int? disappearingAfterSec
+@JsonKey(name: 'chat_id') String chatId,@JsonKey(name: 'recipient_id') String recipientId,@JsonKey(name: 'recipient_name') String recipientName,@JsonKey(name: 'recipient_phone') String recipientPhone,@JsonKey(name: 'recipient_profile_pic') String? recipientProfilePic,@JsonKey(name: 'last_msg_id') String? lastMsgId,@JsonKey(name: 'last_msg_type') String? lastMsgType,@JsonKey(name: 'last_msg_body') String? lastMsgBody,@JsonKey(name: 'last_msg_at') String? lastMsgAt,@JsonKey(name: 'pinned_msg_id') String? pinnedMsgId,@JsonKey(name: 'unread_count') int? unreadCount,@JsonKey(name: 'is_online') bool isRecipientOnline,@JsonKey(name: 'deleted_at') String? deletedAt,@JsonKey(name: 'pinned_at') String? pinnedAt,@JsonKey(name: 'is_muted') bool isMuted,@JsonKey(name: 'is_favorite') bool isFavorite,@JsonKey(name: 'created_at') String createdAt,@JsonKey(name: 'disappearing_after_sec') int? disappearingAfterSec
 });
 
 
@@ -614,7 +621,7 @@ class __$DmModelCopyWithImpl<$Res>
 
 /// Create a copy of DmModel
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? chatId = null,Object? recipientId = null,Object? recipientName = null,Object? recipientPhone = null,Object? recipientProfilePic = freezed,Object? lastMsgId = freezed,Object? lastMsgType = freezed,Object? lastMsgBody = freezed,Object? lastMsgAt = freezed,Object? pinnedMsgId = freezed,Object? unreadCount = freezed,Object? isRecipientOnline = null,Object? deletedAt = freezed,Object? isPinned = null,Object? isMuted = null,Object? isFavorite = null,Object? createdAt = null,Object? disappearingAfterSec = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? chatId = null,Object? recipientId = null,Object? recipientName = null,Object? recipientPhone = null,Object? recipientProfilePic = freezed,Object? lastMsgId = freezed,Object? lastMsgType = freezed,Object? lastMsgBody = freezed,Object? lastMsgAt = freezed,Object? pinnedMsgId = freezed,Object? unreadCount = freezed,Object? isRecipientOnline = null,Object? deletedAt = freezed,Object? pinnedAt = freezed,Object? isMuted = null,Object? isFavorite = null,Object? createdAt = null,Object? disappearingAfterSec = freezed,}) {
   return _then(_DmModel(
 chatId: null == chatId ? _self.chatId : chatId // ignore: cast_nullable_to_non_nullable
 as String,recipientId: null == recipientId ? _self.recipientId : recipientId // ignore: cast_nullable_to_non_nullable
@@ -629,8 +636,8 @@ as String?,pinnedMsgId: freezed == pinnedMsgId ? _self.pinnedMsgId : pinnedMsgId
 as String?,unreadCount: freezed == unreadCount ? _self.unreadCount : unreadCount // ignore: cast_nullable_to_non_nullable
 as int?,isRecipientOnline: null == isRecipientOnline ? _self.isRecipientOnline : isRecipientOnline // ignore: cast_nullable_to_non_nullable
 as bool,deletedAt: freezed == deletedAt ? _self.deletedAt : deletedAt // ignore: cast_nullable_to_non_nullable
-as String?,isPinned: null == isPinned ? _self.isPinned : isPinned // ignore: cast_nullable_to_non_nullable
-as bool,isMuted: null == isMuted ? _self.isMuted : isMuted // ignore: cast_nullable_to_non_nullable
+as String?,pinnedAt: freezed == pinnedAt ? _self.pinnedAt : pinnedAt // ignore: cast_nullable_to_non_nullable
+as String?,isMuted: null == isMuted ? _self.isMuted : isMuted // ignore: cast_nullable_to_non_nullable
 as bool,isFavorite: null == isFavorite ? _self.isFavorite : isFavorite // ignore: cast_nullable_to_non_nullable
 as bool,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
 as String,disappearingAfterSec: freezed == disappearingAfterSec ? _self.disappearingAfterSec : disappearingAfterSec // ignore: cast_nullable_to_non_nullable

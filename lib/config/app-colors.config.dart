@@ -101,13 +101,13 @@ class AppColors {
   /// Amber theme
   static const ColorTheme amber = ColorTheme(
     name: 'Amber',
-    primary: Color(0xFFFFC107), // Amber 500
-    primaryLight: Color(0xFFFFD54F), // Amber 300
-    primaryExtraLight: Color(0xFFFFECB3), // Amber 100
-    primaryPlusLight: Color(0xFFFFF2CA), // Amber — between 50 and 100
-    primaryUltraLight: Color(0xFFFFF8E1), // Amber 50
-    primaryDark: Color(0xFFFFA000), // Amber 700
-    accent: Color(0xFFFFCA28), // Amber 400
+    primary: Color(0xFF4a151f), // Amber 500
+    primaryLight: Color(0xFFa17c80), // Amber 300
+    primaryExtraLight: Color(0xFFb89c9f), // Amber 100
+    primaryPlusLight: Color(0xFFd4c3c5), // Amber — between 50 and 100
+    primaryUltraLight: Color(0xFFedddde), // Amber 50
+    primaryDark: Color(0xFF321016), // Amber 700
+    accent: Color(0xFF4f1c26), // Amber 400
   );
 
   /// Cyan theme

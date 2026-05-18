@@ -1521,6 +1521,17 @@ class $ChatsTable extends Chats with TableInfo<$ChatsTable, Chat> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _profilePicMeta = const VerificationMeta(
+    'profilePic',
+  );
+  @override
+  late final GeneratedColumn<String> profilePic = GeneratedColumn<String>(
+    'profile_pic',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createrIdMeta = const VerificationMeta(
     'createrId',
   );
@@ -1588,20 +1599,16 @@ class $ChatsTable extends Chats with TableInfo<$ChatsTable, Chat> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
-  static const VerificationMeta _isPinnedMeta = const VerificationMeta(
-    'isPinned',
+  static const VerificationMeta _pinnedAtMeta = const VerificationMeta(
+    'pinnedAt',
   );
   @override
-  late final GeneratedColumn<bool> isPinned = GeneratedColumn<bool>(
-    'is_pinned',
+  late final GeneratedColumn<String> pinnedAt = GeneratedColumn<String>(
+    'pinned_at',
     aliasedName,
-    false,
-    type: DriftSqlType.bool,
+    true,
+    type: DriftSqlType.string,
     requiredDuringInsert: false,
-    defaultConstraints: GeneratedColumn.constraintIsAlways(
-      'CHECK ("is_pinned" IN (0, 1))',
-    ),
-    defaultValue: const Constant(false),
   );
   static const VerificationMeta _isFavoriteMeta = const VerificationMeta(
     'isFavorite',
@@ -1685,13 +1692,14 @@ class $ChatsTable extends Chats with TableInfo<$ChatsTable, Chat> {
     id,
     type,
     title,
+    profilePic,
     createrId,
     unreadCount,
     lastMsgId,
     lastMsgAt,
     pinnedMsgId,
     deletedAt,
-    isPinned,
+    pinnedAt,
     isFavorite,
     isMuted,
     createdAt,
@@ -1728,6 +1736,12 @@ class $ChatsTable extends Chats with TableInfo<$ChatsTable, Chat> {
       context.handle(
         _titleMeta,
         title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    }
+    if (data.containsKey('profile_pic')) {
+      context.handle(
+        _profilePicMeta,
+        profilePic.isAcceptableOrUnknown(data['profile_pic']!, _profilePicMeta),
       );
     }
     if (data.containsKey('creater_id')) {
@@ -1772,10 +1786,10 @@ class $ChatsTable extends Chats with TableInfo<$ChatsTable, Chat> {
         deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
       );
     }
-    if (data.containsKey('is_pinned')) {
+    if (data.containsKey('pinned_at')) {
       context.handle(
-        _isPinnedMeta,
-        isPinned.isAcceptableOrUnknown(data['is_pinned']!, _isPinnedMeta),
+        _pinnedAtMeta,
+        pinnedAt.isAcceptableOrUnknown(data['pinned_at']!, _pinnedAtMeta),
       );
     }
     if (data.containsKey('is_favorite')) {
@@ -1838,6 +1852,10 @@ class $ChatsTable extends Chats with TableInfo<$ChatsTable, Chat> {
         DriftSqlType.string,
         data['${effectivePrefix}title'],
       ),
+      profilePic: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}profile_pic'],
+      ),
       createrId: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}creater_id'],
@@ -1862,10 +1880,10 @@ class $ChatsTable extends Chats with TableInfo<$ChatsTable, Chat> {
         DriftSqlType.string,
         data['${effectivePrefix}deleted_at'],
       ),
-      isPinned: attachedDatabase.typeMapping.read(
-        DriftSqlType.bool,
-        data['${effectivePrefix}is_pinned'],
-      )!,
+      pinnedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}pinned_at'],
+      ),
       isFavorite: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}is_favorite'],
@@ -1903,13 +1921,14 @@ class Chat extends DataClass implements Insertable<Chat> {
   final String id;
   final String type;
   final String? title;
+  final String? profilePic;
   final String? createrId;
   final int? unreadCount;
   final String? lastMsgId;
   final String? lastMsgAt;
   final String? pinnedMsgId;
   final String? deletedAt;
-  final bool isPinned;
+  final String? pinnedAt;
   final bool isFavorite;
   final bool isMuted;
   final String? createdAt;
@@ -1920,13 +1939,14 @@ class Chat extends DataClass implements Insertable<Chat> {
     required this.id,
     required this.type,
     this.title,
+    this.profilePic,
     this.createrId,
     this.unreadCount,
     this.lastMsgId,
     this.lastMsgAt,
     this.pinnedMsgId,
     this.deletedAt,
-    required this.isPinned,
+    this.pinnedAt,
     required this.isFavorite,
     required this.isMuted,
     this.createdAt,
@@ -1941,6 +1961,9 @@ class Chat extends DataClass implements Insertable<Chat> {
     map['type'] = Variable<String>(type);
     if (!nullToAbsent || title != null) {
       map['title'] = Variable<String>(title);
+    }
+    if (!nullToAbsent || profilePic != null) {
+      map['profile_pic'] = Variable<String>(profilePic);
     }
     if (!nullToAbsent || createrId != null) {
       map['creater_id'] = Variable<String>(createrId);
@@ -1960,7 +1983,9 @@ class Chat extends DataClass implements Insertable<Chat> {
     if (!nullToAbsent || deletedAt != null) {
       map['deleted_at'] = Variable<String>(deletedAt);
     }
-    map['is_pinned'] = Variable<bool>(isPinned);
+    if (!nullToAbsent || pinnedAt != null) {
+      map['pinned_at'] = Variable<String>(pinnedAt);
+    }
     map['is_favorite'] = Variable<bool>(isFavorite);
     map['is_muted'] = Variable<bool>(isMuted);
     if (!nullToAbsent || createdAt != null) {
@@ -1983,6 +2008,9 @@ class Chat extends DataClass implements Insertable<Chat> {
       title: title == null && nullToAbsent
           ? const Value.absent()
           : Value(title),
+      profilePic: profilePic == null && nullToAbsent
+          ? const Value.absent()
+          : Value(profilePic),
       createrId: createrId == null && nullToAbsent
           ? const Value.absent()
           : Value(createrId),
@@ -2001,7 +2029,9 @@ class Chat extends DataClass implements Insertable<Chat> {
       deletedAt: deletedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(deletedAt),
-      isPinned: Value(isPinned),
+      pinnedAt: pinnedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pinnedAt),
       isFavorite: Value(isFavorite),
       isMuted: Value(isMuted),
       createdAt: createdAt == null && nullToAbsent
@@ -2026,13 +2056,14 @@ class Chat extends DataClass implements Insertable<Chat> {
       id: serializer.fromJson<String>(json['id']),
       type: serializer.fromJson<String>(json['type']),
       title: serializer.fromJson<String?>(json['title']),
+      profilePic: serializer.fromJson<String?>(json['profilePic']),
       createrId: serializer.fromJson<String?>(json['createrId']),
       unreadCount: serializer.fromJson<int?>(json['unreadCount']),
       lastMsgId: serializer.fromJson<String?>(json['lastMsgId']),
       lastMsgAt: serializer.fromJson<String?>(json['lastMsgAt']),
       pinnedMsgId: serializer.fromJson<String?>(json['pinnedMsgId']),
       deletedAt: serializer.fromJson<String?>(json['deletedAt']),
-      isPinned: serializer.fromJson<bool>(json['isPinned']),
+      pinnedAt: serializer.fromJson<String?>(json['pinnedAt']),
       isFavorite: serializer.fromJson<bool>(json['isFavorite']),
       isMuted: serializer.fromJson<bool>(json['isMuted']),
       createdAt: serializer.fromJson<String?>(json['createdAt']),
@@ -2050,13 +2081,14 @@ class Chat extends DataClass implements Insertable<Chat> {
       'id': serializer.toJson<String>(id),
       'type': serializer.toJson<String>(type),
       'title': serializer.toJson<String?>(title),
+      'profilePic': serializer.toJson<String?>(profilePic),
       'createrId': serializer.toJson<String?>(createrId),
       'unreadCount': serializer.toJson<int?>(unreadCount),
       'lastMsgId': serializer.toJson<String?>(lastMsgId),
       'lastMsgAt': serializer.toJson<String?>(lastMsgAt),
       'pinnedMsgId': serializer.toJson<String?>(pinnedMsgId),
       'deletedAt': serializer.toJson<String?>(deletedAt),
-      'isPinned': serializer.toJson<bool>(isPinned),
+      'pinnedAt': serializer.toJson<String?>(pinnedAt),
       'isFavorite': serializer.toJson<bool>(isFavorite),
       'isMuted': serializer.toJson<bool>(isMuted),
       'createdAt': serializer.toJson<String?>(createdAt),
@@ -2070,13 +2102,14 @@ class Chat extends DataClass implements Insertable<Chat> {
     String? id,
     String? type,
     Value<String?> title = const Value.absent(),
+    Value<String?> profilePic = const Value.absent(),
     Value<String?> createrId = const Value.absent(),
     Value<int?> unreadCount = const Value.absent(),
     Value<String?> lastMsgId = const Value.absent(),
     Value<String?> lastMsgAt = const Value.absent(),
     Value<String?> pinnedMsgId = const Value.absent(),
     Value<String?> deletedAt = const Value.absent(),
-    bool? isPinned,
+    Value<String?> pinnedAt = const Value.absent(),
     bool? isFavorite,
     bool? isMuted,
     Value<String?> createdAt = const Value.absent(),
@@ -2087,13 +2120,14 @@ class Chat extends DataClass implements Insertable<Chat> {
     id: id ?? this.id,
     type: type ?? this.type,
     title: title.present ? title.value : this.title,
+    profilePic: profilePic.present ? profilePic.value : this.profilePic,
     createrId: createrId.present ? createrId.value : this.createrId,
     unreadCount: unreadCount.present ? unreadCount.value : this.unreadCount,
     lastMsgId: lastMsgId.present ? lastMsgId.value : this.lastMsgId,
     lastMsgAt: lastMsgAt.present ? lastMsgAt.value : this.lastMsgAt,
     pinnedMsgId: pinnedMsgId.present ? pinnedMsgId.value : this.pinnedMsgId,
     deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
-    isPinned: isPinned ?? this.isPinned,
+    pinnedAt: pinnedAt.present ? pinnedAt.value : this.pinnedAt,
     isFavorite: isFavorite ?? this.isFavorite,
     isMuted: isMuted ?? this.isMuted,
     createdAt: createdAt.present ? createdAt.value : this.createdAt,
@@ -2108,6 +2142,9 @@ class Chat extends DataClass implements Insertable<Chat> {
       id: data.id.present ? data.id.value : this.id,
       type: data.type.present ? data.type.value : this.type,
       title: data.title.present ? data.title.value : this.title,
+      profilePic: data.profilePic.present
+          ? data.profilePic.value
+          : this.profilePic,
       createrId: data.createrId.present ? data.createrId.value : this.createrId,
       unreadCount: data.unreadCount.present
           ? data.unreadCount.value
@@ -2118,7 +2155,7 @@ class Chat extends DataClass implements Insertable<Chat> {
           ? data.pinnedMsgId.value
           : this.pinnedMsgId,
       deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
-      isPinned: data.isPinned.present ? data.isPinned.value : this.isPinned,
+      pinnedAt: data.pinnedAt.present ? data.pinnedAt.value : this.pinnedAt,
       isFavorite: data.isFavorite.present
           ? data.isFavorite.value
           : this.isFavorite,
@@ -2138,13 +2175,14 @@ class Chat extends DataClass implements Insertable<Chat> {
           ..write('id: $id, ')
           ..write('type: $type, ')
           ..write('title: $title, ')
+          ..write('profilePic: $profilePic, ')
           ..write('createrId: $createrId, ')
           ..write('unreadCount: $unreadCount, ')
           ..write('lastMsgId: $lastMsgId, ')
           ..write('lastMsgAt: $lastMsgAt, ')
           ..write('pinnedMsgId: $pinnedMsgId, ')
           ..write('deletedAt: $deletedAt, ')
-          ..write('isPinned: $isPinned, ')
+          ..write('pinnedAt: $pinnedAt, ')
           ..write('isFavorite: $isFavorite, ')
           ..write('isMuted: $isMuted, ')
           ..write('createdAt: $createdAt, ')
@@ -2160,13 +2198,14 @@ class Chat extends DataClass implements Insertable<Chat> {
     id,
     type,
     title,
+    profilePic,
     createrId,
     unreadCount,
     lastMsgId,
     lastMsgAt,
     pinnedMsgId,
     deletedAt,
-    isPinned,
+    pinnedAt,
     isFavorite,
     isMuted,
     createdAt,
@@ -2181,13 +2220,14 @@ class Chat extends DataClass implements Insertable<Chat> {
           other.id == this.id &&
           other.type == this.type &&
           other.title == this.title &&
+          other.profilePic == this.profilePic &&
           other.createrId == this.createrId &&
           other.unreadCount == this.unreadCount &&
           other.lastMsgId == this.lastMsgId &&
           other.lastMsgAt == this.lastMsgAt &&
           other.pinnedMsgId == this.pinnedMsgId &&
           other.deletedAt == this.deletedAt &&
-          other.isPinned == this.isPinned &&
+          other.pinnedAt == this.pinnedAt &&
           other.isFavorite == this.isFavorite &&
           other.isMuted == this.isMuted &&
           other.createdAt == this.createdAt &&
@@ -2200,13 +2240,14 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
   final Value<String> id;
   final Value<String> type;
   final Value<String?> title;
+  final Value<String?> profilePic;
   final Value<String?> createrId;
   final Value<int?> unreadCount;
   final Value<String?> lastMsgId;
   final Value<String?> lastMsgAt;
   final Value<String?> pinnedMsgId;
   final Value<String?> deletedAt;
-  final Value<bool> isPinned;
+  final Value<String?> pinnedAt;
   final Value<bool> isFavorite;
   final Value<bool> isMuted;
   final Value<String?> createdAt;
@@ -2218,13 +2259,14 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     this.id = const Value.absent(),
     this.type = const Value.absent(),
     this.title = const Value.absent(),
+    this.profilePic = const Value.absent(),
     this.createrId = const Value.absent(),
     this.unreadCount = const Value.absent(),
     this.lastMsgId = const Value.absent(),
     this.lastMsgAt = const Value.absent(),
     this.pinnedMsgId = const Value.absent(),
     this.deletedAt = const Value.absent(),
-    this.isPinned = const Value.absent(),
+    this.pinnedAt = const Value.absent(),
     this.isFavorite = const Value.absent(),
     this.isMuted = const Value.absent(),
     this.createdAt = const Value.absent(),
@@ -2237,13 +2279,14 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     required String id,
     required String type,
     this.title = const Value.absent(),
+    this.profilePic = const Value.absent(),
     this.createrId = const Value.absent(),
     this.unreadCount = const Value.absent(),
     this.lastMsgId = const Value.absent(),
     this.lastMsgAt = const Value.absent(),
     this.pinnedMsgId = const Value.absent(),
     this.deletedAt = const Value.absent(),
-    this.isPinned = const Value.absent(),
+    this.pinnedAt = const Value.absent(),
     this.isFavorite = const Value.absent(),
     this.isMuted = const Value.absent(),
     this.createdAt = const Value.absent(),
@@ -2257,13 +2300,14 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     Expression<String>? id,
     Expression<String>? type,
     Expression<String>? title,
+    Expression<String>? profilePic,
     Expression<String>? createrId,
     Expression<int>? unreadCount,
     Expression<String>? lastMsgId,
     Expression<String>? lastMsgAt,
     Expression<String>? pinnedMsgId,
     Expression<String>? deletedAt,
-    Expression<bool>? isPinned,
+    Expression<String>? pinnedAt,
     Expression<bool>? isFavorite,
     Expression<bool>? isMuted,
     Expression<String>? createdAt,
@@ -2276,13 +2320,14 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
       if (id != null) 'id': id,
       if (type != null) 'type': type,
       if (title != null) 'title': title,
+      if (profilePic != null) 'profile_pic': profilePic,
       if (createrId != null) 'creater_id': createrId,
       if (unreadCount != null) 'unread_count': unreadCount,
       if (lastMsgId != null) 'last_msg_id': lastMsgId,
       if (lastMsgAt != null) 'last_msg_at': lastMsgAt,
       if (pinnedMsgId != null) 'pinned_msg_id': pinnedMsgId,
       if (deletedAt != null) 'deleted_at': deletedAt,
-      if (isPinned != null) 'is_pinned': isPinned,
+      if (pinnedAt != null) 'pinned_at': pinnedAt,
       if (isFavorite != null) 'is_favorite': isFavorite,
       if (isMuted != null) 'is_muted': isMuted,
       if (createdAt != null) 'created_at': createdAt,
@@ -2298,13 +2343,14 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     Value<String>? id,
     Value<String>? type,
     Value<String?>? title,
+    Value<String?>? profilePic,
     Value<String?>? createrId,
     Value<int?>? unreadCount,
     Value<String?>? lastMsgId,
     Value<String?>? lastMsgAt,
     Value<String?>? pinnedMsgId,
     Value<String?>? deletedAt,
-    Value<bool>? isPinned,
+    Value<String?>? pinnedAt,
     Value<bool>? isFavorite,
     Value<bool>? isMuted,
     Value<String?>? createdAt,
@@ -2317,13 +2363,14 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
       id: id ?? this.id,
       type: type ?? this.type,
       title: title ?? this.title,
+      profilePic: profilePic ?? this.profilePic,
       createrId: createrId ?? this.createrId,
       unreadCount: unreadCount ?? this.unreadCount,
       lastMsgId: lastMsgId ?? this.lastMsgId,
       lastMsgAt: lastMsgAt ?? this.lastMsgAt,
       pinnedMsgId: pinnedMsgId ?? this.pinnedMsgId,
       deletedAt: deletedAt ?? this.deletedAt,
-      isPinned: isPinned ?? this.isPinned,
+      pinnedAt: pinnedAt ?? this.pinnedAt,
       isFavorite: isFavorite ?? this.isFavorite,
       isMuted: isMuted ?? this.isMuted,
       createdAt: createdAt ?? this.createdAt,
@@ -2346,6 +2393,9 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     if (title.present) {
       map['title'] = Variable<String>(title.value);
     }
+    if (profilePic.present) {
+      map['profile_pic'] = Variable<String>(profilePic.value);
+    }
     if (createrId.present) {
       map['creater_id'] = Variable<String>(createrId.value);
     }
@@ -2364,8 +2414,8 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     if (deletedAt.present) {
       map['deleted_at'] = Variable<String>(deletedAt.value);
     }
-    if (isPinned.present) {
-      map['is_pinned'] = Variable<bool>(isPinned.value);
+    if (pinnedAt.present) {
+      map['pinned_at'] = Variable<String>(pinnedAt.value);
     }
     if (isFavorite.present) {
       map['is_favorite'] = Variable<bool>(isFavorite.value);
@@ -2397,13 +2447,14 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
           ..write('id: $id, ')
           ..write('type: $type, ')
           ..write('title: $title, ')
+          ..write('profilePic: $profilePic, ')
           ..write('createrId: $createrId, ')
           ..write('unreadCount: $unreadCount, ')
           ..write('lastMsgId: $lastMsgId, ')
           ..write('lastMsgAt: $lastMsgAt, ')
           ..write('pinnedMsgId: $pinnedMsgId, ')
           ..write('deletedAt: $deletedAt, ')
-          ..write('isPinned: $isPinned, ')
+          ..write('pinnedAt: $pinnedAt, ')
           ..write('isFavorite: $isFavorite, ')
           ..write('isMuted: $isMuted, ')
           ..write('createdAt: $createdAt, ')
@@ -5158,13 +5209,14 @@ typedef $$ChatsTableCreateCompanionBuilder =
       required String id,
       required String type,
       Value<String?> title,
+      Value<String?> profilePic,
       Value<String?> createrId,
       Value<int?> unreadCount,
       Value<String?> lastMsgId,
       Value<String?> lastMsgAt,
       Value<String?> pinnedMsgId,
       Value<String?> deletedAt,
-      Value<bool> isPinned,
+      Value<String?> pinnedAt,
       Value<bool> isFavorite,
       Value<bool> isMuted,
       Value<String?> createdAt,
@@ -5178,13 +5230,14 @@ typedef $$ChatsTableUpdateCompanionBuilder =
       Value<String> id,
       Value<String> type,
       Value<String?> title,
+      Value<String?> profilePic,
       Value<String?> createrId,
       Value<int?> unreadCount,
       Value<String?> lastMsgId,
       Value<String?> lastMsgAt,
       Value<String?> pinnedMsgId,
       Value<String?> deletedAt,
-      Value<bool> isPinned,
+      Value<String?> pinnedAt,
       Value<bool> isFavorite,
       Value<bool> isMuted,
       Value<String?> createdAt,
@@ -5214,6 +5267,11 @@ class $$ChatsTableFilterComposer extends Composer<_$AppDatabase, $ChatsTable> {
 
   ColumnFilters<String> get title => $composableBuilder(
     column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get profilePic => $composableBuilder(
+    column: $table.profilePic,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5247,8 +5305,8 @@ class $$ChatsTableFilterComposer extends Composer<_$AppDatabase, $ChatsTable> {
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<bool> get isPinned => $composableBuilder(
-    column: $table.isPinned,
+  ColumnFilters<String> get pinnedAt => $composableBuilder(
+    column: $table.pinnedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5307,6 +5365,11 @@ class $$ChatsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get profilePic => $composableBuilder(
+    column: $table.profilePic,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get createrId => $composableBuilder(
     column: $table.createrId,
     builder: (column) => ColumnOrderings(column),
@@ -5337,8 +5400,8 @@ class $$ChatsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<bool> get isPinned => $composableBuilder(
-    column: $table.isPinned,
+  ColumnOrderings<String> get pinnedAt => $composableBuilder(
+    column: $table.pinnedAt,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -5391,6 +5454,11 @@ class $$ChatsTableAnnotationComposer
   GeneratedColumn<String> get title =>
       $composableBuilder(column: $table.title, builder: (column) => column);
 
+  GeneratedColumn<String> get profilePic => $composableBuilder(
+    column: $table.profilePic,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get createrId =>
       $composableBuilder(column: $table.createrId, builder: (column) => column);
 
@@ -5413,8 +5481,8 @@ class $$ChatsTableAnnotationComposer
   GeneratedColumn<String> get deletedAt =>
       $composableBuilder(column: $table.deletedAt, builder: (column) => column);
 
-  GeneratedColumn<bool> get isPinned =>
-      $composableBuilder(column: $table.isPinned, builder: (column) => column);
+  GeneratedColumn<String> get pinnedAt =>
+      $composableBuilder(column: $table.pinnedAt, builder: (column) => column);
 
   GeneratedColumn<bool> get isFavorite => $composableBuilder(
     column: $table.isFavorite,
@@ -5470,13 +5538,14 @@ class $$ChatsTableTableManager
                 Value<String> id = const Value.absent(),
                 Value<String> type = const Value.absent(),
                 Value<String?> title = const Value.absent(),
+                Value<String?> profilePic = const Value.absent(),
                 Value<String?> createrId = const Value.absent(),
                 Value<int?> unreadCount = const Value.absent(),
                 Value<String?> lastMsgId = const Value.absent(),
                 Value<String?> lastMsgAt = const Value.absent(),
                 Value<String?> pinnedMsgId = const Value.absent(),
                 Value<String?> deletedAt = const Value.absent(),
-                Value<bool> isPinned = const Value.absent(),
+                Value<String?> pinnedAt = const Value.absent(),
                 Value<bool> isFavorite = const Value.absent(),
                 Value<bool> isMuted = const Value.absent(),
                 Value<String?> createdAt = const Value.absent(),
@@ -5488,13 +5557,14 @@ class $$ChatsTableTableManager
                 id: id,
                 type: type,
                 title: title,
+                profilePic: profilePic,
                 createrId: createrId,
                 unreadCount: unreadCount,
                 lastMsgId: lastMsgId,
                 lastMsgAt: lastMsgAt,
                 pinnedMsgId: pinnedMsgId,
                 deletedAt: deletedAt,
-                isPinned: isPinned,
+                pinnedAt: pinnedAt,
                 isFavorite: isFavorite,
                 isMuted: isMuted,
                 createdAt: createdAt,
@@ -5508,13 +5578,14 @@ class $$ChatsTableTableManager
                 required String id,
                 required String type,
                 Value<String?> title = const Value.absent(),
+                Value<String?> profilePic = const Value.absent(),
                 Value<String?> createrId = const Value.absent(),
                 Value<int?> unreadCount = const Value.absent(),
                 Value<String?> lastMsgId = const Value.absent(),
                 Value<String?> lastMsgAt = const Value.absent(),
                 Value<String?> pinnedMsgId = const Value.absent(),
                 Value<String?> deletedAt = const Value.absent(),
-                Value<bool> isPinned = const Value.absent(),
+                Value<String?> pinnedAt = const Value.absent(),
                 Value<bool> isFavorite = const Value.absent(),
                 Value<bool> isMuted = const Value.absent(),
                 Value<String?> createdAt = const Value.absent(),
@@ -5526,13 +5597,14 @@ class $$ChatsTableTableManager
                 id: id,
                 type: type,
                 title: title,
+                profilePic: profilePic,
                 createrId: createrId,
                 unreadCount: unreadCount,
                 lastMsgId: lastMsgId,
                 lastMsgAt: lastMsgAt,
                 pinnedMsgId: pinnedMsgId,
                 deletedAt: deletedAt,
-                isPinned: isPinned,
+                pinnedAt: pinnedAt,
                 isFavorite: isFavorite,
                 isMuted: isMuted,
                 createdAt: createdAt,

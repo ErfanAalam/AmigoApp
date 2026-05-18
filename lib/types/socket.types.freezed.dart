@@ -2803,7 +2803,15 @@ as DateTime,
 /// @nodoc
 mixin _$ConversationActionPayload {
 
-@JsonKey(name: 'event_id') String get eventId;@JsonKey(name: 'conv_id') String get convId;@JsonKey(name: 'conv_type')@ChatTypeConverter() ChatType get convType;@ConversationActionTypeConverter() ConversationActionType get action; List<MembersType> get members;@JsonKey(name: 'actor_id') String? get actorId; String get message;@JsonKey(name: 'action_at') DateTime get actionAt;
+@JsonKey(name: 'event_id') String get eventId;@JsonKey(name: 'conv_id') String get convId;@JsonKey(name: 'conv_type')@ChatTypeConverter() ChatType get convType;@ConversationActionTypeConverter() ConversationActionType get action; List<MembersType> get members;@JsonKey(name: 'actor_id') String? get actorId; String get message;@JsonKey(name: 'action_at') DateTime get actionAt;// chat_details:update fields. Only set when at least one of title /
+// profilePic changed. profilePic == null with profilePicChanged = true
+// means the admin cleared the avatar.
+ String? get title;@JsonKey(name: 'profile_pic') String? get profilePic;// Previous profile pic URL — used as the key to evict the old image
+// from the on-disk CachedNetworkImage cache when the pfp changes.
+@JsonKey(name: 'previous_profile_pic') String? get previousProfilePic;// Explicit "pfp column was touched in this update" flag. Needed because
+// profilePic == null can mean either "cleared" or "absent from payload",
+// and the on-the-wire JSON collapses those two cases.
+@JsonKey(name: 'profile_pic_changed') bool get profilePicChanged;
 /// Create a copy of ConversationActionPayload
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -2816,16 +2824,16 @@ $ConversationActionPayloadCopyWith<ConversationActionPayload> get copyWith => _$
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ConversationActionPayload&&(identical(other.eventId, eventId) || other.eventId == eventId)&&(identical(other.convId, convId) || other.convId == convId)&&(identical(other.convType, convType) || other.convType == convType)&&(identical(other.action, action) || other.action == action)&&const DeepCollectionEquality().equals(other.members, members)&&(identical(other.actorId, actorId) || other.actorId == actorId)&&(identical(other.message, message) || other.message == message)&&(identical(other.actionAt, actionAt) || other.actionAt == actionAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ConversationActionPayload&&(identical(other.eventId, eventId) || other.eventId == eventId)&&(identical(other.convId, convId) || other.convId == convId)&&(identical(other.convType, convType) || other.convType == convType)&&(identical(other.action, action) || other.action == action)&&const DeepCollectionEquality().equals(other.members, members)&&(identical(other.actorId, actorId) || other.actorId == actorId)&&(identical(other.message, message) || other.message == message)&&(identical(other.actionAt, actionAt) || other.actionAt == actionAt)&&(identical(other.title, title) || other.title == title)&&(identical(other.profilePic, profilePic) || other.profilePic == profilePic)&&(identical(other.previousProfilePic, previousProfilePic) || other.previousProfilePic == previousProfilePic)&&(identical(other.profilePicChanged, profilePicChanged) || other.profilePicChanged == profilePicChanged));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,eventId,convId,convType,action,const DeepCollectionEquality().hash(members),actorId,message,actionAt);
+int get hashCode => Object.hash(runtimeType,eventId,convId,convType,action,const DeepCollectionEquality().hash(members),actorId,message,actionAt,title,profilePic,previousProfilePic,profilePicChanged);
 
 @override
 String toString() {
-  return 'ConversationActionPayload(eventId: $eventId, convId: $convId, convType: $convType, action: $action, members: $members, actorId: $actorId, message: $message, actionAt: $actionAt)';
+  return 'ConversationActionPayload(eventId: $eventId, convId: $convId, convType: $convType, action: $action, members: $members, actorId: $actorId, message: $message, actionAt: $actionAt, title: $title, profilePic: $profilePic, previousProfilePic: $previousProfilePic, profilePicChanged: $profilePicChanged)';
 }
 
 
@@ -2836,7 +2844,7 @@ abstract mixin class $ConversationActionPayloadCopyWith<$Res>  {
   factory $ConversationActionPayloadCopyWith(ConversationActionPayload value, $Res Function(ConversationActionPayload) _then) = _$ConversationActionPayloadCopyWithImpl;
 @useResult
 $Res call({
-@JsonKey(name: 'event_id') String eventId,@JsonKey(name: 'conv_id') String convId,@JsonKey(name: 'conv_type')@ChatTypeConverter() ChatType convType,@ConversationActionTypeConverter() ConversationActionType action, List<MembersType> members,@JsonKey(name: 'actor_id') String? actorId, String message,@JsonKey(name: 'action_at') DateTime actionAt
+@JsonKey(name: 'event_id') String eventId,@JsonKey(name: 'conv_id') String convId,@JsonKey(name: 'conv_type')@ChatTypeConverter() ChatType convType,@ConversationActionTypeConverter() ConversationActionType action, List<MembersType> members,@JsonKey(name: 'actor_id') String? actorId, String message,@JsonKey(name: 'action_at') DateTime actionAt, String? title,@JsonKey(name: 'profile_pic') String? profilePic,@JsonKey(name: 'previous_profile_pic') String? previousProfilePic,@JsonKey(name: 'profile_pic_changed') bool profilePicChanged
 });
 
 
@@ -2853,7 +2861,7 @@ class _$ConversationActionPayloadCopyWithImpl<$Res>
 
 /// Create a copy of ConversationActionPayload
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? eventId = null,Object? convId = null,Object? convType = null,Object? action = null,Object? members = null,Object? actorId = freezed,Object? message = null,Object? actionAt = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? eventId = null,Object? convId = null,Object? convType = null,Object? action = null,Object? members = null,Object? actorId = freezed,Object? message = null,Object? actionAt = null,Object? title = freezed,Object? profilePic = freezed,Object? previousProfilePic = freezed,Object? profilePicChanged = null,}) {
   return _then(_self.copyWith(
 eventId: null == eventId ? _self.eventId : eventId // ignore: cast_nullable_to_non_nullable
 as String,convId: null == convId ? _self.convId : convId // ignore: cast_nullable_to_non_nullable
@@ -2863,7 +2871,11 @@ as ConversationActionType,members: null == members ? _self.members : members // 
 as List<MembersType>,actorId: freezed == actorId ? _self.actorId : actorId // ignore: cast_nullable_to_non_nullable
 as String?,message: null == message ? _self.message : message // ignore: cast_nullable_to_non_nullable
 as String,actionAt: null == actionAt ? _self.actionAt : actionAt // ignore: cast_nullable_to_non_nullable
-as DateTime,
+as DateTime,title: freezed == title ? _self.title : title // ignore: cast_nullable_to_non_nullable
+as String?,profilePic: freezed == profilePic ? _self.profilePic : profilePic // ignore: cast_nullable_to_non_nullable
+as String?,previousProfilePic: freezed == previousProfilePic ? _self.previousProfilePic : previousProfilePic // ignore: cast_nullable_to_non_nullable
+as String?,profilePicChanged: null == profilePicChanged ? _self.profilePicChanged : profilePicChanged // ignore: cast_nullable_to_non_nullable
+as bool,
   ));
 }
 
@@ -2948,10 +2960,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(name: 'event_id')  String eventId, @JsonKey(name: 'conv_id')  String convId, @JsonKey(name: 'conv_type')@ChatTypeConverter()  ChatType convType, @ConversationActionTypeConverter()  ConversationActionType action,  List<MembersType> members, @JsonKey(name: 'actor_id')  String? actorId,  String message, @JsonKey(name: 'action_at')  DateTime actionAt)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(name: 'event_id')  String eventId, @JsonKey(name: 'conv_id')  String convId, @JsonKey(name: 'conv_type')@ChatTypeConverter()  ChatType convType, @ConversationActionTypeConverter()  ConversationActionType action,  List<MembersType> members, @JsonKey(name: 'actor_id')  String? actorId,  String message, @JsonKey(name: 'action_at')  DateTime actionAt,  String? title, @JsonKey(name: 'profile_pic')  String? profilePic, @JsonKey(name: 'previous_profile_pic')  String? previousProfilePic, @JsonKey(name: 'profile_pic_changed')  bool profilePicChanged)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _ConversationActionPayload() when $default != null:
-return $default(_that.eventId,_that.convId,_that.convType,_that.action,_that.members,_that.actorId,_that.message,_that.actionAt);case _:
+return $default(_that.eventId,_that.convId,_that.convType,_that.action,_that.members,_that.actorId,_that.message,_that.actionAt,_that.title,_that.profilePic,_that.previousProfilePic,_that.profilePicChanged);case _:
   return orElse();
 
 }
@@ -2969,10 +2981,10 @@ return $default(_that.eventId,_that.convId,_that.convType,_that.action,_that.mem
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(name: 'event_id')  String eventId, @JsonKey(name: 'conv_id')  String convId, @JsonKey(name: 'conv_type')@ChatTypeConverter()  ChatType convType, @ConversationActionTypeConverter()  ConversationActionType action,  List<MembersType> members, @JsonKey(name: 'actor_id')  String? actorId,  String message, @JsonKey(name: 'action_at')  DateTime actionAt)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(name: 'event_id')  String eventId, @JsonKey(name: 'conv_id')  String convId, @JsonKey(name: 'conv_type')@ChatTypeConverter()  ChatType convType, @ConversationActionTypeConverter()  ConversationActionType action,  List<MembersType> members, @JsonKey(name: 'actor_id')  String? actorId,  String message, @JsonKey(name: 'action_at')  DateTime actionAt,  String? title, @JsonKey(name: 'profile_pic')  String? profilePic, @JsonKey(name: 'previous_profile_pic')  String? previousProfilePic, @JsonKey(name: 'profile_pic_changed')  bool profilePicChanged)  $default,) {final _that = this;
 switch (_that) {
 case _ConversationActionPayload():
-return $default(_that.eventId,_that.convId,_that.convType,_that.action,_that.members,_that.actorId,_that.message,_that.actionAt);case _:
+return $default(_that.eventId,_that.convId,_that.convType,_that.action,_that.members,_that.actorId,_that.message,_that.actionAt,_that.title,_that.profilePic,_that.previousProfilePic,_that.profilePicChanged);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -2989,10 +3001,10 @@ return $default(_that.eventId,_that.convId,_that.convType,_that.action,_that.mem
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(name: 'event_id')  String eventId, @JsonKey(name: 'conv_id')  String convId, @JsonKey(name: 'conv_type')@ChatTypeConverter()  ChatType convType, @ConversationActionTypeConverter()  ConversationActionType action,  List<MembersType> members, @JsonKey(name: 'actor_id')  String? actorId,  String message, @JsonKey(name: 'action_at')  DateTime actionAt)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(name: 'event_id')  String eventId, @JsonKey(name: 'conv_id')  String convId, @JsonKey(name: 'conv_type')@ChatTypeConverter()  ChatType convType, @ConversationActionTypeConverter()  ConversationActionType action,  List<MembersType> members, @JsonKey(name: 'actor_id')  String? actorId,  String message, @JsonKey(name: 'action_at')  DateTime actionAt,  String? title, @JsonKey(name: 'profile_pic')  String? profilePic, @JsonKey(name: 'previous_profile_pic')  String? previousProfilePic, @JsonKey(name: 'profile_pic_changed')  bool profilePicChanged)?  $default,) {final _that = this;
 switch (_that) {
 case _ConversationActionPayload() when $default != null:
-return $default(_that.eventId,_that.convId,_that.convType,_that.action,_that.members,_that.actorId,_that.message,_that.actionAt);case _:
+return $default(_that.eventId,_that.convId,_that.convType,_that.action,_that.members,_that.actorId,_that.message,_that.actionAt,_that.title,_that.profilePic,_that.previousProfilePic,_that.profilePicChanged);case _:
   return null;
 
 }
@@ -3004,7 +3016,7 @@ return $default(_that.eventId,_that.convId,_that.convType,_that.action,_that.mem
 @JsonSerializable()
 
 class _ConversationActionPayload implements ConversationActionPayload {
-  const _ConversationActionPayload({@JsonKey(name: 'event_id') required this.eventId, @JsonKey(name: 'conv_id') required this.convId, @JsonKey(name: 'conv_type')@ChatTypeConverter() required this.convType, @ConversationActionTypeConverter() required this.action, required final  List<MembersType> members, @JsonKey(name: 'actor_id') this.actorId, required this.message, @JsonKey(name: 'action_at') required this.actionAt}): _members = members;
+  const _ConversationActionPayload({@JsonKey(name: 'event_id') required this.eventId, @JsonKey(name: 'conv_id') required this.convId, @JsonKey(name: 'conv_type')@ChatTypeConverter() required this.convType, @ConversationActionTypeConverter() required this.action, final  List<MembersType> members = const <MembersType>[], @JsonKey(name: 'actor_id') this.actorId, required this.message, @JsonKey(name: 'action_at') required this.actionAt, this.title, @JsonKey(name: 'profile_pic') this.profilePic, @JsonKey(name: 'previous_profile_pic') this.previousProfilePic, @JsonKey(name: 'profile_pic_changed') this.profilePicChanged = false}): _members = members;
   factory _ConversationActionPayload.fromJson(Map<String, dynamic> json) => _$ConversationActionPayloadFromJson(json);
 
 @override@JsonKey(name: 'event_id') final  String eventId;
@@ -3012,7 +3024,7 @@ class _ConversationActionPayload implements ConversationActionPayload {
 @override@JsonKey(name: 'conv_type')@ChatTypeConverter() final  ChatType convType;
 @override@ConversationActionTypeConverter() final  ConversationActionType action;
  final  List<MembersType> _members;
-@override List<MembersType> get members {
+@override@JsonKey() List<MembersType> get members {
   if (_members is EqualUnmodifiableListView) return _members;
   // ignore: implicit_dynamic_type
   return EqualUnmodifiableListView(_members);
@@ -3021,6 +3033,18 @@ class _ConversationActionPayload implements ConversationActionPayload {
 @override@JsonKey(name: 'actor_id') final  String? actorId;
 @override final  String message;
 @override@JsonKey(name: 'action_at') final  DateTime actionAt;
+// chat_details:update fields. Only set when at least one of title /
+// profilePic changed. profilePic == null with profilePicChanged = true
+// means the admin cleared the avatar.
+@override final  String? title;
+@override@JsonKey(name: 'profile_pic') final  String? profilePic;
+// Previous profile pic URL — used as the key to evict the old image
+// from the on-disk CachedNetworkImage cache when the pfp changes.
+@override@JsonKey(name: 'previous_profile_pic') final  String? previousProfilePic;
+// Explicit "pfp column was touched in this update" flag. Needed because
+// profilePic == null can mean either "cleared" or "absent from payload",
+// and the on-the-wire JSON collapses those two cases.
+@override@JsonKey(name: 'profile_pic_changed') final  bool profilePicChanged;
 
 /// Create a copy of ConversationActionPayload
 /// with the given fields replaced by the non-null parameter values.
@@ -3035,16 +3059,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ConversationActionPayload&&(identical(other.eventId, eventId) || other.eventId == eventId)&&(identical(other.convId, convId) || other.convId == convId)&&(identical(other.convType, convType) || other.convType == convType)&&(identical(other.action, action) || other.action == action)&&const DeepCollectionEquality().equals(other._members, _members)&&(identical(other.actorId, actorId) || other.actorId == actorId)&&(identical(other.message, message) || other.message == message)&&(identical(other.actionAt, actionAt) || other.actionAt == actionAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ConversationActionPayload&&(identical(other.eventId, eventId) || other.eventId == eventId)&&(identical(other.convId, convId) || other.convId == convId)&&(identical(other.convType, convType) || other.convType == convType)&&(identical(other.action, action) || other.action == action)&&const DeepCollectionEquality().equals(other._members, _members)&&(identical(other.actorId, actorId) || other.actorId == actorId)&&(identical(other.message, message) || other.message == message)&&(identical(other.actionAt, actionAt) || other.actionAt == actionAt)&&(identical(other.title, title) || other.title == title)&&(identical(other.profilePic, profilePic) || other.profilePic == profilePic)&&(identical(other.previousProfilePic, previousProfilePic) || other.previousProfilePic == previousProfilePic)&&(identical(other.profilePicChanged, profilePicChanged) || other.profilePicChanged == profilePicChanged));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,eventId,convId,convType,action,const DeepCollectionEquality().hash(_members),actorId,message,actionAt);
+int get hashCode => Object.hash(runtimeType,eventId,convId,convType,action,const DeepCollectionEquality().hash(_members),actorId,message,actionAt,title,profilePic,previousProfilePic,profilePicChanged);
 
 @override
 String toString() {
-  return 'ConversationActionPayload(eventId: $eventId, convId: $convId, convType: $convType, action: $action, members: $members, actorId: $actorId, message: $message, actionAt: $actionAt)';
+  return 'ConversationActionPayload(eventId: $eventId, convId: $convId, convType: $convType, action: $action, members: $members, actorId: $actorId, message: $message, actionAt: $actionAt, title: $title, profilePic: $profilePic, previousProfilePic: $previousProfilePic, profilePicChanged: $profilePicChanged)';
 }
 
 
@@ -3055,7 +3079,7 @@ abstract mixin class _$ConversationActionPayloadCopyWith<$Res> implements $Conve
   factory _$ConversationActionPayloadCopyWith(_ConversationActionPayload value, $Res Function(_ConversationActionPayload) _then) = __$ConversationActionPayloadCopyWithImpl;
 @override @useResult
 $Res call({
-@JsonKey(name: 'event_id') String eventId,@JsonKey(name: 'conv_id') String convId,@JsonKey(name: 'conv_type')@ChatTypeConverter() ChatType convType,@ConversationActionTypeConverter() ConversationActionType action, List<MembersType> members,@JsonKey(name: 'actor_id') String? actorId, String message,@JsonKey(name: 'action_at') DateTime actionAt
+@JsonKey(name: 'event_id') String eventId,@JsonKey(name: 'conv_id') String convId,@JsonKey(name: 'conv_type')@ChatTypeConverter() ChatType convType,@ConversationActionTypeConverter() ConversationActionType action, List<MembersType> members,@JsonKey(name: 'actor_id') String? actorId, String message,@JsonKey(name: 'action_at') DateTime actionAt, String? title,@JsonKey(name: 'profile_pic') String? profilePic,@JsonKey(name: 'previous_profile_pic') String? previousProfilePic,@JsonKey(name: 'profile_pic_changed') bool profilePicChanged
 });
 
 
@@ -3072,7 +3096,7 @@ class __$ConversationActionPayloadCopyWithImpl<$Res>
 
 /// Create a copy of ConversationActionPayload
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? eventId = null,Object? convId = null,Object? convType = null,Object? action = null,Object? members = null,Object? actorId = freezed,Object? message = null,Object? actionAt = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? eventId = null,Object? convId = null,Object? convType = null,Object? action = null,Object? members = null,Object? actorId = freezed,Object? message = null,Object? actionAt = null,Object? title = freezed,Object? profilePic = freezed,Object? previousProfilePic = freezed,Object? profilePicChanged = null,}) {
   return _then(_ConversationActionPayload(
 eventId: null == eventId ? _self.eventId : eventId // ignore: cast_nullable_to_non_nullable
 as String,convId: null == convId ? _self.convId : convId // ignore: cast_nullable_to_non_nullable
@@ -3082,7 +3106,11 @@ as ConversationActionType,members: null == members ? _self._members : members //
 as List<MembersType>,actorId: freezed == actorId ? _self.actorId : actorId // ignore: cast_nullable_to_non_nullable
 as String?,message: null == message ? _self.message : message // ignore: cast_nullable_to_non_nullable
 as String,actionAt: null == actionAt ? _self.actionAt : actionAt // ignore: cast_nullable_to_non_nullable
-as DateTime,
+as DateTime,title: freezed == title ? _self.title : title // ignore: cast_nullable_to_non_nullable
+as String?,profilePic: freezed == profilePic ? _self.profilePic : profilePic // ignore: cast_nullable_to_non_nullable
+as String?,previousProfilePic: freezed == previousProfilePic ? _self.previousProfilePic : previousProfilePic // ignore: cast_nullable_to_non_nullable
+as String?,profilePicChanged: null == profilePicChanged ? _self.profilePicChanged : profilePicChanged // ignore: cast_nullable_to_non_nullable
+as bool,
   ));
 }
 

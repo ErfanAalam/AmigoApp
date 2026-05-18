@@ -56,8 +56,7 @@ Widget buildUploadingStatusTick(MessageModel message) {
 /// (config wiring for the [MessageBubble] widget), `buildMessageContent`
 /// (contact / media / text dispatch), and `buildSystemMessage`. Hosts plug
 /// in via the conversation-shape getters and a couple of helper hooks.
-mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
-    on ConsumerState<T> {
+mixin ChatBubbleMixin<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   // ---- Conversation-shape config ----
   bool get isGroupChat;
 
@@ -219,8 +218,12 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
                 message: message,
                 isMyMessage: isMyMessage,
                 replyIconBackgroundColor: themeColor.primary.withOpacity(0.8),
-                bubbleBuilder: () =>
-                    buildMessageBubble(message, isMyMessage, isPinned, isStarred),
+                bubbleBuilder: () => buildMessageBubble(
+                  message,
+                  isMyMessage,
+                  isPinned,
+                  isStarred,
+                ),
               ),
               if (selectedMessages.isNotEmpty)
                 Positioned(
@@ -271,10 +274,10 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Center(
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
           decoration: BoxDecoration(
-            color: Colors.grey[200],
-            borderRadius: BorderRadius.circular(16),
+            color: Colors.grey[50],
+            borderRadius: BorderRadius.circular(80),
           ),
           child: Text(
             message.body ?? '',
@@ -312,13 +315,11 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
         // Deleted messages always render as the placeholder text bubble — even
         // if the original was a media message — so force the non-media layout
         // for them.
-        isMediaMessage: (m) =>
-            !m.isDeleted && ChatHelpers.isMediaMessage(m),
+        isMediaMessage: (m) => !m.isDeleted && ChatHelpers.isMediaMessage(m),
         // Deleted messages keep the time but drop the delivery/read ticks —
         // the placeholder is a tombstone, not a live message.
-        buildMessageStatusTicks: (m) => m.isDeleted
-            ? const SizedBox.shrink()
-            : buildMessageStatusTicks(m),
+        buildMessageStatusTicks: (m) =>
+            m.isDeleted ? const SizedBox.shrink() : buildMessageStatusTicks(m),
         onResendFailedMessage: onResendFailedMessage,
         onDeleteFailedMessage: (messageId) async {
           if (canSetState) {
@@ -420,9 +421,7 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
       addAutomaticKeepAlives: false,
       addRepaintBoundaries: true,
       itemBuilder: (context, index) {
-        if (!isInJumpMode &&
-            isLoadingMore &&
-            index == displayMessages.length) {
+        if (!isInJumpMode && isLoadingMore && index == displayMessages.length) {
           return const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
             child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
@@ -453,7 +452,8 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
 
         final isMyMessage = message.senderId == currentUserId;
 
-        final showUnreadDivider = firstUnreadMessageId != null &&
+        final showUnreadDivider =
+            firstUnreadMessageId != null &&
             unreadAtOpen > 0 &&
             message.id == firstUnreadMessageId;
 
@@ -483,8 +483,7 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(100),
@@ -546,8 +545,9 @@ mixin ChatBubbleMixin<T extends ConsumerStatefulWidget>
         bottom: 8,
       ),
       child: Column(
-        crossAxisAlignment:
-            isMyMessage ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: isMyMessage
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: [
           if (ChatHelpers.shouldShowDateSeparator(
             displayMessages,

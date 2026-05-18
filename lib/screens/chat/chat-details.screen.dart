@@ -1,19 +1,23 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../api/api_service.dart';
 import '../../config/app-colors.config.dart';
 import '../../db/repositories/conversation-member.repo.dart';
 import '../../db/repositories/conversations.repo.dart';
 import '../../db/repositories/user.repo.dart';
+import '../../db/sqlite.schema.dart';
 import '../../models/conversations.model.dart';
 import '../../models/group.model.dart';
 import '../../models/user.model.dart';
 import '../../providers/chat.provider.dart';
+import '../../providers/message.provider.dart';
 import '../../providers/theme-color.provider.dart';
 import '../../services/socket/ws-message.handler.dart';
 import '../../services/user-status.service.dart';
@@ -67,10 +71,11 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
 
   // ─── State ───────────────────────────────────────────────────────────────
   bool _busy = false; // generic single-shot operation guard
+  bool _uploadingPfp = false; // group pfp upload in-flight
   UserModel? _recipientUser; // DMs
   UserModel? _currentUser;
   String? _creatorId;
-  String? _groupTitleOverride; // set after admin edits title
+  final ImagePicker _imagePicker = ImagePicker();
   List<Map<String, dynamic>> _members = const [];
 
   /// Active subscription to the Drift members stream — keeps the list
@@ -94,9 +99,32 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
   String get conversationId => widget.dm?.chatId ?? widget.group!.chatId;
   ChatType get chatType => isGroup ? ChatType.group : ChatType.dm;
 
-  String get _title {
-    if (isGroup) return _groupTitleOverride ?? widget.group!.title;
+  /// Title resolved against the live `chats` row when available — drops back
+  /// to the in-memory widget snapshot during the very first paint while the
+  /// stream is still loading. Reading off the row is what lets WS-driven
+  /// `chat_details:update` events update the hero text live.
+  ///
+  /// Non-reactive: getters use `ref.read`, so call sites in event handlers
+  /// (dialog text, snackbar messages) see the current value but don't
+  /// rebuild on change. The hero header in `build()` uses `ref.watch`
+  /// directly so it does redraw on every emit.
+  String _resolveTitle(Chat? live) {
+    if (isGroup) {
+      final liveTitle = live?.title;
+      if (liveTitle != null && liveTitle.isNotEmpty) return liveTitle;
+      return widget.group!.title;
+    }
     return _recipientUser?.displayName ?? widget.dm?.recipientName ?? 'Unknown';
+  }
+
+  String? _resolveGroupProfilePic(Chat? live) {
+    if (!isGroup) return null;
+    return live?.profilePic ?? widget.group?.profilePic;
+  }
+
+  String get _title {
+    final live = ref.read(chatByIdStreamProvider(conversationId)).value;
+    return _resolveTitle(live);
   }
 
   bool get _isCurrentUserAdmin {
@@ -871,7 +899,15 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
         conversationId: conversationId,
       )).toMap();
       if (res['success'] == true) {
-        if (mounted) setState(() => _groupTitleOverride = newTitle);
+        // Optimistic local DB write so the editor sees the new title even
+        // before the server's chat_details:update WS event lands. Drift
+        // watchers re-emit → AppBars / hero text repaint. The WS event is
+        // idempotent and writes the same value again.
+        try {
+          await _conversationRepo.updateChatTitle(conversationId, newTitle);
+        } catch (_) {
+          /* best-effort */
+        }
         TaskSnack.resolve(
           id: taskId,
           isSuccess: true,
@@ -888,6 +924,108 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
       TaskSnack.dismiss();
       Snack.error('Error updating name: $e');
     }
+  }
+
+  // ─── Group profile picture (admin only) ──────────────────────────────────
+
+  /// Show source picker and upload the chosen image as the group's avatar.
+  /// On success: optimistic local DB write for instant feedback, then the
+  /// chat_details:update WS event re-applies the change to every member's
+  /// local DB (idempotent).
+  Future<void> _pickAndUploadGroupPfp() async {
+    if (!isGroup || !_isCurrentUserAdmin || _uploadingPfp) return;
+    final source = await _showImageSourceSheet();
+    if (source == null) return;
+    final XFile? picked = await _imagePicker.pickImage(
+      source: source,
+      maxWidth: 512,
+      maxHeight: 512,
+      imageQuality: 85,
+    );
+    if (picked == null || !mounted) return;
+
+    setState(() => _uploadingPfp = true);
+    final taskId = TaskSnack.show(message: 'Updating group photo…');
+    try {
+      final res = await apiService.group.updateGroupProfileImage(
+        conversationId: conversationId,
+        image: File(picked.path),
+      );
+      final map = res.toMap();
+      if (map['success'] == true) {
+        final newUrl =
+            (map['data'] as Map<String, dynamic>?)?['profile_pic'] as String?;
+        // Optimistic local DB write — Drift watchers re-emit so the hero
+        // updates without waiting for the WS round-trip.
+        if (newUrl != null && newUrl.isNotEmpty) {
+          try {
+            await _conversationRepo.updateChatProfilePic(
+              conversationId,
+              newUrl,
+            );
+          } catch (_) {
+            /* best-effort */
+          }
+        }
+        TaskSnack.resolve(
+          id: taskId,
+          isSuccess: true,
+          message: 'Group photo updated',
+        );
+      } else {
+        TaskSnack.resolve(
+          id: taskId,
+          isSuccess: false,
+          message: map['message']?.toString() ?? 'Failed to update photo',
+        );
+      }
+    } catch (e) {
+      TaskSnack.dismiss();
+      Snack.error('Error updating photo: $e');
+    } finally {
+      if (mounted) setState(() => _uploadingPfp = false);
+    }
+  }
+
+  Future<ImageSource?> _showImageSourceSheet() {
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Choose from gallery'),
+                onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+              ),
+              ListTile(
+                leading: const Icon(Icons.camera_alt_outlined),
+                title: const Text('Take a photo'),
+                onTap: () => Navigator.pop(ctx, ImageSource.camera),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   // ─── Add Member sheet ────────────────────────────────────────────────────
@@ -1209,20 +1347,31 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
 
   Widget _buildHeroHeader(ColorTheme themeColor) {
     final subtitle = _heroSubtitle();
+    // Reactive read — the hero rebuilds when chat_details:update writes a
+    // new title/profilePic into local DB.
+    final liveChat = ref.watch(chatByIdStreamProvider(conversationId)).value;
+    final title = _resolveTitle(liveChat);
+    final groupPic = _resolveGroupProfilePic(liveChat);
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 4, 24, 4),
       child: Column(
         children: [
           _HeroAvatar(
-            title: _title,
+            title: title,
             isGroup: isGroup,
-            profilePic: !isGroup ? _recipientUser?.profilePic : null,
+            profilePic: isGroup ? groupPic : _recipientUser?.profilePic,
             color: themeColor.primary,
             highlight: themeColor.primaryLight,
+            // Editable only when the current user is a group admin. Tap
+            // opens the source sheet → upload → optimistic DB write.
+            onTap: (isGroup && _isCurrentUserAdmin)
+                ? (_uploadingPfp ? null : _pickAndUploadGroupPfp)
+                : null,
+            isUploading: _uploadingPfp,
           ),
           const SizedBox(height: 14),
           Text(
-            _title,
+            title,
             style: const TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.bold,
@@ -1692,6 +1841,10 @@ class _HeroAvatar extends StatelessWidget {
   final String? profilePic;
   final Color color;
   final Color highlight;
+  // Non-null only for admins of the current group — taps open the source
+  // sheet to pick/upload a new pfp. When null, the avatar is non-interactive.
+  final VoidCallback? onTap;
+  final bool isUploading;
 
   const _HeroAvatar({
     required this.title,
@@ -1699,12 +1852,14 @@ class _HeroAvatar extends StatelessWidget {
     required this.profilePic,
     required this.color,
     required this.highlight,
+    this.onTap,
+    this.isUploading = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final initials = _initials(title);
-    return Container(
+    final avatar = Container(
       width: 100,
       height: 100,
       decoration: BoxDecoration(
@@ -1732,6 +1887,70 @@ class _HeroAvatar extends StatelessWidget {
               ),
             )
           : _avatarText(initials),
+    );
+
+    final editable = onTap != null;
+    return SizedBox(
+      width: 108,
+      height: 108,
+      child: Stack(
+        alignment: Alignment.center,
+        clipBehavior: Clip.none,
+        children: [
+          // Tap target wraps the whole 100x100 avatar — Material+InkWell
+          // gives a subtle ripple for the admin tap affordance.
+          Material(
+            color: Colors.transparent,
+            shape: const CircleBorder(),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onTap,
+              customBorder: const CircleBorder(),
+              child: avatar,
+            ),
+          ),
+          if (isUploading)
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.black.withOpacity(0.35),
+              ),
+              alignment: Alignment.center,
+              child: const SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+            ),
+          if (editable && !isUploading)
+            Positioned(
+              right: 7,
+              bottom: 7,
+              child: Container(
+                width: 25,
+                height: 25,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.12),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
+                ),
+                child: Icon(Icons.camera_alt_rounded, size: 16, color: color),
+              ),
+            ),
+        ],
+      ),
     );
   }
 

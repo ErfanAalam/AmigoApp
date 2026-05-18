@@ -3,11 +3,13 @@ import 'dart:math';
 import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/db/repositories/user.repo.dart';
+import 'package:amigo/db/sqlite.schema.dart';
 import 'package:amigo/models/message.model.dart';
 import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:scroll_to_index/scroll_to_index.dart';
@@ -22,6 +24,7 @@ import '../../../models/user.model.dart';
 import '../../../providers/call.provider.dart';
 import '../../../providers/chat.provider.dart';
 import '../../../providers/draft.provider.dart';
+import '../../../providers/message.provider.dart';
 import '../../../providers/theme-color.provider.dart';
 import '../../../utils/message-recommendations.store.dart';
 import '../../../services/fcm/fcm-init.service.dart';
@@ -588,6 +591,19 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
         );
     final hasDisappearing = (liveGroup.disappearingAfterSec ?? 0) > 0;
 
+    // Live read of the underlying chat row — title and profilePic update
+    // here in real time whenever a chat_details:update WS event rewrites
+    // either column in local DB. Falls back to the widget snapshot during
+    // the first paint while the stream is still loading.
+    final liveChat = ref
+        .watch(chatByIdStreamProvider(widget.group.chatId))
+        .value;
+    final title = (liveChat?.title?.isNotEmpty ?? false)
+        ? liveChat!.title!
+        : widget.group.title;
+    final pfp = liveChat?.profilePic ?? widget.group.profilePic;
+    final hasPfp = pfp != null && pfp.isNotEmpty;
+
     return InkWell(
       borderRadius: BorderRadius.circular(14),
       onTap: () => Navigator.push(
@@ -606,16 +622,19 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                 CircleAvatar(
                   radius: 18,
                   backgroundColor: themeColor.primary.withAlpha(20),
-                  child: Text(
-                    widget.group.title.isNotEmpty
-                        ? widget.group.title[0].toUpperCase()
-                        : '?',
-                    style: TextStyle(
-                      color: themeColor.primary,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
+                  backgroundImage: hasPfp
+                      ? CachedNetworkImageProvider(pfp)
+                      : null,
+                  child: hasPfp
+                      ? null
+                      : Text(
+                          title.isNotEmpty ? title[0].toUpperCase() : '?',
+                          style: TextStyle(
+                            color: themeColor.primary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
                 ),
                 if (hasDisappearing)
                   Positioned(
@@ -634,7 +653,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    widget.group.title,
+                    title,
                     style: const TextStyle(
                       color: Colors.black,
                       fontWeight: FontWeight.bold,

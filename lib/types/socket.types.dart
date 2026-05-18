@@ -106,7 +106,11 @@ enum ConversationActionType {
   memberRemoved('member_removed'),
   memberPromoted('member_promoted'),
   memberDemoted('member_demoted'),
-  chatDelete('chat_delete');
+  chatDelete('chat_delete'),
+  // Group title or profile picture changed by an admin. Members list is
+  // empty for this action; the new title / profilePic / previousProfilePic
+  // fields on ConversationActionPayload describe the change.
+  chatDetailsUpdate('chat_details:update');
 
   final String value;
   const ConversationActionType(this.value);
@@ -374,10 +378,23 @@ abstract class ConversationActionPayload with _$ConversationActionPayload {
     @JsonKey(name: 'conv_id') required String convId,
     @JsonKey(name: 'conv_type') @ChatTypeConverter() required ChatType convType,
     @ConversationActionTypeConverter() required ConversationActionType action,
-    required List<MembersType> members,
+    @Default(<MembersType>[]) List<MembersType> members,
     @JsonKey(name: 'actor_id') String? actorId,
     required String message,
     @JsonKey(name: 'action_at') required DateTime actionAt,
+    // chat_details:update fields. Only set when at least one of title /
+    // profilePic changed. profilePic == null with profilePicChanged = true
+    // means the admin cleared the avatar.
+    String? title,
+    @JsonKey(name: 'profile_pic') String? profilePic,
+    // Previous profile pic URL — used as the key to evict the old image
+    // from the on-disk CachedNetworkImage cache when the pfp changes.
+    @JsonKey(name: 'previous_profile_pic') String? previousProfilePic,
+    // Explicit "pfp column was touched in this update" flag. Needed because
+    // profilePic == null can mean either "cleared" or "absent from payload",
+    // and the on-the-wire JSON collapses those two cases.
+    @JsonKey(name: 'profile_pic_changed') @Default(false)
+    bool profilePicChanged,
   }) = _ConversationActionPayload;
   factory ConversationActionPayload.fromJson(Map<String, dynamic> json) =>
       _$ConversationActionPayloadFromJson(json);
