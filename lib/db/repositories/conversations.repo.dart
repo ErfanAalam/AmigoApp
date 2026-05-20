@@ -76,7 +76,7 @@ class ConversationRepository {
       unreadCount: conv.unreadCount,
       deletedAt: conv.deletedAt,
       pinnedAt: conv.pinnedAt,
-      isMuted: conv.isMuted,
+      mutedUntil: conv.mutedUntil,
       isFavorite: conv.isFavorite,
       createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
       updatedAt: conv.updatedAt,
@@ -123,7 +123,7 @@ class ConversationRepository {
 
   /// Bulk insert conversations atomically. Uses InsertMode.insertOrIgnore so
   /// re-inserting an existing chat row preserves the user's local-only flags
-  /// (pinnedAt/isMuted/isFavorite) instead of being clobbered by server data
+  /// (pinnedAt/mutedUntil/isFavorite) instead of being clobbered by server data
   /// that doesn't carry them. db.batch wraps the whole thing in one
   /// transaction → one Drift watch emit, no partial loads, no per-row throws.
   Future<void> insertConversations(
@@ -147,7 +147,7 @@ class ConversationRepository {
           createdAt: Value(conv.createdAt),
           deletedAt: Value(conv.deletedAt),
           pinnedAt: Value(conv.pinnedAt),
-          isMuted: Value(conv.isMuted),
+          mutedUntil: Value(conv.mutedUntil),
           isFavorite: Value(conv.isFavorite),
           updatedAt: Value(conv.updatedAt),
           disappearingAfterSec: Value(conv.disappearingAfterSec),
@@ -218,7 +218,7 @@ class ConversationRepository {
       createdAt: Value(conversation.createdAt),
       deletedAt: Value(conversation.deletedAt),
       pinnedAt: Value(conversation.pinnedAt),
-      isMuted: Value(conversation.isMuted),
+      mutedUntil: Value(conversation.mutedUntil),
       isFavorite: Value(conversation.isFavorite),
       updatedAt: Value(
         conversation.updatedAt ?? DateTime.now().toIso8601String(),
@@ -349,16 +349,20 @@ class ConversationRepository {
     );
   }
 
-  /// Toggle mute status of a conversation
-  Future<void> toggleMute(String conversationId, bool isMuted) async {
+  /// Write the local mirror of muted_until for a conversation. The server is
+  /// the source of truth — callers must persist via the /chat/mute or
+  /// /chat/unmute API first and only land this row on success. Pass null to
+  /// clear the mute. Does NOT touch updatedAt: muting is not "activity" and
+  /// must not promote the chat in the list ordering.
+  Future<void> setLocalMutedUntil(
+    String conversationId,
+    String? mutedUntilIso,
+  ) async {
     final db = sqliteDatabase.database;
     await (db.update(
       db.chats,
     )..where((t) => t.id.equals(conversationId))).write(
-      ChatsCompanion(
-        isMuted: Value(isMuted),
-        updatedAt: Value(DateTime.now().toIso8601String()),
-      ),
+      ChatsCompanion(mutedUntil: Value(mutedUntilIso)),
     );
   }
 
@@ -554,7 +558,7 @@ class ConversationRepository {
               isRecipientOnline: recipientUser.isOnline,
               deletedAt: conv.deletedAt,
               pinnedAt: conv.pinnedAt,
-              isMuted: conv.isMuted,
+              mutedUntil: conv.mutedUntil,
               isFavorite: conv.isFavorite,
               createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
               disappearingAfterSec: conv.disappearingAfterSec,
@@ -595,6 +599,7 @@ class ConversationRepository {
             String? lastMessageType;
             String? lastMessageBody;
             String? lastMessageAt;
+            String? lastMessageSenderName;
             String? lastMsgId = conv.lastMsgId;
 
             if (conv.lastMsgId != null) {
@@ -610,6 +615,29 @@ class ConversationRepository {
                 );
                 lastMessageAt = lastMessage.sentAt;
                 lastMsgId = lastMessage.id;
+
+                // Resolve sender display name for the "Aman: hi" prefix the
+                // group list shows. Current user resolves to "You" so the row
+                // matches WhatsApp's familiar convention.
+                final senderId = lastMessage.senderId;
+                if (senderId != null && senderId.isNotEmpty) {
+                  if (currentUserInfo != null &&
+                      senderId == currentUserInfo.id) {
+                    lastMessageSenderName = 'You';
+                  } else {
+                    final senderUser = await (db.select(db.users)
+                          ..where((t) => t.id.equals(senderId)))
+                        .getSingleOrNull();
+                    final fullName =
+                        senderUser?.username ?? senderUser?.name;
+                    // Show only the first whitespace-separated word so the
+                    // list prefix stays short ("Aman: hi" instead of
+                    // "Aman Kumar Sharma: hi"). trim() first so a leading
+                    // space doesn't produce an empty first segment.
+                    lastMessageSenderName =
+                        fullName?.trim().split(RegExp(r'\s+')).first;
+                  }
+                }
               }
             }
 
@@ -628,10 +656,11 @@ class ConversationRepository {
               lastMsgType: lastMessageType,
               lastMsgBody: lastMessageBody,
               lastMsgAt: lastMessageAt,
+              lastMsgSenderName: lastMessageSenderName,
               role: currentUserMemberInfo?.role,
               unreadCount: conv.unreadCount ?? 0,
               pinnedAt: conv.pinnedAt,
-              isMuted: conv.isMuted,
+              mutedUntil: conv.mutedUntil,
               isFavorite: conv.isFavorite,
               joinedAt: currentUserMemberInfo?.joinedAt ??
                   DateTime.now().toIso8601String(),
@@ -731,7 +760,7 @@ class ConversationRepository {
         isRecipientOnline: recipientUser.isOnline,
         deletedAt: conv.deletedAt,
         pinnedAt: conv.pinnedAt,
-        isMuted: conv.isMuted,
+        mutedUntil: conv.mutedUntil,
         isFavorite: conv.isFavorite,
         createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
         disappearingAfterSec: conv.disappearingAfterSec,
@@ -829,7 +858,7 @@ class ConversationRepository {
         isRecipientOnline: recipientUser.isOnline,
         deletedAt: conv.deletedAt,
         pinnedAt: conv.pinnedAt,
-        isMuted: conv.isMuted,
+        mutedUntil: conv.mutedUntil,
         isFavorite: conv.isFavorite,
         createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
         disappearingAfterSec: conv.disappearingAfterSec,
@@ -915,7 +944,7 @@ class ConversationRepository {
       isRecipientOnline: recipientUser.isOnline,
       deletedAt: conv.deletedAt,
       pinnedAt: conv.pinnedAt,
-      isMuted: conv.isMuted,
+      mutedUntil: conv.mutedUntil,
       isFavorite: conv.isFavorite,
       createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
       disappearingAfterSec: conv.disappearingAfterSec,
@@ -991,7 +1020,7 @@ class ConversationRepository {
         role: currentUserMemberInfo?.role,
         unreadCount: conv.unreadCount ?? 0,
         pinnedAt: conv.pinnedAt,
-        isMuted: conv.isMuted,
+        mutedUntil: conv.mutedUntil,
         isFavorite: conv.isFavorite,
         joinedAt:
             currentUserMemberInfo?.joinedAt ?? DateTime.now().toIso8601String(),
@@ -1064,7 +1093,7 @@ class ConversationRepository {
       role: currentUserMemberInfo?.role,
       unreadCount: conv.unreadCount ?? 0,
       pinnedAt: conv.pinnedAt,
-      isMuted: conv.isMuted,
+      mutedUntil: conv.mutedUntil,
       isFavorite: conv.isFavorite,
       joinedAt:
           currentUserMemberInfo?.joinedAt ?? DateTime.now().toIso8601String(),
@@ -1214,7 +1243,7 @@ class ConversationRepository {
       role: currentUserMemberInfo?.role,
       unreadCount: conv.unreadCount ?? 0,
       pinnedAt: conv.pinnedAt,
-      isMuted: conv.isMuted,
+      mutedUntil: conv.mutedUntil,
       isFavorite: conv.isFavorite,
       joinedAt:
           currentUserMemberInfo?.joinedAt ?? DateTime.now().toIso8601String(),

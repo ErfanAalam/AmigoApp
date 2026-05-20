@@ -18,6 +18,7 @@ import '../../../ui/chat.action-sheet.dart';
 import '../../../ui/blurred-popup.widget.dart';
 import '../../../ui/chat/disappearing-timer-badge.widget.dart';
 import '../../../ui/chat/searchable-list.widget.dart';
+import '../../../utils/chat/mute-duration-picker.util.dart';
 import '../../../utils/route-transitions.util.dart';
 import 'community-group-list.screen.dart';
 import 'create-group.screen.dart';
@@ -120,9 +121,29 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
 
   /// Handle group chat action
   Future<void> _handleGroupChatAction(String action, GroupModel group) async {
+    // Mute → ask how long. Unmute → confirm first, telling the user when the
+    // chat would auto-unmute on its own.
+    DateTime? muteUntil;
+    if (action == 'mute') {
+      final choice = await showMuteDurationPicker(context);
+      if (choice == null || !mounted) return;
+      muteUntil = choice.until;
+    } else if (action == 'unmute') {
+      final confirmed = await showUnmuteConfirmation(
+        context: context,
+        mutedUntilIso: group.mutedUntil,
+      );
+      if (confirmed != true || !mounted) return;
+    }
+
     await ref
         .read(chatProvider.notifier)
-        .handleChatAction(action, group.chatId, ChatType.group);
+        .handleChatAction(
+          action,
+          group.chatId,
+          ChatType.group,
+          muteUntil: muteUntil,
+        );
   }
 
   // All state management and WebSocket handling is now done by groupListProvider
@@ -563,11 +584,18 @@ class GroupListItem extends ConsumerWidget {
       if (group.lastMsgId != null &&
           group.lastMsgAt != null &&
           group.lastMsgType != null) {
-        lastMessageText = _formatLastMessageText(
+        final body = _formatLastMessageText(
           group.lastMsgBody ?? '',
           group.lastMsgType,
           group.metadata?.lastMessage?.attachmentData,
         );
+        // Prefix the message with the sender's display name ("You" for the
+        // current user). Falls back to body-only when sender is unknown so
+        // legacy / FCM-restored rows without senderName still render.
+        final senderName = group.lastMsgSenderName;
+        lastMessageText = (senderName != null && senderName.isNotEmpty)
+            ? '$senderName: $body'
+            : body;
       }
     }
 
@@ -664,7 +692,7 @@ class GroupListItem extends ConsumerWidget {
                           ],
                           if (isMuted) ...[
                             Icon(
-                              Icons.volume_off,
+                              Icons.notifications_off_rounded,
                               size: 16,
                               color: Colors.grey[600],
                             ),

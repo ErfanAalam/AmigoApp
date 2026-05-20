@@ -114,6 +114,26 @@ class ChatClient extends BaseApiClient {
     );
   }
 
+  /// Mute a chat for the calling user. [until] = null = "forever" (the server
+  /// stores a far-future timestamp). Response carries the persisted
+  /// `muted_until` ISO timestamp that the caller should write to local state.
+  Future<ApiResult<dynamic>> muteChat({
+    required String conversationId,
+    DateTime? until,
+  }) async {
+    return post(
+      '/chat/mute/$conversationId',
+      data: {'until': until?.toUtc().toIso8601String()},
+    );
+  }
+
+  /// Unmute a chat for the calling user. Idempotent server-side.
+  Future<ApiResult<dynamic>> unmuteChat({
+    required String conversationId,
+  }) async {
+    return post('/chat/unmute/$conversationId');
+  }
+
   /// Mark message as delivered
   Future<ApiResult<dynamic>> markMessageDelivered({
     required String messageId,

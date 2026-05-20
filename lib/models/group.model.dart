@@ -17,13 +17,18 @@ abstract class GroupModel with _$GroupModel {
     @JsonKey(name: 'last_msg_type') String? lastMsgType,
     @JsonKey(name: 'last_msg_body') String? lastMsgBody,
     @JsonKey(name: 'last_msg_at') String? lastMsgAt,
+    // Display name of the user who sent the last message, or "You" when it
+    // was the current user. Populated by the Drift watch query so the group
+    // list can render a WhatsApp-style "Aman: hello" prefix.
+    @JsonKey(name: 'last_msg_sender_name') String? lastMsgSenderName,
     @JsonKey(name: 'pinned_msg_id') String? pinnedMsgId,
     String? role,
     @JsonKey(name: 'unread_count') @Default(0) int unreadCount,
     // Client-only pin-to-top. Null = unpinned. Pinned chats sort above
     // non-pinned chats by descending pinnedAt — most recently pinned first.
     @JsonKey(name: 'pinned_at') String? pinnedAt,
-    @JsonKey(name: 'is_muted') @Default(false) bool isMuted,
+    // Mirrors ChatModel.mutedUntil — see that doc-string. null = not muted.
+    @JsonKey(name: 'muted_until') String? mutedUntil,
     @JsonKey(name: 'is_favorite') @Default(false) bool isFavorite,
     @JsonKey(name: 'joined_at') @Default('') String joinedAt,
     // Disappearing-messages duration in seconds; null = off. Mirrors the
@@ -45,11 +50,13 @@ abstract class GroupModel with _$GroupModel {
       'last_msg_type': json['last_msg_type'] ?? json['lastMsgType'],
       'last_msg_body': json['last_msg_body'] ?? json['lastMsgBody'],
       'last_msg_at': json['last_msg_at'] ?? json['lastMsgAt'],
+      'last_msg_sender_name':
+          json['last_msg_sender_name'] ?? json['lastMsgSenderName'],
       'pinned_msg_id': json['pinned_msg_id'] ?? json['pinnedMsgId'],
       'role': json['role'],
       'unread_count': json['unread_count'] ?? json['unreadCount'] ?? 0,
       'pinned_at': json['pinned_at'] ?? json['pinnedAt'],
-      'is_muted': json['is_muted'] ?? json['isMuted'] ?? false,
+      'muted_until': json['muted_until'] ?? json['mutedUntil'],
       'is_favorite': json['is_favorite'] ?? json['isFavorite'] ?? false,
       'joined_at': json['joined_at'] ?? json['joinedAt'] ?? '',
       'disappearing_after_sec':
@@ -58,6 +65,12 @@ abstract class GroupModel with _$GroupModel {
   }
 
   bool get isPinned => pinnedAt != null;
+  bool get isMuted {
+    if (mutedUntil == null) return false;
+    final until = DateTime.tryParse(mutedUntil!);
+    if (until == null) return false;
+    return until.isAfter(DateTime.now().toUtc());
+  }
 
   int get memberCount => members?.length ?? 0;
 

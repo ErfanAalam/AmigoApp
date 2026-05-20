@@ -14,6 +14,7 @@ import '../db/repositories/message-status.repo.dart';
 import '../models/community.model.dart';
 import '../models/group.model.dart';
 import '../models/user.model.dart';
+import '../services/cookies.service.dart';
 import '../services/message/message_gc.service.dart';
 import '../services/message/status-ack.service.dart';
 import '../services/socket/ws-message.handler.dart';
@@ -272,6 +273,15 @@ class ChatNotifier extends Notifier<ChatState> {
 
   /// Load conversations from server
   Future<void> loadConvsFromServer({bool silent = true}) async {
+    // Skip when there are no auth cookies. logout() reads chatProvider.notifier
+    // to clear state, which lazily instantiates this provider and kicks off
+    // build()'s loadConvsFromServer microtask — at that moment cookies are
+    // already gone, and hitting /chat/list would 499→refresh→404→logout again.
+    if (!await CookieService().hasAuthCookies()) {
+      debugPrint('🔄 Skipping loadConvsFromServer (not authenticated)');
+      if (!silent) state = state.copyWith(isLoading: false);
+      return;
+    }
     if (!silent) {
       state = state.copyWith(isLoading: true);
     }
@@ -389,8 +399,30 @@ class ChatNotifier extends Notifier<ChatState> {
             debugPrint('❌ Error reconciling DM conversations to DB: $e');
           }
 
+          // Load client-only flags (pinnedAt, isFavorite) from local DB and
+          // merge them in. The server doesn't ship these fields at all, so
+          // without this merge the post-refresh in-memory state replaces
+          // them with the model defaults (pinnedAt=null, isFavorite=false)
+          // and screens that read from chatProvider.state (e.g. chat-details)
+          // forget the chat is pinned/favorite until app restart while
+          // offline. Mirrors the equivalent merge in the group flow.
+          final localDms = await _conversationsRepo.getConversationsByType(
+            ChatType.dm,
+          );
+          final localDmStatusMap = <String, ConversationModel>{
+            for (final c in localDms) c.id: c,
+          };
+          final mergedDmList = enrichedDmList.map((dm) {
+            final local = localDmStatusMap[dm.chatId];
+            if (local == null) return dm;
+            return dm.copyWith(
+              pinnedAt: local.pinnedAt,
+              isFavorite: local.isFavorite,
+            );
+          }).toList();
+
           // Update Provider state
-          final sortedDms = await filterAndSortConversations(enrichedDmList);
+          final sortedDms = await filterAndSortConversations(mergedDmList);
           debugPrint('✅ Processed ${sortedDms.length} DMs');
           state = state.copyWith(dmList: sortedDms, isLoading: false);
           debugPrint('✅ DMs state updated successfully');
@@ -457,7 +489,10 @@ class ChatNotifier extends Notifier<ChatState> {
                 pinnedMsgId: enrichedGroup.pinnedMsgId,
                 pinnedAt: null,
                 isFavorite: false,
-                isMuted: false,
+                // Mirror the server-parsed mute end so a freshly-inserted
+                // local row preserves the user's mute (insertOrIgnore won't
+                // overwrite an existing row's value).
+                mutedUntil: enrichedGroup.mutedUntil,
                 createdAt: groupModel.joinedAt,
                 disappearingAfterSec: enrichedGroup.disappearingAfterSec,
               );
@@ -530,7 +565,7 @@ class ChatNotifier extends Notifier<ChatState> {
           if (conv != null) {
             return group.copyWith(
               pinnedAt: conv.pinnedAt,
-              isMuted: conv.isMuted,
+              mutedUntil: conv.mutedUntil,
               isFavorite: conv.isFavorite,
             );
           }
@@ -630,6 +665,12 @@ class ChatNotifier extends Notifier<ChatState> {
                   lastMsgAt: lastMsg?['sent_at']?.toString() ?? json['lastMsgAt']?.toString(),
                   unreadCount: json['unreadCount'] is int ? json['unreadCount'] : 0,
                   isRecipientOnline: false,
+                  // Server-side mute end timestamp from chat_members. Without
+                  // this the post-refresh in-memory dmList drops the muted
+                  // state, and screens that read from chatProvider.state
+                  // (e.g. chat-details) flip back to "not muted" on app
+                  // restart even though the local DB has the right value.
+                  mutedUntil: json['mutedUntil']?.toString(),
                   createdAt: json['joinedAt']?.toString() ?? '',
                   disappearingAfterSec: json['disappearingAfterSec'] is int
                       ? json['disappearingAfterSec'] as int
@@ -711,7 +752,10 @@ class ChatNotifier extends Notifier<ChatState> {
                   // existing pin timestamp on rows that are already local.
                   pinnedAt: null,
                   isFavorite: json['isFavorite'] == true,
-                  isMuted: json['isMuted'] == true,
+                  // Server returns mutedUntil from chat_members for this user.
+                  // Null = not muted; far-future = "forever" (see MUTED_FOREVER
+                  // on the backend). The isMuted getter handles the now() check.
+                  mutedUntil: json['mutedUntil']?.toString(),
                   createdAt: json['joinedAt']?.toString(),
                   // Hydrate disappearing-messages setting on fresh login so the
                   // input-border / avatar-badge UI shows the correct state
@@ -991,12 +1035,18 @@ class ChatNotifier extends Notifier<ChatState> {
     }
   }
 
-  /// Handle chat action (pin, mute, favorite, delete)
+  /// Handle chat action (pin, mute, favorite, delete).
+  ///
+  /// [muteUntil] only applies when [action] == 'mute'. Pass an explicit UTC
+  /// timestamp for a time-limited mute, or null to mute forever (backend
+  /// stores that as a far-future date via MUTED_FOREVER). For 'unmute' and
+  /// every other action it's ignored.
   Future<void> handleChatAction(
     String action,
     String conversationId,
-    ChatType convType,
-  ) async {
+    ChatType convType, {
+    DateTime? muteUntil,
+  }) async {
     try {
       if (convType == ChatType.dm) {
         final convIndex = state.dmList.indexWhere(
@@ -1022,15 +1072,32 @@ class ChatNotifier extends Notifier<ChatState> {
             updatedConversation = conv.copyWith(pinnedAt: null);
             break;
           case 'mute':
-            await _conversationsRepo.toggleMute(conversationId, true);
-
-            updatedConversation = conv.copyWith(isMuted: !conv.isMuted);
-            break;
+            {
+              // Server is the source of truth. Round-trip first; on success,
+              // mirror the persisted muted_until into local Drift. The list
+              // stream reflects it via the isMuted getter on DmModel.
+              final res = await apiService.chat.muteChat(
+                conversationId: conversationId,
+                until: muteUntil, // null = forever
+              );
+              if (!res.isSuccess) break;
+              final until = (res.data is Map)
+                  ? (res.data as Map)['muted_until']?.toString()
+                  : null;
+              await _conversationsRepo.setLocalMutedUntil(conversationId, until);
+              updatedConversation = conv.copyWith(mutedUntil: until);
+              break;
+            }
           case 'unmute':
-            await _conversationsRepo.toggleMute(conversationId, false);
-
-            updatedConversation = conv.copyWith(isMuted: !conv.isMuted);
-            break;
+            {
+              final res = await apiService.chat.unmuteChat(
+                conversationId: conversationId,
+              );
+              if (!res.isSuccess) break;
+              await _conversationsRepo.setLocalMutedUntil(conversationId, null);
+              updatedConversation = conv.copyWith(mutedUntil: null);
+              break;
+            }
           case 'favorite':
             await _conversationsRepo.toggleFavorite(conversationId, true);
 
@@ -1086,15 +1153,29 @@ class ChatNotifier extends Notifier<ChatState> {
             updatedGroup = group.copyWith(pinnedAt: null);
             break;
           case 'mute':
-            await _conversationsRepo.toggleMute(conversationId, true);
-
-            updatedGroup = group.copyWith(isMuted: !group.isMuted);
-            break;
+            {
+              final res = await apiService.chat.muteChat(
+                conversationId: conversationId,
+                until: muteUntil, // null = forever
+              );
+              if (!res.isSuccess) break;
+              final until = (res.data is Map)
+                  ? (res.data as Map)['muted_until']?.toString()
+                  : null;
+              await _conversationsRepo.setLocalMutedUntil(conversationId, until);
+              updatedGroup = group.copyWith(mutedUntil: until);
+              break;
+            }
           case 'unmute':
-            await _conversationsRepo.toggleMute(conversationId, false);
-
-            updatedGroup = group.copyWith(isMuted: !group.isMuted);
-            break;
+            {
+              final res = await apiService.chat.unmuteChat(
+                conversationId: conversationId,
+              );
+              if (!res.isSuccess) break;
+              await _conversationsRepo.setLocalMutedUntil(conversationId, null);
+              updatedGroup = group.copyWith(mutedUntil: null);
+              break;
+            }
           case 'favorite':
             await _conversationsRepo.toggleFavorite(conversationId, true);
 
@@ -1750,7 +1831,6 @@ class ChatNotifier extends Notifier<ChatState> {
           isRecipientOnline: true,
           unreadCount: 0,
           isFavorite: false,
-          isMuted: false,
           createdAt: message.joinedAt.toIso8601String(),
         );
 
@@ -1761,7 +1841,6 @@ class ChatNotifier extends Notifier<ChatState> {
           unreadCount: 0,
           pinnedMsgId: null,
           isFavorite: false,
-          isMuted: false,
           createdAt: message.joinedAt.toIso8601String(),
         );
 
@@ -1801,7 +1880,6 @@ class ChatNotifier extends Notifier<ChatState> {
           title: message.title ?? 'New Group',
           unreadCount: 0,
           isFavorite: false,
-          isMuted: false,
           joinedAt: message.joinedAt.toIso8601String(),
         );
 
@@ -1813,7 +1891,6 @@ class ChatNotifier extends Notifier<ChatState> {
           unreadCount: 0,
           pinnedMsgId: null,
           isFavorite: false,
-          isMuted: false,
           createdAt: message.joinedAt.toIso8601String(),
         );
 

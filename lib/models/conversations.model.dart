@@ -22,7 +22,11 @@ abstract class ChatModel with _$ChatModel {
     // non-pinned chats by descending pinnedAt — most recently pinned first.
     @JsonKey(name: 'pinned_at') String? pinnedAt,
     @JsonKey(name: 'is_favorite') @Default(false) bool isFavorite,
-    @JsonKey(name: 'is_muted') @Default(false) bool isMuted,
+    // Per-user mute end time as ISO-8601 UTC. Null = not muted. Replaces the
+    // old client-only `is_muted` boolean. `isMuted` is now a computed getter
+    // that checks the timestamp against now() so expired mutes self-clear
+    // without a sweeper. See backend muted_until on chat_members.
+    @JsonKey(name: 'muted_until') String? mutedUntil,
     @JsonKey(name: 'created_at') String? createdAt,
     @JsonKey(name: 'updated_at') String? updatedAt,
     @JsonKey(name: 'need_sync') @Default(true) bool needSync,
@@ -35,6 +39,12 @@ abstract class ChatModel with _$ChatModel {
       _$ChatModelFromJson(json);
 
   bool get isPinned => pinnedAt != null;
+  bool get isMuted {
+    if (mutedUntil == null) return false;
+    final until = DateTime.tryParse(mutedUntil!);
+    if (until == null) return false;
+    return until.isAfter(DateTime.now().toUtc());
+  }
 }
 
 // Back-compat alias so the many screen/provider references keep compiling
@@ -60,7 +70,8 @@ abstract class DmModel with _$DmModel {
     @JsonKey(name: 'is_online') @Default(false) bool isRecipientOnline,
     @JsonKey(name: 'deleted_at') String? deletedAt,
     @JsonKey(name: 'pinned_at') String? pinnedAt,
-    @JsonKey(name: 'is_muted') @Default(false) bool isMuted,
+    // Mirrors ChatModel.mutedUntil — see that doc-string. null = not muted.
+    @JsonKey(name: 'muted_until') String? mutedUntil,
     @JsonKey(name: 'is_favorite') @Default(false) bool isFavorite,
     @JsonKey(name: 'created_at') required String createdAt,
     // Disappearing-messages duration in seconds; null = off. Mirrors the
@@ -72,6 +83,12 @@ abstract class DmModel with _$DmModel {
       _$DmModelFromJson(json);
 
   bool get isPinned => pinnedAt != null;
+  bool get isMuted {
+    if (mutedUntil == null) return false;
+    final until = DateTime.tryParse(mutedUntil!);
+    if (until == null) return false;
+    return until.isAfter(DateTime.now().toUtc());
+  }
 }
 
 @freezed
@@ -85,6 +102,10 @@ abstract class ChatMemberModel with _$ChatMemberModel {
     @JsonKey(name: 'removed_at') String? removedAt,
     @JsonKey(name: 'last_read_msg_id') String? lastReadMsgId,
     @JsonKey(name: 'last_delivered_msg_id') String? lastDeliveredMsgId,
+    // Per-user mute end time as ISO-8601. Returned by /chat/get-chat-members
+    // and on the chat-list payload (synced into the local chats table for
+    // the current user).
+    @JsonKey(name: 'muted_until') String? mutedUntil,
   }) = _ChatMemberModel;
 
   factory ChatMemberModel.fromJson(Map<String, dynamic> json) =>

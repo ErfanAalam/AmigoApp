@@ -74,7 +74,11 @@ class Chats extends Table {
   // first. Activity on a chat (new message etc.) cannot reshuffle pinned rows.
   TextColumn get pinnedAt => text().nullable()();
   BoolColumn get isFavorite => boolean().withDefault(const Constant(false))();
-  BoolColumn get isMuted => boolean().withDefault(const Constant(false))();
+  // Per-user mute end time as ISO-8601 UTC (mirrors chat_members.muted_until
+  // on the server). Null = not muted. A far-future timestamp ("forever") is
+  // produced by the backend's MUTED_FOREVER constant. UI / FCM handler treat
+  // muted = (mutedUntil != null && DateTime.parse(mutedUntil).isAfter(now)).
+  TextColumn get mutedUntil => text().nullable()();
   TextColumn get createdAt => text().nullable()();
   TextColumn get updatedAt => text().nullable()();
   BoolColumn get needSync => boolean().withDefault(const Constant(true))();
@@ -168,7 +172,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration {

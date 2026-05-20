@@ -20,6 +20,7 @@ import '../../api/api_service.dart';
 import '../../types/socket.types.dart';
 import '../../utils/user.utils.dart';
 import '../call/stream/stream_call.fcm.dart';
+import '../cookies.service.dart';
 import '../user-info-cache.service.dart';
 
 // import 'package:amigo/firebase_options.dart';
@@ -139,6 +140,15 @@ class NotificationService {
     _firebaseMessaging!.onTokenRefresh.listen((newToken) async {
       debugPrint('[FCM] Token refreshed');
       _fcmToken = newToken;
+      // On fresh install Firebase emits the initial token through this
+      // listener. Hitting an authenticated endpoint with no cookies trips
+      // the 499→refresh→404→logout cascade. The authenticated bootstrap
+      // (initializeAuthenticatedUser) explicitly uploads the token, so
+      // it's safe to skip here when there are no auth cookies.
+      if (!await CookieService().hasAuthCookies()) {
+        debugPrint('[FCM] Skipping refreshed-token upload (not authenticated)');
+        return;
+      }
       try {
         final result = await apiService.auth.updateFCMToken(newToken);
         if (result.isSuccess) {
@@ -426,13 +436,18 @@ class NotificationService {
 
     switch (notificationType) {
       case 'ws-message':
+        // Muted-chat signal — same contract as the background handler:
+        // `silent=1` means store the message but don't paint a notification.
+        final isSilent = data['silent'] == '1';
         // Parse the batch of ws_messages
         final wsMessages = _parseWSMessages(data);
         for (final wsMessage in wsMessages) {
           if (wsMessage.type == WSMessageType.messageNew) {
             final chatPayload = wsMessage.chatMessagePayload;
             if (chatPayload != null) {
-              _handleMessageNotification(notification, chatPayload);
+              if (!isSilent) {
+                _handleMessageNotification(notification, chatPayload);
+              }
               await _storeMessageFromPayload(chatPayload);
             }
           } else if (wsMessage.type == WSMessageType.messageDelete) {

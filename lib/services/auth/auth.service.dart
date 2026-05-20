@@ -37,6 +37,13 @@ class AuthService {
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
   final CookieService _cookieService = CookieService();
 
+  // Re-entry guard. Multiple subsystems (FCM, chat list loader, refresh-token
+  // interceptor, etc.) can each trip the auth-failure path concurrently on a
+  // fresh install. Without this, every concurrent failure runs the full
+  // teardown and pushes a new LoginScreen — visible as the login screen
+  // "warping" / popping in several times.
+  bool _isLoggingOut = false;
+
   /// Lazy getter for ApiService - only accessed after initialization
   ApiService get apiService => ApiService();
 
@@ -172,6 +179,19 @@ class AuthService {
 
   // Log out user
   Future<void> logout() async {
+    if (_isLoggingOut) {
+      debugPrint('🚪 Logout already in progress — skipping duplicate call');
+      return;
+    }
+    _isLoggingOut = true;
+    // Capture pre-logout auth state. If the user wasn't authenticated to
+    // begin with (fresh install, already-logged-out state), the MaterialApp
+    // `home:` builder is already rendering LoginScreen — pushing another
+    // one on top plays a redundant pop-in animation. Skip the push in that
+    // case.
+    final hadAuthState =
+        await _cookieService.hasAuthCookies() ||
+            (await _secureStorage.read(key: _authStatusKey)) == 'authenticated';
     try {
       debugPrint('🚪 Logging out user...');
       // Ensure websocket is fully shut down and won't auto-reconnect
@@ -325,8 +345,12 @@ class AuthService {
         }
       }
 
-      // 16. Restart the app
-      if (NavigationHelper.navigatorKey.currentContext != null) {
+      // 16. Restart the app — but only if the user actually had an auth
+      // session to log out of. On a fresh install the home: builder is
+      // already rendering LoginScreen, so pushing another one plays a
+      // redundant pop-in animation.
+      if (hadAuthState &&
+          NavigationHelper.navigatorKey.currentContext != null) {
         Navigator.pushAndRemoveUntil(
           NavigationHelper.navigatorKey.currentContext!,
           MaterialPageRoute(builder: (context) => const LoginScreen()),
@@ -336,6 +360,8 @@ class AuthService {
       debugPrint('✅ Logout process completed successfully');
     } catch (e) {
       debugPrint('❌ Error during logout');
+    } finally {
+      _isLoggingOut = false;
     }
   }
 

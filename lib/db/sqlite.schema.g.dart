@@ -1625,20 +1625,16 @@ class $ChatsTable extends Chats with TableInfo<$ChatsTable, Chat> {
     ),
     defaultValue: const Constant(false),
   );
-  static const VerificationMeta _isMutedMeta = const VerificationMeta(
-    'isMuted',
+  static const VerificationMeta _mutedUntilMeta = const VerificationMeta(
+    'mutedUntil',
   );
   @override
-  late final GeneratedColumn<bool> isMuted = GeneratedColumn<bool>(
-    'is_muted',
+  late final GeneratedColumn<String> mutedUntil = GeneratedColumn<String>(
+    'muted_until',
     aliasedName,
-    false,
-    type: DriftSqlType.bool,
+    true,
+    type: DriftSqlType.string,
     requiredDuringInsert: false,
-    defaultConstraints: GeneratedColumn.constraintIsAlways(
-      'CHECK ("is_muted" IN (0, 1))',
-    ),
-    defaultValue: const Constant(false),
   );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
@@ -1701,7 +1697,7 @@ class $ChatsTable extends Chats with TableInfo<$ChatsTable, Chat> {
     deletedAt,
     pinnedAt,
     isFavorite,
-    isMuted,
+    mutedUntil,
     createdAt,
     updatedAt,
     needSync,
@@ -1798,10 +1794,10 @@ class $ChatsTable extends Chats with TableInfo<$ChatsTable, Chat> {
         isFavorite.isAcceptableOrUnknown(data['is_favorite']!, _isFavoriteMeta),
       );
     }
-    if (data.containsKey('is_muted')) {
+    if (data.containsKey('muted_until')) {
       context.handle(
-        _isMutedMeta,
-        isMuted.isAcceptableOrUnknown(data['is_muted']!, _isMutedMeta),
+        _mutedUntilMeta,
+        mutedUntil.isAcceptableOrUnknown(data['muted_until']!, _mutedUntilMeta),
       );
     }
     if (data.containsKey('created_at')) {
@@ -1888,10 +1884,10 @@ class $ChatsTable extends Chats with TableInfo<$ChatsTable, Chat> {
         DriftSqlType.bool,
         data['${effectivePrefix}is_favorite'],
       )!,
-      isMuted: attachedDatabase.typeMapping.read(
-        DriftSqlType.bool,
-        data['${effectivePrefix}is_muted'],
-      )!,
+      mutedUntil: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}muted_until'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}created_at'],
@@ -1930,7 +1926,7 @@ class Chat extends DataClass implements Insertable<Chat> {
   final String? deletedAt;
   final String? pinnedAt;
   final bool isFavorite;
-  final bool isMuted;
+  final String? mutedUntil;
   final String? createdAt;
   final String? updatedAt;
   final bool needSync;
@@ -1948,7 +1944,7 @@ class Chat extends DataClass implements Insertable<Chat> {
     this.deletedAt,
     this.pinnedAt,
     required this.isFavorite,
-    required this.isMuted,
+    this.mutedUntil,
     this.createdAt,
     this.updatedAt,
     required this.needSync,
@@ -1987,7 +1983,9 @@ class Chat extends DataClass implements Insertable<Chat> {
       map['pinned_at'] = Variable<String>(pinnedAt);
     }
     map['is_favorite'] = Variable<bool>(isFavorite);
-    map['is_muted'] = Variable<bool>(isMuted);
+    if (!nullToAbsent || mutedUntil != null) {
+      map['muted_until'] = Variable<String>(mutedUntil);
+    }
     if (!nullToAbsent || createdAt != null) {
       map['created_at'] = Variable<String>(createdAt);
     }
@@ -2033,7 +2031,9 @@ class Chat extends DataClass implements Insertable<Chat> {
           ? const Value.absent()
           : Value(pinnedAt),
       isFavorite: Value(isFavorite),
-      isMuted: Value(isMuted),
+      mutedUntil: mutedUntil == null && nullToAbsent
+          ? const Value.absent()
+          : Value(mutedUntil),
       createdAt: createdAt == null && nullToAbsent
           ? const Value.absent()
           : Value(createdAt),
@@ -2065,7 +2065,7 @@ class Chat extends DataClass implements Insertable<Chat> {
       deletedAt: serializer.fromJson<String?>(json['deletedAt']),
       pinnedAt: serializer.fromJson<String?>(json['pinnedAt']),
       isFavorite: serializer.fromJson<bool>(json['isFavorite']),
-      isMuted: serializer.fromJson<bool>(json['isMuted']),
+      mutedUntil: serializer.fromJson<String?>(json['mutedUntil']),
       createdAt: serializer.fromJson<String?>(json['createdAt']),
       updatedAt: serializer.fromJson<String?>(json['updatedAt']),
       needSync: serializer.fromJson<bool>(json['needSync']),
@@ -2090,7 +2090,7 @@ class Chat extends DataClass implements Insertable<Chat> {
       'deletedAt': serializer.toJson<String?>(deletedAt),
       'pinnedAt': serializer.toJson<String?>(pinnedAt),
       'isFavorite': serializer.toJson<bool>(isFavorite),
-      'isMuted': serializer.toJson<bool>(isMuted),
+      'mutedUntil': serializer.toJson<String?>(mutedUntil),
       'createdAt': serializer.toJson<String?>(createdAt),
       'updatedAt': serializer.toJson<String?>(updatedAt),
       'needSync': serializer.toJson<bool>(needSync),
@@ -2111,7 +2111,7 @@ class Chat extends DataClass implements Insertable<Chat> {
     Value<String?> deletedAt = const Value.absent(),
     Value<String?> pinnedAt = const Value.absent(),
     bool? isFavorite,
-    bool? isMuted,
+    Value<String?> mutedUntil = const Value.absent(),
     Value<String?> createdAt = const Value.absent(),
     Value<String?> updatedAt = const Value.absent(),
     bool? needSync,
@@ -2129,7 +2129,7 @@ class Chat extends DataClass implements Insertable<Chat> {
     deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
     pinnedAt: pinnedAt.present ? pinnedAt.value : this.pinnedAt,
     isFavorite: isFavorite ?? this.isFavorite,
-    isMuted: isMuted ?? this.isMuted,
+    mutedUntil: mutedUntil.present ? mutedUntil.value : this.mutedUntil,
     createdAt: createdAt.present ? createdAt.value : this.createdAt,
     updatedAt: updatedAt.present ? updatedAt.value : this.updatedAt,
     needSync: needSync ?? this.needSync,
@@ -2159,7 +2159,9 @@ class Chat extends DataClass implements Insertable<Chat> {
       isFavorite: data.isFavorite.present
           ? data.isFavorite.value
           : this.isFavorite,
-      isMuted: data.isMuted.present ? data.isMuted.value : this.isMuted,
+      mutedUntil: data.mutedUntil.present
+          ? data.mutedUntil.value
+          : this.mutedUntil,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       needSync: data.needSync.present ? data.needSync.value : this.needSync,
@@ -2184,7 +2186,7 @@ class Chat extends DataClass implements Insertable<Chat> {
           ..write('deletedAt: $deletedAt, ')
           ..write('pinnedAt: $pinnedAt, ')
           ..write('isFavorite: $isFavorite, ')
-          ..write('isMuted: $isMuted, ')
+          ..write('mutedUntil: $mutedUntil, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('needSync: $needSync, ')
@@ -2207,7 +2209,7 @@ class Chat extends DataClass implements Insertable<Chat> {
     deletedAt,
     pinnedAt,
     isFavorite,
-    isMuted,
+    mutedUntil,
     createdAt,
     updatedAt,
     needSync,
@@ -2229,7 +2231,7 @@ class Chat extends DataClass implements Insertable<Chat> {
           other.deletedAt == this.deletedAt &&
           other.pinnedAt == this.pinnedAt &&
           other.isFavorite == this.isFavorite &&
-          other.isMuted == this.isMuted &&
+          other.mutedUntil == this.mutedUntil &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt &&
           other.needSync == this.needSync &&
@@ -2249,7 +2251,7 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
   final Value<String?> deletedAt;
   final Value<String?> pinnedAt;
   final Value<bool> isFavorite;
-  final Value<bool> isMuted;
+  final Value<String?> mutedUntil;
   final Value<String?> createdAt;
   final Value<String?> updatedAt;
   final Value<bool> needSync;
@@ -2268,7 +2270,7 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     this.deletedAt = const Value.absent(),
     this.pinnedAt = const Value.absent(),
     this.isFavorite = const Value.absent(),
-    this.isMuted = const Value.absent(),
+    this.mutedUntil = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.needSync = const Value.absent(),
@@ -2288,7 +2290,7 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     this.deletedAt = const Value.absent(),
     this.pinnedAt = const Value.absent(),
     this.isFavorite = const Value.absent(),
-    this.isMuted = const Value.absent(),
+    this.mutedUntil = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.needSync = const Value.absent(),
@@ -2309,7 +2311,7 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     Expression<String>? deletedAt,
     Expression<String>? pinnedAt,
     Expression<bool>? isFavorite,
-    Expression<bool>? isMuted,
+    Expression<String>? mutedUntil,
     Expression<String>? createdAt,
     Expression<String>? updatedAt,
     Expression<bool>? needSync,
@@ -2329,7 +2331,7 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
       if (deletedAt != null) 'deleted_at': deletedAt,
       if (pinnedAt != null) 'pinned_at': pinnedAt,
       if (isFavorite != null) 'is_favorite': isFavorite,
-      if (isMuted != null) 'is_muted': isMuted,
+      if (mutedUntil != null) 'muted_until': mutedUntil,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (needSync != null) 'need_sync': needSync,
@@ -2352,7 +2354,7 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     Value<String?>? deletedAt,
     Value<String?>? pinnedAt,
     Value<bool>? isFavorite,
-    Value<bool>? isMuted,
+    Value<String?>? mutedUntil,
     Value<String?>? createdAt,
     Value<String?>? updatedAt,
     Value<bool>? needSync,
@@ -2372,7 +2374,7 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
       deletedAt: deletedAt ?? this.deletedAt,
       pinnedAt: pinnedAt ?? this.pinnedAt,
       isFavorite: isFavorite ?? this.isFavorite,
-      isMuted: isMuted ?? this.isMuted,
+      mutedUntil: mutedUntil ?? this.mutedUntil,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       needSync: needSync ?? this.needSync,
@@ -2420,8 +2422,8 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
     if (isFavorite.present) {
       map['is_favorite'] = Variable<bool>(isFavorite.value);
     }
-    if (isMuted.present) {
-      map['is_muted'] = Variable<bool>(isMuted.value);
+    if (mutedUntil.present) {
+      map['muted_until'] = Variable<String>(mutedUntil.value);
     }
     if (createdAt.present) {
       map['created_at'] = Variable<String>(createdAt.value);
@@ -2456,7 +2458,7 @@ class ChatsCompanion extends UpdateCompanion<Chat> {
           ..write('deletedAt: $deletedAt, ')
           ..write('pinnedAt: $pinnedAt, ')
           ..write('isFavorite: $isFavorite, ')
-          ..write('isMuted: $isMuted, ')
+          ..write('mutedUntil: $mutedUntil, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('needSync: $needSync, ')
@@ -5218,7 +5220,7 @@ typedef $$ChatsTableCreateCompanionBuilder =
       Value<String?> deletedAt,
       Value<String?> pinnedAt,
       Value<bool> isFavorite,
-      Value<bool> isMuted,
+      Value<String?> mutedUntil,
       Value<String?> createdAt,
       Value<String?> updatedAt,
       Value<bool> needSync,
@@ -5239,7 +5241,7 @@ typedef $$ChatsTableUpdateCompanionBuilder =
       Value<String?> deletedAt,
       Value<String?> pinnedAt,
       Value<bool> isFavorite,
-      Value<bool> isMuted,
+      Value<String?> mutedUntil,
       Value<String?> createdAt,
       Value<String?> updatedAt,
       Value<bool> needSync,
@@ -5315,8 +5317,8 @@ class $$ChatsTableFilterComposer extends Composer<_$AppDatabase, $ChatsTable> {
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<bool> get isMuted => $composableBuilder(
-    column: $table.isMuted,
+  ColumnFilters<String> get mutedUntil => $composableBuilder(
+    column: $table.mutedUntil,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5410,8 +5412,8 @@ class $$ChatsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<bool> get isMuted => $composableBuilder(
-    column: $table.isMuted,
+  ColumnOrderings<String> get mutedUntil => $composableBuilder(
+    column: $table.mutedUntil,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -5489,8 +5491,10 @@ class $$ChatsTableAnnotationComposer
     builder: (column) => column,
   );
 
-  GeneratedColumn<bool> get isMuted =>
-      $composableBuilder(column: $table.isMuted, builder: (column) => column);
+  GeneratedColumn<String> get mutedUntil => $composableBuilder(
+    column: $table.mutedUntil,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -5547,7 +5551,7 @@ class $$ChatsTableTableManager
                 Value<String?> deletedAt = const Value.absent(),
                 Value<String?> pinnedAt = const Value.absent(),
                 Value<bool> isFavorite = const Value.absent(),
-                Value<bool> isMuted = const Value.absent(),
+                Value<String?> mutedUntil = const Value.absent(),
                 Value<String?> createdAt = const Value.absent(),
                 Value<String?> updatedAt = const Value.absent(),
                 Value<bool> needSync = const Value.absent(),
@@ -5566,7 +5570,7 @@ class $$ChatsTableTableManager
                 deletedAt: deletedAt,
                 pinnedAt: pinnedAt,
                 isFavorite: isFavorite,
-                isMuted: isMuted,
+                mutedUntil: mutedUntil,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 needSync: needSync,
@@ -5587,7 +5591,7 @@ class $$ChatsTableTableManager
                 Value<String?> deletedAt = const Value.absent(),
                 Value<String?> pinnedAt = const Value.absent(),
                 Value<bool> isFavorite = const Value.absent(),
-                Value<bool> isMuted = const Value.absent(),
+                Value<String?> mutedUntil = const Value.absent(),
                 Value<String?> createdAt = const Value.absent(),
                 Value<String?> updatedAt = const Value.absent(),
                 Value<bool> needSync = const Value.absent(),
@@ -5606,7 +5610,7 @@ class $$ChatsTableTableManager
                 deletedAt: deletedAt,
                 pinnedAt: pinnedAt,
                 isFavorite: isFavorite,
-                isMuted: isMuted,
+                mutedUntil: mutedUntil,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 needSync: needSync,

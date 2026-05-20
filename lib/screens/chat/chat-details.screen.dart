@@ -28,6 +28,7 @@ import '../../ui/chat/add-member.sheet.dart';
 import '../../ui/chat/group-actions.dart';
 import '../../ui/snackbar.dart';
 import '../../utils/animations.utils.dart';
+import '../../utils/chat/mute-duration-picker.util.dart';
 import '../../utils/user.utils.dart';
 import 'dm/dm-media-links-docs.screen.dart';
 import 'dm/dm-messaging.screen.dart';
@@ -189,6 +190,8 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
       isGroup ? (_liveGroup?.isPinned ?? false) : (_liveDm?.isPinned ?? false);
   bool get _isMuted =>
       isGroup ? (_liveGroup?.isMuted ?? false) : (_liveDm?.isMuted ?? false);
+  String? get _mutedUntil =>
+      isGroup ? _liveGroup?.mutedUntil : _liveDm?.mutedUntil;
   bool get _isFavorite => isGroup
       ? (_liveGroup?.isFavorite ?? false)
       : (_liveDm?.isFavorite ?? false);
@@ -589,13 +592,22 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
 
   // ─── Chat-level actions (pin / mute / favorite / delete / media) ────────
 
-  Future<void> _runChatAction(String action, {String? successMsg}) async {
+  Future<void> _runChatAction(
+    String action, {
+    String? successMsg,
+    DateTime? muteUntil,
+  }) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
       await ref
           .read(chatProvider.notifier)
-          .handleChatAction(action, conversationId, chatType);
+          .handleChatAction(
+            action,
+            conversationId,
+            chatType,
+            muteUntil: muteUntil,
+          );
       if (successMsg != null) Snack.show(successMsg);
     } catch (_) {
       Snack.error('Action failed');
@@ -609,10 +621,40 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
     successMsg: _isPinned ? 'Chat unpinned' : 'Chat pinned',
   );
 
-  Future<void> _toggleMute() => _runChatAction(
-    _isMuted ? 'unmute' : 'mute',
-    successMsg: _isMuted ? 'Chat unmuted' : 'Chat muted',
-  );
+  // Muted → unmuted asks for confirmation first (with the auto-unmute time);
+  // unmuted → muted opens the duration picker.
+  Future<void> _toggleMute() async {
+    if (_isMuted) {
+      final confirmed = await showUnmuteConfirmation(
+        context: context,
+        mutedUntilIso: _mutedUntil,
+      );
+      if (confirmed != true || !mounted) return;
+      await _runChatAction('unmute', successMsg: 'Chat unmuted');
+      return;
+    }
+    final choice = await showMuteDurationPicker(context);
+    if (choice == null || !mounted) return;
+    await _runChatAction(
+      'mute',
+      muteUntil: choice.until,
+      successMsg: choice.isForever ? 'Chat muted' : 'Chat muted until ${_formatMuteUntil(choice.until!)}',
+    );
+  }
+
+  String _formatMuteUntil(DateTime until) {
+    final local = until.toLocal();
+    final now = DateTime.now();
+    final sameDay = local.year == now.year &&
+        local.month == now.month &&
+        local.day == now.day;
+    final hh = local.hour.toString().padLeft(2, '0');
+    final mm = local.minute.toString().padLeft(2, '0');
+    if (sameDay) return '$hh:$mm';
+    final dd = local.day.toString().padLeft(2, '0');
+    final mo = local.month.toString().padLeft(2, '0');
+    return '$dd/$mo $hh:$mm';
+  }
 
   Future<void> _toggleFavorite() => _runChatAction(
     _isFavorite ? 'unfavorite' : 'favorite',

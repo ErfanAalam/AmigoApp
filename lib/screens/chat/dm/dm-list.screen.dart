@@ -18,6 +18,7 @@ import '../../../ui/blurred-popup.widget.dart';
 import '../../../ui/chat/disappearing-timer-badge.widget.dart';
 import '../../../ui/chat/searchable-list.widget.dart';
 import '../../../ui/chat/user-profile.modal.dart';
+import '../../../utils/chat/mute-duration-picker.util.dart';
 import '../../../utils/route-transitions.util.dart';
 import '../../contact/contact-list.screen.dart';
 import 'dm-messaging.screen.dart';
@@ -65,9 +66,33 @@ class ChatsPageState extends ConsumerState<ChatsPage>
       }
     }
 
+    // Mute → ask how long. Unmute → confirm first, telling the user when
+    // the chat would auto-unmute on its own. The delete branch above may
+    // have awaited a confirmation, so re-check `mounted` before reusing
+    // context.
+    DateTime? muteUntil;
+    if (action == 'mute') {
+      if (!mounted) return;
+      final choice = await showMuteDurationPicker(context);
+      if (choice == null || !mounted) return;
+      muteUntil = choice.until;
+    } else if (action == 'unmute') {
+      if (!mounted) return;
+      final confirmed = await showUnmuteConfirmation(
+        context: context,
+        mutedUntilIso: conversation.mutedUntil,
+      );
+      if (confirmed != true || !mounted) return;
+    }
+
     await ref
         .read(chatProvider.notifier)
-        .handleChatAction(action, conversation.chatId, ChatType.dm);
+        .handleChatAction(
+          action,
+          conversation.chatId,
+          ChatType.dm,
+          muteUntil: muteUntil,
+        );
   }
 
   /// Show delete confirmation dialog
@@ -646,7 +671,7 @@ class ChatListItem extends ConsumerWidget {
     final draft = drafts[conversationId];
     final themeColor = ref.watch(themeColorProvider);
 
-    final hasUnreadMessages = (conversation.unreadCount ?? 0) > 0 && !isMuted;
+    final hasUnreadMessages = (conversation.unreadCount ?? 0) > 0;
 
     // Use draft if available, otherwise use last message
     String lastMessageBody;
@@ -700,7 +725,11 @@ class ChatListItem extends ConsumerWidget {
                 SizedBox(width: 4),
               ],
               if (isMuted) ...[
-                Icon(Icons.volume_off, size: 16, color: Colors.grey[600]),
+                Icon(
+                  Icons.notifications_off_rounded,
+                  size: 16,
+                  color: Colors.grey[600],
+                ),
                 SizedBox(width: 4),
               ],
               if (isFavorite) ...[
@@ -731,7 +760,7 @@ class ChatListItem extends ConsumerWidget {
                   style: TextStyle(
                     color: draft != null && draft.isNotEmpty
                         ? Colors.green[600]
-                        : (isMuted ? Colors.grey[400] : Colors.grey[600]),
+                        : Colors.grey[600],
                     fontSize: 14,
                     fontStyle: FontStyle.normal,
                     fontWeight: draft != null && draft.isNotEmpty
@@ -860,7 +889,7 @@ class ChatListItem extends ConsumerWidget {
             ),
             constraints: const BoxConstraints(minWidth: 20),
             decoration: BoxDecoration(
-              color: isMuted ? Colors.grey : themeColor.primary,
+              color: themeColor.primary,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(

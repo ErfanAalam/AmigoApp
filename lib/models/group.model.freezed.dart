@@ -15,9 +15,13 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$GroupModel {
 
-@JsonKey(name: 'chat_id') String get chatId; String get title;@JsonKey(name: 'profile_pic') String? get profilePic; List<GroupMember>? get members; GroupMetadata? get metadata;@JsonKey(name: 'last_msg_id') String? get lastMsgId;@JsonKey(name: 'last_msg_type') String? get lastMsgType;@JsonKey(name: 'last_msg_body') String? get lastMsgBody;@JsonKey(name: 'last_msg_at') String? get lastMsgAt;@JsonKey(name: 'pinned_msg_id') String? get pinnedMsgId; String? get role;@JsonKey(name: 'unread_count') int get unreadCount;// Client-only pin-to-top. Null = unpinned. Pinned chats sort above
+@JsonKey(name: 'chat_id') String get chatId; String get title;@JsonKey(name: 'profile_pic') String? get profilePic; List<GroupMember>? get members; GroupMetadata? get metadata;@JsonKey(name: 'last_msg_id') String? get lastMsgId;@JsonKey(name: 'last_msg_type') String? get lastMsgType;@JsonKey(name: 'last_msg_body') String? get lastMsgBody;@JsonKey(name: 'last_msg_at') String? get lastMsgAt;// Display name of the user who sent the last message, or "You" when it
+// was the current user. Populated by the Drift watch query so the group
+// list can render a WhatsApp-style "Aman: hello" prefix.
+@JsonKey(name: 'last_msg_sender_name') String? get lastMsgSenderName;@JsonKey(name: 'pinned_msg_id') String? get pinnedMsgId; String? get role;@JsonKey(name: 'unread_count') int get unreadCount;// Client-only pin-to-top. Null = unpinned. Pinned chats sort above
 // non-pinned chats by descending pinnedAt — most recently pinned first.
-@JsonKey(name: 'pinned_at') String? get pinnedAt;@JsonKey(name: 'is_muted') bool get isMuted;@JsonKey(name: 'is_favorite') bool get isFavorite;@JsonKey(name: 'joined_at') String get joinedAt;// Disappearing-messages duration in seconds; null = off. Mirrors the
+@JsonKey(name: 'pinned_at') String? get pinnedAt;// Mirrors ChatModel.mutedUntil — see that doc-string. null = not muted.
+@JsonKey(name: 'muted_until') String? get mutedUntil;@JsonKey(name: 'is_favorite') bool get isFavorite;@JsonKey(name: 'joined_at') String get joinedAt;// Disappearing-messages duration in seconds; null = off. Mirrors the
 // chats table column. Drives the avatar timer-badge + input-border UI.
 @JsonKey(name: 'disappearing_after_sec') int? get disappearingAfterSec;
 /// Create a copy of GroupModel
@@ -32,16 +36,16 @@ $GroupModelCopyWith<GroupModel> get copyWith => _$GroupModelCopyWithImpl<GroupMo
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is GroupModel&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.title, title) || other.title == title)&&(identical(other.profilePic, profilePic) || other.profilePic == profilePic)&&const DeepCollectionEquality().equals(other.members, members)&&(identical(other.metadata, metadata) || other.metadata == metadata)&&(identical(other.lastMsgId, lastMsgId) || other.lastMsgId == lastMsgId)&&(identical(other.lastMsgType, lastMsgType) || other.lastMsgType == lastMsgType)&&(identical(other.lastMsgBody, lastMsgBody) || other.lastMsgBody == lastMsgBody)&&(identical(other.lastMsgAt, lastMsgAt) || other.lastMsgAt == lastMsgAt)&&(identical(other.pinnedMsgId, pinnedMsgId) || other.pinnedMsgId == pinnedMsgId)&&(identical(other.role, role) || other.role == role)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.pinnedAt, pinnedAt) || other.pinnedAt == pinnedAt)&&(identical(other.isMuted, isMuted) || other.isMuted == isMuted)&&(identical(other.isFavorite, isFavorite) || other.isFavorite == isFavorite)&&(identical(other.joinedAt, joinedAt) || other.joinedAt == joinedAt)&&(identical(other.disappearingAfterSec, disappearingAfterSec) || other.disappearingAfterSec == disappearingAfterSec));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is GroupModel&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.title, title) || other.title == title)&&(identical(other.profilePic, profilePic) || other.profilePic == profilePic)&&const DeepCollectionEquality().equals(other.members, members)&&(identical(other.metadata, metadata) || other.metadata == metadata)&&(identical(other.lastMsgId, lastMsgId) || other.lastMsgId == lastMsgId)&&(identical(other.lastMsgType, lastMsgType) || other.lastMsgType == lastMsgType)&&(identical(other.lastMsgBody, lastMsgBody) || other.lastMsgBody == lastMsgBody)&&(identical(other.lastMsgAt, lastMsgAt) || other.lastMsgAt == lastMsgAt)&&(identical(other.lastMsgSenderName, lastMsgSenderName) || other.lastMsgSenderName == lastMsgSenderName)&&(identical(other.pinnedMsgId, pinnedMsgId) || other.pinnedMsgId == pinnedMsgId)&&(identical(other.role, role) || other.role == role)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.pinnedAt, pinnedAt) || other.pinnedAt == pinnedAt)&&(identical(other.mutedUntil, mutedUntil) || other.mutedUntil == mutedUntil)&&(identical(other.isFavorite, isFavorite) || other.isFavorite == isFavorite)&&(identical(other.joinedAt, joinedAt) || other.joinedAt == joinedAt)&&(identical(other.disappearingAfterSec, disappearingAfterSec) || other.disappearingAfterSec == disappearingAfterSec));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,chatId,title,profilePic,const DeepCollectionEquality().hash(members),metadata,lastMsgId,lastMsgType,lastMsgBody,lastMsgAt,pinnedMsgId,role,unreadCount,pinnedAt,isMuted,isFavorite,joinedAt,disappearingAfterSec);
+int get hashCode => Object.hash(runtimeType,chatId,title,profilePic,const DeepCollectionEquality().hash(members),metadata,lastMsgId,lastMsgType,lastMsgBody,lastMsgAt,lastMsgSenderName,pinnedMsgId,role,unreadCount,pinnedAt,mutedUntil,isFavorite,joinedAt,disappearingAfterSec);
 
 @override
 String toString() {
-  return 'GroupModel(chatId: $chatId, title: $title, profilePic: $profilePic, members: $members, metadata: $metadata, lastMsgId: $lastMsgId, lastMsgType: $lastMsgType, lastMsgBody: $lastMsgBody, lastMsgAt: $lastMsgAt, pinnedMsgId: $pinnedMsgId, role: $role, unreadCount: $unreadCount, pinnedAt: $pinnedAt, isMuted: $isMuted, isFavorite: $isFavorite, joinedAt: $joinedAt, disappearingAfterSec: $disappearingAfterSec)';
+  return 'GroupModel(chatId: $chatId, title: $title, profilePic: $profilePic, members: $members, metadata: $metadata, lastMsgId: $lastMsgId, lastMsgType: $lastMsgType, lastMsgBody: $lastMsgBody, lastMsgAt: $lastMsgAt, lastMsgSenderName: $lastMsgSenderName, pinnedMsgId: $pinnedMsgId, role: $role, unreadCount: $unreadCount, pinnedAt: $pinnedAt, mutedUntil: $mutedUntil, isFavorite: $isFavorite, joinedAt: $joinedAt, disappearingAfterSec: $disappearingAfterSec)';
 }
 
 
@@ -52,7 +56,7 @@ abstract mixin class $GroupModelCopyWith<$Res>  {
   factory $GroupModelCopyWith(GroupModel value, $Res Function(GroupModel) _then) = _$GroupModelCopyWithImpl;
 @useResult
 $Res call({
-@JsonKey(name: 'chat_id') String chatId, String title,@JsonKey(name: 'profile_pic') String? profilePic, List<GroupMember>? members, GroupMetadata? metadata,@JsonKey(name: 'last_msg_id') String? lastMsgId,@JsonKey(name: 'last_msg_type') String? lastMsgType,@JsonKey(name: 'last_msg_body') String? lastMsgBody,@JsonKey(name: 'last_msg_at') String? lastMsgAt,@JsonKey(name: 'pinned_msg_id') String? pinnedMsgId, String? role,@JsonKey(name: 'unread_count') int unreadCount,@JsonKey(name: 'pinned_at') String? pinnedAt,@JsonKey(name: 'is_muted') bool isMuted,@JsonKey(name: 'is_favorite') bool isFavorite,@JsonKey(name: 'joined_at') String joinedAt,@JsonKey(name: 'disappearing_after_sec') int? disappearingAfterSec
+@JsonKey(name: 'chat_id') String chatId, String title,@JsonKey(name: 'profile_pic') String? profilePic, List<GroupMember>? members, GroupMetadata? metadata,@JsonKey(name: 'last_msg_id') String? lastMsgId,@JsonKey(name: 'last_msg_type') String? lastMsgType,@JsonKey(name: 'last_msg_body') String? lastMsgBody,@JsonKey(name: 'last_msg_at') String? lastMsgAt,@JsonKey(name: 'last_msg_sender_name') String? lastMsgSenderName,@JsonKey(name: 'pinned_msg_id') String? pinnedMsgId, String? role,@JsonKey(name: 'unread_count') int unreadCount,@JsonKey(name: 'pinned_at') String? pinnedAt,@JsonKey(name: 'muted_until') String? mutedUntil,@JsonKey(name: 'is_favorite') bool isFavorite,@JsonKey(name: 'joined_at') String joinedAt,@JsonKey(name: 'disappearing_after_sec') int? disappearingAfterSec
 });
 
 
@@ -69,7 +73,7 @@ class _$GroupModelCopyWithImpl<$Res>
 
 /// Create a copy of GroupModel
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? chatId = null,Object? title = null,Object? profilePic = freezed,Object? members = freezed,Object? metadata = freezed,Object? lastMsgId = freezed,Object? lastMsgType = freezed,Object? lastMsgBody = freezed,Object? lastMsgAt = freezed,Object? pinnedMsgId = freezed,Object? role = freezed,Object? unreadCount = null,Object? pinnedAt = freezed,Object? isMuted = null,Object? isFavorite = null,Object? joinedAt = null,Object? disappearingAfterSec = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? chatId = null,Object? title = null,Object? profilePic = freezed,Object? members = freezed,Object? metadata = freezed,Object? lastMsgId = freezed,Object? lastMsgType = freezed,Object? lastMsgBody = freezed,Object? lastMsgAt = freezed,Object? lastMsgSenderName = freezed,Object? pinnedMsgId = freezed,Object? role = freezed,Object? unreadCount = null,Object? pinnedAt = freezed,Object? mutedUntil = freezed,Object? isFavorite = null,Object? joinedAt = null,Object? disappearingAfterSec = freezed,}) {
   return _then(_self.copyWith(
 chatId: null == chatId ? _self.chatId : chatId // ignore: cast_nullable_to_non_nullable
 as String,title: null == title ? _self.title : title // ignore: cast_nullable_to_non_nullable
@@ -80,12 +84,13 @@ as GroupMetadata?,lastMsgId: freezed == lastMsgId ? _self.lastMsgId : lastMsgId 
 as String?,lastMsgType: freezed == lastMsgType ? _self.lastMsgType : lastMsgType // ignore: cast_nullable_to_non_nullable
 as String?,lastMsgBody: freezed == lastMsgBody ? _self.lastMsgBody : lastMsgBody // ignore: cast_nullable_to_non_nullable
 as String?,lastMsgAt: freezed == lastMsgAt ? _self.lastMsgAt : lastMsgAt // ignore: cast_nullable_to_non_nullable
+as String?,lastMsgSenderName: freezed == lastMsgSenderName ? _self.lastMsgSenderName : lastMsgSenderName // ignore: cast_nullable_to_non_nullable
 as String?,pinnedMsgId: freezed == pinnedMsgId ? _self.pinnedMsgId : pinnedMsgId // ignore: cast_nullable_to_non_nullable
 as String?,role: freezed == role ? _self.role : role // ignore: cast_nullable_to_non_nullable
 as String?,unreadCount: null == unreadCount ? _self.unreadCount : unreadCount // ignore: cast_nullable_to_non_nullable
 as int,pinnedAt: freezed == pinnedAt ? _self.pinnedAt : pinnedAt // ignore: cast_nullable_to_non_nullable
-as String?,isMuted: null == isMuted ? _self.isMuted : isMuted // ignore: cast_nullable_to_non_nullable
-as bool,isFavorite: null == isFavorite ? _self.isFavorite : isFavorite // ignore: cast_nullable_to_non_nullable
+as String?,mutedUntil: freezed == mutedUntil ? _self.mutedUntil : mutedUntil // ignore: cast_nullable_to_non_nullable
+as String?,isFavorite: null == isFavorite ? _self.isFavorite : isFavorite // ignore: cast_nullable_to_non_nullable
 as bool,joinedAt: null == joinedAt ? _self.joinedAt : joinedAt // ignore: cast_nullable_to_non_nullable
 as String,disappearingAfterSec: freezed == disappearingAfterSec ? _self.disappearingAfterSec : disappearingAfterSec // ignore: cast_nullable_to_non_nullable
 as int?,
@@ -185,10 +190,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(name: 'chat_id')  String chatId,  String title, @JsonKey(name: 'profile_pic')  String? profilePic,  List<GroupMember>? members,  GroupMetadata? metadata, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_type')  String? lastMsgType, @JsonKey(name: 'last_msg_body')  String? lastMsgBody, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId,  String? role, @JsonKey(name: 'unread_count')  int unreadCount, @JsonKey(name: 'pinned_at')  String? pinnedAt, @JsonKey(name: 'is_muted')  bool isMuted, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'joined_at')  String joinedAt, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(name: 'chat_id')  String chatId,  String title, @JsonKey(name: 'profile_pic')  String? profilePic,  List<GroupMember>? members,  GroupMetadata? metadata, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_type')  String? lastMsgType, @JsonKey(name: 'last_msg_body')  String? lastMsgBody, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'last_msg_sender_name')  String? lastMsgSenderName, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId,  String? role, @JsonKey(name: 'unread_count')  int unreadCount, @JsonKey(name: 'pinned_at')  String? pinnedAt, @JsonKey(name: 'muted_until')  String? mutedUntil, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'joined_at')  String joinedAt, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _GroupModel() when $default != null:
-return $default(_that.chatId,_that.title,_that.profilePic,_that.members,_that.metadata,_that.lastMsgId,_that.lastMsgType,_that.lastMsgBody,_that.lastMsgAt,_that.pinnedMsgId,_that.role,_that.unreadCount,_that.pinnedAt,_that.isMuted,_that.isFavorite,_that.joinedAt,_that.disappearingAfterSec);case _:
+return $default(_that.chatId,_that.title,_that.profilePic,_that.members,_that.metadata,_that.lastMsgId,_that.lastMsgType,_that.lastMsgBody,_that.lastMsgAt,_that.lastMsgSenderName,_that.pinnedMsgId,_that.role,_that.unreadCount,_that.pinnedAt,_that.mutedUntil,_that.isFavorite,_that.joinedAt,_that.disappearingAfterSec);case _:
   return orElse();
 
 }
@@ -206,10 +211,10 @@ return $default(_that.chatId,_that.title,_that.profilePic,_that.members,_that.me
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(name: 'chat_id')  String chatId,  String title, @JsonKey(name: 'profile_pic')  String? profilePic,  List<GroupMember>? members,  GroupMetadata? metadata, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_type')  String? lastMsgType, @JsonKey(name: 'last_msg_body')  String? lastMsgBody, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId,  String? role, @JsonKey(name: 'unread_count')  int unreadCount, @JsonKey(name: 'pinned_at')  String? pinnedAt, @JsonKey(name: 'is_muted')  bool isMuted, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'joined_at')  String joinedAt, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(name: 'chat_id')  String chatId,  String title, @JsonKey(name: 'profile_pic')  String? profilePic,  List<GroupMember>? members,  GroupMetadata? metadata, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_type')  String? lastMsgType, @JsonKey(name: 'last_msg_body')  String? lastMsgBody, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'last_msg_sender_name')  String? lastMsgSenderName, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId,  String? role, @JsonKey(name: 'unread_count')  int unreadCount, @JsonKey(name: 'pinned_at')  String? pinnedAt, @JsonKey(name: 'muted_until')  String? mutedUntil, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'joined_at')  String joinedAt, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)  $default,) {final _that = this;
 switch (_that) {
 case _GroupModel():
-return $default(_that.chatId,_that.title,_that.profilePic,_that.members,_that.metadata,_that.lastMsgId,_that.lastMsgType,_that.lastMsgBody,_that.lastMsgAt,_that.pinnedMsgId,_that.role,_that.unreadCount,_that.pinnedAt,_that.isMuted,_that.isFavorite,_that.joinedAt,_that.disappearingAfterSec);case _:
+return $default(_that.chatId,_that.title,_that.profilePic,_that.members,_that.metadata,_that.lastMsgId,_that.lastMsgType,_that.lastMsgBody,_that.lastMsgAt,_that.lastMsgSenderName,_that.pinnedMsgId,_that.role,_that.unreadCount,_that.pinnedAt,_that.mutedUntil,_that.isFavorite,_that.joinedAt,_that.disappearingAfterSec);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -226,10 +231,10 @@ return $default(_that.chatId,_that.title,_that.profilePic,_that.members,_that.me
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(name: 'chat_id')  String chatId,  String title, @JsonKey(name: 'profile_pic')  String? profilePic,  List<GroupMember>? members,  GroupMetadata? metadata, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_type')  String? lastMsgType, @JsonKey(name: 'last_msg_body')  String? lastMsgBody, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId,  String? role, @JsonKey(name: 'unread_count')  int unreadCount, @JsonKey(name: 'pinned_at')  String? pinnedAt, @JsonKey(name: 'is_muted')  bool isMuted, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'joined_at')  String joinedAt, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(name: 'chat_id')  String chatId,  String title, @JsonKey(name: 'profile_pic')  String? profilePic,  List<GroupMember>? members,  GroupMetadata? metadata, @JsonKey(name: 'last_msg_id')  String? lastMsgId, @JsonKey(name: 'last_msg_type')  String? lastMsgType, @JsonKey(name: 'last_msg_body')  String? lastMsgBody, @JsonKey(name: 'last_msg_at')  String? lastMsgAt, @JsonKey(name: 'last_msg_sender_name')  String? lastMsgSenderName, @JsonKey(name: 'pinned_msg_id')  String? pinnedMsgId,  String? role, @JsonKey(name: 'unread_count')  int unreadCount, @JsonKey(name: 'pinned_at')  String? pinnedAt, @JsonKey(name: 'muted_until')  String? mutedUntil, @JsonKey(name: 'is_favorite')  bool isFavorite, @JsonKey(name: 'joined_at')  String joinedAt, @JsonKey(name: 'disappearing_after_sec')  int? disappearingAfterSec)?  $default,) {final _that = this;
 switch (_that) {
 case _GroupModel() when $default != null:
-return $default(_that.chatId,_that.title,_that.profilePic,_that.members,_that.metadata,_that.lastMsgId,_that.lastMsgType,_that.lastMsgBody,_that.lastMsgAt,_that.pinnedMsgId,_that.role,_that.unreadCount,_that.pinnedAt,_that.isMuted,_that.isFavorite,_that.joinedAt,_that.disappearingAfterSec);case _:
+return $default(_that.chatId,_that.title,_that.profilePic,_that.members,_that.metadata,_that.lastMsgId,_that.lastMsgType,_that.lastMsgBody,_that.lastMsgAt,_that.lastMsgSenderName,_that.pinnedMsgId,_that.role,_that.unreadCount,_that.pinnedAt,_that.mutedUntil,_that.isFavorite,_that.joinedAt,_that.disappearingAfterSec);case _:
   return null;
 
 }
@@ -241,7 +246,7 @@ return $default(_that.chatId,_that.title,_that.profilePic,_that.members,_that.me
 @JsonSerializable()
 
 class _GroupModel extends GroupModel {
-  const _GroupModel({@JsonKey(name: 'chat_id') required this.chatId, this.title = '', @JsonKey(name: 'profile_pic') this.profilePic, final  List<GroupMember>? members, this.metadata, @JsonKey(name: 'last_msg_id') this.lastMsgId, @JsonKey(name: 'last_msg_type') this.lastMsgType, @JsonKey(name: 'last_msg_body') this.lastMsgBody, @JsonKey(name: 'last_msg_at') this.lastMsgAt, @JsonKey(name: 'pinned_msg_id') this.pinnedMsgId, this.role, @JsonKey(name: 'unread_count') this.unreadCount = 0, @JsonKey(name: 'pinned_at') this.pinnedAt, @JsonKey(name: 'is_muted') this.isMuted = false, @JsonKey(name: 'is_favorite') this.isFavorite = false, @JsonKey(name: 'joined_at') this.joinedAt = '', @JsonKey(name: 'disappearing_after_sec') this.disappearingAfterSec}): _members = members,super._();
+  const _GroupModel({@JsonKey(name: 'chat_id') required this.chatId, this.title = '', @JsonKey(name: 'profile_pic') this.profilePic, final  List<GroupMember>? members, this.metadata, @JsonKey(name: 'last_msg_id') this.lastMsgId, @JsonKey(name: 'last_msg_type') this.lastMsgType, @JsonKey(name: 'last_msg_body') this.lastMsgBody, @JsonKey(name: 'last_msg_at') this.lastMsgAt, @JsonKey(name: 'last_msg_sender_name') this.lastMsgSenderName, @JsonKey(name: 'pinned_msg_id') this.pinnedMsgId, this.role, @JsonKey(name: 'unread_count') this.unreadCount = 0, @JsonKey(name: 'pinned_at') this.pinnedAt, @JsonKey(name: 'muted_until') this.mutedUntil, @JsonKey(name: 'is_favorite') this.isFavorite = false, @JsonKey(name: 'joined_at') this.joinedAt = '', @JsonKey(name: 'disappearing_after_sec') this.disappearingAfterSec}): _members = members,super._();
   factory _GroupModel.fromJson(Map<String, dynamic> json) => _$GroupModelFromJson(json);
 
 @override@JsonKey(name: 'chat_id') final  String chatId;
@@ -261,13 +266,18 @@ class _GroupModel extends GroupModel {
 @override@JsonKey(name: 'last_msg_type') final  String? lastMsgType;
 @override@JsonKey(name: 'last_msg_body') final  String? lastMsgBody;
 @override@JsonKey(name: 'last_msg_at') final  String? lastMsgAt;
+// Display name of the user who sent the last message, or "You" when it
+// was the current user. Populated by the Drift watch query so the group
+// list can render a WhatsApp-style "Aman: hello" prefix.
+@override@JsonKey(name: 'last_msg_sender_name') final  String? lastMsgSenderName;
 @override@JsonKey(name: 'pinned_msg_id') final  String? pinnedMsgId;
 @override final  String? role;
 @override@JsonKey(name: 'unread_count') final  int unreadCount;
 // Client-only pin-to-top. Null = unpinned. Pinned chats sort above
 // non-pinned chats by descending pinnedAt — most recently pinned first.
 @override@JsonKey(name: 'pinned_at') final  String? pinnedAt;
-@override@JsonKey(name: 'is_muted') final  bool isMuted;
+// Mirrors ChatModel.mutedUntil — see that doc-string. null = not muted.
+@override@JsonKey(name: 'muted_until') final  String? mutedUntil;
 @override@JsonKey(name: 'is_favorite') final  bool isFavorite;
 @override@JsonKey(name: 'joined_at') final  String joinedAt;
 // Disappearing-messages duration in seconds; null = off. Mirrors the
@@ -287,16 +297,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _GroupModel&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.title, title) || other.title == title)&&(identical(other.profilePic, profilePic) || other.profilePic == profilePic)&&const DeepCollectionEquality().equals(other._members, _members)&&(identical(other.metadata, metadata) || other.metadata == metadata)&&(identical(other.lastMsgId, lastMsgId) || other.lastMsgId == lastMsgId)&&(identical(other.lastMsgType, lastMsgType) || other.lastMsgType == lastMsgType)&&(identical(other.lastMsgBody, lastMsgBody) || other.lastMsgBody == lastMsgBody)&&(identical(other.lastMsgAt, lastMsgAt) || other.lastMsgAt == lastMsgAt)&&(identical(other.pinnedMsgId, pinnedMsgId) || other.pinnedMsgId == pinnedMsgId)&&(identical(other.role, role) || other.role == role)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.pinnedAt, pinnedAt) || other.pinnedAt == pinnedAt)&&(identical(other.isMuted, isMuted) || other.isMuted == isMuted)&&(identical(other.isFavorite, isFavorite) || other.isFavorite == isFavorite)&&(identical(other.joinedAt, joinedAt) || other.joinedAt == joinedAt)&&(identical(other.disappearingAfterSec, disappearingAfterSec) || other.disappearingAfterSec == disappearingAfterSec));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _GroupModel&&(identical(other.chatId, chatId) || other.chatId == chatId)&&(identical(other.title, title) || other.title == title)&&(identical(other.profilePic, profilePic) || other.profilePic == profilePic)&&const DeepCollectionEquality().equals(other._members, _members)&&(identical(other.metadata, metadata) || other.metadata == metadata)&&(identical(other.lastMsgId, lastMsgId) || other.lastMsgId == lastMsgId)&&(identical(other.lastMsgType, lastMsgType) || other.lastMsgType == lastMsgType)&&(identical(other.lastMsgBody, lastMsgBody) || other.lastMsgBody == lastMsgBody)&&(identical(other.lastMsgAt, lastMsgAt) || other.lastMsgAt == lastMsgAt)&&(identical(other.lastMsgSenderName, lastMsgSenderName) || other.lastMsgSenderName == lastMsgSenderName)&&(identical(other.pinnedMsgId, pinnedMsgId) || other.pinnedMsgId == pinnedMsgId)&&(identical(other.role, role) || other.role == role)&&(identical(other.unreadCount, unreadCount) || other.unreadCount == unreadCount)&&(identical(other.pinnedAt, pinnedAt) || other.pinnedAt == pinnedAt)&&(identical(other.mutedUntil, mutedUntil) || other.mutedUntil == mutedUntil)&&(identical(other.isFavorite, isFavorite) || other.isFavorite == isFavorite)&&(identical(other.joinedAt, joinedAt) || other.joinedAt == joinedAt)&&(identical(other.disappearingAfterSec, disappearingAfterSec) || other.disappearingAfterSec == disappearingAfterSec));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,chatId,title,profilePic,const DeepCollectionEquality().hash(_members),metadata,lastMsgId,lastMsgType,lastMsgBody,lastMsgAt,pinnedMsgId,role,unreadCount,pinnedAt,isMuted,isFavorite,joinedAt,disappearingAfterSec);
+int get hashCode => Object.hash(runtimeType,chatId,title,profilePic,const DeepCollectionEquality().hash(_members),metadata,lastMsgId,lastMsgType,lastMsgBody,lastMsgAt,lastMsgSenderName,pinnedMsgId,role,unreadCount,pinnedAt,mutedUntil,isFavorite,joinedAt,disappearingAfterSec);
 
 @override
 String toString() {
-  return 'GroupModel(chatId: $chatId, title: $title, profilePic: $profilePic, members: $members, metadata: $metadata, lastMsgId: $lastMsgId, lastMsgType: $lastMsgType, lastMsgBody: $lastMsgBody, lastMsgAt: $lastMsgAt, pinnedMsgId: $pinnedMsgId, role: $role, unreadCount: $unreadCount, pinnedAt: $pinnedAt, isMuted: $isMuted, isFavorite: $isFavorite, joinedAt: $joinedAt, disappearingAfterSec: $disappearingAfterSec)';
+  return 'GroupModel(chatId: $chatId, title: $title, profilePic: $profilePic, members: $members, metadata: $metadata, lastMsgId: $lastMsgId, lastMsgType: $lastMsgType, lastMsgBody: $lastMsgBody, lastMsgAt: $lastMsgAt, lastMsgSenderName: $lastMsgSenderName, pinnedMsgId: $pinnedMsgId, role: $role, unreadCount: $unreadCount, pinnedAt: $pinnedAt, mutedUntil: $mutedUntil, isFavorite: $isFavorite, joinedAt: $joinedAt, disappearingAfterSec: $disappearingAfterSec)';
 }
 
 
@@ -307,7 +317,7 @@ abstract mixin class _$GroupModelCopyWith<$Res> implements $GroupModelCopyWith<$
   factory _$GroupModelCopyWith(_GroupModel value, $Res Function(_GroupModel) _then) = __$GroupModelCopyWithImpl;
 @override @useResult
 $Res call({
-@JsonKey(name: 'chat_id') String chatId, String title,@JsonKey(name: 'profile_pic') String? profilePic, List<GroupMember>? members, GroupMetadata? metadata,@JsonKey(name: 'last_msg_id') String? lastMsgId,@JsonKey(name: 'last_msg_type') String? lastMsgType,@JsonKey(name: 'last_msg_body') String? lastMsgBody,@JsonKey(name: 'last_msg_at') String? lastMsgAt,@JsonKey(name: 'pinned_msg_id') String? pinnedMsgId, String? role,@JsonKey(name: 'unread_count') int unreadCount,@JsonKey(name: 'pinned_at') String? pinnedAt,@JsonKey(name: 'is_muted') bool isMuted,@JsonKey(name: 'is_favorite') bool isFavorite,@JsonKey(name: 'joined_at') String joinedAt,@JsonKey(name: 'disappearing_after_sec') int? disappearingAfterSec
+@JsonKey(name: 'chat_id') String chatId, String title,@JsonKey(name: 'profile_pic') String? profilePic, List<GroupMember>? members, GroupMetadata? metadata,@JsonKey(name: 'last_msg_id') String? lastMsgId,@JsonKey(name: 'last_msg_type') String? lastMsgType,@JsonKey(name: 'last_msg_body') String? lastMsgBody,@JsonKey(name: 'last_msg_at') String? lastMsgAt,@JsonKey(name: 'last_msg_sender_name') String? lastMsgSenderName,@JsonKey(name: 'pinned_msg_id') String? pinnedMsgId, String? role,@JsonKey(name: 'unread_count') int unreadCount,@JsonKey(name: 'pinned_at') String? pinnedAt,@JsonKey(name: 'muted_until') String? mutedUntil,@JsonKey(name: 'is_favorite') bool isFavorite,@JsonKey(name: 'joined_at') String joinedAt,@JsonKey(name: 'disappearing_after_sec') int? disappearingAfterSec
 });
 
 
@@ -324,7 +334,7 @@ class __$GroupModelCopyWithImpl<$Res>
 
 /// Create a copy of GroupModel
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? chatId = null,Object? title = null,Object? profilePic = freezed,Object? members = freezed,Object? metadata = freezed,Object? lastMsgId = freezed,Object? lastMsgType = freezed,Object? lastMsgBody = freezed,Object? lastMsgAt = freezed,Object? pinnedMsgId = freezed,Object? role = freezed,Object? unreadCount = null,Object? pinnedAt = freezed,Object? isMuted = null,Object? isFavorite = null,Object? joinedAt = null,Object? disappearingAfterSec = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? chatId = null,Object? title = null,Object? profilePic = freezed,Object? members = freezed,Object? metadata = freezed,Object? lastMsgId = freezed,Object? lastMsgType = freezed,Object? lastMsgBody = freezed,Object? lastMsgAt = freezed,Object? lastMsgSenderName = freezed,Object? pinnedMsgId = freezed,Object? role = freezed,Object? unreadCount = null,Object? pinnedAt = freezed,Object? mutedUntil = freezed,Object? isFavorite = null,Object? joinedAt = null,Object? disappearingAfterSec = freezed,}) {
   return _then(_GroupModel(
 chatId: null == chatId ? _self.chatId : chatId // ignore: cast_nullable_to_non_nullable
 as String,title: null == title ? _self.title : title // ignore: cast_nullable_to_non_nullable
@@ -335,12 +345,13 @@ as GroupMetadata?,lastMsgId: freezed == lastMsgId ? _self.lastMsgId : lastMsgId 
 as String?,lastMsgType: freezed == lastMsgType ? _self.lastMsgType : lastMsgType // ignore: cast_nullable_to_non_nullable
 as String?,lastMsgBody: freezed == lastMsgBody ? _self.lastMsgBody : lastMsgBody // ignore: cast_nullable_to_non_nullable
 as String?,lastMsgAt: freezed == lastMsgAt ? _self.lastMsgAt : lastMsgAt // ignore: cast_nullable_to_non_nullable
+as String?,lastMsgSenderName: freezed == lastMsgSenderName ? _self.lastMsgSenderName : lastMsgSenderName // ignore: cast_nullable_to_non_nullable
 as String?,pinnedMsgId: freezed == pinnedMsgId ? _self.pinnedMsgId : pinnedMsgId // ignore: cast_nullable_to_non_nullable
 as String?,role: freezed == role ? _self.role : role // ignore: cast_nullable_to_non_nullable
 as String?,unreadCount: null == unreadCount ? _self.unreadCount : unreadCount // ignore: cast_nullable_to_non_nullable
 as int,pinnedAt: freezed == pinnedAt ? _self.pinnedAt : pinnedAt // ignore: cast_nullable_to_non_nullable
-as String?,isMuted: null == isMuted ? _self.isMuted : isMuted // ignore: cast_nullable_to_non_nullable
-as bool,isFavorite: null == isFavorite ? _self.isFavorite : isFavorite // ignore: cast_nullable_to_non_nullable
+as String?,mutedUntil: freezed == mutedUntil ? _self.mutedUntil : mutedUntil // ignore: cast_nullable_to_non_nullable
+as String?,isFavorite: null == isFavorite ? _self.isFavorite : isFavorite // ignore: cast_nullable_to_non_nullable
 as bool,joinedAt: null == joinedAt ? _self.joinedAt : joinedAt // ignore: cast_nullable_to_non_nullable
 as String,disappearingAfterSec: freezed == disappearingAfterSec ? _self.disappearingAfterSec : disappearingAfterSec // ignore: cast_nullable_to_non_nullable
 as int?,

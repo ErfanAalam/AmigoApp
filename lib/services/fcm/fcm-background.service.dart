@@ -301,6 +301,12 @@ Future<void> _handleMessageNotificationBatchBackground(
 ) async {
   if (wsMessages.isEmpty) return;
 
+  // Muted-chat signal from the backend: `silent: '1'` in the FCM data payload
+  // means "process this message but do not paint a local notification". The
+  // message still lands in Drift so the chat stays in sync; the user just
+  // doesn't get pinged. See chat-mute.cache.ts on the server.
+  final isSilent = data['silent'] == '1';
+
   // Collect IDs for batch delivery receipt
   final List<Map<String, dynamic>> deliveries = [];
   final messageRepo = MessageRepository();
@@ -315,7 +321,7 @@ Future<void> _handleMessageNotificationBatchBackground(
               chatPayload.id,
             );
 
-            if (!alreadyExists) {
+            if (!alreadyExists && !isSilent) {
               final msgBody =
                   chatPayload.body ??
                   ((chatPayload.msgType != MessageType.text)
@@ -333,6 +339,8 @@ Future<void> _handleMessageNotificationBatchBackground(
               } catch (e, st) {
                 debugPrint('[FCM-BG] ❌ showMessageNotification failed: $e\n$st');
               }
+            } else if (isSilent) {
+              debugPrint('[FCM-BG] silent=1 — storing msg ${chatPayload.id} without notification');
             } else {
               debugPrint('[FCM-BG] Message ${chatPayload.id} already exists, skipping notification');
             }

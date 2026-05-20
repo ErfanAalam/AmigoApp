@@ -19,7 +19,7 @@ _ChatModel _$ChatModelFromJson(Map<String, dynamic> json) => _ChatModel(
   deletedAt: json['deleted_at'] as String?,
   pinnedAt: json['pinned_at'] as String?,
   isFavorite: json['is_favorite'] as bool? ?? false,
-  isMuted: json['is_muted'] as bool? ?? false,
+  mutedUntil: json['muted_until'] as String?,
   createdAt: json['created_at'] as String?,
   updatedAt: json['updated_at'] as String?,
   needSync: json['need_sync'] as bool? ?? true,
@@ -40,7 +40,7 @@ Map<String, dynamic> _$ChatModelToJson(_ChatModel instance) =>
       'deleted_at': instance.deletedAt,
       'pinned_at': instance.pinnedAt,
       'is_favorite': instance.isFavorite,
-      'is_muted': instance.isMuted,
+      'muted_until': instance.mutedUntil,
       'created_at': instance.createdAt,
       'updated_at': instance.updatedAt,
       'need_sync': instance.needSync,
@@ -62,7 +62,7 @@ _DmModel _$DmModelFromJson(Map<String, dynamic> json) => _DmModel(
   isRecipientOnline: json['is_online'] as bool? ?? false,
   deletedAt: json['deleted_at'] as String?,
   pinnedAt: json['pinned_at'] as String?,
-  isMuted: json['is_muted'] as bool? ?? false,
+  mutedUntil: json['muted_until'] as String?,
   isFavorite: json['is_favorite'] as bool? ?? false,
   createdAt: json['created_at'] as String,
   disappearingAfterSec: (json['disappearing_after_sec'] as num?)?.toInt(),
@@ -83,7 +83,7 @@ Map<String, dynamic> _$DmModelToJson(_DmModel instance) => <String, dynamic>{
   'is_online': instance.isRecipientOnline,
   'deleted_at': instance.deletedAt,
   'pinned_at': instance.pinnedAt,
-  'is_muted': instance.isMuted,
+  'muted_until': instance.mutedUntil,
   'is_favorite': instance.isFavorite,
   'created_at': instance.createdAt,
   'disappearing_after_sec': instance.disappearingAfterSec,
@@ -99,6 +99,7 @@ _ChatMemberModel _$ChatMemberModelFromJson(Map<String, dynamic> json) =>
       removedAt: json['removed_at'] as String?,
       lastReadMsgId: json['last_read_msg_id'] as String?,
       lastDeliveredMsgId: json['last_delivered_msg_id'] as String?,
+      mutedUntil: json['muted_until'] as String?,
     );
 
 Map<String, dynamic> _$ChatMemberModelToJson(_ChatMemberModel instance) =>
@@ -111,4 +112,5 @@ Map<String, dynamic> _$ChatMemberModelToJson(_ChatMemberModel instance) =>
       'removed_at': instance.removedAt,
       'last_read_msg_id': instance.lastReadMsgId,
       'last_delivered_msg_id': instance.lastDeliveredMsgId,
+      'muted_until': instance.mutedUntil,
     };
