@@ -446,21 +446,6 @@ class ConversationRepository {
         .write(ChatsCompanion(lastMsgId: Value(lastMsgId)));
   }
 
-  /// Mark conversation as deleted (soft delete)
-  Future<void> markAsDeleted(String conversationId, bool isDeleted) async {
-    final db = sqliteDatabase.database;
-    await (db.update(
-      db.chats,
-    )..where((t) => t.id.equals(conversationId))).write(
-      ChatsCompanion(
-        deletedAt: Value(
-          isDeleted ? DateTime.now().toIso8601String() : null,
-        ),
-        updatedAt: Value(DateTime.now().toIso8601String()),
-      ),
-    );
-  }
-
   /// Watch DM conversations as a reactive Drift stream ordered by last activity.
   /// Emits whenever the chats table changes (e.g. new message updates
   /// lastMsgId). Joins users/members asynchronously per emission.
@@ -698,78 +683,6 @@ class ConversationRepository {
         updatedAt: Value(DateTime.now().toIso8601String()),
       ),
     );
-  }
-
-  // get all deleted DMs
-  Future<List<DmModel>> getAllDeletedDms() async {
-    final db = sqliteDatabase.database;
-
-    // Query conversations by type and deletedAt
-    final conversations =
-        await (db.select(db.chats)
-              ..where(
-                (t) => t.type.equals('dm') & t.deletedAt.isNotNull(),
-              )
-              ..orderBy([
-                (t) => OrderingTerm(
-                  expression: t.updatedAt,
-                  mode: OrderingMode.desc,
-                ),
-                (t) => OrderingTerm(
-                  expression: t.createdAt,
-                  mode: OrderingMode.desc,
-                ),
-              ]))
-            .get();
-
-    final result = <DmModel>[];
-
-    for (final conv in conversations) {
-      // Get chat members
-      final members =
-          await (db.select(db.chatMembers)..where(
-                (t) => t.chatId.equals(conv.id) & t.removedAt.isNull(),
-              ))
-              .get();
-
-      // Skip if no members found
-      if (members.isEmpty) {
-        continue;
-      }
-
-      // Get recipient user info
-      final recipientUser = await (db.select(
-        db.users,
-      )..where((t) => t.id.equals(members[0].userId))).getSingleOrNull();
-
-      if (recipientUser == null) {
-        // Skip if recipient user not found
-        continue;
-      }
-
-      // Create DmListModel
-      final dmModel = DmModel(
-        chatId: conv.id,
-        recipientId: recipientUser.id,
-        recipientName: recipientUser.name,
-        recipientPhone: recipientUser.phone,
-        recipientProfilePic: recipientUser.profilePic,
-        pinnedMsgId: conv.pinnedMsgId,
-        lastMsgId: conv.lastMsgId,
-        unreadCount: conv.unreadCount,
-        isRecipientOnline: recipientUser.isOnline,
-        deletedAt: conv.deletedAt,
-        pinnedAt: conv.pinnedAt,
-        mutedUntil: conv.mutedUntil,
-        isFavorite: conv.isFavorite,
-        createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
-        disappearingAfterSec: conv.disappearingAfterSec,
-      );
-
-      result.add(dmModel);
-    }
-
-    return result;
   }
 
   // Get all DMs by type with recipient info and last message details

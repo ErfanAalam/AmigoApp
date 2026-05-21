@@ -66,7 +66,7 @@ class PinnedMessageSection extends StatelessWidget {
                   color: Colors.blue.withValues(alpha: 0.25),
                   width: 0.5,
                 ),
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(20),
               ),
               child: Row(
                 children: [
@@ -74,8 +74,8 @@ class PinnedMessageSection extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
-                      color: Colors.blue[400],
-                      borderRadius: BorderRadius.circular(8),
+                      color: Colors.blue[800],
+                      borderRadius: BorderRadius.circular(50),
                     ),
                     child: const Icon(
                       Icons.push_pin,

@@ -5,7 +5,6 @@ import '../../providers/theme-color.provider.dart';
 import '../../ui/app-bar.widget.dart';
 import '../../ui/settings-tile.widget.dart';
 import '../../utils/message-recommendations.store.dart';
-import '../profile/deleted-dms.screen.dart';
 
 class ChatSettingsScreen extends ConsumerWidget {
   const ChatSettingsScreen({super.key});
@@ -35,25 +34,6 @@ class ChatSettingsScreen extends ConsumerWidget {
                     context,
                     MaterialPageRoute(
                       builder: (_) => const QuickRepliesScreen(),
-                    ),
-                  );
-                },
-              ),
-              SettingsTile(
-                icon: Icons.restore_from_trash_rounded,
-                iconBackgroundColor: const Color(0xFFEF5350),
-                title: 'Restore Deleted Chats',
-                subtitle: 'View and restore previously deleted DMs',
-                trailing: Icon(
-                  Icons.chevron_right_rounded,
-                  color: Colors.grey[400],
-                  size: 22,
-                ),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const DeletedChatsPage(),
                     ),
                   );
                 },

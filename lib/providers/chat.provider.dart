@@ -22,6 +22,7 @@ import '../services/socket/transport.manager.dart';
 import '../services/user-info-cache.service.dart';
 import '../services/user-status.service.dart';
 import '../types/socket.types.dart';
+import '../ui/snackbar.dart';
 import '../utils/user.utils.dart';
 
 /// Overall transport/connectivity status exposed to the UI.
@@ -877,57 +878,6 @@ class ChatNotifier extends Notifier<ChatState> {
     return filteredGroups;
   }
 
-  void toggleDeleteChat(String conversationId, ChatType convType) async {
-    if (convType == ChatType.dm) {
-      final convIndex = state.dmList.indexWhere(
-        (conv) => conv.chatId == conversationId,
-      );
-      if (convIndex == -1) return;
-
-      final conv = state.dmList[convIndex];
-
-      final updatedConv = conv.copyWith(
-        deletedAt: conv.deletedAt == null
-            ? DateTime.now().toIso8601String()
-            : null,
-      );
-      // print(
-      //   "--------------------------------------------------------------------------------",
-      // );
-      // print("updatedConv -> ${updatedConv.toJson()}");
-      // print(
-      //   "--------------------------------------------------------------------------------",
-      // );
-      final updatedDmList = List<DmModel>.from(state.dmList);
-      updatedDmList[convIndex] = updatedConv;
-
-      // Sort conversations
-      final sortedConversations = await filterAndSortConversations(
-        updatedDmList,
-      );
-
-      state = state.copyWith(dmList: sortedConversations);
-    }
-    // else if (convType == ChatType.group) {
-    //   final convIndex = state.groupList.indexWhere(
-    //     (group) => group.conversationId == conversationId,
-    //   );
-    //   if (convIndex == -1) return;
-    //   final group = state.groupList[convIndex];
-    //   final updatedGroup =
-    //       group.copyWith(isDeleted: !(group.isDeleted ?? false));
-    //   final updatedGroupList = List<GroupModel>.from(state.groupList);
-    //   updatedGroupList[convIndex] = updatedGroup;
-    //
-    //   state = state.copyWith(groupList: updatedGroupList);
-    //   await _conversationsRepo.toggleDeleteConversation(
-    //     conversationId,
-    //     convType,
-    //     updatedGroup.isDeleted ?? false,
-    //   );
-    // }
-  }
-
   /// Set active conversation
   void setActiveConversation(String? conversationId, ChatType? convType) {
     final shouldClear = conversationId == null;
@@ -1111,12 +1061,27 @@ class ChatNotifier extends Notifier<ChatState> {
           case 'delete':
             final response = await apiService.chat.deleteDm(conversationId);
             if (response.isSuccess) {
-              // Soft-delete locally (sets chats.deletedAt) so the DM stays
-              // restorable from Profile → Chat Management. The dm-list
-              // stream filters deletedAt-not-null rows out of the active
-              // list, and toggleDeleteChat keeps state.dmList in sync.
-              await _conversationsRepo.softDeleteConversation(conversationId);
-              toggleDeleteChat(conversationId, ChatType.dm);
+              // "Delete for me" — server set chat_members.removed_at; locally
+              // we hard-purge so the DM (and any history) is gone from this
+              // client. If the peer ever messages again, the server-side
+              // revive_hidden_dm_members path emits conversation:new and the
+              // DM reappears fresh.
+              await _messageRepo.purgeConversationMessages(conversationId);
+              await _conversationsMemberRepo
+                  .deleteMembersByConversationId(conversationId);
+              await _conversationsRepo.deleteConversation(conversationId);
+
+              final updatedDms = state.dmList
+                  .where((d) => d.chatId != conversationId)
+                  .toList();
+              final clearedActive = state.activeConvId == conversationId
+                  ? null
+                  : state.activeConvId;
+              state = state.copyWith(
+                dmList: updatedDms,
+                activeConvId: clearedActive,
+              );
+              return;
             }
             break;
         }
@@ -2174,11 +2139,31 @@ class ChatNotifier extends Notifier<ChatState> {
           }
           break;
         case ConversationActionType.chatDelete:
-          // Admin hard-deleted the chat. Wipe local state and bail out before
-          // the system-message insert below — there's no chat row left for
-          // it to belong to. If the user is currently inside this chat,
-          // setActiveConvId(null) so the screen's existing removed-from-group
-          // empty-state path takes over on next build.
+          // Admin deleted the chat. Wipe everything tied to it locally —
+          // messages, per-user message_info, chat_members, and the chat row
+          // itself — then drop it from the in-memory lists. Bail out before
+          // the system-message insert below (there'd be no chat row left
+          // for it to belong to). If the user is currently inside this
+          // chat, clearing activeConvId lets the screen fall through to its
+          // existing "you are no longer a member" empty state.
+          //
+          // We resolve the snackbar text BEFORE the purge: payload.title is
+          // shipped on chat_delete for exactly this reason (local chat row
+          // is about to disappear). Actor name comes from the in-memory
+          // user cache; falls back to a generic phrasing if unresolved.
+          final actorForSnack = payload.actorId != null
+              ? await UserInfoCache.instance.getUser(payload.actorId!)
+              : null;
+          final actorName = actorForSnack?.name ?? 'Admin';
+          final groupLabel = (payload.title?.trim().isNotEmpty ?? false)
+              ? '"${payload.title}"'
+              : 'the group';
+          Snack.show(
+            '$actorName deleted $groupLabel — cleaning up messages…',
+            duration: const Duration(seconds: 3),
+          );
+
+          await _messageRepo.purgeConversationMessages(payload.convId);
           await _conversationsMemberRepo.deleteMembersByConversationId(
             payload.convId,
           );

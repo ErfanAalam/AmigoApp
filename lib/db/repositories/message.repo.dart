@@ -542,6 +542,22 @@ class MessageRepository {
         );
   }
 
+  /// Hard-purge every message + message_info row tied to a conversation.
+  /// Used when the chat itself is being removed from local DB (DM "delete
+  /// for me" or admin-initiated chat_delete) — soft-delete isn't enough
+  /// because the chat row is going away and the messages would orphan.
+  Future<void> purgeConversationMessages(String conversationId) async {
+    final db = sqliteDatabase.database;
+    await db.transaction(() async {
+      await (db.delete(db.messageInfo)
+            ..where((t) => t.chatId.equals(conversationId)))
+          .go();
+      await (db.delete(db.messages)
+            ..where((t) => t.chatId.equals(conversationId)))
+          .go();
+    });
+  }
+
   /// Mark a message as "deleted for me" by writing MessageInfo.deletedAt for
   /// the given user. The Messages.deletedAt column (global "deleted for
   /// everyone") is left untouched. watchMessages joins MessageInfo for the

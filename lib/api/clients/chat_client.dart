@@ -95,11 +95,6 @@ class ChatClient extends BaseApiClient {
     return delete('/chat/dm/soft-delete-dm/$conversationId');
   }
 
-  /// Revive chat
-  Future<ApiResult<dynamic>> reviveChat(String conversationId) async {
-    return post('/chat/revive-chat/$conversationId');
-  }
-
   /// Set/clear the disappearing-messages duration on a chat.
   /// [durationSec] = null clears the setting (off).
   /// Backend accepts the WhatsApp-style presets: 24h / 7d / 90d. Anything

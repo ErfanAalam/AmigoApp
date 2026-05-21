@@ -1,4 +1,3 @@
-import 'package:amigo/db/repositories/conversations.repo.dart';
 import 'package:amigo/db/repositories/message.repo.dart';
 import 'package:amigo/db/sqlite.db.dart';
 import 'package:amigo/utils/user.utils.dart';
@@ -21,7 +20,6 @@ import '../../services/auth/auth.service.dart';
 import '../../ui/snackbar.dart';
 import '../auth/login.screen.dart';
 import '../debug/debug-menu.screen.dart';
-import 'deleted-dms.screen.dart';
 import 'edit-profile.screen.dart';
 import '../../utils/network.utils.dart';
 import '../../types/network.types.dart';
@@ -39,13 +37,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   final AuthService _authService = AuthService();
   // final CookieService _cookieService = CookieService();
   final apiService = ApiService();
-  final ConversationRepository _conversationRepo = ConversationRepository();
   final ImagePicker _picker = ImagePicker();
 
   Map<String, dynamic>? userData;
   bool isLoading = true;
   bool isUpdatingProfilePic = false;
-  int deletedChatsCount = 0;
   String appVersion = '';
   Timer? _debugTimer;
 
@@ -53,7 +49,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   void initState() {
     super.initState();
     _loadUserData();
-    _loadDeletedChatsCount();
     _loadAppVersion();
     // _checkPermissions();
     _requestPermissions();
@@ -63,19 +58,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   void dispose() {
     _debugTimer?.cancel();
     super.dispose();
-  }
-
-  Future<void> _loadDeletedChatsCount() async {
-    try {
-      final deletedChats = await _conversationRepo.getAllDeletedDms();
-      if (mounted) {
-        setState(() {
-          deletedChatsCount = deletedChats.length;
-        });
-      }
-    } catch (e) {
-      debugPrint('❌ Error loading deleted chats count: $e');
-    }
   }
 
   Future<void> _loadAppVersion() async {
@@ -859,55 +841,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                           valueColor: (userData?['call_access'] == true)
                               ? Colors.green
                               : Colors.orange,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-
-              // Chat Management Section
-              Container(
-                margin: EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.grey.withOpacity(0.1),
-                      spreadRadius: 1,
-                      blurRadius: 5,
-                      offset: Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    _buildInfoSection(
-                      title: 'Chat Management',
-                      children: [
-                        ProfileOption(
-                          icon: Icons.delete_outline,
-                          title: 'Deleted Chats',
-                          subtitle: deletedChatsCount > 0
-                              ? '$deletedChatsCount deleted chat${deletedChatsCount > 1 ? 's' : ''}'
-                              : 'View deleted chats',
-                          onTap: () async {
-                            final result = await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => DeletedChatsPage(),
-                              ),
-                            );
-                            // Refresh count when returning
-                            _loadDeletedChatsCount();
-
-                            // If a chat was restored, notify the parent to refresh
-                            if (result == true && mounted) {
-                              // Send a signal to refresh the chats page
-                              Navigator.pop(context, 'refresh_chats');
-                            }
-                          },
                         ),
                       ],
                     ),
