@@ -49,6 +49,24 @@ final chatByIdStreamProvider =
   return ConversationRepository().watchChatById(chatId);
 });
 
+/// Reactive list of starred messages for a chat, most-recently-starred first.
+/// Drives the StarredMessagesScreen.
+final starredMessagesStreamProvider =
+    StreamProvider.family<List<MessageModel>, String>((ref, chatId) async* {
+  final user = await UserUtils().getUserDetails();
+  yield* MessageRepository().watchStarredMessages(
+    chatId,
+    currentUserId: user?.id,
+  );
+});
+
+/// Reactive set of starred message ids for a chat. Used by messaging screens
+/// to render the star indicator on bubbles.
+final starredMessageIdsStreamProvider =
+    StreamProvider.family<Set<String>, String>((ref, chatId) {
+  return MessageRepository().watchStarredMessageIds(chatId);
+});
+
 /// Reactive stream of user online status map.
 /// Bridges UserStatusService into Riverpod so the DM list rebuilds
 /// whenever any user goes online/offline without needing a DB write.

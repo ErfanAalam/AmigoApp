@@ -55,6 +55,7 @@ mixin ChatSyncMixin<T extends ConsumerStatefulWidget>
   StreamSubscription<Map<String, Map<String, dynamic>>>? reactionsSubscription;
   StreamSubscription<Map<String, MessageStatusType>>?
       deliveryStatusSubscription;
+  StreamSubscription<Set<String>>? starredIdsSubscription;
 
   /// Drives view-layer re-evaluation of disappearing-messages so expired rows
   /// vanish without waiting for the server's message:delete event. The actual
@@ -90,6 +91,11 @@ mixin ChatSyncMixin<T extends ConsumerStatefulWidget>
   /// Pinned-message slot (read+write). Lives on `ChatActionsMixin`.
   MessageModel? get pinnedMessage;
   void setPinnedMessage(MessageModel? message);
+
+  /// Reactive set of starred message ids for this chat (lives on
+  /// `ChatActionsMixin`). Mutated when the Drift starred-ids stream emits.
+  Set<String> get starredMessages;
+  set starredMessages(Set<String> value);
 
   /// `sendConversationJoin` from ChatWebSocketMixin — fired off after the
   /// chat is initialized.
@@ -292,6 +298,17 @@ mixin ChatSyncMixin<T extends ConsumerStatefulWidget>
               '$scrollDebugPrefix delivery status stream error: $e',
             ),
           );
+
+      starredIdsSubscription?.cancel();
+      starredIdsSubscription =
+          messagesRepo.watchStarredMessageIds(conversationId).listen(
+        (ids) {
+          if (!canSetState) return;
+          safeSetState(() => starredMessages = ids);
+        },
+        onError: (e) =>
+            debugPrint('$scrollDebugPrefix starred ids stream error: $e'),
+      );
     });
 
     // Independent async work: clear unread count + load pinned. Run in
@@ -572,6 +589,7 @@ mixin ChatSyncMixin<T extends ConsumerStatefulWidget>
     messagesStreamSub?.cancel();
     reactionsSubscription?.cancel();
     deliveryStatusSubscription?.cancel();
+    starredIdsSubscription?.cancel();
     _disappearingTicker?.cancel();
   }
 }

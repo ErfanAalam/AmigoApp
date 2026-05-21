@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../api/api_service.dart';
 import '../../../db/repositories/message-status.repo.dart';
+import '../../../db/repositories/message.repo.dart';
 import '../../../models/message.model.dart';
 import '../../../providers/chat.provider.dart';
 import '../../../utils/chat/chat-helpers.utils.dart';
@@ -15,14 +16,15 @@ import '../../../utils/chat/chat-helpers.utils.dart';
 /// hooks so the mixin stays free of DM/group conditionals.
 mixin ChatActionsMixin<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   final Set<String> selectedMessages = {};
-  final Set<String> starredMessages = {};
+  // Reactive set of starred message ids for this chat — populated by the
+  // host from `starredMessageIdsStreamProvider` so the bubble overlay
+  // reflects SQLite truth without manual book-keeping.
+  Set<String> starredMessages = <String>{};
   final Set<String> messagesToForward = {};
   MessageModel? replyToMessageData;
   bool isLoadingConversations = false;
 
-  // Star feature is dropped on the backend. Keep the toggle reachable behind
-  // a compile-time flag so it can be restored without restructuring this mixin.
-  static const bool _starEnabled = false;
+  final MessageRepository _messageRepo = MessageRepository();
 
   bool get canSetState;
   void safeSetState(VoidCallback fn);
@@ -98,10 +100,8 @@ mixin ChatActionsMixin<T extends ConsumerStatefulWidget> on ConsumerState<T> {
         .updatePinnedMessageInState(conversationId, newPinnedMessageId);
   }
 
-  void toggleStarMessage(String messageId) {
-    if (_starEnabled) {
-      /* star disabled */
-    }
+  Future<void> toggleStarMessage(String messageId) async {
+    await _messageRepo.toggleStarMessage(messageId);
   }
 
   Future<void> reactToMessage(MessageModel message, String emoji) async {
@@ -166,10 +166,21 @@ mixin ChatActionsMixin<T extends ConsumerStatefulWidget> on ConsumerState<T> {
     await showForwardModal();
   }
 
-  void bulkStarMessages() {
-    if (_starEnabled) {
-      /* star disabled */
+  Future<void> bulkStarMessages() async {
+    if (selectedMessages.isEmpty) return;
+    final ids = selectedMessages.toList(growable: false);
+    // If every selected message is already starred, treat the action as
+    // "unstar all". Otherwise star whatever isn't already starred so the
+    // bulk action never has a no-op outcome.
+    final allStarred = ids.every(starredMessages.contains);
+    for (final id in ids) {
+      if (allStarred) {
+        await _messageRepo.unstarMessage(id);
+      } else {
+        await _messageRepo.starMessage(id);
+      }
     }
+    exitSelectionMode();
   }
 
   Future<void> bulkForwardMessages() => ChatHelpers.bulkForwardMessages(

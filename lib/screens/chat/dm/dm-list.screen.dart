@@ -54,8 +54,18 @@ class ChatsPageState extends ConsumerState<ChatsPage>
     ref.read(chatProvider.notifier).updateSearchQuery('');
   }
 
-  /// Handle chat action (pin, mute, favorite, delete)
+  /// Handle chat action (pin, mute, favorite, delete, mark_read)
   Future<void> _handleChatAction(String action, DmModel conversation) async {
+    // Mark-as-read short-circuits before the shared handleChatAction path —
+    // it has its own provider method that owns the local-DB writes + WS
+    // dispatch / offline queueing.
+    if (action == 'mark_read') {
+      await ref
+          .read(chatProvider.notifier)
+          .markConversationAsRead(conversation.chatId, ChatType.dm);
+      return;
+    }
+
     // Show delete confirmation if needed
     if (action == 'delete') {
       final shouldDelete = await _showDeleteConfirmation(
@@ -135,11 +145,19 @@ class ChatsPageState extends ConsumerState<ChatsPage>
       Offset.zero & overlayBox.size,
     );
 
+    final hasUnread = (conversation.unreadCount ?? 0) > 0;
     final action = await showBlurredPopup<String>(
       context: anchor,
       position: position,
       scaleAlignment: Alignment.topCenter,
+      maxWidth: 200,
       items: [
+        if (hasUnread)
+          const BlurredPopupAction<String>(
+            label: 'Mark as Read',
+            icon: Icons.mark_chat_read_outlined,
+            value: 'mark_read',
+          ),
         BlurredPopupAction<String>(
           label: isPinned ? 'Unpin Chat' : 'Pin Chat',
           icon: isPinned ? Icons.push_pin : Icons.push_pin_outlined,
@@ -172,6 +190,17 @@ class ChatsPageState extends ConsumerState<ChatsPage>
 
   void _refreshConversations() {
     ref.read(chatProvider.notifier).loadConvsFromServer();
+  }
+
+  void _onAppBarMenuSelected(String value) {
+    switch (value) {
+      case 'refresh':
+        _refreshConversations();
+        break;
+      case 'mark_all_read':
+        ref.read(chatProvider.notifier).markAllConversationsAsRead(ChatType.dm);
+        break;
+    }
   }
 
   // All state management and WebSocket handling is now done by dmListProvider
@@ -215,10 +244,28 @@ class ChatsPageState extends ConsumerState<ChatsPage>
       appBar: AmigoAppBar(
         title: 'AmigoChats',
         actions: [
-          AmigoAppBarAction(
-            icon: Icons.refresh_rounded,
-            onPressed: _refreshConversations,
-            tooltip: 'Refresh',
+          Container(
+            margin: const EdgeInsets.only(right: 6),
+            child: BlurredPopupButton<String>(
+              icon: Icons.more_vert,
+              iconColor: themeColor.primary,
+              iconSize: 22,
+              tooltip: 'More',
+              menuMaxWidth: 200,
+              itemsBuilder: () => const [
+                BlurredPopupAction<String>(
+                  label: 'Refresh List',
+                  icon: Icons.refresh_rounded,
+                  value: 'refresh',
+                ),
+                BlurredPopupAction<String>(
+                  label: 'Mark All as Read',
+                  icon: Icons.mark_chat_read_outlined,
+                  value: 'mark_all_read',
+                ),
+              ],
+              onSelected: _onAppBarMenuSelected,
+            ),
           ),
         ],
       ),

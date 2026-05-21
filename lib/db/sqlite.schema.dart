@@ -125,6 +125,9 @@ class Messages extends Table {
   TextColumn get expiresAt => text().nullable()();
   BoolColumn get isFailed =>
       boolean().withDefault(const Constant(false))(); // client-only
+  // Client-only star. Null = unstarred; ISO-8601 timestamp = when starred.
+  // The starred-messages screen sorts by this DESC (most recent first).
+  TextColumn get starredAt => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -172,7 +175,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 14;
+  int get schemaVersion => 15;
 
   @override
   MigrationStrategy get migration {
@@ -226,6 +229,11 @@ class AppDatabase extends _$AppDatabase {
     );
     await m.database.customStatement(
       'CREATE INDEX IF NOT EXISTS idx_chats_type ON chats(type)',
+    );
+    // Speeds up the per-chat starred-messages listing.
+    await m.database.customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_messages_chat_starred '
+      'ON messages(chat_id, starred_at) WHERE starred_at IS NOT NULL',
     );
   }
 

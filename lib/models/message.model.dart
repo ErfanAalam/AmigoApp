@@ -42,6 +42,10 @@ abstract class MessageModel with _$MessageModel {
     // filters expired-but-not-deleted rows; the row is only soft-deleted
     // when the server's message:delete event arrives.
     @JsonKey(name: 'expires_at') String? expiresAt,
+    // Client-only star marker. Null = not starred; ISO-8601 timestamp = when
+    // the user starred it. Never sent over the wire.
+    @JsonKey(name: 'starred_at', includeFromJson: false, includeToJson: false)
+    String? starredAt,
   }) = _MessageModel;
 
   factory MessageModel.fromJson(Map<String, dynamic> json) =>
@@ -74,6 +78,7 @@ abstract class MessageModel with _$MessageModel {
   bool get isReply => repliedTo != null;
   bool get isForwardedMessage => type == MessageType.forwarded;
   bool get isDeleted => deletedAt != null;
+  bool get isStarred => starredAt != null;
 
   /// Returns true when this message has a disappearing deadline that has
   /// already passed. Used by the view layer to hide expired messages until

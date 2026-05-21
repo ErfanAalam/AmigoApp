@@ -3114,6 +3114,17 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _starredAtMeta = const VerificationMeta(
+    'starredAt',
+  );
+  @override
+  late final GeneratedColumn<String> starredAt = GeneratedColumn<String>(
+    'starred_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -3127,6 +3138,7 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     deletedAt,
     expiresAt,
     isFailed,
+    starredAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -3205,6 +3217,12 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         isFailed.isAcceptableOrUnknown(data['is_failed']!, _isFailedMeta),
       );
     }
+    if (data.containsKey('starred_at')) {
+      context.handle(
+        _starredAtMeta,
+        starredAt.isAcceptableOrUnknown(data['starred_at']!, _starredAtMeta),
+      );
+    }
     return context;
   }
 
@@ -3260,6 +3278,10 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         DriftSqlType.bool,
         data['${effectivePrefix}is_failed'],
       )!,
+      starredAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}starred_at'],
+      ),
     );
   }
 
@@ -3284,6 +3306,7 @@ class Message extends DataClass implements Insertable<Message> {
   final String? deletedAt;
   final String? expiresAt;
   final bool isFailed;
+  final String? starredAt;
   const Message({
     required this.id,
     required this.chatId,
@@ -3296,6 +3319,7 @@ class Message extends DataClass implements Insertable<Message> {
     this.deletedAt,
     this.expiresAt,
     required this.isFailed,
+    this.starredAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -3325,6 +3349,9 @@ class Message extends DataClass implements Insertable<Message> {
       map['expires_at'] = Variable<String>(expiresAt);
     }
     map['is_failed'] = Variable<bool>(isFailed);
+    if (!nullToAbsent || starredAt != null) {
+      map['starred_at'] = Variable<String>(starredAt);
+    }
     return map;
   }
 
@@ -3351,6 +3378,9 @@ class Message extends DataClass implements Insertable<Message> {
           ? const Value.absent()
           : Value(expiresAt),
       isFailed: Value(isFailed),
+      starredAt: starredAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(starredAt),
     );
   }
 
@@ -3373,6 +3403,7 @@ class Message extends DataClass implements Insertable<Message> {
       deletedAt: serializer.fromJson<String?>(json['deletedAt']),
       expiresAt: serializer.fromJson<String?>(json['expiresAt']),
       isFailed: serializer.fromJson<bool>(json['isFailed']),
+      starredAt: serializer.fromJson<String?>(json['starredAt']),
     );
   }
   @override
@@ -3390,6 +3421,7 @@ class Message extends DataClass implements Insertable<Message> {
       'deletedAt': serializer.toJson<String?>(deletedAt),
       'expiresAt': serializer.toJson<String?>(expiresAt),
       'isFailed': serializer.toJson<bool>(isFailed),
+      'starredAt': serializer.toJson<String?>(starredAt),
     };
   }
 
@@ -3405,6 +3437,7 @@ class Message extends DataClass implements Insertable<Message> {
     Value<String?> deletedAt = const Value.absent(),
     Value<String?> expiresAt = const Value.absent(),
     bool? isFailed,
+    Value<String?> starredAt = const Value.absent(),
   }) => Message(
     id: id ?? this.id,
     chatId: chatId ?? this.chatId,
@@ -3417,6 +3450,7 @@ class Message extends DataClass implements Insertable<Message> {
     deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
     expiresAt: expiresAt.present ? expiresAt.value : this.expiresAt,
     isFailed: isFailed ?? this.isFailed,
+    starredAt: starredAt.present ? starredAt.value : this.starredAt,
   );
   Message copyWithCompanion(MessagesCompanion data) {
     return Message(
@@ -3433,6 +3467,7 @@ class Message extends DataClass implements Insertable<Message> {
       deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
       expiresAt: data.expiresAt.present ? data.expiresAt.value : this.expiresAt,
       isFailed: data.isFailed.present ? data.isFailed.value : this.isFailed,
+      starredAt: data.starredAt.present ? data.starredAt.value : this.starredAt,
     );
   }
 
@@ -3449,7 +3484,8 @@ class Message extends DataClass implements Insertable<Message> {
           ..write('sentAt: $sentAt, ')
           ..write('deletedAt: $deletedAt, ')
           ..write('expiresAt: $expiresAt, ')
-          ..write('isFailed: $isFailed')
+          ..write('isFailed: $isFailed, ')
+          ..write('starredAt: $starredAt')
           ..write(')'))
         .toString();
   }
@@ -3467,6 +3503,7 @@ class Message extends DataClass implements Insertable<Message> {
     deletedAt,
     expiresAt,
     isFailed,
+    starredAt,
   );
   @override
   bool operator ==(Object other) =>
@@ -3482,7 +3519,8 @@ class Message extends DataClass implements Insertable<Message> {
           other.sentAt == this.sentAt &&
           other.deletedAt == this.deletedAt &&
           other.expiresAt == this.expiresAt &&
-          other.isFailed == this.isFailed);
+          other.isFailed == this.isFailed &&
+          other.starredAt == this.starredAt);
 }
 
 class MessagesCompanion extends UpdateCompanion<Message> {
@@ -3497,6 +3535,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   final Value<String?> deletedAt;
   final Value<String?> expiresAt;
   final Value<bool> isFailed;
+  final Value<String?> starredAt;
   final Value<int> rowid;
   const MessagesCompanion({
     this.id = const Value.absent(),
@@ -3510,6 +3549,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.deletedAt = const Value.absent(),
     this.expiresAt = const Value.absent(),
     this.isFailed = const Value.absent(),
+    this.starredAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MessagesCompanion.insert({
@@ -3524,6 +3564,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.deletedAt = const Value.absent(),
     this.expiresAt = const Value.absent(),
     this.isFailed = const Value.absent(),
+    this.starredAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        chatId = Value(chatId),
@@ -3541,6 +3582,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Expression<String>? deletedAt,
     Expression<String>? expiresAt,
     Expression<bool>? isFailed,
+    Expression<String>? starredAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -3555,6 +3597,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       if (deletedAt != null) 'deleted_at': deletedAt,
       if (expiresAt != null) 'expires_at': expiresAt,
       if (isFailed != null) 'is_failed': isFailed,
+      if (starredAt != null) 'starred_at': starredAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -3571,6 +3614,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Value<String?>? deletedAt,
     Value<String?>? expiresAt,
     Value<bool>? isFailed,
+    Value<String?>? starredAt,
     Value<int>? rowid,
   }) {
     return MessagesCompanion(
@@ -3585,6 +3629,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       deletedAt: deletedAt ?? this.deletedAt,
       expiresAt: expiresAt ?? this.expiresAt,
       isFailed: isFailed ?? this.isFailed,
+      starredAt: starredAt ?? this.starredAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -3627,6 +3672,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     if (isFailed.present) {
       map['is_failed'] = Variable<bool>(isFailed.value);
     }
+    if (starredAt.present) {
+      map['starred_at'] = Variable<String>(starredAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -3647,6 +3695,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
           ..write('deletedAt: $deletedAt, ')
           ..write('expiresAt: $expiresAt, ')
           ..write('isFailed: $isFailed, ')
+          ..write('starredAt: $starredAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -5913,6 +5962,7 @@ typedef $$MessagesTableCreateCompanionBuilder =
       Value<String?> deletedAt,
       Value<String?> expiresAt,
       Value<bool> isFailed,
+      Value<String?> starredAt,
       Value<int> rowid,
     });
 typedef $$MessagesTableUpdateCompanionBuilder =
@@ -5928,6 +5978,7 @@ typedef $$MessagesTableUpdateCompanionBuilder =
       Value<String?> deletedAt,
       Value<String?> expiresAt,
       Value<bool> isFailed,
+      Value<String?> starredAt,
       Value<int> rowid,
     });
 
@@ -5999,6 +6050,11 @@ class $$MessagesTableFilterComposer
     column: $table.isFailed,
     builder: (column) => ColumnFilters(column),
   );
+
+  ColumnFilters<String> get starredAt => $composableBuilder(
+    column: $table.starredAt,
+    builder: (column) => ColumnFilters(column),
+  );
 }
 
 class $$MessagesTableOrderingComposer
@@ -6064,6 +6120,11 @@ class $$MessagesTableOrderingComposer
     column: $table.isFailed,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get starredAt => $composableBuilder(
+    column: $table.starredAt,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$MessagesTableAnnotationComposer
@@ -6110,6 +6171,9 @@ class $$MessagesTableAnnotationComposer
 
   GeneratedColumn<bool> get isFailed =>
       $composableBuilder(column: $table.isFailed, builder: (column) => column);
+
+  GeneratedColumn<String> get starredAt =>
+      $composableBuilder(column: $table.starredAt, builder: (column) => column);
 }
 
 class $$MessagesTableTableManager
@@ -6151,6 +6215,7 @@ class $$MessagesTableTableManager
                 Value<String?> deletedAt = const Value.absent(),
                 Value<String?> expiresAt = const Value.absent(),
                 Value<bool> isFailed = const Value.absent(),
+                Value<String?> starredAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MessagesCompanion(
                 id: id,
@@ -6164,6 +6229,7 @@ class $$MessagesTableTableManager
                 deletedAt: deletedAt,
                 expiresAt: expiresAt,
                 isFailed: isFailed,
+                starredAt: starredAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -6179,6 +6245,7 @@ class $$MessagesTableTableManager
                 Value<String?> deletedAt = const Value.absent(),
                 Value<String?> expiresAt = const Value.absent(),
                 Value<bool> isFailed = const Value.absent(),
+                Value<String?> starredAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MessagesCompanion.insert(
                 id: id,
@@ -6192,6 +6259,7 @@ class $$MessagesTableTableManager
                 deletedAt: deletedAt,
                 expiresAt: expiresAt,
                 isFailed: isFailed,
+                starredAt: starredAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

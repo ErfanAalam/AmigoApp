@@ -95,6 +95,10 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
         final enrichedUsers = await UserUtils().enrichUsersWithDisplayNames(
           users,
         );
+        enrichedUsers.sort(
+          (a, b) =>
+              a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
+        );
 
         setState(() {
           _allUsers = enrichedUsers;
@@ -443,10 +447,13 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
                           ),
                           deleteIcon: const Icon(Icons.close, size: 14),
                           onDeleted: () => _toggleUserSelection(id),
-                          backgroundColor: themeColor.primaryLight.withOpacity(0.15),
+                          backgroundColor: themeColor.primaryLight.withOpacity(
+                            0.15,
+                          ),
                           side: BorderSide.none,
                           padding: const EdgeInsets.symmetric(horizontal: 4),
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
                           visualDensity: VisualDensity.compact,
                         ),
                       ),
@@ -466,177 +473,164 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
                     ),
                   )
                 : _filteredUsers.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.search_off_rounded,
-                              size: 48,
-                              color: Colors.grey.shade300,
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              'No users found',
-                              style: TextStyle(
-                                fontSize: 15,
-                                color: Colors.grey.shade500,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.search_off_rounded,
+                          size: 48,
+                          color: Colors.grey.shade300,
                         ),
-                      )
-                    : ListView.separated(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        itemCount: _filteredUsers.length,
-                        separatorBuilder: (_, __) => Divider(
-                          height: 1,
-                          indent: 68,
-                          color: Colors.grey.shade100,
+                        const SizedBox(height: 12),
+                        Text(
+                          'No users found',
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: Colors.grey.shade500,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
-                        itemBuilder: (context, index) {
-                          final user = _filteredUsers[index];
-                          final isSelected = _selectedUserIds.contains(user.id);
+                      ],
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    itemCount: _filteredUsers.length,
+                    separatorBuilder: (_, __) => Divider(
+                      height: 1,
+                      indent: 68,
+                      color: Colors.grey.shade100,
+                    ),
+                    itemBuilder: (context, index) {
+                      final user = _filteredUsers[index];
+                      final isSelected = _selectedUserIds.contains(user.id);
 
-                          return StaggeredSlideFadeItem(
-                            index: index,
-                            child: Material(
-                              color: Colors.white,
-                              child: InkWell(
-                                onTap: () => _toggleUserSelection(user.id),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 10,
+                      return StaggeredSlideFadeItem(
+                        index: index,
+                        child: Material(
+                          color: Colors.white,
+                          child: InkWell(
+                            onTap: () => _toggleUserSelection(user.id),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 10,
+                              ),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 22,
+                                    backgroundColor: isSelected
+                                        ? themeColor.primaryLight.withOpacity(
+                                            0.3,
+                                          )
+                                        : Colors.grey.shade100,
+                                    backgroundImage: user.profilePic != null
+                                        ? NetworkImage(user.profilePic!)
+                                        : null,
+                                    child: user.profilePic == null
+                                        ? Text(
+                                            _getInitials(user.displayName),
+                                            style: TextStyle(
+                                              color: isSelected
+                                                  ? themeColor.primary
+                                                  : Colors.grey.shade500,
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 14,
+                                            ),
+                                          )
+                                        : null,
                                   ),
-                                  child: Row(
-                                    children: [
-                                      CircleAvatar(
-                                        radius: 22,
-                                        backgroundColor: isSelected
-                                            ? themeColor.primaryLight
-                                                .withOpacity(0.3)
-                                            : Colors.grey.shade100,
-                                        backgroundImage:
-                                            user.profilePic != null
-                                            ? NetworkImage(user.profilePic!)
-                                            : null,
-                                        child: user.profilePic == null
-                                            ? Text(
-                                                _getInitials(user.displayName),
-                                                style: TextStyle(
-                                                  color: isSelected
-                                                      ? themeColor.primary
-                                                      : Colors.grey.shade500,
-                                                  fontWeight: FontWeight.w600,
-                                                  fontSize: 14,
-                                                ),
-                                              )
-                                            : null,
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
                                           children: [
-                                            Row(
-                                              children: [
-                                                Flexible(
-                                                  child: Text(
-                                                    user.displayName,
-                                                    style: TextStyle(
-                                                      fontWeight: isSelected
-                                                          ? FontWeight.w600
-                                                          : FontWeight.w400,
-                                                      fontSize: 15,
-                                                      color: Colors.black87,
-                                                    ),
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                  ),
+                                            Flexible(
+                                              child: Text(
+                                                user.displayName,
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 15,
+                                                  color: Colors.black87,
                                                 ),
-                                                if (user.role?.toLowerCase() ==
-                                                    'staff')
-                                                  Container(
-                                                    margin:
-                                                        const EdgeInsets.only(
-                                                          left: 6,
-                                                        ),
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            if (user.role?.toLowerCase() ==
+                                                'staff')
+                                              Container(
+                                                margin: const EdgeInsets.only(
+                                                  left: 6,
+                                                ),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
                                                       horizontal: 5,
                                                       vertical: 1,
                                                     ),
-                                                    decoration: BoxDecoration(
-                                                      color:
-                                                          Colors.blue.shade50,
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            4,
-                                                          ),
-                                                    ),
-                                                    child: Text(
-                                                      'Staff',
-                                                      style: TextStyle(
-                                                        color:
-                                                            Colors
-                                                                .blue.shade600,
-                                                        fontSize: 10,
-                                                        fontWeight:
-                                                            FontWeight.w500,
-                                                      ),
-                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.blue.shade50,
+                                                  borderRadius:
+                                                      BorderRadius.circular(4),
+                                                ),
+                                                child: Text(
+                                                  'Staff',
+                                                  style: TextStyle(
+                                                    color: Colors.blue.shade600,
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.w500,
                                                   ),
-                                              ],
-                                            ),
-                                            const SizedBox(height: 1),
-                                            Text(
-                                              user.phone,
-                                              style: TextStyle(
-                                                color: Colors.grey.shade500,
-                                                fontSize: 13,
+                                                ),
                                               ),
-                                            ),
                                           ],
                                         ),
-                                      ),
-                                      AnimatedContainer(
-                                        duration: const Duration(
-                                          milliseconds: 200,
-                                        ),
-                                        width: 22,
-                                        height: 22,
-                                        decoration: BoxDecoration(
-                                          color: isSelected
-                                              ? themeColor.primary
-                                              : Colors.transparent,
-                                          borderRadius:
-                                              BorderRadius.circular(6),
-                                          border: Border.all(
-                                            color: isSelected
-                                                ? themeColor.primary
-                                                : Colors.grey.shade300,
-                                            width: 1.5,
+                                        const SizedBox(height: 1),
+                                        Text(
+                                          user.phone,
+                                          style: TextStyle(
+                                            color: Colors.grey.shade500,
+                                            fontSize: 13,
                                           ),
                                         ),
-                                        child: isSelected
-                                            ? const Icon(
-                                                Icons.check_rounded,
-                                                color: Colors.white,
-                                                size: 14,
-                                              )
-                                            : null,
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
-                                ),
+                                  AnimatedContainer(
+                                    duration: const Duration(milliseconds: 200),
+                                    width: 22,
+                                    height: 22,
+                                    decoration: BoxDecoration(
+                                      color: isSelected
+                                          ? themeColor.primary
+                                          : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(
+                                        color: isSelected
+                                            ? themeColor.primary
+                                            : Colors.grey.shade300,
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                    child: isSelected
+                                        ? const Icon(
+                                            Icons.check_rounded,
+                                            color: Colors.white,
+                                            size: 14,
+                                          )
+                                        : null,
+                                  ),
+                                ],
                               ),
                             ),
-                          );
-                        },
-                      ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
@@ -650,13 +644,14 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
                 16,
                 12,
                 16,
-                12 + (bottomInset > 0 ? 0 : MediaQuery.of(context).padding.bottom),
+                12 +
+                    (bottomInset > 0
+                        ? 0
+                        : MediaQuery.of(context).padding.bottom),
               ),
               decoration: BoxDecoration(
                 color: Colors.white,
-                border: Border(
-                  top: BorderSide(color: Colors.grey.shade100),
-                ),
+                border: Border(top: BorderSide(color: Colors.grey.shade100)),
               ),
               child: SizedBox(
                 width: double.infinity,
@@ -665,7 +660,9 @@ class _CreateGroupPageState extends ConsumerState<CreateGroupPage> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: themeColor.primary,
                     foregroundColor: Colors.white,
-                    disabledBackgroundColor: themeColor.primary.withOpacity(0.6),
+                    disabledBackgroundColor: themeColor.primary.withOpacity(
+                      0.6,
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),

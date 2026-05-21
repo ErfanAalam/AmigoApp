@@ -64,6 +64,19 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
     ref.read(chatProvider.notifier).loadConvsFromServer();
   }
 
+  void _onAppBarMenuSelected(String value) {
+    switch (value) {
+      case 'refresh':
+        _refreshData();
+        break;
+      case 'mark_all_read':
+        ref
+            .read(chatProvider.notifier)
+            .markAllConversationsAsRead(ChatType.group);
+        break;
+    }
+  }
+
   /// Show group chat actions as a blurred popup anchored to the long-pressed
   /// row. Replaces the legacy [ChatActionBottomSheet] sheet — kept on disk
   /// for future reuse but no longer wired.
@@ -91,11 +104,19 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
       Offset.zero & overlayBox.size,
     );
 
+    final hasUnread = group.unreadCount > 0;
     final action = await showBlurredPopup<String>(
       context: anchor,
       position: position,
       scaleAlignment: Alignment.topCenter,
+      maxWidth: 200,
       items: [
+        if (hasUnread)
+          const BlurredPopupAction<String>(
+            label: 'Mark as Read',
+            icon: Icons.mark_chat_read_outlined,
+            value: 'mark_read',
+          ),
         BlurredPopupAction<String>(
           label: isPinned ? 'Unpin Chat' : 'Pin Chat',
           icon: isPinned ? Icons.push_pin : Icons.push_pin_outlined,
@@ -121,6 +142,16 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
 
   /// Handle group chat action
   Future<void> _handleGroupChatAction(String action, GroupModel group) async {
+    // Mark-as-read short-circuits before the shared handleChatAction path —
+    // it has its own provider method that owns the local-DB writes + WS
+    // dispatch / offline queueing.
+    if (action == 'mark_read') {
+      await ref
+          .read(chatProvider.notifier)
+          .markConversationAsRead(group.chatId, ChatType.group);
+      return;
+    }
+
     // Mute → ask how long. Unmute → confirm first, telling the user when the
     // chat would auto-unmute on its own.
     DateTime? muteUntil;
@@ -174,10 +205,28 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
       appBar: AmigoAppBar(
         title: 'Groups',
         actions: [
-          AmigoAppBarAction(
-            icon: Icons.refresh_rounded,
-            onPressed: _refreshData,
-            tooltip: 'Refresh',
+          Container(
+            margin: const EdgeInsets.only(right: 6),
+            child: BlurredPopupButton<String>(
+              icon: Icons.more_vert,
+              iconColor: themeColor.primary,
+              iconSize: 22,
+              tooltip: 'More',
+              menuMaxWidth: 200,
+              itemsBuilder: () => const [
+                BlurredPopupAction<String>(
+                  label: 'Refresh List',
+                  icon: Icons.refresh_rounded,
+                  value: 'refresh',
+                ),
+                BlurredPopupAction<String>(
+                  label: 'Mark All as Read',
+                  icon: Icons.mark_chat_read_outlined,
+                  value: 'mark_all_read',
+                ),
+              ],
+              onSelected: _onAppBarMenuSelected,
+            ),
           ),
         ],
       ),

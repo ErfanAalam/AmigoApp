@@ -145,6 +145,10 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
         final available = enriched
             .where((u) => !widget.existingMemberIds.contains(u.id))
             .toList();
+        available.sort(
+          (a, b) =>
+              a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
+        );
         if (mounted) setState(() => _users = available);
       }
     } catch (e) {
@@ -161,6 +165,25 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
       return u.displayName.toLowerCase().contains(q) ||
           u.phone.toLowerCase().contains(q);
     }).toList();
+  }
+
+  bool get _areAllFilteredSelected {
+    if (_filtered.isEmpty) return false;
+    return _filtered.every((u) => _selected.contains(u.id));
+  }
+
+  void _selectAllFiltered() {
+    setState(() {
+      _selected.addAll(_filtered.map((u) => u.id));
+    });
+  }
+
+  void _deselectAllFiltered() {
+    setState(() {
+      for (final u in _filtered) {
+        _selected.remove(u.id);
+      }
+    });
   }
 
   @override
@@ -245,6 +268,28 @@ class _AddMemberSheetState extends State<_AddMemberSheet> {
               ),
             ),
           ),
+          if (!_loading && _filtered.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Row(
+                children: [
+                  GestureDetector(
+                    onTap: _areAllFilteredSelected
+                        ? _deselectAllFiltered
+                        : _selectAllFiltered,
+                    child: Text(
+                      _areAllFilteredSelected ? 'Deselect all' : 'Select all',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: theme.primary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                ],
+              ),
+            ),
           Flexible(
             child: _loading
                 ? const Padding(

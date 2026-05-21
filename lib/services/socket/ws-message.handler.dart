@@ -331,6 +331,12 @@ class WebSocketMessageHandler {
           }
           break;
 
+        case WSMessageType.conversationMarkRead:
+          // Outbound-only from this client; the server re-broadcasts to
+          // senders as `conversation:join`. This case exists solely to
+          // satisfy the exhaustive switch.
+          break;
+
         case WSMessageType.socketHealthCheck:
           final payload = message.miscPayload;
           if (payload != null) {

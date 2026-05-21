@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/api_service.dart';
 import '../db/repositories/conversation-member.repo.dart';
 import '../db/repositories/message-status.repo.dart';
+import '../db/repositories/missed-ws-messages.repo.dart';
 import '../models/community.model.dart';
 import '../models/group.model.dart';
 import '../models/user.model.dart';
@@ -1173,6 +1174,139 @@ class ChatNotifier extends Notifier<ChatState> {
       }
     } catch (e) {
       debugPrint('❌ Error handling chat action: $e');
+    }
+  }
+
+  /// Mark every unread message in [conversationId] as read for the current
+  /// user. Mirrors the implicit mark-read that happens when entering a chat,
+  /// but driven from the list-screen long-press menu so the user doesn't
+  /// need to open the conversation. Writes to local SQLite immediately
+  /// (Drift watchers re-emit so the list badge drops), then dispatches a
+  /// `conversation:mark_read` WS event — queued into missed_ws_messages and
+  /// replayed on reconnect if the transport is currently offline.
+  Future<void> markConversationAsRead(
+    String conversationId,
+    ChatType convType,
+  ) async {
+    try {
+      final currentUser = await UserUtils().getUserDetails();
+      if (currentUser == null) return;
+
+      // Capture the latest server-resolvable message id BEFORE writing —
+      // the server's mark_read_upto needs a backend-known id to expand the
+      // cursor (system messages are client-only and would no-op).
+      final lastReadMsgId = await _messageRepo.getLatestNonSystemMessageId(
+        conversationId,
+      );
+
+      // Local SQLite source-of-truth updates. Both calls are idempotent so
+      // a re-press is harmless.
+      await _messageStatusRepo.markAllAsReadByConversationAndUser(
+        chatId: conversationId,
+        userId: currentUser.id,
+      );
+      await _conversationsRepo.markAsRead(conversationId);
+
+      // Optimistically zero the in-memory unread count so the badge
+      // disappears on the next frame; the Drift stream emission will land
+      // the same value shortly after.
+      if (convType == ChatType.dm) {
+        final convIndex = state.dmList.indexWhere(
+          (c) => c.chatId == conversationId,
+        );
+        if (convIndex != -1) {
+          final updated = List<DmModel>.from(state.dmList);
+          updated[convIndex] = updated[convIndex].copyWith(unreadCount: 0);
+          state = state.copyWith(dmList: updated);
+        }
+      } else if (convType == ChatType.group) {
+        final convIndex = state.groupList.indexWhere(
+          (c) => c.chatId == conversationId,
+        );
+        if (convIndex != -1) {
+          final updated = List<GroupModel>.from(state.groupList);
+          updated[convIndex] = updated[convIndex].copyWith(unreadCount: 0);
+          state = state.copyWith(groupList: updated);
+        }
+      }
+
+      // No backend message id means no server-side work to do — local-only
+      // ack is enough (the unread badge was the user-visible signal).
+      if (lastReadMsgId == null || lastReadMsgId.isEmpty) return;
+
+      // Same wire shape as `conversation:join` — the server's
+      // handle_conv_mark_read accepts ConvJoinPayload and re-broadcasts as
+      // `conversation:join` to the original senders so their tick marks
+      // update without any new client handler.
+      final payload = ConvJoinPayload(
+        convId: conversationId,
+        userId: currentUser.id,
+        lastReadMsgId: lastReadMsgId,
+      );
+
+      final wsMsg = WSMessage(
+        type: WSMessageType.conversationMarkRead,
+        payload: payload,
+        wsTimestamp: DateTime.now(),
+      ).toJson();
+
+      if (_transportManager.isConnected) {
+        try {
+          final sent = await _transportManager.sendMessage(wsMsg);
+          if (!sent) {
+            await MissedWsMessagesRepository().storeEvent(
+              'conversation:mark_read',
+              payload.toJson(),
+            );
+          }
+        } catch (e) {
+          debugPrint(
+            '[markConversationAsRead] WS send threw, queueing offline: $e',
+          );
+          await MissedWsMessagesRepository().storeEvent(
+            'conversation:mark_read',
+            payload.toJson(),
+          );
+        }
+      } else {
+        await MissedWsMessagesRepository().storeEvent(
+          'conversation:mark_read',
+          payload.toJson(),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error marking conversation as read: $e');
+    }
+  }
+
+  /// Mark every conversation of [convType] that still has unread messages as
+  /// read. Delegates to [markConversationAsRead] per row so the offline-queue
+  /// + sender-broadcast behaviour stays identical to the long-press path.
+  /// Sequential on purpose — N parallel transport sends would race for the
+  /// same socket; the missed-ws outbox preserves order which is what the
+  /// server's monotonic GREATEST guards expect.
+  Future<void> markAllConversationsAsRead(ChatType convType) async {
+    try {
+      final List<String> targetIds;
+      if (convType == ChatType.dm) {
+        targetIds = state.dmList
+            .where((c) => (c.unreadCount ?? 0) > 0)
+            .map((c) => c.chatId)
+            .toList();
+      } else if (convType == ChatType.group) {
+        targetIds = state.groupList
+            .where((c) => c.unreadCount > 0)
+            .map((c) => c.chatId)
+            .toList();
+      } else {
+        return;
+      }
+
+      for (final convId in targetIds) {
+        await markConversationAsRead(convId, convType);
+      }
+    } catch (e) {
+      debugPrint('❌ Error marking all conversations as read: $e');
     }
   }
 

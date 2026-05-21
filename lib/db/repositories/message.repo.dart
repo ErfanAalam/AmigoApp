@@ -49,6 +49,7 @@ class MessageRepository {
       sentAt: message.sentAt,
       deletedAt: message.deletedAt,
       expiresAt: message.expiresAt,
+      starredAt: message.starredAt,
     );
   }
 
@@ -66,6 +67,7 @@ class MessageRepository {
       sentAt: message.sentAt,
       deletedAt: Value(message.deletedAt),
       expiresAt: Value(message.expiresAt),
+      starredAt: Value(message.starredAt),
     );
   }
 
@@ -404,6 +406,29 @@ class MessageRepository {
 
     if (message == null) return null;
     return _messageToModel(message);
+  }
+
+  /// Latest non-system message id in a conversation. System messages live
+  /// only in the client DB — passing one as a read cursor to the server
+  /// produces a no-op subquery, so callers that need a server-resolvable
+  /// id (e.g. conversation:mark_read) use this instead of [getLastMessage].
+  Future<String?> getLatestNonSystemMessageId(String conversationId) async {
+    final db = sqliteDatabase.database;
+    final message =
+        await (db.select(db.messages)
+              ..where(
+                (t) =>
+                    t.chatId.equals(conversationId) &
+                    t.deletedAt.isNull() &
+                    t.type.equals(MessageType.system.value).not(),
+              )
+              ..orderBy([
+                (t) =>
+                    OrderingTerm(expression: t.sentAt, mode: OrderingMode.desc),
+              ])
+              ..limit(1))
+            .getSingleOrNull();
+    return message?.id;
   }
 
   /// Partially update a message by ID.
@@ -795,6 +820,124 @@ class MessageRepository {
   void _stopCleanupTimer() {
     _cleanupTimer?.cancel();
     _cleanupTimer = null;
+  }
+
+  /// Star a message (client-only). Idempotent — re-starring updates the
+  /// timestamp so the message floats back to the top of the starred list.
+  Future<SqliteResult<void>> starMessage(String messageId) async {
+    try {
+      final db = sqliteDatabase.database;
+      await (db.update(db.messages)
+            ..where((t) => t.id.equals(messageId)))
+          .write(
+            MessagesCompanion(
+              starredAt: Value(DateTime.now().toIso8601String()),
+            ),
+          );
+      return SqliteResult.success(message: 'Message starred');
+    } catch (e) {
+      final errorCode = _extractSqliteErrorCode(e);
+      debugPrint('Error starring message: $e');
+      return SqliteResult.error(
+        message: 'Failed to star message',
+        errorCode: errorCode,
+      );
+    }
+  }
+
+  /// Unstar a message. Idempotent.
+  Future<SqliteResult<void>> unstarMessage(String messageId) async {
+    try {
+      final db = sqliteDatabase.database;
+      await (db.update(db.messages)
+            ..where((t) => t.id.equals(messageId)))
+          .write(const MessagesCompanion(starredAt: Value(null)));
+      return SqliteResult.success(message: 'Message unstarred');
+    } catch (e) {
+      final errorCode = _extractSqliteErrorCode(e);
+      debugPrint('Error unstarring message: $e');
+      return SqliteResult.error(
+        message: 'Failed to unstar message',
+        errorCode: errorCode,
+      );
+    }
+  }
+
+  /// Toggle the starred state of a message.
+  Future<SqliteResult<void>> toggleStarMessage(String messageId) async {
+    final msg = await getMessageById(messageId);
+    if (msg == null) {
+      return SqliteResult.error(message: 'Message not found');
+    }
+    return msg.isStarred ? unstarMessage(messageId) : starMessage(messageId);
+  }
+
+  /// Reactive list of starred messages for a chat, sorted by most-recently-
+  /// starred first. Filters out soft-deleted messages and per-user "delete
+  /// for me" rows so a deleted message can't keep haunting the starred list.
+  Stream<List<MessageModel>> watchStarredMessages(
+    String chatId, {
+    String? currentUserId,
+  }) {
+    final db = sqliteDatabase.database;
+    final uid = currentUserId;
+    final infoForUser = uid == null ? null : db.alias(db.messageInfo, 'mi_self');
+
+    final joins = <Join>[
+      leftOuterJoin(db.users, db.users.id.equalsExp(db.messages.senderId)),
+      if (infoForUser != null && uid != null)
+        leftOuterJoin(
+          infoForUser,
+          infoForUser.messageId.equalsExp(db.messages.id) &
+              infoForUser.userId.equals(uid),
+        ),
+    ];
+
+    final query = db.select(db.messages).join(joins)
+      ..where(
+        db.messages.chatId.equals(chatId) &
+            db.messages.starredAt.isNotNull() &
+            db.messages.deletedAt.isNull(),
+      );
+
+    if (infoForUser != null) {
+      query.where(infoForUser.deletedAt.isNull());
+    }
+
+    query.orderBy([
+      OrderingTerm(
+        expression: db.messages.starredAt,
+        mode: OrderingMode.desc,
+      ),
+    ]);
+
+    return query.watch().map((results) {
+      return results.map((row) {
+        final message = row.readTable(db.messages);
+        final user = row.readTableOrNull(db.users);
+        return _messageToModel(message).copyWith(
+          senderName: user?.name,
+          senderProfilePic: user?.profilePic,
+        );
+      }).toList();
+    });
+  }
+
+  /// Reactive set of starred message ids for a chat. Used by messaging
+  /// screens to render the star icon on bubbles without having to denormalize
+  /// the value into the in-memory message list.
+  Stream<Set<String>> watchStarredMessageIds(String chatId) {
+    final db = sqliteDatabase.database;
+    final query = db.selectOnly(db.messages)
+      ..addColumns([db.messages.id])
+      ..where(
+        db.messages.chatId.equals(chatId) &
+            db.messages.starredAt.isNotNull() &
+            db.messages.deletedAt.isNull(),
+      );
+    return query.watch().map(
+          (rows) => rows.map((r) => r.read(db.messages.id)!).toSet(),
+        );
   }
 
   /// Failed messages for the given sender only.

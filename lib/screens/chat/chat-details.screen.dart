@@ -32,6 +32,7 @@ import '../../utils/chat/mute-duration-picker.util.dart';
 import '../../utils/user.utils.dart';
 import 'dm/dm-media-links-docs.screen.dart';
 import 'dm/dm-messaging.screen.dart';
+import 'starred-messages.screen.dart';
 
 /// Telegram-style chat details. Handles both DMs (`dm`) and groups (`group`),
 /// driven by which constructor arg is provided.
@@ -1379,7 +1380,84 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
               staggerDelayMs: 80,
               child: _buildMediaNavCard(themeColor),
             ),
+            const SizedBox(height: 12),
+            StaggeredSlideFadeItem(
+              index: isGroup ? 4 : 3,
+              staggerDelayMs: 80,
+              child: _buildStarredNavCard(themeColor),
+            ),
           ],
+        ),
+      ),
+    );
+  }
+
+  void _navigateToStarred() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => StarredMessagesScreen(
+          chatId: conversationId,
+          chatTitle: _resolveTitle(null),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStarredNavCard(ColorTheme themeColor) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: _navigateToStarred,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: themeColor.primaryLight.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(50),
+                    ),
+                    child: Icon(
+                      Icons.star_outline_rounded,
+                      color: themeColor.primary,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Text(
+                      'Starred Messages',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: Colors.grey.shade400,
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

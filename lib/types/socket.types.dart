@@ -127,6 +127,7 @@ enum ConversationActionType {
 enum WSMessageType {
   connectionStatus('connection:status'),
   conversationJoin('conversation:join'),
+  conversationMarkRead('conversation:mark_read'),
   conversationNew('conversation:new'),
   conversationTyping('conversation:typing'),
   conversationAction('conversation:action'),
@@ -171,6 +172,7 @@ enum WSMessageType {
 
 enum VitalWSMessageType {
   conversationJoin('conversation:join'),
+  conversationMarkRead('conversation:mark_read'),
   conversationNew('conversation:new'),
   conversationAction('conversation:action'),
   messageNew('message:new'),
@@ -604,6 +606,10 @@ class WSMessage {
       case WSMessageType.connectionStatus:
         return ConnectionStatusPayload.fromJson(json);
       case WSMessageType.conversationJoin:
+        return ConvJoinPayload.fromJson(json);
+      case WSMessageType.conversationMarkRead:
+        // Outbound-only from this client; servers re-broadcast as
+        // conversation:join to senders, so this case is defensive.
         return ConvJoinPayload.fromJson(json);
       case WSMessageType.conversationNew:
         return NewConversationPayload.fromJson(json);
