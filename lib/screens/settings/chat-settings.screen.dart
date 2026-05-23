@@ -6,11 +6,38 @@ import '../../ui/app-bar.widget.dart';
 import '../../ui/settings-tile.widget.dart';
 import '../../utils/message-recommendations.store.dart';
 
-class ChatSettingsScreen extends ConsumerWidget {
+class ChatSettingsScreen extends ConsumerStatefulWidget {
   const ChatSettingsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ChatSettingsScreen> createState() => _ChatSettingsScreenState();
+}
+
+class _ChatSettingsScreenState extends ConsumerState<ChatSettingsScreen> {
+  bool _quickRepliesEnabled = false;
+  bool _enabledLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    MessageRecommendationsStore.loadEnabled().then((enabled) {
+      if (!mounted) return;
+      setState(() {
+        _quickRepliesEnabled = enabled;
+        _enabledLoaded = true;
+      });
+    });
+  }
+
+  void _toggleEnabled(bool value) {
+    setState(() => _quickRepliesEnabled = value);
+    MessageRecommendationsStore.saveEnabled(value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final themeColor = ref.watch(themeColorProvider);
+
     return Scaffold(
       backgroundColor: const Color(0xFFF2F3F5),
       appBar: const AmigoAppBar(title: 'Chat Settings', showBackButton: true),
@@ -22,8 +49,26 @@ class ChatSettingsScreen extends ConsumerWidget {
               SettingsTile(
                 icon: Icons.bolt_rounded,
                 iconBackgroundColor: const Color(0xFFFFB400),
-                title: 'Quick Replies',
-                subtitle: 'Customize one-tap message suggestions',
+                title: 'Enable Quick Replies',
+                subtitle: 'Show one-tap suggestions above the message input',
+                trailing: Switch.adaptive(
+                  value: _quickRepliesEnabled,
+                  onChanged: _enabledLoaded ? _toggleEnabled : null,
+                  activeTrackColor: themeColor.primary,
+                ),
+                onTap: _enabledLoaded
+                    ? () => _toggleEnabled(!_quickRepliesEnabled)
+                    : null,
+              ),
+            ],
+          ),
+          SettingsCard(
+            children: [
+              SettingsTile(
+                icon: Icons.tune_rounded,
+                iconBackgroundColor: const Color(0xFF8E8E93),
+                title: 'Customize Quick Replies',
+                subtitle: 'Edit the list of one-tap suggestions',
                 trailing: Icon(
                   Icons.chevron_right_rounded,
                   color: Colors.grey[400],
@@ -43,7 +88,7 @@ class ChatSettingsScreen extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(28, 12, 28, 0),
             child: Text(
-              'Quick replies appear above the message input for one-tap responses.',
+              'Quick replies appear above the message input for one-tap responses. Open a chat after toggling for the change to take effect.',
               style: TextStyle(fontSize: 12, color: Colors.grey[600]),
             ),
           ),

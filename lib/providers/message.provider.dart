@@ -5,6 +5,7 @@ import '../db/sqlite.schema.dart';
 import '../models/conversations.model.dart';
 import '../models/group.model.dart';
 import '../models/message.model.dart';
+import '../models/user.model.dart';
 import '../services/socket/ws-message.handler.dart';
 import '../services/user-status.service.dart';
 import '../types/socket.types.dart';
@@ -80,4 +81,30 @@ final userStatusStreamProvider = StreamProvider<Map<String, bool>>((ref) {
 /// chats-table watchers don't re-fire on users-table writes alone.
 final userUpdateStreamProvider = StreamProvider<UserUpdatePayload>((ref) {
   return WebSocketMessageHandler().userUpdateStream;
+});
+
+/// Reactive stream of the currently-logged-in user. Used to power role-
+/// gated UI (e.g. the sub-admin "manage groups" FAB and long-press action
+/// on the group list) so that when the super-admin flips a role from the
+/// dashboard, the WS `user:update` event lands → SharedPreferences is
+/// rewritten by the ws-message handler → this stream re-emits → dependent
+/// widgets rebuild with the new role without a logout/login round-trip.
+///
+/// The source of truth is SharedPreferences (written on login + on every
+/// incoming role broadcast). We re-read on every `user:update` event for
+/// the current user so widgets pick up role flips live.
+final currentUserStreamProvider = StreamProvider<UserModel?>((ref) async* {
+  final initial = await UserUtils().getUserDetails();
+  yield initial;
+  final selfId = initial?.id;
+  if (selfId == null) return;
+
+  await for (final payload
+      in WebSocketMessageHandler().userUpdateStream.where(
+        (p) => p.userId == selfId,
+      )) {
+    // ignore: unused_local_variable
+    final _ = payload;
+    yield await UserUtils().getUserDetails();
+  }
 });

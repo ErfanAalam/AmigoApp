@@ -302,9 +302,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   // searchMatches, currentMatchIndex, searchDebounceTimer, isInputFocused,
   // highlightedMessageId, highlightedMessageIds).
 
-  List<String> _messageRecommendations = List<String>.from(
-    kDefaultMessageRecommendations,
-  );
+  List<String> _messageRecommendations = const [];
 
   // Sticky-date state lives on ChatScrollMixin (currentStickyDate, showStickyDate).
 
@@ -339,9 +337,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // `isLoading` → false on first emission, so the skeleton can clear.
     initializeChat();
 
-    MessageRecommendationsStore.load().then((recs) {
-      if (!mounted) return;
-      setState(() => _messageRecommendations = recs);
+    MessageRecommendationsStore.loadEnabled().then((enabled) {
+      if (!mounted || !enabled) return;
+      MessageRecommendationsStore.load().then((recs) {
+        if (!mounted) return;
+        setState(() => _messageRecommendations = recs);
+      });
     });
 
     // Everything else can wait until after the first frame paints — these

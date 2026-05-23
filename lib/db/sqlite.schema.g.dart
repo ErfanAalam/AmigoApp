@@ -26,17 +26,6 @@ class $UsersTable extends Users with TableInfo<$UsersTable, User> {
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
-  static const VerificationMeta _usernameMeta = const VerificationMeta(
-    'username',
-  );
-  @override
-  late final GeneratedColumn<String> username = GeneratedColumn<String>(
-    'username',
-    aliasedName,
-    true,
-    type: DriftSqlType.string,
-    requiredDuringInsert: false,
-  );
   static const VerificationMeta _phoneMeta = const VerificationMeta('phone');
   @override
   late final GeneratedColumn<String> phone = GeneratedColumn<String>(
@@ -110,7 +99,6 @@ class $UsersTable extends Users with TableInfo<$UsersTable, User> {
   List<GeneratedColumn> get $columns => [
     id,
     name,
-    username,
     phone,
     role,
     isOnline,
@@ -142,12 +130,6 @@ class $UsersTable extends Users with TableInfo<$UsersTable, User> {
       );
     } else if (isInserting) {
       context.missing(_nameMeta);
-    }
-    if (data.containsKey('username')) {
-      context.handle(
-        _usernameMeta,
-        username.isAcceptableOrUnknown(data['username']!, _usernameMeta),
-      );
     }
     if (data.containsKey('phone')) {
       context.handle(
@@ -206,10 +188,6 @@ class $UsersTable extends Users with TableInfo<$UsersTable, User> {
         DriftSqlType.string,
         data['${effectivePrefix}name'],
       )!,
-      username: attachedDatabase.typeMapping.read(
-        DriftSqlType.string,
-        data['${effectivePrefix}username'],
-      ),
       phone: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}phone'],
@@ -246,7 +224,6 @@ class $UsersTable extends Users with TableInfo<$UsersTable, User> {
 class User extends DataClass implements Insertable<User> {
   final String id;
   final String name;
-  final String? username;
   final String phone;
   final String? role;
   final bool isOnline;
@@ -256,7 +233,6 @@ class User extends DataClass implements Insertable<User> {
   const User({
     required this.id,
     required this.name,
-    this.username,
     required this.phone,
     this.role,
     required this.isOnline,
@@ -269,9 +245,6 @@ class User extends DataClass implements Insertable<User> {
     final map = <String, Expression>{};
     map['id'] = Variable<String>(id);
     map['name'] = Variable<String>(name);
-    if (!nullToAbsent || username != null) {
-      map['username'] = Variable<String>(username);
-    }
     map['phone'] = Variable<String>(phone);
     if (!nullToAbsent || role != null) {
       map['role'] = Variable<String>(role);
@@ -293,9 +266,6 @@ class User extends DataClass implements Insertable<User> {
     return UsersCompanion(
       id: Value(id),
       name: Value(name),
-      username: username == null && nullToAbsent
-          ? const Value.absent()
-          : Value(username),
       phone: Value(phone),
       role: role == null && nullToAbsent ? const Value.absent() : Value(role),
       isOnline: Value(isOnline),
@@ -319,7 +289,6 @@ class User extends DataClass implements Insertable<User> {
     return User(
       id: serializer.fromJson<String>(json['id']),
       name: serializer.fromJson<String>(json['name']),
-      username: serializer.fromJson<String?>(json['username']),
       phone: serializer.fromJson<String>(json['phone']),
       role: serializer.fromJson<String?>(json['role']),
       isOnline: serializer.fromJson<bool>(json['isOnline']),
@@ -334,7 +303,6 @@ class User extends DataClass implements Insertable<User> {
     return <String, dynamic>{
       'id': serializer.toJson<String>(id),
       'name': serializer.toJson<String>(name),
-      'username': serializer.toJson<String?>(username),
       'phone': serializer.toJson<String>(phone),
       'role': serializer.toJson<String?>(role),
       'isOnline': serializer.toJson<bool>(isOnline),
@@ -347,7 +315,6 @@ class User extends DataClass implements Insertable<User> {
   User copyWith({
     String? id,
     String? name,
-    Value<String?> username = const Value.absent(),
     String? phone,
     Value<String?> role = const Value.absent(),
     bool? isOnline,
@@ -357,7 +324,6 @@ class User extends DataClass implements Insertable<User> {
   }) => User(
     id: id ?? this.id,
     name: name ?? this.name,
-    username: username.present ? username.value : this.username,
     phone: phone ?? this.phone,
     role: role.present ? role.value : this.role,
     isOnline: isOnline ?? this.isOnline,
@@ -369,7 +335,6 @@ class User extends DataClass implements Insertable<User> {
     return User(
       id: data.id.present ? data.id.value : this.id,
       name: data.name.present ? data.name.value : this.name,
-      username: data.username.present ? data.username.value : this.username,
       phone: data.phone.present ? data.phone.value : this.phone,
       role: data.role.present ? data.role.value : this.role,
       isOnline: data.isOnline.present ? data.isOnline.value : this.isOnline,
@@ -388,7 +353,6 @@ class User extends DataClass implements Insertable<User> {
     return (StringBuffer('User(')
           ..write('id: $id, ')
           ..write('name: $name, ')
-          ..write('username: $username, ')
           ..write('phone: $phone, ')
           ..write('role: $role, ')
           ..write('isOnline: $isOnline, ')
@@ -403,7 +367,6 @@ class User extends DataClass implements Insertable<User> {
   int get hashCode => Object.hash(
     id,
     name,
-    username,
     phone,
     role,
     isOnline,
@@ -417,7 +380,6 @@ class User extends DataClass implements Insertable<User> {
       (other is User &&
           other.id == this.id &&
           other.name == this.name &&
-          other.username == this.username &&
           other.phone == this.phone &&
           other.role == this.role &&
           other.isOnline == this.isOnline &&
@@ -429,7 +391,6 @@ class User extends DataClass implements Insertable<User> {
 class UsersCompanion extends UpdateCompanion<User> {
   final Value<String> id;
   final Value<String> name;
-  final Value<String?> username;
   final Value<String> phone;
   final Value<String?> role;
   final Value<bool> isOnline;
@@ -440,7 +401,6 @@ class UsersCompanion extends UpdateCompanion<User> {
   const UsersCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
-    this.username = const Value.absent(),
     this.phone = const Value.absent(),
     this.role = const Value.absent(),
     this.isOnline = const Value.absent(),
@@ -452,7 +412,6 @@ class UsersCompanion extends UpdateCompanion<User> {
   UsersCompanion.insert({
     required String id,
     required String name,
-    this.username = const Value.absent(),
     required String phone,
     this.role = const Value.absent(),
     required bool isOnline,
@@ -467,7 +426,6 @@ class UsersCompanion extends UpdateCompanion<User> {
   static Insertable<User> custom({
     Expression<String>? id,
     Expression<String>? name,
-    Expression<String>? username,
     Expression<String>? phone,
     Expression<String>? role,
     Expression<bool>? isOnline,
@@ -479,7 +437,6 @@ class UsersCompanion extends UpdateCompanion<User> {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (name != null) 'name': name,
-      if (username != null) 'username': username,
       if (phone != null) 'phone': phone,
       if (role != null) 'role': role,
       if (isOnline != null) 'is_online': isOnline,
@@ -493,7 +450,6 @@ class UsersCompanion extends UpdateCompanion<User> {
   UsersCompanion copyWith({
     Value<String>? id,
     Value<String>? name,
-    Value<String?>? username,
     Value<String>? phone,
     Value<String?>? role,
     Value<bool>? isOnline,
@@ -505,7 +461,6 @@ class UsersCompanion extends UpdateCompanion<User> {
     return UsersCompanion(
       id: id ?? this.id,
       name: name ?? this.name,
-      username: username ?? this.username,
       phone: phone ?? this.phone,
       role: role ?? this.role,
       isOnline: isOnline ?? this.isOnline,
@@ -524,9 +479,6 @@ class UsersCompanion extends UpdateCompanion<User> {
     }
     if (name.present) {
       map['name'] = Variable<String>(name.value);
-    }
-    if (username.present) {
-      map['username'] = Variable<String>(username.value);
     }
     if (phone.present) {
       map['phone'] = Variable<String>(phone.value);
@@ -557,7 +509,6 @@ class UsersCompanion extends UpdateCompanion<User> {
     return (StringBuffer('UsersCompanion(')
           ..write('id: $id, ')
           ..write('name: $name, ')
-          ..write('username: $username, ')
           ..write('phone: $phone, ')
           ..write('role: $role, ')
           ..write('isOnline: $isOnline, ')
@@ -4517,7 +4468,6 @@ typedef $$UsersTableCreateCompanionBuilder =
     UsersCompanion Function({
       required String id,
       required String name,
-      Value<String?> username,
       required String phone,
       Value<String?> role,
       required bool isOnline,
@@ -4530,7 +4480,6 @@ typedef $$UsersTableUpdateCompanionBuilder =
     UsersCompanion Function({
       Value<String> id,
       Value<String> name,
-      Value<String?> username,
       Value<String> phone,
       Value<String?> role,
       Value<bool> isOnline,
@@ -4555,11 +4504,6 @@ class $$UsersTableFilterComposer extends Composer<_$AppDatabase, $UsersTable> {
 
   ColumnFilters<String> get name => $composableBuilder(
     column: $table.name,
-    builder: (column) => ColumnFilters(column),
-  );
-
-  ColumnFilters<String> get username => $composableBuilder(
-    column: $table.username,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4613,11 +4557,6 @@ class $$UsersTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<String> get username => $composableBuilder(
-    column: $table.username,
-    builder: (column) => ColumnOrderings(column),
-  );
-
   ColumnOrderings<String> get phone => $composableBuilder(
     column: $table.phone,
     builder: (column) => ColumnOrderings(column),
@@ -4663,9 +4602,6 @@ class $$UsersTableAnnotationComposer
 
   GeneratedColumn<String> get name =>
       $composableBuilder(column: $table.name, builder: (column) => column);
-
-  GeneratedColumn<String> get username =>
-      $composableBuilder(column: $table.username, builder: (column) => column);
 
   GeneratedColumn<String> get phone =>
       $composableBuilder(column: $table.phone, builder: (column) => column);
@@ -4720,7 +4656,6 @@ class $$UsersTableTableManager
               ({
                 Value<String> id = const Value.absent(),
                 Value<String> name = const Value.absent(),
-                Value<String?> username = const Value.absent(),
                 Value<String> phone = const Value.absent(),
                 Value<String?> role = const Value.absent(),
                 Value<bool> isOnline = const Value.absent(),
@@ -4731,7 +4666,6 @@ class $$UsersTableTableManager
               }) => UsersCompanion(
                 id: id,
                 name: name,
-                username: username,
                 phone: phone,
                 role: role,
                 isOnline: isOnline,
@@ -4744,7 +4678,6 @@ class $$UsersTableTableManager
               ({
                 required String id,
                 required String name,
-                Value<String?> username = const Value.absent(),
                 required String phone,
                 Value<String?> role = const Value.absent(),
                 required bool isOnline,
@@ -4755,7 +4688,6 @@ class $$UsersTableTableManager
               }) => UsersCompanion.insert(
                 id: id,
                 name: name,
-                username: username,
                 phone: phone,
                 role: role,
                 isOnline: isOnline,

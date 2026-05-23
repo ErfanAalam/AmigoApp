@@ -507,7 +507,10 @@ class ConversationDisappearingPayload {
       };
 }
 
-/// Sent when another user updates their profile (name and/or profile pic).
+/// Sent when another user updates their profile (name and/or profile pic),
+/// or when a super-admin changes a user's app-level role from the admin
+/// dashboard (in which case [role] is set and the payload is also delivered
+/// to the target user themselves so their permissions update live).
 /// Manual class — adding a freezed class would require re-running codegen
 /// on this file, which we want to keep an isolated change.
 class UserUpdatePayload {
@@ -515,6 +518,7 @@ class UserUpdatePayload {
   final String? name;
   final String? profilePic;
   final String? previousProfilePic;
+  final String? role;
   final DateTime updatedAt;
 
   UserUpdatePayload({
@@ -522,6 +526,7 @@ class UserUpdatePayload {
     this.name,
     this.profilePic,
     this.previousProfilePic,
+    this.role,
     required this.updatedAt,
   });
 
@@ -531,6 +536,7 @@ class UserUpdatePayload {
       name: json['name'] as String?,
       profilePic: json['profile_pic'] as String?,
       previousProfilePic: json['previous_profile_pic'] as String?,
+      role: json['role'] as String?,
       updatedAt: json['updated_at'] != null
           ? DateTime.tryParse(json['updated_at'].toString()) ?? DateTime.now()
           : DateTime.now(),
@@ -543,6 +549,7 @@ class UserUpdatePayload {
         if (profilePic != null) 'profile_pic': profilePic,
         if (previousProfilePic != null)
           'previous_profile_pic': previousProfilePic,
+        if (role != null) 'role': role,
         'updated_at': updatedAt.toUtc().toIso8601String(),
       };
 }

@@ -6,18 +6,36 @@ import '../sqlite.schema.dart';
 class UserRepository {
   final sqliteDatabase = SqliteDatabase.instance;
 
-  /// Helper method to convert User row to UserModel
-  UserModel _userToModel(User user) {
+  /// Convert a User row (plus optional joined Contact row) to a UserModel.
+  /// contactName comes from the local contacts table; it is transient on
+  /// UserModel and never written back to the users table.
+  UserModel _userToModel(User user, Contact? contact) {
     return UserModel(
       id: user.id,
       name: user.name,
-      username: user.username,
       phone: user.phone,
       role: user.role,
       profilePic: user.profilePic,
       isOnline: user.isOnline,
       callAccess: user.callAccess,
+      contactName: contact?.name,
     );
+  }
+
+  /// Select users left-joined with contacts so every returned UserModel
+  /// carries its contactName when one exists.
+  JoinedSelectStatement<HasResultSet, dynamic> _usersWithContactsQuery() {
+    final db = sqliteDatabase.database;
+    return db.select(db.users).join([
+      leftOuterJoin(db.contacts, db.contacts.id.equalsExp(db.users.id)),
+    ]);
+  }
+
+  UserModel _readJoinedRow(TypedResult row) {
+    final db = sqliteDatabase.database;
+    final user = row.readTable(db.users);
+    final contact = row.readTableOrNull(db.contacts);
+    return _userToModel(user, contact);
   }
 
   /// Insert a single user
@@ -25,7 +43,9 @@ class UserRepository {
     final db = sqliteDatabase.database;
 
     // Check if user already exists to preserve existing values
-    final existingUser = await getUserById(user.id);
+    final existingUser = await (db.select(
+      db.users,
+    )..where((t) => t.id.equals(user.id))).getSingleOrNull();
 
     // For required fields (name, phone), preserve if new value is empty
     // For optional fields, preserve if new value is null
@@ -34,7 +54,6 @@ class UserRepository {
       name: user.name.isEmpty && existingUser != null
           ? existingUser.name
           : user.name,
-      username: Value(user.username ?? existingUser?.username),
       phone: user.phone.isEmpty && existingUser != null
           ? existingUser.phone
           : user.phone,
@@ -53,7 +72,9 @@ class UserRepository {
 
     for (final user in users) {
       // Check if user already exists to preserve existing values
-      final existingUser = await getUserById(user.id);
+      final existingUser = await (db.select(
+        db.users,
+      )..where((t) => t.id.equals(user.id))).getSingleOrNull();
 
       // For required fields (name, phone), preserve if new value is empty
       // For optional fields, preserve if new value is null
@@ -62,7 +83,6 @@ class UserRepository {
         name: user.name.isEmpty && existingUser != null
             ? existingUser.name
             : user.name,
-        username: Value(user.username ?? existingUser?.username),
         phone: user.phone.isEmpty && existingUser != null
             ? existingUser.phone
             : user.phone,
@@ -83,8 +103,10 @@ class UserRepository {
 
     // Batch fetch all existing users
     final userIds = users.map((u) => u.id).toList();
-    final existingUsers = await getUsersByIds(userIds);
-    final existingUsersMap = {for (var user in existingUsers) user.id: user};
+    final existingRows = await (db.select(
+      db.users,
+    )..where((t) => t.id.isIn(userIds))).get();
+    final existingUsersMap = {for (var u in existingRows) u.id: u};
 
     final List<UserModel> usersToInsert = [];
     final List<UserModel> usersToUpdate = [];
@@ -99,7 +121,6 @@ class UserRepository {
         // User exists, check if any data has changed
         bool hasChanged =
             user.name != existingUser.name ||
-            user.username != existingUser.username ||
             user.phone != existingUser.phone ||
             user.role != existingUser.role ||
             user.profilePic != existingUser.profilePic ||
@@ -117,7 +138,6 @@ class UserRepository {
         final userCompanion = UsersCompanion.insert(
           id: user.id,
           name: user.name,
-          username: Value(user.username),
           phone: user.phone,
           role: Value(user.role),
           profilePic: Value(user.profilePic),
@@ -134,9 +154,6 @@ class UserRepository {
         final companion = UsersCompanion(
           id: Value(user.id),
           name: user.name.isNotEmpty ? Value(user.name) : const Value.absent(),
-          username: user.username != null
-              ? Value(user.username)
-              : const Value.absent(),
           phone: user.phone.isNotEmpty
               ? Value(user.phone)
               : const Value.absent(),
@@ -166,7 +183,6 @@ class UserRepository {
         final userCompanion = UsersCompanion.insert(
           id: user.id,
           name: user.name,
-          username: Value(user.username),
           phone: user.phone,
           role: Value(user.role),
           profilePic: Value(user.profilePic),
@@ -180,98 +196,75 @@ class UserRepository {
 
   /// Get all users
   Future<List<UserModel>> getAllUsers() async {
-    final db = sqliteDatabase.database;
-    final users = await db.select(db.users).get();
-
-    return users.map((user) => _userToModel(user)).toList();
+    final rows = await _usersWithContactsQuery().get();
+    return rows.map(_readJoinedRow).toList();
   }
 
   /// Get a user by ID
   Future<UserModel?> getUserById(String userId) async {
     final db = sqliteDatabase.database;
-
-    final user = await (db.select(
-      db.users,
-    )..where((t) => t.id.equals(userId))).getSingleOrNull();
-
-    if (user == null) return null;
-
-    return _userToModel(user);
+    final query = _usersWithContactsQuery()
+      ..where(db.users.id.equals(userId));
+    final row = await query.getSingleOrNull();
+    if (row == null) return null;
+    return _readJoinedRow(row);
   }
 
   /// Get a user by phone number
   Future<UserModel?> getUserByPhone(String phone) async {
     final db = sqliteDatabase.database;
-
-    final user = await (db.select(
-      db.users,
-    )..where((t) => t.phone.equals(phone))).getSingleOrNull();
-
-    if (user == null) return null;
-
-    return _userToModel(user);
+    final query = _usersWithContactsQuery()
+      ..where(db.users.phone.equals(phone));
+    final row = await query.getSingleOrNull();
+    if (row == null) return null;
+    return _readJoinedRow(row);
   }
 
   /// Get users by role
   Future<List<UserModel>> getUsersByRole(String role) async {
     final db = sqliteDatabase.database;
+    final query = _usersWithContactsQuery()
+      ..where(db.users.role.equals(role))
+      ..orderBy([OrderingTerm(expression: db.users.name)]);
 
-    final query = db.select(db.users)
-      ..where((t) => t.role.equals(role))
-      ..orderBy([
-        (t) => OrderingTerm(expression: t.name, mode: OrderingMode.asc),
-      ]);
-
-    final users = await query.get();
-
-    return users.map((user) => _userToModel(user)).toList();
+    final rows = await query.get();
+    return rows.map(_readJoinedRow).toList();
   }
 
   /// Search users by name (case-insensitive partial match)
   Future<List<UserModel>> searchUsersByName(String searchQuery) async {
     final db = sqliteDatabase.database;
+    final query = _usersWithContactsQuery()
+      ..where(db.users.name.like('%$searchQuery%'))
+      ..orderBy([OrderingTerm(expression: db.users.name)]);
 
-    final query = db.select(db.users)
-      ..where((t) => t.name.like('%$searchQuery%'))
-      ..orderBy([
-        (t) => OrderingTerm(expression: t.name, mode: OrderingMode.asc),
-      ]);
-
-    final users = await query.get();
-
-    return users.map((user) => _userToModel(user)).toList();
+    final rows = await query.get();
+    return rows.map(_readJoinedRow).toList();
   }
 
   /// Search users by phone number (partial match)
   Future<List<UserModel>> searchUsersByPhone(String searchQuery) async {
     final db = sqliteDatabase.database;
+    final query = _usersWithContactsQuery()
+      ..where(db.users.phone.like('%$searchQuery%'))
+      ..orderBy([OrderingTerm(expression: db.users.name)]);
 
-    final query = db.select(db.users)
-      ..where((t) => t.phone.like('%$searchQuery%'))
-      ..orderBy([
-        (t) => OrderingTerm(expression: t.name, mode: OrderingMode.asc),
-      ]);
-
-    final users = await query.get();
-
-    return users.map((user) => _userToModel(user)).toList();
+    final rows = await query.get();
+    return rows.map(_readJoinedRow).toList();
   }
 
   /// Search users by name or phone (case-insensitive partial match)
   Future<List<UserModel>> searchUsers(String searchQuery) async {
     final db = sqliteDatabase.database;
-
-    final query = db.select(db.users)
+    final query = _usersWithContactsQuery()
       ..where(
-        (t) => t.name.like('%$searchQuery%') | t.phone.like('%$searchQuery%'),
+        db.users.name.like('%$searchQuery%') |
+            db.users.phone.like('%$searchQuery%'),
       )
-      ..orderBy([
-        (t) => OrderingTerm(expression: t.name, mode: OrderingMode.asc),
-      ]);
+      ..orderBy([OrderingTerm(expression: db.users.name)]);
 
-    final users = await query.get();
-
-    return users.map((user) => _userToModel(user)).toList();
+    final rows = await query.get();
+    return rows.map(_readJoinedRow).toList();
   }
 
   /// Get multiple users by their IDs
@@ -279,16 +272,12 @@ class UserRepository {
     if (userIds.isEmpty) return [];
 
     final db = sqliteDatabase.database;
+    final query = _usersWithContactsQuery()
+      ..where(db.users.id.isIn(userIds))
+      ..orderBy([OrderingTerm(expression: db.users.name)]);
 
-    final query = db.select(db.users)
-      ..where((t) => t.id.isIn(userIds))
-      ..orderBy([
-        (t) => OrderingTerm(expression: t.name, mode: OrderingMode.asc),
-      ]);
-
-    final users = await query.get();
-
-    return users.map((user) => _userToModel(user)).toList();
+    final rows = await query.get();
+    return rows.map(_readJoinedRow).toList();
   }
 
   /// Update a user
@@ -296,16 +285,15 @@ class UserRepository {
     final db = sqliteDatabase.database;
 
     // Get existing user to preserve values not provided
-    final existingUser = await getUserById(user.id);
+    final existingUser = await (db.select(
+      db.users,
+    )..where((t) => t.id.equals(user.id))).getSingleOrNull();
     if (existingUser == null) return;
 
     // Only update fields that are explicitly provided (non-empty for required fields)
     final companion = UsersCompanion(
       id: Value(user.id),
       name: user.name.isNotEmpty ? Value(user.name) : const Value.absent(),
-      username: user.username != null
-          ? Value(user.username)
-          : const Value.absent(),
       phone: user.phone.isNotEmpty ? Value(user.phone) : const Value.absent(),
       role: user.role != null ? Value(user.role) : const Value.absent(),
       profilePic: user.profilePic != null
@@ -328,27 +316,6 @@ class UserRepository {
     final db = sqliteDatabase.database;
     await (db.update(db.users)..where((t) => t.id.equals(userId))).write(
       UsersCompanion(name: Value(name)),
-    );
-  }
-
-  /// Update user's username (contact name)
-  Future<void> updateUserUsername(String userId, String? username) async {
-    final db = sqliteDatabase.database;
-    await (db.update(db.users)..where((t) => t.id.equals(userId))).write(
-      UsersCompanion(username: Value(username)),
-    );
-  }
-
-  /// Update user's username and role together
-  /// This ensures role is preserved when updating username from contacts
-  Future<void> updateUserUsernameAndRole(
-    String userId,
-    String? username,
-    String? role,
-  ) async {
-    final db = sqliteDatabase.database;
-    await (db.update(db.users)..where((t) => t.id.equals(userId))).write(
-      UsersCompanion(username: Value(username), role: Value(role)),
     );
   }
 
@@ -423,7 +390,6 @@ class UserRepository {
         final userCompanion = UsersCompanion.insert(
           id: user.id,
           name: user.name,
-          username: Value(user.username),
           phone: user.phone,
           role: Value(user.role),
           profilePic: Value(user.profilePic),
@@ -468,66 +434,41 @@ class UserRepository {
     bool ascending = true,
   }) async {
     final db = sqliteDatabase.database;
-
-    final query = db.select(db.users)..limit(limit, offset: offset);
+    final query = _usersWithContactsQuery()..limit(limit, offset: offset);
 
     // Order by specified field or default to name
+    final mode = ascending ? OrderingMode.asc : OrderingMode.desc;
     if (orderBy == 'phone') {
-      query.orderBy([
-        (t) => OrderingTerm(
-          expression: t.phone,
-          mode: ascending ? OrderingMode.asc : OrderingMode.desc,
-        ),
-      ]);
+      query.orderBy([OrderingTerm(expression: db.users.phone, mode: mode)]);
     } else if (orderBy == 'role') {
-      query.orderBy([
-        (t) => OrderingTerm(
-          expression: t.role,
-          mode: ascending ? OrderingMode.asc : OrderingMode.desc,
-        ),
-      ]);
+      query.orderBy([OrderingTerm(expression: db.users.role, mode: mode)]);
     } else {
-      // Default: order by name
-      query.orderBy([
-        (t) => OrderingTerm(
-          expression: t.name,
-          mode: ascending ? OrderingMode.asc : OrderingMode.desc,
-        ),
-      ]);
+      query.orderBy([OrderingTerm(expression: db.users.name, mode: mode)]);
     }
 
-    final users = await query.get();
-
-    return users.map((user) => _userToModel(user)).toList();
+    final rows = await query.get();
+    return rows.map(_readJoinedRow).toList();
   }
 
   /// Get users who have a profile picture
   Future<List<UserModel>> getUsersWithProfilePic() async {
     final db = sqliteDatabase.database;
+    final query = _usersWithContactsQuery()
+      ..where(db.users.profilePic.isNotNull())
+      ..orderBy([OrderingTerm(expression: db.users.name)]);
 
-    final query = db.select(db.users)
-      ..where((t) => t.profilePic.isNotNull())
-      ..orderBy([
-        (t) => OrderingTerm(expression: t.name, mode: OrderingMode.asc),
-      ]);
-
-    final users = await query.get();
-
-    return users.map((user) => _userToModel(user)).toList();
+    final rows = await query.get();
+    return rows.map(_readJoinedRow).toList();
   }
 
   /// Get users who don't have a profile picture
   Future<List<UserModel>> getUsersWithoutProfilePic() async {
     final db = sqliteDatabase.database;
+    final query = _usersWithContactsQuery()
+      ..where(db.users.profilePic.isNull())
+      ..orderBy([OrderingTerm(expression: db.users.name)]);
 
-    final query = db.select(db.users)
-      ..where((t) => t.profilePic.isNull())
-      ..orderBy([
-        (t) => OrderingTerm(expression: t.name, mode: OrderingMode.asc),
-      ]);
-
-    final users = await query.get();
-
-    return users.map((user) => _userToModel(user)).toList();
+    final rows = await query.get();
+    return rows.map(_readJoinedRow).toList();
   }
 }

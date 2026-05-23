@@ -6,6 +6,7 @@ import '../../db/repositories/conversations.repo.dart';
 import '../../db/repositories/user.repo.dart';
 import '../../types/socket.types.dart';
 import '../../utils/navigation-helper.util.dart';
+import '../../utils/user.utils.dart';
 import '../user-status.service.dart';
 import '../auth/auth.service.dart';
 import 'transport.manager.dart';
@@ -555,6 +556,21 @@ class WebSocketMessageHandler {
       // — `name`-only updates leave profile_pic unchanged.
       if (newPic != null) {
         await _userRepo.updateUserProfilePic(payload.userId, normalizedPic);
+      }
+
+      // Role change pushed from the super-admin dashboard. Persist to Drift
+      // so peers see the badge update, and — when the change targets the
+      // current user — overwrite SharedPreferences so role-gated screens
+      // (e.g. group-list FAB, manage-group action) pick up the new role on
+      // their next read without needing a logout/login round-trip.
+      if (payload.role != null && payload.role!.isNotEmpty) {
+        await _userRepo.updateUserRole(payload.userId, payload.role!);
+
+        final me = await UserUtils().getUserDetails();
+        if (me != null && me.id == payload.userId && me.role != payload.role) {
+          final updated = me.copyWith(role: payload.role);
+          await UserUtils().saveUserDetails(updated);
+        }
       }
 
       // Evict the previous PFP from the disk + memory cache so widgets

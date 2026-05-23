@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 // FlutterCallkitIncoming - commented out, replaced by native call screen
 // import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'services/call/native_call_screen.service.dart';
+import 'services/contact-sync.service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart'
     show Permission, PermissionActions;
@@ -263,6 +264,14 @@ class _MyAppState extends material.State<MyApp>
       }
 
       await _apiService.auth.updateUserLocationAndIp();
+
+      // Background contact-name sync: matches device address-book names
+      // against users we already know about and writes any renames into the
+      // local contacts table. Pure offline; the 3-second delay keeps it
+      // off the launch critical path.
+      Future.delayed(const Duration(seconds: 3), () {
+        ContactSyncService().sync(force: true);
+      });
     } catch (e) {
       debugPrint('❌ Failed to establish WebSocket connection: $e');
     }
@@ -308,6 +317,13 @@ class _MyAppState extends material.State<MyApp>
         // Re-run the version gate check on resume so a freshly-released
         // mandatory update gates users without requiring a cold start.
         VersionGateService().check();
+        // Reconcile contact names whenever we come back to the foreground —
+        // catches renames the user made in the system contacts app while
+        // ours was backgrounded. The service throttles itself to once per
+        // 30 seconds so app-switching doesn't cause repeated scans.
+        if (_isAuthenticated) {
+          ContactSyncService().sync();
+        }
         // NOTE: Do NOT re-open the native call screen here.
         // Doing so causes it to reopen every time the user presses back.
         // The call pill overlay gives the user a way to tap back into the call.

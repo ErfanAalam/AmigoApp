@@ -11,7 +11,6 @@ part 'sqlite.schema.g.dart';
 class Users extends Table {
   TextColumn get id => text()(); // UUID
   TextColumn get name => text()();
-  TextColumn get username => text().nullable()(); // Name from contact list
   TextColumn get phone => text()();
   TextColumn get role => text().nullable()();
   BoolColumn get isOnline => boolean()();
@@ -175,7 +174,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 15;
+  int get schemaVersion => 16;
 
   @override
   MigrationStrategy get migration {

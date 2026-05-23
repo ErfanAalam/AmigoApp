@@ -402,9 +402,7 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
   // searchMatches, currentMatchIndex, searchDebounceTimer, isInputFocused,
   // highlightedMessageId, highlightedMessageIds).
 
-  List<String> _messageRecommendations = List<String>.from(
-    kDefaultMessageRecommendations,
-  );
+  List<String> _messageRecommendations = const [];
 
   // Swipe animation controllers, gesture state, and constants live on
   // ChatSwipeReplyMixin (swipeAnimationControllers, swipeAnimations,
@@ -457,9 +455,12 @@ class _InnerGroupChatPageState extends ConsumerState<InnerGroupChatPage>
     setupWebSocketListener();
     initializeChat();
 
-    MessageRecommendationsStore.load().then((recs) {
-      if (!mounted) return;
-      setState(() => _messageRecommendations = recs);
+    MessageRecommendationsStore.loadEnabled().then((enabled) {
+      if (!mounted || !enabled) return;
+      MessageRecommendationsStore.load().then((recs) {
+        if (!mounted) return;
+        setState(() => _messageRecommendations = recs);
+      });
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {

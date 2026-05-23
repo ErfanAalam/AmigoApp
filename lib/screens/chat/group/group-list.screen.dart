@@ -20,6 +20,7 @@ import '../../../ui/chat/disappearing-timer-badge.widget.dart';
 import '../../../ui/chat/searchable-list.widget.dart';
 import '../../../utils/chat/mute-duration-picker.util.dart';
 import '../../../utils/route-transitions.util.dart';
+import 'bulk-action-users.screen.dart';
 import 'community-group-list.screen.dart';
 import 'create-group.screen.dart';
 import 'group-messaging.screen.dart';
@@ -239,45 +240,105 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
         ),
         content: _buildContent(),
       ),
-      floatingActionButton: Padding(
-        padding: EdgeInsets.only(bottom: 80 + systemNavInset),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(180),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withAlpha(30),
-                blurRadius: 5,
-                offset: const Offset(0, 3),
+      floatingActionButton: _buildFloatingActions(themeColor, systemNavInset),
+    );
+  }
+
+  /// FAB stack on the group list. By default a single "New group" button.
+  /// Sub-admins get a second, smaller "Manage groups" button stacked above
+  /// it as their entry point into the bulk-manage flow (long-press on an
+  /// individual group row gets them straight to that group; this FAB lets
+  /// them pick the target group from a sheet first).
+  Widget _buildFloatingActions(ColorTheme themeColor, double systemNavInset) {
+    final me = ref.watch(currentUserStreamProvider).value;
+    final isSubAdmin = me?.role == 'sub_admin';
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: 80 + systemNavInset),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (isSubAdmin) ...[
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(180),
+                // boxShadow: [
+                //   BoxShadow(
+                //     color: Colors.black.withAlpha(30),
+                //     blurRadius: 2,
+                //     offset: const Offset(0, 1),
+                //   ),
+                // ],
               ),
-            ],
-          ),
-          child: FloatingActionButton(
-            onPressed: () async {
-              final result = await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const CreateGroupPage(),
+              child: FloatingActionButton.small(
+                heroTag: 'group-list-manage-fab',
+                onPressed: _onManageGroupsTapped,
+                backgroundColor: Colors.white,
+                foregroundColor: themeColor.primary,
+                elevation: 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(100),
+                  side: BorderSide(
+                    color: themeColor.primary.withAlpha(10),
+                    width: 1,
+                  ),
                 ),
-              );
-              if (result == true) {
-                _refreshData();
-              }
-            },
-            backgroundColor: themeColor.primary,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(100),
+                tooltip: 'Manage groups',
+                child: const Icon(
+                  Icons.admin_panel_settings_outlined,
+                  size: 22,
+                ),
+              ),
             ),
-            tooltip: 'New group',
-            child: const Icon(
-              Icons.add_comment_rounded,
-              color: Colors.white,
-              size: 24,
+            const SizedBox(height: 12),
+          ],
+          Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(180),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withAlpha(30),
+                  blurRadius: 5,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: FloatingActionButton(
+              heroTag: 'group-list-new-fab',
+              onPressed: () async {
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const CreateGroupPage(),
+                  ),
+                );
+                if (result == true) {
+                  _refreshData();
+                }
+              },
+              backgroundColor: themeColor.primary,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(100),
+              ),
+              tooltip: 'New group',
+              child: const Icon(
+                Icons.add_comment_rounded,
+                color: Colors.white,
+                size: 24,
+              ),
             ),
           ),
-        ),
+        ],
       ),
+    );
+  }
+
+  void _onManageGroupsTapped() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const BulkActionUsersPage()),
     );
   }
 

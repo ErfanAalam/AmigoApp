@@ -192,9 +192,11 @@ class MessageRepository {
   }) async {
     final db = sqliteDatabase.database;
 
-    // Create query with LEFT JOIN to Users table
+    // LEFT JOIN Users for sender display name + avatar, and Contacts so the
+    // local-contact name (when present) overrides the server users.name.
     final query = db.select(db.messages).join([
       leftOuterJoin(db.users, db.users.id.equalsExp(db.messages.senderId)),
+      leftOuterJoin(db.contacts, db.contacts.id.equalsExp(db.messages.senderId)),
     ])..where(db.messages.chatId.equals(conversationId));
 
     if (!includeDeleted) {
@@ -215,11 +217,12 @@ class MessageRepository {
     return results.map((row) {
       final message = row.readTable(db.messages);
       final user = row.readTableOrNull(db.users);
+      final contact = row.readTableOrNull(db.contacts);
 
       final messageModel = _messageToModel(message);
 
       return messageModel.copyWith(
-        senderName: user?.name,
+        senderName: contact?.name ?? user?.name,
         senderProfilePic: user?.profilePic,
       );
     }).toList();
@@ -244,6 +247,9 @@ class MessageRepository {
 
     final joins = <Join>[
       leftOuterJoin(db.users, db.users.id.equalsExp(db.messages.senderId)),
+      // Local contact name override; mirrors the join in
+      // getMessagesByConversation. Contacts.id matches users.id by design.
+      leftOuterJoin(db.contacts, db.contacts.id.equalsExp(db.messages.senderId)),
       if (infoForUser != null && uid != null)
         leftOuterJoin(
           infoForUser,
@@ -267,8 +273,9 @@ class MessageRepository {
       return results.map((row) {
         final message = row.readTable(db.messages);
         final user = row.readTableOrNull(db.users);
+        final contact = row.readTableOrNull(db.contacts);
         return _messageToModel(message).copyWith(
-          senderName: user?.name,
+          senderName: contact?.name ?? user?.name,
           senderProfilePic: user?.profilePic,
         );
       }).toList();
@@ -885,6 +892,8 @@ class MessageRepository {
 
     final joins = <Join>[
       leftOuterJoin(db.users, db.users.id.equalsExp(db.messages.senderId)),
+      // Local contact name override; see watchMessages for rationale.
+      leftOuterJoin(db.contacts, db.contacts.id.equalsExp(db.messages.senderId)),
       if (infoForUser != null && uid != null)
         leftOuterJoin(
           infoForUser,
@@ -915,8 +924,9 @@ class MessageRepository {
       return results.map((row) {
         final message = row.readTable(db.messages);
         final user = row.readTableOrNull(db.users);
+        final contact = row.readTableOrNull(db.contacts);
         return _messageToModel(message).copyWith(
-          senderName: user?.name,
+          senderName: contact?.name ?? user?.name,
           senderProfilePic: user?.profilePic,
         );
       }).toList();

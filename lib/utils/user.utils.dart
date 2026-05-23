@@ -200,8 +200,9 @@ class UserUtils {
     }
   }
 
-  /// Enrich user list with display names from local database
-  /// This ensures contact names (username) are preserved instead of server names
+  /// Enrich a list of users (typically freshly parsed from an API response)
+  /// with the local-contact name from the contacts table, so callers can
+  /// surface `user.displayName` without an additional repo round-trip.
   Future<List<UserModel>> enrichUsersWithDisplayNames(
     List<UserModel> users,
   ) async {
@@ -210,15 +211,11 @@ class UserUtils {
       final enrichedUsers = <UserModel>[];
 
       for (final user in users) {
-        // Try to get user from local database
         final localUser = await userRepo.getUserById(user.id);
 
-        if (localUser != null && localUser.username != null) {
-          // Update user with username from local database
-          final enrichedUser = user.copyWith(username: localUser.username);
-          enrichedUsers.add(enrichedUser);
+        if (localUser != null && localUser.contactName != null) {
+          enrichedUsers.add(user.copyWith(contactName: localUser.contactName));
         } else {
-          // User not found in local DB or no username, keep original user
           enrichedUsers.add(user);
         }
       }
@@ -226,7 +223,6 @@ class UserUtils {
       return enrichedUsers;
     } catch (e) {
       debugPrint('❌ Error enriching users with display names: $e');
-      // Return original list if enrichment fails
       return users;
     }
   }

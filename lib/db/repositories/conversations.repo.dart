@@ -507,6 +507,12 @@ class ConversationRepository {
                 .getSingleOrNull();
             if (recipientUser == null) continue;
 
+            // Contact name from the local address book wins over the server
+            // name in the DM list — see UserRepository for the canonical join.
+            final recipientContact = await (db.select(db.contacts)
+                  ..where((t) => t.id.equals(recipientUser.id)))
+                .getSingleOrNull();
+
             String? lastMessageType;
             String? lastMessageBody;
             String? lastMessageAt;
@@ -531,7 +537,7 @@ class ConversationRepository {
             result.add(DmModel(
               chatId: conv.id,
               recipientId: recipientUser.id,
-              recipientName: recipientUser.username ?? recipientUser.name,
+              recipientName: recipientContact?.name ?? recipientUser.name,
               recipientPhone: recipientUser.phone,
               recipientProfilePic: recipientUser.profilePic,
               pinnedMsgId: conv.pinnedMsgId,
@@ -613,8 +619,11 @@ class ConversationRepository {
                     final senderUser = await (db.select(db.users)
                           ..where((t) => t.id.equals(senderId)))
                         .getSingleOrNull();
+                    final senderContact = await (db.select(db.contacts)
+                          ..where((t) => t.id.equals(senderId)))
+                        .getSingleOrNull();
                     final fullName =
-                        senderUser?.username ?? senderUser?.name;
+                        senderContact?.name ?? senderUser?.name;
                     // Show only the first whitespace-separated word so the
                     // list prefix stays short ("Aman: hi" instead of
                     // "Aman Kumar Sharma: hi"). trim() first so a leading
@@ -730,6 +739,11 @@ class ConversationRepository {
         continue;
       }
 
+      // Local-contact name override; see watchDmConversations for rationale.
+      final recipientContact = await (db.select(
+        db.contacts,
+      )..where((t) => t.id.equals(recipientUser.id))).getSingleOrNull();
+
       // Get last message details if lastMsgId exists
       String? lastMessageType;
       String? lastMessageBody;
@@ -759,7 +773,7 @@ class ConversationRepository {
       final dmModel = DmModel(
         chatId: conv.id,
         recipientId: recipientUser.id,
-        recipientName: recipientUser.username ?? recipientUser.name,
+        recipientName: recipientContact?.name ?? recipientUser.name,
         recipientPhone: recipientUser.phone,
         recipientProfilePic: recipientUser.profilePic,
         pinnedMsgId: conv.pinnedMsgId,
@@ -817,6 +831,11 @@ class ConversationRepository {
       return null;
     }
 
+    // Local-contact name override; see watchDmConversations for rationale.
+    final recipientContact = await (db.select(
+      db.contacts,
+    )..where((t) => t.id.equals(recipientUser.id))).getSingleOrNull();
+
     // Get last message details if lastMsgId exists
     String? lastMessageType;
     String? lastMessageBody;
@@ -845,7 +864,7 @@ class ConversationRepository {
     return DmModel(
       chatId: conv.id,
       recipientId: recipientUser.id,
-      recipientName: recipientUser.username ?? recipientUser.name,
+      recipientName: recipientContact?.name ?? recipientUser.name,
       recipientPhone: recipientUser.phone,
       recipientProfilePic: recipientUser.profilePic,
       pinnedMsgId: conv.pinnedMsgId,
@@ -1028,6 +1047,12 @@ class ConversationRepository {
             db.users,
             db.users.id.equalsExp(db.chatMembers.userId),
           ),
+          // contacts.id mirrors users.id, so the local contact name (when
+          // saved) overrides the server name in the member list.
+          leftOuterJoin(
+            db.contacts,
+            db.contacts.id.equalsExp(db.chatMembers.userId),
+          ),
         ])
       ..where(db.chatMembers.chatId.equals(conversationId))
       ..where(db.chatMembers.removedAt.isNull())
@@ -1045,10 +1070,11 @@ class ConversationRepository {
       for (final row in rows) {
         final m = row.readTable(db.chatMembers);
         final u = row.readTableOrNull(db.users);
+        final c = row.readTableOrNull(db.contacts);
         if (map.containsKey(m.userId)) continue;
         map[m.userId] = GroupMember(
           userId: m.userId,
-          name: u?.username ?? u?.name ?? '',
+          name: c?.name ?? u?.name ?? '',
           profilePic: u?.profilePic,
           role: m.role,
           joinedAt: m.joinedAt,
@@ -1083,6 +1109,10 @@ class ConversationRepository {
                 db.users,
                 db.users.id.equalsExp(db.chatMembers.userId),
               ),
+              leftOuterJoin(
+                db.contacts,
+                db.contacts.id.equalsExp(db.chatMembers.userId),
+              ),
             ])
           ..where(db.chatMembers.chatId.equals(conversationId))
           ..where(db.chatMembers.removedAt.isNull())
@@ -1100,10 +1130,11 @@ class ConversationRepository {
     for (final row in memberJoin) {
       final member = row.readTable(db.chatMembers);
       final user = row.readTableOrNull(db.users);
+      final contact = row.readTableOrNull(db.contacts);
       if (membersMap.containsKey(member.userId)) continue;
       membersMap[member.userId] = GroupMember(
         userId: member.userId,
-        name: user?.username ?? user?.name ?? '',
+        name: contact?.name ?? user?.name ?? '',
         profilePic: user?.profilePic,
         role: member.role,
         joinedAt: member.joinedAt,

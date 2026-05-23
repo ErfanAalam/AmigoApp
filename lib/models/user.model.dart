@@ -10,7 +10,6 @@ abstract class UserModel with _$UserModel {
   const factory UserModel({
     required String id,
     required String name,
-    String? username,
     required String phone,
     String? role,
     @JsonKey(name: 'profile_pic') String? profilePic,
@@ -19,10 +18,14 @@ abstract class UserModel with _$UserModel {
     @JsonKey(name: 'updated_at') String? updatedAt,
     @JsonKey(name: 'created_at') String? createdAt,
     @JsonKey(name: 'last_seen') String? lastSeen,
+    // Local contact name from the device's address book. Transient — populated
+    // by UserRepository via a join against the contacts table, never persisted
+    // to the users table and not part of JSON round-trips.
+    @JsonKey(includeFromJson: false, includeToJson: false) String? contactName,
   }) = _UserModel;
 
   factory UserModel.fromJson(Map<String, dynamic> json) =>
       _$UserModelFromJson(json);
 
-  String get displayName => username ?? name;
+  String get displayName => contactName ?? name;
 }

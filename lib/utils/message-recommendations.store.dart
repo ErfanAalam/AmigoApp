@@ -18,6 +18,26 @@ const List<String> kDefaultMessageRecommendations = [
 
 class MessageRecommendationsStore {
   static const String _prefsKey = 'message_recommendations';
+  static const String _enabledKey = 'message_recommendations_enabled';
+
+  static Future<bool> loadEnabled() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_enabledKey) ?? false;
+    } catch (e) {
+      debugPrint('Error loading quick replies enabled flag: $e');
+      return false;
+    }
+  }
+
+  static Future<void> saveEnabled(bool enabled) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_enabledKey, enabled);
+    } catch (e) {
+      debugPrint('Error saving quick replies enabled flag: $e');
+    }
+  }
 
   static Future<List<String>> load() async {
     try {

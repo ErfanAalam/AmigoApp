@@ -15,7 +15,7 @@ class CallRepository {
     final isIncoming = call.calleeId == currentUserId;
     final otherUserId = isIncoming ? call.callerId : call.calleeId;
 
-    // Get contact info from Users table
+    // Get contact info: local contact name (if any) overrides server name.
     String contactName = 'Unknown';
     String? contactProfilePic;
     String contactId = otherUserId;
@@ -24,7 +24,10 @@ class CallRepository {
       db.users,
     )..where((t) => t.id.equals(otherUserId))).getSingleOrNull();
     if (user != null) {
-      contactName = user.username ?? user.name;
+      final contact = await (db.select(
+        db.contacts,
+      )..where((t) => t.id.equals(otherUserId))).getSingleOrNull();
+      contactName = contact?.name ?? user.name;
       contactProfilePic = user.profilePic;
       contactId = user.id;
     }

@@ -58,6 +58,42 @@ class GroupClient extends BaseApiClient {
     );
   }
 
+  /// Admin/sub-admin bulk-add the same set of users to every group in
+  /// `conversationIds` in one request. Per-group already-active users are
+  /// silently skipped server-side. Backed by an admin endpoint gated to
+  /// roles `admin` and `sub_admin`.
+  Future<ApiResult<dynamic>> bulkAddMembersToGroups({
+    required List<String> conversationIds,
+    required List<String> userIds,
+    String role = 'member',
+  }) async {
+    return post(
+      '/admin/chat-management/bulk-add-members-to-groups',
+      data: {
+        'conversation_ids': conversationIds,
+        'user_ids': userIds,
+        'role': role,
+      },
+    );
+  }
+
+  /// Admin/sub-admin bulk-remove the cross-product of (groups × users).
+  /// Server silently skips users not in a given group — one batched DB
+  /// UPDATE plus one broadcast per affected group. Backed by an admin
+  /// endpoint gated to roles `admin` and `sub_admin`.
+  Future<ApiResult<dynamic>> bulkRemoveMembersFromGroups({
+    required List<String> conversationIds,
+    required List<String> userIds,
+  }) async {
+    return delete(
+      '/admin/chat-management/bulk-remove-members-from-groups',
+      data: {
+        'conversation_ids': conversationIds,
+        'user_ids': userIds,
+      },
+    );
+  }
+
   /// Update group title
   Future<ApiResult<dynamic>> updateGroupTitle({
     required String conversationId,

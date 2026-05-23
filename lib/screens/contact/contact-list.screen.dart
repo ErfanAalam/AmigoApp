@@ -16,6 +16,7 @@ import '../../providers/chat.provider.dart';
 import '../../providers/message.provider.dart';
 import '../../providers/theme-color.provider.dart';
 import '../../services/contact.service.dart';
+import '../../services/contact-sync.service.dart';
 import '../../services/user-status.service.dart';
 import '../../ui/app-bar.widget.dart';
 import '../../ui/blurred-dialog.widget.dart';
@@ -92,11 +93,10 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
           _filteredUsers = sorted;
         });
 
-        // If we have contacts loaded, update all existing users with contact names
-        // This handles users that were already in database from DMs/groups
-        if (_contacts.isNotEmpty) {
-          await _updateAllExistingUsersWithContacts();
-        }
+        // Reconcile the contacts table with the device address book —
+        // catches renames since the last sync and seeds rows for users we
+        // already know about (e.g. from DMs/groups).
+        await ContactSyncService().sync(force: true);
       }
     } catch (_) {}
   }
@@ -114,18 +114,21 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
             .map((userJson) => UserModel.fromJson(userJson))
             .toList();
 
-        // Match users with contacts and set username from contact displayName
+        // Decorate each user with their device-contact name (transient).
         users = _matchUsersWithContacts(users);
 
-        // Replace local contacts DB to mirror backend
-        await _contactsRepository.replaceAllContacts(users);
+        // Persist matched device-contact names into the contacts table. The
+        // contacts row's name field holds the local display name, and reads
+        // via UserRepository.join (or inline join sites) prefer it over the
+        // server users.name.
+        await _replaceMatchedContacts(users);
 
-        // Update existing users in the users table with username
-        await _updateExistingUsersWithUsername(users);
+        // Sync roles from backend for matched users.
+        await _syncRolesForMatchedUsers(users);
 
-        // Update ALL existing users in database with contact names
-        // This includes users that were inserted from DMs/groups before visiting contacts page
-        await _updateAllExistingUsersWithContacts();
+        // Backfill: reconcile every users-table row against the device
+        // address book so DM/group-seeded users also get a contacts row.
+        await ContactSyncService().sync(force: true);
 
         if (mounted) {
           final sorted = _sortByName(users);
@@ -214,10 +217,11 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
     return _contacts.map((contact) => contact.phoneNumber).toList();
   }
 
-  /// Match users with contacts and set username from contact displayName
+  /// Annotate each user with their local device-contact display name via the
+  /// transient `contactName` field. Not persisted onto users; downstream
+  /// `displayName` (`contactName ?? name`) handles UI fallback.
   List<UserModel> _matchUsersWithContacts(List<UserModel> users) {
     return users.map((user) {
-      // Find matching contact by phone number
       final matchingContact = _contacts.firstWhere(
         (contact) => contact.phoneNumber == user.phone,
         orElse: () => ContactModel(
@@ -227,67 +231,36 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
           phoneNumber: '',
         ),
       );
-
-      // If matching contact found, set username to contact's display name
-      if (matchingContact.phoneNumber.isNotEmpty) {
-        return user.copyWith(username: matchingContact.displayName);
+      if (matchingContact.phoneNumber.isNotEmpty &&
+          matchingContact.displayName.isNotEmpty) {
+        return user.copyWith(contactName: matchingContact.displayName);
       }
-
       return user;
     }).toList();
   }
 
-  /// Update existing users in the database with username from contacts
-  Future<void> _updateExistingUsersWithUsername(List<UserModel> users) async {
-    try {
-      // Update each user in the users table with their username and preserve role
-      for (final user in users) {
-        if (user.username != null && user.username!.isNotEmpty) {
-          await _userRepository.updateUserUsernameAndRole(
-            user.id,
-            user.username,
-            user.role, // Preserve the role from backend
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('Error updating users with username: $e');
-    }
+  /// Replace the contacts table with every matched user (those with a
+  /// device-contact display name). The contacts row stores the display name
+  /// directly in its `name` column.
+  Future<void> _replaceMatchedContacts(List<UserModel> users) async {
+    final matched = users
+        .where((u) => u.contactName != null && u.contactName!.isNotEmpty)
+        .map((u) => u.copyWith(name: u.contactName!))
+        .toList();
+    await _contactsRepository.replaceAllContacts(matched);
   }
 
-  /// Update ALL existing users in the database by matching with contacts
-  Future<void> _updateAllExistingUsersWithContacts() async {
+  /// Backend's `getAvailableUsers` may return an updated role for matched
+  /// users; mirror it into the users table when the row already exists.
+  Future<void> _syncRolesForMatchedUsers(List<UserModel> users) async {
     try {
-      // Get all users from the database
-      final allUsers = await _userRepository.getAllUsers();
-
-      if (allUsers.isEmpty) return;
-
-      // Match each user with contacts and update if match found
-      for (final user in allUsers) {
-        final matchingContact = _contacts.firstWhere(
-          (contact) => contact.phoneNumber == user.phone,
-          orElse: () => ContactModel(
-            displayName: '',
-            firstName: '',
-            lastName: '',
-            phoneNumber: '',
-          ),
-        );
-
-        // If matching contact found, update username and preserve role
-        if (matchingContact.phoneNumber.isNotEmpty) {
-          await _userRepository.updateUserUsernameAndRole(
-            user.id,
-            matchingContact.displayName,
-            user.role, // Preserve the role from backend
-          );
+      for (final user in users) {
+        if (user.role != null && user.contactName != null) {
+          await _userRepository.updateUserRole(user.id, user.role!);
         }
       }
-
-      debugPrint('✅ Updated ${allUsers.length} users with contact names');
     } catch (e) {
-      debugPrint('Error updating all users with contacts: $e');
+      debugPrint('Error syncing roles for matched users: $e');
     }
   }
 
@@ -312,11 +285,11 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
             .map((userJson) => UserModel.fromJson(userJson))
             .toList();
 
-        // Match users with contacts and set username from contact displayName
+        // Annotate with device-contact display name and persist matched
+        // rows into the contacts table.
         users = _matchUsersWithContacts(users);
-
-        // Update existing users in the users table with username
-        await _updateExistingUsersWithUsername(users);
+        await _replaceMatchedContacts(users);
+        await _syncRolesForMatchedUsers(users);
 
         final sorted = _sortByName(users);
         setState(() {
@@ -497,7 +470,6 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
         final userToSave = UserModel(
           id: user.id,
           name: user.name,
-          username: user.username,
           phone: user.phone,
           role: user.role,
           profilePic: user.profilePic,
