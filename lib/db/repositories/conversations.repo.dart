@@ -458,7 +458,16 @@ class ConversationRepository {
     final db = sqliteDatabase.database;
 
     return (db.select(db.chats)
-          ..where((t) => t.type.equals('dm') & t.deletedAt.isNull())
+          // Only surface DMs that have at least one message — empty chats
+          // (e.g. stale rows from the old "create-dm-on-contact-tap" flow,
+          // or chats the recipient created but never sent in) stay hidden
+          // from the list until the first message lands.
+          ..where(
+            (t) =>
+                t.type.equals('dm') &
+                t.deletedAt.isNull() &
+                t.lastMsgId.isNotNull(),
+          )
           // pinnedAt DESC NULLS LAST keeps pinned chats on top, ordered by
           // most-recently-pinned first; non-pinned chats (NULL) fall through
           // to the activity tie-breakers below. A new message bumps updatedAt
@@ -881,6 +890,26 @@ class ConversationRepository {
       createdAt: conv.createdAt ?? DateTime.now().toIso8601String(),
       disappearingAfterSec: conv.disappearingAfterSec,
     );
+  }
+
+  /// Look up an existing DM whose only non-current-user member is
+  /// [recipientUserId]. Returns null if no such chat exists locally.
+  /// Used by the contact-tap flow to skip create-dm when the user already
+  /// has a chat with the tapped contact.
+  Future<DmModel?> getDmByRecipientUserId(String recipientUserId) async {
+    final db = sqliteDatabase.database;
+    final memberRows = await (db.select(db.chatMembers)
+          ..where(
+            (t) => t.userId.equals(recipientUserId) & t.removedAt.isNull(),
+          ))
+        .get();
+    for (final m in memberRows) {
+      final dm = await getDmByConversationId(m.chatId);
+      if (dm != null && dm.recipientId == recipientUserId) {
+        return dm;
+      }
+    }
+    return null;
   }
 
   // get group list

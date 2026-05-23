@@ -417,12 +417,19 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
 
   Future<void> _loadRecipientInfo() async {
     try {
-      // Fast path: use the live DM model from chatProvider if available.
+      // Resolve recipientId from chatProvider's in-memory list when present
+      // (cheap), otherwise fall back to the chat_members table.
+      String? recipientId;
       try {
         final dm = ref
             .read(chatProvider)
             .dmList
             .firstWhere((d) => d.chatId == widget.dm!.chatId);
+        recipientId = dm.recipientId;
+        // First-paint placeholder while the repo lookup is in flight. The
+        // recipientName here may be the raw server name (chatProvider builds
+        // DMs from backend JSON before the contacts join exists), so the
+        // repo lookup below is required to fill `contactName`.
         if (mounted) {
           setState(() {
             _recipientUser = UserModel(
@@ -434,28 +441,26 @@ class _ChatDetailsScreenState extends ConsumerState<ChatDetailsScreen> {
             );
           });
         }
-        return;
       } catch (_) {
-        /* fall through to DB lookup */
-      }
+        final me = await _userUtils.getUserDetails();
+        final myId = me?.id;
+        final members = await _memberRepo.getActiveMembersByConversationId(
+          widget.dm!.chatId,
+        );
+        if (members.isEmpty) return;
 
-      final me = await _userUtils.getUserDetails();
-      final myId = me?.id;
-      final members = await _memberRepo.getActiveMembersByConversationId(
-        widget.dm!.chatId,
-      );
-      if (members.isEmpty) return;
-
-      // Pick first non-self member; fall back to first if needed.
-      String? recipientId;
-      for (final m in members) {
-        if (m.userId != myId) {
-          recipientId = m.userId;
-          break;
+        for (final m in members) {
+          if (m.userId != myId) {
+            recipientId = m.userId;
+            break;
+          }
         }
+        recipientId ??= members.first.userId;
       }
-      recipientId ??= members.first.userId;
 
+      // Authoritative load via the repo so the joined `contactName` field is
+      // populated — this is what makes `displayName` reflect the local
+      // contact rename instead of the server name.
       final user = await _userRepo.getUserById(recipientId);
       if (mounted && user != null) setState(() => _recipientUser = user);
     } catch (e) {

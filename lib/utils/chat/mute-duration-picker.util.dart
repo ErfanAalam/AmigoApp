@@ -20,6 +20,7 @@ class MuteDurationChoice {
 class _ForeverSentinel {
   const _ForeverSentinel();
 }
+
 const _foreverSentinel = _ForeverSentinel();
 
 /// Ask the user how long to mute a chat for, using the blurred selection
@@ -28,9 +29,7 @@ const _foreverSentinel = _ForeverSentinel();
 ///
 /// The set of presets here intentionally matches what most messaging apps
 /// offer: a short break (5h), a workweek (1w), a month, and indefinite.
-Future<MuteDurationChoice?> showMuteDurationPicker(
-  BuildContext context,
-) async {
+Future<MuteDurationChoice?> showMuteDurationPicker(BuildContext context) async {
   // Compute absolute "until" timestamps now so the value remains stable
   // even if the user lingers in the dialog. Using UTC because the server
   // stores muted_until in UTC and the local DB mirror is ISO-UTC too.
@@ -40,7 +39,7 @@ Future<MuteDurationChoice?> showMuteDurationPicker(
   // entry falls out by score) and the client-side isMuted getter
   // (mutedUntil < now() flips back to "not muted") in a single sitting.
   // Remove before GA.
-  final oneMinute = now.add(const Duration(minutes: 1));
+  // final oneMinute = now.add(const Duration(minutes: 1));
   final fiveHours = now.add(const Duration(hours: 5));
   final oneWeek = now.add(const Duration(days: 7));
   final oneMonth = now.add(const Duration(days: 30));
@@ -51,12 +50,12 @@ Future<MuteDurationChoice?> showMuteDurationPicker(
     body:
         "You won't get notifications for new messages. Messages still arrive in your chats list.",
     options: [
-      BlurredSelectionOption<Object>(
-        value: oneMinute,
-        label: '1 minute',
-        sublabel: 'Test option — remove before GA',
-        icon: Icons.timer_outlined,
-      ),
+      // BlurredSelectionOption<Object>(
+      //   value: oneMinute,
+      //   label: '1 minute',
+      //   sublabel: 'Test option — remove before GA',
+      //   icon: Icons.timer_outlined,
+      // ),
       BlurredSelectionOption<Object>(
         value: fiveHours,
         label: '5 hours',
@@ -115,8 +114,18 @@ String? _formatMutedUntil(String? mutedUntilIso) {
   if (daysAway == 1) return 'tomorrow at $time';
 
   const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
   final monthLabel = months[local.month - 1];
   return 'on $monthLabel ${local.day} at $time';

@@ -9,10 +9,8 @@ import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/api_service.dart';
-import '../../db/repositories/conversation-member.repo.dart';
 import '../../models/contact.model.dart';
 import '../../models/user.model.dart';
-import '../../providers/chat.provider.dart';
 import '../../providers/message.provider.dart';
 import '../../providers/theme-color.provider.dart';
 import '../../services/contact.service.dart';
@@ -38,8 +36,6 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
   final UserStatusService _userStatusService = UserStatusService();
   final ConversationRepository _conversationRepository =
       ConversationRepository();
-  final ConversationMemberRepository _conversationMemberRepository =
-      ConversationMemberRepository();
   List<ContactModel> _contacts = [];
   List<UserModel> _availableUsers = [];
   List<UserModel> _filteredUsers = [];
@@ -404,128 +400,53 @@ class _ContactsPageState extends ConsumerState<ContactsPage>
   }
 
   void startConversation(UserModel user) async {
-    final result = await apiService.chat.createChat(user.id.toString());
-    if (result.isSuccess && result.data != null) {
-      try {
-        // store the recipient info in the user table
-        await _userRepository.insertUser(user);
+    try {
+      // Always upsert the user so the messaging screen has fresh recipient
+      // metadata for the AppBar even before any server round-trip.
+      await _userRepository.insertUser(user);
 
-        // Create ConversationModel from the response
-        final conversationData = result.data!;
-        if (conversationData['existing'] == true) {
-          final dm = await _conversationRepository.getDmByConversationId(
-            conversationData['id'],
-          );
-          if (dm == null) {
-            if (mounted) {
-              Snack.show(
-                'Cannot start conversation. The chat maybe deleted. Try restoring the chat.',
-              );
-            }
-            return;
-          }
-          if (mounted) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => InnerChatPage(dm: dm)),
-            );
-          }
-          return;
-        }
-
-        final dm = DmModel(
-          chatId: conversationData['id']?.toString() ?? '',
-          recipientId: user.id,
-          recipientName: user.displayName,
-          recipientPhone: user.phone,
-          recipientProfilePic: user.profilePic,
-          unreadCount: 0,
-          isRecipientOnline: user.isOnline,
-          createdAt: conversationData['created_at']?.toString() ?? '',
-        );
-
-        final conversation = ConversationModel(
-          id: conversationData['id']?.toString() ?? '',
-          type: 'dm',
-          unreadCount: 0,
-          createrId: conversationData['creater_id']?.toString(),
-          createdAt: conversationData['created_at']?.toString(),
-        );
-
-        // store the conversation in local db
-        await _conversationRepository.insertConversations([conversation]);
-
-        final receiverMember = ConversationMemberModel(
-          chatId: conversationData['id']?.toString() ?? '',
-          userId: user.id,
-          role: 'member',
-          joinedAt: conversationData['created_at']?.toString(),
-        );
-
-        // Store conversation members in SQLite
-        await _conversationMemberRepository.insertConversationMembers([
-          receiverMember,
-        ]);
-
-        final userToSave = UserModel(
-          id: user.id,
-          name: user.name,
-          phone: user.phone,
-          role: user.role,
-          profilePic: user.profilePic,
-          isOnline: user.isOnline,
-          callAccess: user.callAccess,
-        );
-
-        await _userRepository.insertUser(userToSave);
-
-        // Add the new DM to the chat provider state
-        await ref.read(chatProvider.notifier).addNewDm(dm);
-
+      // If we already have a local DM with this contact, jump straight to
+      // it — no need to (re)create.
+      final existingDm = await _conversationRepository.getDmByRecipientUserId(
+        user.id,
+      );
+      if (existingDm != null) {
         if (mounted) {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => InnerChatPage(dm: dm)),
+            MaterialPageRoute(
+              builder: (context) => InnerChatPage(dm: existingDm),
+            ),
           );
         }
-      } catch (e) {
-        Snack.error('Failed to start conversation: $e');
-        // if (mounted) {
-        //   try {
-        //     final messenger = ScaffoldMessenger.maybeOf(context);
-        //     if (messenger != null) {
-        //       messenger.showSnackBar(
-        //         _createBlurredSnackBar(
-        //           message: 'Failed to start conversation: $e',
-        //           backgroundColor: Colors.red,
-        //           duration: Duration(seconds: 3),
-        //         ),
-        //       );
-        //     }
-        //   } catch (_) {
-        //     // Context is invalid, ignore
-        //   }
-        // }
+        return;
       }
-    } else {
-      Snack.error('Failed to create chat: ${result.message}');
-      // if (mounted) {
-      //   try {
-      //     final messenger = ScaffoldMessenger.maybeOf(context);
-      //     if (messenger != null) {
-      //       messenger.showSnackBar(
-      //         _createBlurredSnackBar(
-      //           message:
-      //               'Failed to create chat: ${response['message'] ?? 'Unknown error'}',
-      //           backgroundColor: Colors.red,
-      //           duration: Duration(seconds: 3),
-      //         ),
-      //       );
-      //     }
-      //   } catch (_) {
-      //     // Context is invalid, ignore
-      //   }
-      // }
+
+      // No existing chat: open the messaging screen with a "pending" DM
+      // (chatId == ''). The actual `chat/dm/create-dm` API call is deferred
+      // to the first send so contacts the user tapped but never wrote to
+      // don't get a phantom empty chat on either side.
+      final pendingDm = DmModel(
+        chatId: '',
+        recipientId: user.id,
+        recipientName: user.displayName,
+        recipientPhone: user.phone,
+        recipientProfilePic: user.profilePic,
+        unreadCount: 0,
+        isRecipientOnline: user.isOnline,
+        createdAt: DateTime.now().toUtc().toIso8601String(),
+      );
+
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => InnerChatPage(dm: pendingDm),
+          ),
+        );
+      }
+    } catch (e) {
+      Snack.error('Failed to start conversation: $e');
     }
   }
 

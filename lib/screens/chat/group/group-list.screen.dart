@@ -200,6 +200,15 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
     final themeColor = ref.watch(themeColorProvider);
     final view = View.of(context);
     final systemNavInset = view.viewPadding.bottom / view.devicePixelRatio;
+    // Show "Mark All as Read" only when at least one group has unread
+    // messages. Falls back to the chatProvider list while the Drift stream
+    // is still loading its first emission.
+    final groupListAsync = ref.watch(groupListStreamProvider);
+    final hasAnyUnread = groupListAsync.maybeWhen(
+      data: (groups) => groups.any((g) => g.unreadCount > 0),
+      orElse: () =>
+          ref.watch(chatProvider).groupList.any((g) => g.unreadCount > 0),
+    );
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -214,17 +223,18 @@ class GroupsPageState extends ConsumerState<GroupsPage> {
               iconSize: 22,
               tooltip: 'More',
               menuMaxWidth: 200,
-              itemsBuilder: () => const [
-                BlurredPopupAction<String>(
+              itemsBuilder: () => [
+                const BlurredPopupAction<String>(
                   label: 'Refresh List',
                   icon: Icons.refresh_rounded,
                   value: 'refresh',
                 ),
-                BlurredPopupAction<String>(
-                  label: 'Mark All as Read',
-                  icon: Icons.mark_chat_read_outlined,
-                  value: 'mark_all_read',
-                ),
+                if (hasAnyUnread)
+                  const BlurredPopupAction<String>(
+                    label: 'Mark All as Read',
+                    icon: Icons.mark_chat_read_outlined,
+                    value: 'mark_all_read',
+                  ),
               ],
               onSelected: _onAppBarMenuSelected,
             ),

@@ -114,6 +114,15 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   MessageModel? _pinnedMessage;
   UserModel? _currentUserDetails;
 
+  // Tracks the live DM identity. Starts as widget.dm; if widget.dm came in
+  // "pending" (chatId == '') from the contact-tap flow, this is swapped for
+  // a real DmModel by _ensureConversation() once the server has created the
+  // chat — at which point all chatId-dependent subscriptions are wired up.
+  late DmModel _dm;
+  // Guards against concurrent first-send taps racing each other to call
+  // create-dm (e.g. text + media simultaneously).
+  Future<bool>? _conversationCreationFuture;
+
   // Typing animation controllers
   late AnimationController _typingAnimationController;
   late List<Animation<double>> _typingDotAnimations;
@@ -172,7 +181,13 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
 
   // ChatActionsMixin requirements
   @override
-  String get conversationId => widget.dm.chatId;
+  String get conversationId => _dm.chatId;
+
+  /// True until the server-side chat row has been created. While pending,
+  /// initState skips the chatId-dependent setup (WS join, history sync,
+  /// active-conversation pin, draft load) and the send paths first run
+  /// [_ensureConversation] to upgrade `_dm` to a real chat.
+  bool get _isPendingDm => _dm.chatId.isEmpty;
   @override
   String? get currentUserId => _currentUserDetails?.id;
   @override
@@ -321,6 +336,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
   void initState() {
     super.initState();
 
+    _dm = widget.dm;
+
     // Capture unread snapshot BEFORE initializeChat clears it — drives the
     // unread-separator pill and the scroll-to-first-unread initial position.
     unreadAtOpen = widget.dm.unreadCount ?? 0;
@@ -332,10 +349,17 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     searchController.addListener(onSearchTextChanged);
     _messageFocusNode.addListener(onInputFocusChange);
 
-    setupWebSocketListener();
-    // initializeChat() subscribes the messages-stream listener which flips
-    // `isLoading` → false on first emission, so the skeleton can clear.
-    initializeChat();
+    if (_isPendingDm) {
+      // Pending DM (opened from contact-tap before any message exists):
+      // skip everything that wants a real chatId. Still load the current
+      // user so `sendMessage` has a senderId once the user actually sends.
+      _loadCurrentUserForPending();
+    } else {
+      setupWebSocketListener();
+      // initializeChat() subscribes the messages-stream listener which flips
+      // `isLoading` → false on first emission, so the skeleton can clear.
+      initializeChat();
+    }
 
     MessageRecommendationsStore.loadEnabled().then((enabled) {
       if (!mounted || !enabled) return;
@@ -350,13 +374,27 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // / animation controllers that only matter once the UI is interactive.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      NotificationService().clearConversationNotifications(widget.dm.chatId);
+      if (!_isPendingDm) {
+        NotificationService().clearConversationNotifications(_dm.chatId);
+      }
       _initializeTypingAnimation();
       initializeVoiceRecording();
       _initializeAudioPlayback();
       startSendAutoRetry();
-      loadDraft();
+      if (!_isPendingDm) {
+        loadDraft();
+      }
     });
+  }
+
+  /// Pending-DM shortcut for the slice of initializeChat we still need:
+  /// caching the current user so the send pipeline knows the sender id.
+  /// All the chatId-bound work (streams, WS join, sync) is deferred to
+  /// [_ensureConversation] once we have a real chatId.
+  Future<void> _loadCurrentUserForPending() async {
+    final currentUser = await _userUtils.getUserDetails();
+    if (!_canSetState || currentUser == null) return;
+    _safeSetState(() => _currentUserDetails = currentUser);
   }
 
   void _initializeTypingAnimation() {
@@ -585,8 +623,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
         .watch(chatProvider)
         .dmList
         .firstWhere(
-          (d) => d.chatId == widget.dm.chatId,
-          orElse: () => widget.dm,
+          (d) => d.chatId == _dm.chatId,
+          orElse: () => _dm,
         );
     final hasDisappearing = (liveDm.disappearingAfterSec ?? 0) > 0;
 
@@ -653,8 +691,8 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
                       final isOnline = ref
                           .read(chatProvider)
                           .isUserOnline(
-                            widget.dm.recipientId,
-                            widget.dm.chatId,
+                            _dm.recipientId,
+                            _dm.chatId,
                           );
                       return Text(
                         isOnline ? 'Online' : 'Offline',
@@ -728,10 +766,12 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // WS subscriptions + typing timeout (mixin-owned).
     disposeWebSocketListener();
 
-    // Save draft before disposing
-    if (_messageController.text.isNotEmpty) {
+    // Save draft before disposing — but only for chats that actually exist
+    // server-side. Pending DMs would key the draft under '' which would
+    // collide across every pending chat.
+    if (_messageController.text.isNotEmpty && !_isPendingDm) {
       final draftNotifier = ref.read(draftMessagesProvider.notifier);
-      draftNotifier.saveDraft(widget.dm.chatId, _messageController.text);
+      draftNotifier.saveDraft(_dm.chatId, _messageController.text);
     }
 
     // Remove listener
@@ -739,8 +779,10 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     // Clear active conversation when leaving the messaging screen
     ref.read(chatProvider.notifier).setActiveConversation(null, null);
 
-    // Clear unread count in local DB
-    _conversationsRepo.updateUnreadCount(widget.dm.chatId, 0);
+    // Clear unread count in local DB (no-op when pending — no chat row exists)
+    if (!_isPendingDm) {
+      _conversationsRepo.updateUnreadCount(_dm.chatId, 0);
+    }
 
     // conversationLeave was removed; the server infers leave from
     // the absence of heartbeat / next join.
@@ -855,6 +897,108 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
     );
   }
 
+  /// Lazy create-dm. Returns `true` once `_dm.chatId` points at a real
+  /// server-side chat (either freshly created here or pre-existing because
+  /// the server reported `existing: true`). Wraps every user-initiated
+  /// send entry point so an unsent chat never produces a server-side row.
+  Future<bool> _ensureConversation() async {
+    if (!_isPendingDm) return true;
+    // Coalesce concurrent first sends (e.g. typing + media simultaneously)
+    // so we only fire create-dm once.
+    final inflight = _conversationCreationFuture;
+    if (inflight != null) return inflight;
+
+    final future = _createConversationNow();
+    _conversationCreationFuture = future;
+    try {
+      return await future;
+    } finally {
+      _conversationCreationFuture = null;
+    }
+  }
+
+  Future<bool> _createConversationNow() async {
+    try {
+      final result = await apiService.chat.createChat(_dm.recipientId);
+      if (!result.isSuccess || result.data == null) {
+        if (mounted) {
+          Snack.error('Failed to start chat: ${result.message}');
+        }
+        return false;
+      }
+      final data = result.data as Map<String, dynamic>;
+      final realChatId = data['id']?.toString() ?? '';
+      if (realChatId.isEmpty) {
+        if (mounted) Snack.error('Failed to start chat: missing id');
+        return false;
+      }
+
+      // Persist the conversation locally so the chat-row + member row exist
+      // before the send pipeline writes the first message (which FKs to
+      // chatId via the messages table).
+      final conv = ConversationModel(
+        id: realChatId,
+        type: 'dm',
+        unreadCount: 0,
+        createrId: data['creater_id']?.toString(),
+        createdAt: data['created_at']?.toString(),
+      );
+      await _conversationsRepo.insertConversations([conv]);
+
+      final receiverMember = ConversationMemberModel(
+        chatId: realChatId,
+        userId: _dm.recipientId,
+        role: 'member',
+        joinedAt: data['created_at']?.toString(),
+      );
+      await _conversationMemberRepo.insertConversationMembers([
+        receiverMember,
+      ]);
+
+      // Swap to a real DmModel — initializeChat() below reads `conversationId`
+      // (which now resolves through `_dm.chatId`) when wiring its streams.
+      final realDm = DmModel(
+        chatId: realChatId,
+        recipientId: _dm.recipientId,
+        recipientName: _dm.recipientName,
+        recipientPhone: _dm.recipientPhone,
+        recipientProfilePic: _dm.recipientProfilePic,
+        unreadCount: 0,
+        isRecipientOnline: _dm.isRecipientOnline,
+        createdAt: data['created_at']?.toString() ?? _dm.createdAt,
+      );
+
+      if (!mounted) return false;
+      _safeSetState(() {
+        _dm = realDm;
+      });
+
+      // Add to chatProvider so any in-memory consumers (AppBar disappearing
+      // badge fallback, etc.) see the new DM without waiting for a server
+      // refresh.
+      await ref.read(chatProvider.notifier).addNewDm(realDm);
+
+      // Now wire all the chatId-dependent subscriptions that initState
+      // skipped for pending mode.
+      setupWebSocketListener();
+      await initializeChat();
+      return true;
+    } catch (e) {
+      if (mounted) Snack.error('Failed to start chat: $e');
+      return false;
+    }
+  }
+
+  /// Wraps a user-initiated send so we lazily create the server-side chat
+  /// the first time. No-op for already-created chats.
+  Future<void> _withConversation(Future<void> Function() action) async {
+    if (_isPendingDm) {
+      final ok = await _ensureConversation();
+      if (!ok || !mounted) return;
+    }
+    await action();
+  }
+
   Widget _buildMessageInput() {
     return MessageInputContainer(
       messageController: _messageController,
@@ -864,22 +1008,32 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
       isSending: isSendingMessage,
       replyToMessageData: replyToMessageData,
       currentUserId: _currentUserDetails?.id,
-      onSendMessage: sendMessage,
+      onSendMessage: (type) => _withConversation(() => sendMessage(type)),
       // Legacy modal flow — left wired so it can be re-enabled by
       // unsetting the inline-recording callbacks below.
-      onSendVoiceNote: sendVoiceNote,
+      onSendVoiceNote: () => _withConversation(() async => sendVoiceNote()),
       // ── New inline (WhatsApp-style) recording flow ─────────────────
       onStartInlineRecording: startInlineRecording,
       onStopInlineRecording: stopInlineRecording,
       onCancelInlineRecording: cancelInlineRecording,
-      onSendInlineRecording: sendInlineRecording,
+      onSendInlineRecording: (path) =>
+          _withConversation(() => sendInlineRecording(path)),
       onDiscardInlineRecording: discardInlineRecording,
       inlineRecordingTimerStream: inlineRecordingTimerStream,
-      onPickGallery: handleGalleryAttachment,
-      onPickCamera: handleCameraAttachment,
-      onPickDocument: handleDocumentAttachment,
-      onPickContact: handleContactAttachment,
-      onTyping: handleTyping,
+      onPickGallery: () =>
+          _withConversation(() => handleGalleryAttachment()),
+      onPickCamera: () => _withConversation(() => handleCameraAttachment()),
+      onPickDocument: () =>
+          _withConversation(() => handleDocumentAttachment()),
+      onPickContact: () =>
+          _withConversation(() => handleContactAttachment()),
+      // Suppress outgoing typing events while we don't have a real chatId
+      // yet — the WS server can't route typing for a conversation that
+      // doesn't exist.
+      onTyping: (val) {
+        if (_isPendingDm) return;
+        handleTyping(val);
+      },
       onCancelReply: cancelReply,
       focusNode: _messageFocusNode,
       onFocusChange: (isFocused) {
@@ -888,7 +1042,7 @@ class _InnerChatPageState extends ConsumerState<InnerChatPage>
           isInputFocused = isFocused;
         });
       },
-      dm: widget.dm,
+      dm: _dm,
       recommendations: ValueListenableBuilder<TextEditingValue>(
         valueListenable: _messageController,
         builder: (context, value, child) {

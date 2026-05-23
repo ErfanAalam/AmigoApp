@@ -238,6 +238,14 @@ class ChatsPageState extends ConsumerState<ChatsPage>
     final themeColor = ref.watch(themeColorProvider);
     final view = View.of(context);
     final systemNavInset = view.viewPadding.bottom / view.devicePixelRatio;
+    // Show "Mark All as Read" only when at least one DM has unread messages.
+    // Falls back to the chatProvider list if the Drift stream is still loading.
+    final dmListAsync = ref.watch(dmListStreamProvider);
+    final hasAnyUnread = dmListAsync.maybeWhen(
+      data: (dms) => dms.any((d) => (d.unreadCount ?? 0) > 0),
+      orElse: () =>
+          ref.watch(chatProvider).dmList.any((d) => (d.unreadCount ?? 0) > 0),
+    );
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -252,17 +260,18 @@ class ChatsPageState extends ConsumerState<ChatsPage>
               iconSize: 22,
               tooltip: 'More',
               menuMaxWidth: 200,
-              itemsBuilder: () => const [
-                BlurredPopupAction<String>(
+              itemsBuilder: () => [
+                const BlurredPopupAction<String>(
                   label: 'Refresh List',
                   icon: Icons.refresh_rounded,
                   value: 'refresh',
                 ),
-                BlurredPopupAction<String>(
-                  label: 'Mark All as Read',
-                  icon: Icons.mark_chat_read_outlined,
-                  value: 'mark_all_read',
-                ),
+                if (hasAnyUnread)
+                  const BlurredPopupAction<String>(
+                    label: 'Mark All as Read',
+                    icon: Icons.mark_chat_read_outlined,
+                    value: 'mark_all_read',
+                  ),
               ],
               onSelected: _onAppBarMenuSelected,
             ),
