@@ -5,6 +5,7 @@ import android.content.Context
 import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.util.Log
 import android.view.WindowManager
 import com.aiexch.amigo.call.AmigoCallPlugin
@@ -20,6 +21,13 @@ class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.aiexch.amigo/lock_screen"
     private val RINGTONE_CHANNEL = "com.aiexch.amigo/stream_ringtone"
     private var lockScreenFlagsEnabled = false
+
+    /// Proximity wake lock held during audio calls. We keep a reference so
+    /// release is idempotent and we can clean up in onDestroy. Created
+    /// lazily in [acquireProximityLock] because some devices don't have a
+    /// proximity sensor, and creating a WakeLock for an unsupported level
+    /// would log a warning we don't need.
+    private var proximityWakeLock: PowerManager.WakeLock? = null
 
     companion object {
         private const val TAG = "MainActivity"
@@ -86,6 +94,24 @@ class MainActivity : FlutterActivity() {
                     requestKeyguardDismissal()
                     result.success(true)
                 }
+                "setCallScreenMode" -> {
+                    // Per-call screen behavior. See [setCallScreenMode] for
+                    // the per-mode contract. Driven from Dart's
+                    // _ActiveCallView so the mode tracks the live state of
+                    // the call (audio ↔ video on user toggle, none on
+                    // dispose).
+                    val mode = call.argument<String>("mode")
+                    if (mode.isNullOrEmpty()) {
+                        result.error(
+                            "MISSING_ARG",
+                            "setCallScreenMode requires a non-empty 'mode' string",
+                            null,
+                        )
+                    } else {
+                        setCallScreenMode(mode)
+                        result.success(true)
+                    }
+                }
                 else -> {
                     result.notImplemented()
                 }
@@ -111,6 +137,23 @@ class MainActivity : FlutterActivity() {
                     "stop" -> {
                         AmigoRingtoneManager.stop()
                         result.success(true)
+                    }
+                    "playOneShot" -> {
+                        // Transient signaling sound (connect / disconnect
+                        // beep). The flutter asset path comes through as
+                        // `asset`; we resolve it inside the manager via
+                        // FlutterInjector so this works in release builds.
+                        val asset = call.argument<String>("asset")
+                        if (asset.isNullOrEmpty()) {
+                            result.error(
+                                "MISSING_ARG",
+                                "playOneShot requires a non-empty 'asset' string",
+                                null,
+                            )
+                        } else {
+                            AmigoRingtoneManager.playOneShot(applicationContext, asset)
+                            result.success(true)
+                        }
                     }
                     else -> result.notImplemented()
                 }
@@ -156,8 +199,96 @@ class MainActivity : FlutterActivity() {
         // the engine is being detached, so we make sure native resources
         // don't outlive the process.
         try { AmigoRingtoneManager.stop() } catch (_: Exception) {}
+        // Release the proximity wake lock if Dart didn't get a chance to
+        // (e.g. the process is being killed). System WakeLock leaks survive
+        // the activity and keep the proximity sensor pinned on; explicit
+        // cleanup here prevents that.
+        try { releaseProximityLock() } catch (_: Exception) {}
+        try {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } catch (_: Exception) {}
         isFlutterRunning = false
         super.onDestroy()
+    }
+
+    /**
+     * Per-call screen behavior driven from Dart's `_ActiveCallView`.
+     *
+     *  - 'audio'  — acquire PROXIMITY_SCREEN_OFF_WAKE_LOCK so holding the
+     *               phone to the ear turns the screen off (and back on when
+     *               pulled away). Clear FLAG_KEEP_SCREEN_ON so it doesn't
+     *               compete with the proximity lock.
+     *  - 'video'  — release proximity (the user is looking at the screen)
+     *               and add FLAG_KEEP_SCREEN_ON so the idle daemon doesn't
+     *               dim during a long video call. Same mechanism a video
+     *               player uses.
+     *  - 'none'   — release both. Called on _ActiveCallView dispose so the
+     *               post-call UI behaves normally.
+     *
+     * Idempotent: re-acquiring a held wake lock is a no-op; clearing an
+     * already-cleared flag likewise. Safe to call any → any.
+     */
+    private fun setCallScreenMode(mode: String) {
+        Log.i(TAG, "setCallScreenMode($mode)")
+        when (mode) {
+            "audio" -> {
+                acquireProximityLock()
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+            "video" -> {
+                releaseProximityLock()
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+            "none" -> {
+                releaseProximityLock()
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+            else -> Log.w(TAG, "setCallScreenMode: unknown mode '$mode'")
+        }
+    }
+
+    private fun acquireProximityLock() {
+        if (proximityWakeLock?.isHeld == true) return
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) {
+                Log.w(TAG, "proximity wake lock unsupported on this device — skipping")
+                return
+            }
+            val wl = pm.newWakeLock(
+                PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,
+                "Amigo:call:proximity",
+            )
+            // Not reference-counted — we own this lock 1:1 with the active
+            // _ActiveCallView. Multiple acquire() calls in a row should NOT
+            // require matching release() calls; the held-check at the top
+            // already gates re-acquisition.
+            wl.setReferenceCounted(false)
+            wl.acquire()
+            proximityWakeLock = wl
+            Log.i(TAG, "proximity wake lock acquired")
+        } catch (e: Exception) {
+            Log.e(TAG, "acquireProximityLock failed: ${e.message}", e)
+        }
+    }
+
+    private fun releaseProximityLock() {
+        val wl = proximityWakeLock ?: return
+        try {
+            if (wl.isHeld) {
+                // No RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY: when the user hangs
+                // up while still holding the phone to their ear, we want the
+                // screen to come back on immediately so they see the
+                // post-call UI / unlock prompt. Waiting for the sensor to
+                // clear would leave them staring at a black screen.
+                wl.release()
+                Log.i(TAG, "proximity wake lock released")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "releaseProximityLock failed: ${e.message}")
+        } finally {
+            proximityWakeLock = null
+        }
     }
 
     /**

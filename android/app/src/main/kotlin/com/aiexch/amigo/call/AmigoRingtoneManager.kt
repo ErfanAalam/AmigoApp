@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import io.flutter.FlutterInjector
 
 /**
  * Foreground-state ringtone playback for Stream calls.
@@ -172,6 +173,66 @@ object AmigoRingtoneManager {
         synchronized(lock) {
             Log.i(TAG, "stop")
             stopInternal()
+        }
+    }
+
+    /**
+     * Self-releasing one-shot for short signaling sounds (call-connected and
+     * call-disconnected beeps).
+     *
+     * Deliberately does NOT touch the looping ringtone state (mediaPlayer /
+     * toneGenerator / watchdog) — the beep is transient and must coexist
+     * with whatever else is playing (e.g. a still-fading outgoing tone). Each
+     * invocation gets its own MediaPlayer that releases itself on completion
+     * or error; there is no shared state to leak.
+     *
+     * Audio attributes:
+     *  - USAGE_VOICE_COMMUNICATION_SIGNALLING + CONTENT_TYPE_SONIFICATION
+     *    routes the beep through the in-call audio path, so it follows
+     *    whatever output the call is using (earpiece / BT / wired / speaker)
+     *    and doesn't grab persistent audio focus from the Stream WebRTC
+     *    session.
+     *
+     * @param assetKey the flutter asset path, e.g.
+     *   "assets/sounds/call_connected_beep.mp3". We resolve it through
+     *   FlutterInjector so this works in both debug and release builds
+     *   (where the asset lives inside the APK under a hashed key).
+     */
+    fun playOneShot(context: Context, assetKey: String) {
+        try {
+            val loader = FlutterInjector.instance().flutterLoader()
+            val lookupKey = loader.getLookupKeyForAsset(assetKey)
+            val afd = context.assets.openFd(lookupKey)
+            val mp = MediaPlayer()
+            try {
+                mp.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION_SIGNALLING)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            } finally {
+                // MediaPlayer dup's the FD inside setDataSource — safe to
+                // close the AssetFileDescriptor immediately. Closing in
+                // `finally` so we don't leak if setDataSource threw.
+                try { afd.close() } catch (_: Exception) {}
+            }
+            mp.setOnCompletionListener {
+                try { it.release() } catch (_: Exception) {}
+                Log.i(TAG, "playOneShot completed: $assetKey")
+            }
+            mp.setOnErrorListener { player, what, extra ->
+                Log.w(TAG, "playOneShot MediaPlayer error " +
+                        "what=$what extra=$extra ($assetKey)")
+                try { player.release() } catch (_: Exception) {}
+                true
+            }
+            mp.prepare()
+            mp.start()
+            Log.i(TAG, "playOneShot started: $assetKey")
+        } catch (e: Exception) {
+            Log.e(TAG, "playOneShot failed for $assetKey: ${e.message}", e)
         }
     }
 

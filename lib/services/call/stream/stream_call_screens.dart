@@ -891,6 +891,13 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
   StreamSubscription<PiPStatus>? _pipStatusSub;
   bool _isInPip = false;
 
+  /// Subscription that drives native screen behavior (proximity wake lock
+  /// vs FLAG_KEEP_SCREEN_ON) based on whether any video is on. We mirror
+  /// the same `anyRemoteVideo || localVideoOn` condition used by the
+  /// build, so the mode stays in lock-step with the visible layout.
+  StreamSubscription<CallState>? _screenModeSub;
+  String? _lastScreenMode;
+
   @override
   void initState() {
     super.initState();
@@ -902,18 +909,33 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
         if (next != _isInPip) setState(() => _isInPip = next);
       });
     }
+
+    // Apply the initial screen mode synchronously, then keep it tracking
+    // the live state of the call. Without the initial apply, an audio
+    // call would never get the proximity lock until the first
+    // post-initState state event lands (which can be hundreds of ms
+    // later — long enough to press the phone to your ear and have it
+    // light up your face).
+    _applyScreenModeFor(widget.call.state.value);
+    _screenModeSub = widget.call.state.valueStream.listen(_applyScreenModeFor);
+
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       // Read the canonical "connected at" from the service so the on-screen
       // counter stays in lock-step with the persistent ongoing-call
       // notification (which is anchored to the same DateTime via Android's
-      // chronometer). Falls back to the call's own session.startedAt while
-      // the service hasn't pinned its own value yet.
-      final svc = StreamCallService();
-      final start = svc.callConnectedAt ??
-          widget.call.state.value.startedAt ??
-          DateTime.now();
-      setState(() => _elapsed = DateTime.now().difference(start));
+      // chronometer). When the anchor isn't pinned yet (we've joined the
+      // SFU but the remote party's audio path hasn't completed — the
+      // ~4-5s "real silence" window) we keep _elapsed at zero; the build
+      // method renders a 'Connecting…' label in that case rather than a
+      // running 00:00, 00:01… over silence. See StreamCallService
+      // `_audioReadyFallbackTimer` for the gating logic.
+      final start = StreamCallService().callConnectedAt;
+      setState(() {
+        _elapsed = start == null
+            ? Duration.zero
+            : DateTime.now().difference(start);
+      });
     });
 
     // Belt-and-braces: if we're already past the ringing phase but the call
@@ -929,7 +951,34 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
   void dispose() {
     _ticker?.cancel();
     _pipStatusSub?.cancel();
+    _screenModeSub?.cancel();
+    // Release the proximity wake lock + FLAG_KEEP_SCREEN_ON before the
+    // widget tears down. Without this, an audio call that ended with the
+    // user still holding the phone to their ear would leave the screen
+    // off until the sensor was uncovered.
+    StreamCallService().setCallScreenMode('none');
+    _lastScreenMode = null;
     super.dispose();
+  }
+
+  /// Computes the desired screen mode for the current call state and
+  /// forwards it to the native side ONLY when it changes — re-invoking
+  /// the channel on every state event would be wasteful (and would also
+  /// thrash the proximity wake lock if any of the underlying flags were
+  /// less idempotent than they currently are).
+  void _applyScreenModeFor(CallState state) {
+    final localVideoOn = state.localParticipant?.isVideoEnabled ?? false;
+    final anyRemoteVideo = state.callParticipants
+        .where((p) => !p.isLocal)
+        .any(
+          (p) =>
+              p.publishedTracks[SfuTrackType.video] != null &&
+              !p.isTrackPaused(SfuTrackType.video),
+        );
+    final mode = (localVideoOn || anyRemoteVideo) ? 'video' : 'audio';
+    if (mode == _lastScreenMode) return;
+    _lastScreenMode = mode;
+    StreamCallService().setCallScreenMode(mode);
   }
 
   @override
@@ -977,6 +1026,24 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
             'local?${localUser != null} videoOn=$localVideoOn '
             'audioMode=$isAudioMode pip=$isPip name="$remoteName"');
 
+        // Pick the top-bar duration label based on whether the call has
+        // actually reached audio-ready state. We mirror the service's
+        // anchor (`callConnectedAt`) so the on-screen counter doesn't
+        // tick over the ~4-5s of SFU/ICE setup silence; during that
+        // window the user sees "Connecting…" instead.
+        final audioReady = StreamCallService().callConnectedAt != null;
+        final streamStatus = state.status;
+        final String durationLabel;
+        if (audioReady) {
+          durationLabel = _fmt(_elapsed);
+        } else if (streamStatus is CallStatusOutgoing) {
+          durationLabel = 'Calling…';
+        } else if (streamStatus is CallStatusIncoming) {
+          durationLabel = 'Incoming call';
+        } else {
+          durationLabel = 'Connecting…';
+        }
+
         return Stack(
           fit: StackFit.expand,
           children: [
@@ -986,7 +1053,7 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
               _VideoGrid(call: widget.call, participants: remoteParticipants),
 
             if (isAudioMode || remoteParticipants.isEmpty)
-              _audioBody(remoteAvatar, remoteName),
+              _audioBody(remoteAvatar, remoteName, durationLabel),
 
             // Self-view PiP when video is on. Guarded — only when localUser
             // is non-null so we never crash. Hidden in PiP because there's
@@ -1006,7 +1073,7 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
               right: 0,
               child: _TopBar(
                 name: remoteName,
-                durationLabel: _fmt(_elapsed),
+                durationLabel: durationLabel,
                 showBackPill: !isAudioMode,
               ),
             ),
@@ -1033,7 +1100,7 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
     );
   }
 
-  Widget _audioBody(String? avatar, String name) {
+  Widget _audioBody(String? avatar, String name, String durationLabel) {
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -1053,7 +1120,7 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
             ),
             const SizedBox(height: 6),
             Text(
-              _fmt(_elapsed),
+              durationLabel,
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.7),
                 fontSize: 15,
@@ -1145,8 +1212,6 @@ class _ControlBar extends StatefulWidget {
 }
 
 class _ControlBarState extends State<_ControlBar> {
-  bool _speakerOn = false;
-
   // Track the user's mic *intent*. Defaults to "unmuted" because we always
   // join with `audioOnlyConnect` (microphone: enabled). Only the user's tap
   // on the mute button flips this; SDK state changes don't.
@@ -1183,30 +1248,115 @@ class _ControlBarState extends State<_ControlBar> {
     await widget.call.setMicrophoneEnabled(enabled: !nextMuted);
   }
 
-  Future<void> _toggleSpeaker() async {
-    final next = !_speakerOn;
-    try {
-      // Pick the right output device by label. Speakerphone vs earpiece.
-      final devices = await RtcMediaDeviceNotifier.instance.audioOutputs();
-      final list = devices.getDataOrNull() ?? const <RtcMediaDevice>[];
-      RtcMediaDevice? target;
-      for (final d in list) {
-        final label = d.label.toLowerCase();
-        if (next && (label.contains('speaker') || d.id == 'speaker')) {
-          target = d;
-          break;
-        }
-        if (!next && (label.contains('earpiece') || d.id == 'earpiece')) {
-          target = d;
-          break;
-        }
-      }
-      target ??= list.isNotEmpty ? list.first : null;
-      if (target != null) {
-        await widget.call.setAudioOutputDevice(target);
-      }
-    } catch (_) {/* best effort */}
-    setState(() => _speakerOn = next);
+  /// Opens a bottom sheet listing every available audio output (earpiece,
+  /// speaker, connected Bluetooth, wired headset, …) and lets the user
+  /// pick one. Reactive to hot-plug: a Bluetooth headset connecting /
+  /// disconnecting while the sheet is open updates the list live
+  /// (`RtcMediaDeviceNotifier.onDeviceChange`).
+  ///
+  /// Replaces the old 2-state speaker toggle, which couldn't represent
+  /// "user is on a Bluetooth headset" as anything other than off.
+  Future<void> _openAudioOutputPicker() async {
+    final initial =
+        (await RtcMediaDeviceNotifier.instance.audioOutputs())
+            .getDataOrNull() ??
+        const <RtcMediaDevice>[];
+
+    if (!mounted) return;
+    // Capture `call` up-front; the bottom-sheet builder runs in its own
+    // BuildContext that doesn't see our widget state, and we want every
+    // tap to use the same Call instance the bar is bound to.
+    final call = widget.call;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1F1F1F),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: StreamBuilder<List<RtcMediaDevice>>(
+          stream: RtcMediaDeviceNotifier.instance.onDeviceChange,
+          initialData: initial,
+          builder: (ctx, snap) {
+            final outputs = (snap.data ?? const <RtcMediaDevice>[])
+                .where((d) => d.kind == RtcMediaDeviceKind.audioOutput)
+                .toList();
+            // Re-read the call state on every build so the check-mark
+            // moves immediately after a selection.
+            final currentId = call.state.value.audioOutputDevice?.id;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.30),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
+                  child: Text(
+                    'Audio output',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                if (outputs.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(20, 8, 20, 20),
+                    child: Text(
+                      'No audio output devices found',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                for (final d in outputs)
+                  ListTile(
+                    leading: Icon(
+                      _AudioOutputUi.iconFor(d),
+                      color: Colors.white,
+                    ),
+                    title: Text(
+                      _AudioOutputUi.labelFor(d),
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    trailing: d.id == currentId
+                        ? const Icon(
+                            Icons.check_rounded,
+                            color: Color(0xFF4CD964),
+                          )
+                        : null,
+                    onTap: () async {
+                      try {
+                        await call.setAudioOutputDevice(d);
+                      } catch (e) {
+                        debugPrint('[STREAM-CALL] audio-picker: '
+                            'setAudioOutputDevice failed: $e');
+                      }
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    },
+                  ),
+                const SizedBox(height: 8),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+
+    // The bar icon mirrors the current device; pump a frame so it
+    // refreshes when the sheet closes even if `widget.state` hasn't
+    // rebuilt yet (the call.state stream will catch up momentarily).
+    if (mounted) setState(() {});
   }
 
   Future<void> _toggleVideo() async {
@@ -1272,11 +1422,17 @@ class _ControlBarState extends State<_ControlBar> {
                     onTap: _toggleMute,
                   ),
                   _PillButton(
-                    icon: _speakerOn
-                        ? Icons.volume_up_rounded
-                        : Icons.hearing_rounded,
-                    active: _speakerOn,
-                    onTap: _toggleSpeaker,
+                    // Icon mirrors the currently-selected audio output
+                    // (earpiece / speaker / BT / wired). `active` lights
+                    // the pill whenever audio is NOT on the earpiece —
+                    // so the user can tell at a glance that they're on
+                    // speaker or a headset without opening the sheet.
+                    icon: _AudioOutputUi.iconFor(
+                      widget.state.audioOutputDevice,
+                    ),
+                    active: widget.state.audioOutputDevice != null &&
+                        !(widget.state.audioOutputDevice!.isEarpiece),
+                    onTap: _openAudioOutputPicker,
                   ),
                   _PillButton(
                     icon: _videoOn
@@ -1304,6 +1460,47 @@ class _ControlBarState extends State<_ControlBar> {
         ),
       ),
     );
+  }
+}
+
+/// Small helpers for rendering an audio output device — icon and a
+/// human-readable label. Used by both the in-call control bar's speaker
+/// pill (when `audioOutputDevice` is non-null) and the audio-output
+/// bottom-sheet picker.
+class _AudioOutputUi {
+  const _AudioOutputUi._();
+
+  /// Icon for the given device. Returns the default "tap to pick output"
+  /// icon when the SDK hasn't told us which device is active yet
+  /// (the call.state hasn't propagated `audioOutputDevice` post-join).
+  static IconData iconFor(RtcMediaDevice? d) {
+    if (d == null) return Icons.hearing_rounded;
+    if (d.isSpeaker) return Icons.volume_up_rounded;
+    if (d.isEarpiece) return Icons.hearing_rounded;
+    if (d.isExternal) {
+      final label = d.label.toLowerCase();
+      if (label.contains('bluetooth') || label.contains('bt')) {
+        return Icons.bluetooth_audio_rounded;
+      }
+      if (label.contains('wired') || label.contains('headset')) {
+        return Icons.headset_rounded;
+      }
+      return Icons.headphones_rounded;
+    }
+    return Icons.speaker_rounded;
+  }
+
+  /// Humane label. Android often reports the raw groupId / type as the
+  /// label, which looks like 'bluetooth' or just '' — rewrite the common
+  /// cases so the picker reads naturally.
+  static String labelFor(RtcMediaDevice d) {
+    if (d.isEarpiece) return 'Earpiece';
+    if (d.isSpeaker) return 'Speaker';
+    if (d.label.isEmpty) {
+      if (d.isExternal) return 'Headphones';
+      return d.id;
+    }
+    return d.label;
   }
 }
 

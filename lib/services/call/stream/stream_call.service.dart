@@ -73,6 +73,13 @@ class StreamCallService implements ICallBackend {
 
   /// Tracks the cid we've issued `join()` for — guards against double-join.
   String? _joinedCid;
+  /// Safety net for the audio-ready gate below. We delay pinning
+  /// [_callConnectedAt] until a remote participant has audio enabled (i.e.
+  /// media is actually flowing — not just signaling). If the remote joins
+  /// muted, or our heuristic never matches for some reason, this timer fires
+  /// after 8s and pins the anchor anyway so the timer can't sit on
+  /// "Connecting…" forever.
+  Timer? _audioReadyFallbackTimer;
   /// Last name passed to the CallStyle notification. Lets us avoid spamming
   /// the native channel with a refresh on every state change unless the
   /// resolved name actually changed (e.g. SFU finally pushed participant
@@ -339,6 +346,24 @@ class StreamCallService implements ICallBackend {
     }
   }
 
+  /// Sets the per-call screen behavior mode on the native side. See
+  /// `MainActivity.setCallScreenMode` for the per-mode contract.
+  ///
+  /// Modes:
+  ///   - `'audio'`: proximity sensor turns the screen off near the ear;
+  ///     idle daemon NOT inhibited (screen still dims when ignored).
+  ///   - `'video'`: keeps the screen on for the duration of the call,
+  ///     same mechanism a video player uses; proximity disabled.
+  ///   - `'none'`: releases both. Call this on _ActiveCallView dispose.
+  Future<void> setCallScreenMode(String mode) async {
+    try {
+      await _lockScreenChannel.invokeMethod('setCallScreenMode', {'mode': mode});
+      debugPrint('[STREAM-CALL]   setCallScreenMode($mode)');
+    } catch (e) {
+      debugPrint('[STREAM-CALL]   setCallScreenMode($mode) failed: $e');
+    }
+  }
+
   /// Explicitly register the FCM token with Stream's coordinator. Stream's
   /// `pushNotificationManager.registerDevice()` only listens for
   /// `onTokenRefresh` on Android — which doesn't fire on a cold start when
@@ -481,6 +506,43 @@ class StreamCallService implements ICallBackend {
     // audio track, which the SFU treats as a track replacement and the
     // callee-side ends up Reconnecting → Disconnected within milliseconds
     // of connecting.
+
+    // Force the audio output to OUR default rather than whatever the
+    // Stream SDK picked from the call-type dashboard settings. The SDK's
+    // `_applyCallSettingsToConnectOptions` respects per-call-type
+    // `speakerDefaultOn` / `defaultDevice` flags, which were defaulting
+    // our audio calls to loudspeaker — bad UX (and not what users expect
+    // for a phone call). Policy here:
+    //   1. External device (BT / wired) — always wins when connected.
+    //   2. Otherwise: earpiece for audio calls, speaker for video calls.
+    // The user can still flip output via the in-call picker.
+    try {
+      final devicesRes = await RtcMediaDeviceNotifier.instance.audioOutputs();
+      final outputs = devicesRes.getDataOrNull() ?? const <RtcMediaDevice>[];
+      RtcMediaDevice? target;
+      for (final d in outputs) {
+        if (d.isExternal) { target = d; break; }
+      }
+      if (target == null) {
+        for (final d in outputs) {
+          if (isVideoCall ? d.isSpeaker : d.isEarpiece) {
+            target = d;
+            break;
+          }
+        }
+      }
+      if (target != null) {
+        debugPrint('[STREAM-CALL]   ensureJoined: routing audio output → '
+            'label="${target.label}" id=${target.id} '
+            'external=${target.isExternal} (video=$isVideoCall)');
+        await call.setAudioOutputDevice(target);
+      } else {
+        debugPrint('[STREAM-CALL]   ensureJoined: no audio output target '
+            'found among ${outputs.length} devices — leaving SDK default');
+      }
+    } catch (e, st) {
+      debugPrint('[STREAM-CALL]   ensureJoined: audio routing failed: $e\n$st');
+    }
   }
 
   /// Wire up the two streams we care about:
@@ -830,33 +892,84 @@ class StreamCallService implements ICallBackend {
       }
     }
 
-    // Pin the canonical "call started" timestamp the first time we see the
-    // call connected. The call screen reads from this so its on-screen
-    // counter is independent of any local Timer drift.
+    // Pin the canonical "call started" timestamp the first time remote
+    // audio is actually FLOWING — not just when WE joined the SFU.
+    // Stream's Joined/Connected status fires the moment our local signaling
+    // is up, but the remote party's media path (ICE/DTLS + subscription)
+    // lands ~4-5s later. Anchoring the on-screen timer + ongoing-call
+    // notification on the earlier signal made the call feel broken — the
+    // timer would tick over 4-5s of silence. We now wait for at least one
+    // remote participant with audio enabled, and fall back at 8s so a
+    // remote that joined muted doesn't strand us on "Connecting…" forever.
     if (refined == app_call.CallStatus.answered) {
-      final firstConnect = _callConnectedAt == null;
-      _callConnectedAt ??= DateTime.now();
-      // Post / refresh the CallStyle notification with the current best
-      // name. We re-fire on every state-change while answered so when the
-      // SFU finally surfaces participant.name (which lags behind the
-      // initial Connected status by 1-2 events) the notification picks
-      // up the real name instead of being stuck on the placeholder
-      // 'Unknown'. The native side caches by NOTIFICATION_ID so this is
-      // a cheap update — no flash, no reordering.
-      final notifName = mirror.userName.isNotEmpty &&
-              mirror.userName != 'Unknown'
-          ? mirror.userName
-          : (_callerHint?.userName ?? 'On call');
-      if (firstConnect || notifName != _lastShownNotifName) {
-        _lastShownNotifName = notifName;
-        debugPrint('[STREAM-CALL]   CallStyle show/refresh  name="$notifName"  '
-            'firstConnect=$firstConnect');
-        // ignore: unawaited_futures
-        StreamCallStyleNotifier.instance.show(
-          callId: state.callCid.value,
-          callerName: notifName,
-          connectedAt: _callConnectedAt!,
-        );
+      final remoteAudioReady = state.callParticipants
+          .any((p) => !p.isLocal && p.isAudioEnabled);
+
+      if (_callConnectedAt == null && !remoteAudioReady) {
+        if (_audioReadyFallbackTimer == null) {
+          debugPrint('[STREAM-CALL]   answered but no remote audio yet — '
+              'arming 8s audio-ready fallback');
+          _audioReadyFallbackTimer = Timer(const Duration(seconds: 8), () {
+            _audioReadyFallbackTimer = null;
+            if (_callConnectedAt != null) return;
+            if (_activeCall?.status != app_call.CallStatus.answered) return;
+            if (_streamCall == null) return;
+            debugPrint('[STREAM-CALL]   audio-ready fallback fired — '
+                'pinning anchor anyway (remote never reported audio enabled)');
+            // Pin BEFORE re-entering: otherwise the re-entry sees
+            // _callConnectedAt == null && !remoteAudioReady and would just
+            // re-arm a fresh 8s timer, looping. With the anchor pinned the
+            // re-entry takes the `else` branch and the CallStyle notif
+            // fires with the correct connectedAt.
+            //
+            // We deliberately do NOT run the connect-beep here (unlike the
+            // happy-path `firstConnect` block above). The beep is meant to
+            // signal "remote audio just went live"; if we ended up in the
+            // fallback we have no evidence that audio is actually flowing,
+            // so a beep would be misleading. The timer still starts so the
+            // UI stops sitting on "Connecting…", but we stay silent.
+            _callConnectedAt = DateTime.now();
+            _onCallStateChanged(_streamCall!.state.value);
+          });
+        }
+      } else {
+        final firstConnect = _callConnectedAt == null;
+        if (firstConnect) {
+          _callConnectedAt = DateTime.now();
+          _audioReadyFallbackTimer?.cancel();
+          _audioReadyFallbackTimer = null;
+          debugPrint('[STREAM-CALL]   _callConnectedAt pinned  '
+              'remoteAudioReady=$remoteAudioReady  '
+              'participants=${state.callParticipants.length}');
+          // Connect beep — fires once, exactly when remote audio actually
+          // starts flowing (matches the on-screen timer start). Routes
+          // through the in-call audio path so the user hears it on the
+          // same output the call itself is using.
+          // ignore: unawaited_futures
+          StreamCallRingtones.instance.playConnectBeep();
+        }
+        // Post / refresh the CallStyle notification with the current best
+        // name. We re-fire on every state-change while answered so when the
+        // SFU finally surfaces participant.name (which lags behind the
+        // initial Connected status by 1-2 events) the notification picks
+        // up the real name instead of being stuck on the placeholder
+        // 'Unknown'. The native side caches by NOTIFICATION_ID so this is
+        // a cheap update — no flash, no reordering.
+        final notifName = mirror.userName.isNotEmpty &&
+                mirror.userName != 'Unknown'
+            ? mirror.userName
+            : (_callerHint?.userName ?? 'On call');
+        if (firstConnect || notifName != _lastShownNotifName) {
+          _lastShownNotifName = notifName;
+          debugPrint('[STREAM-CALL]   CallStyle show/refresh  name="$notifName"  '
+              'firstConnect=$firstConnect');
+          // ignore: unawaited_futures
+          StreamCallStyleNotifier.instance.show(
+            callId: state.callCid.value,
+            callerName: notifName,
+            connectedAt: _callConnectedAt!,
+          );
+        }
       }
     }
 
@@ -868,6 +981,10 @@ class StreamCallService implements ICallBackend {
       // Keep the mirror around for 2s so the pill/screen can show "Call
       // ended" / "Call declined" gracefully, then wipe everything.
       debugPrint('[STREAM-CALL]   terminal status $refined — lingering 2s');
+
+      // (Disconnect beep is fired from `_clearMirror` so user-initiated
+      // hangups — which call _clearMirror() directly without ever reaching
+      // this block — get the beep too. See the comment there.)
 
       // Finalise the call-history row in local SQLite. Pass the disconnect
       // reason through verbatim so the logs screen can render "declined" /
@@ -926,8 +1043,25 @@ class StreamCallService implements ICallBackend {
 
   void _clearMirror() {
     debugPrint('[STREAM-CALL] _clearMirror() — wiping active call mirror');
+    // Disconnect beep — fires here (rather than at the terminal status
+    // event in _onCallStateChanged) because user-initiated paths
+    // (endCall / declineCall) call _clearMirror() DIRECTLY after
+    // call.leave() / call.reject(), which would null `_callConnectedAt`
+    // before the SDK's terminal event reached _onCallStateChanged — so
+    // the beep would never fire for normal hangups. Centralising it
+    // here means every termination path produces exactly one beep
+    // (the first _clearMirror invocation nulls `_callConnectedAt`, so
+    // any subsequent re-entry from the SDK's terminal event no-ops).
+    // The `_callConnectedAt != null` gate still skips calls that ended
+    // during ringing (no audio path to play through anyway).
+    if (_callConnectedAt != null) {
+      // ignore: unawaited_futures
+      StreamCallRingtones.instance.playDisconnectBeep();
+    }
     _terminalLingerTimer?.cancel();
     _terminalLingerTimer = null;
+    _audioReadyFallbackTimer?.cancel();
+    _audioReadyFallbackTimer = null;
     _activeCall = null;
     _streamCall = null;
     _callerHint = null;

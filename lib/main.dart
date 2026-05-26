@@ -293,14 +293,19 @@ class _MyAppState extends material.State<MyApp>
         StatusAckService.instance.flushNow();
 
         // App is going to background or being closed
-        // Only keep wakelock if there's an active call in progress
-        if (!isInCall) {
+        // Only keep wakelock if there's an active call in progress.
+        // Skipped entirely for the Stream backend, which owns screen
+        // state via native `setCallScreenMode` (proximity for audio
+        // calls, KEEP_SCREEN_ON for video). wakelock_plus would just
+        // pin FLAG_KEEP_SCREEN_ON and defeat the proximity-off
+        // behavior during an audio call.
+        if (!isInCall && !Environment.isStreamCallBackend) {
           // No active call - disable wakelock to allow screen to lock
           WakelockPlus.disable();
           debugPrint(
             '[APP_LIFECYCLE] App going to background - disabled wakelock (no active call)',
           );
-        } else {
+        } else if (isInCall) {
           debugPrint(
             '[APP_LIFECYCLE] App going to background - keeping wakelock (active call in progress)',
           );
@@ -308,11 +313,14 @@ class _MyAppState extends material.State<MyApp>
         break;
 
       case material.AppLifecycleState.resumed:
-        // Re-enable wakelock if there's an active call
-        if (isInCall) {
-          WakelockPlus.enable();
-        } else {
-          WakelockPlus.disable();
+        // Re-enable wakelock if there's an active call. Stream backend
+        // skipped — see the inactive/detached branch above.
+        if (!Environment.isStreamCallBackend) {
+          if (isInCall) {
+            WakelockPlus.enable();
+          } else {
+            WakelockPlus.disable();
+          }
         }
         // Re-run the version gate check on resume so a freshly-released
         // mandatory update gates users without requiring a cold start.
@@ -330,8 +338,9 @@ class _MyAppState extends material.State<MyApp>
         break;
 
       case material.AppLifecycleState.hidden:
-        // App is hidden (Android 12+)
-        if (!isInCall) {
+        // App is hidden (Android 12+). Stream backend owns screen state,
+        // skip; see the inactive/detached branch above.
+        if (!isInCall && !Environment.isStreamCallBackend) {
           WakelockPlus.disable();
           debugPrint(
             '[APP_LIFECYCLE] App hidden - disabled wakelock (no active call)',
@@ -671,8 +680,12 @@ class _MyAppState extends material.State<MyApp>
   void dispose() {
     // Remove lifecycle observer
     material.WidgetsBinding.instance.removeObserver(this);
-    // Ensure wakelock is disabled when app is disposed
-    WakelockPlus.disable();
+    // Ensure wakelock is disabled when app is disposed. Stream backend
+    // never enabled wakelock_plus in the first place, so the disable
+    // call would be a no-op — skip for cleanliness.
+    if (!Environment.isStreamCallBackend) {
+      WakelockPlus.disable();
+    }
     _intentDataStreamSubscription?.cancel();
     _transportManager.dispose();
     WebSocketMessageHandler().dispose();

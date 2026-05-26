@@ -43,6 +43,32 @@ class StreamCallRingtones {
   /// Stop both incoming and outgoing tones. Always safe to call.
   Future<void> stopAll() => _setMode(_RingMode.none);
 
+  /// Plays the connect beep — fires once when remote audio actually starts
+  /// flowing (i.e. when [StreamCallService.callConnectedAt] is first
+  /// pinned). Transient, self-releasing one-shot — routes through the
+  /// in-call audio path on Android (USAGE_VOICE_COMMUNICATION_SIGNALLING)
+  /// and does NOT serialise onto the `_setMode` chain because it must
+  /// coexist with any outgoing-tone tail-out without blocking transitions.
+  Future<void> playConnectBeep() =>
+      _playOneShot('assets/sounds/call_connected_beep.mp3');
+
+  /// Plays the disconnect beep — fires once at the terminal transition,
+  /// but only for calls that actually connected (see the call site in
+  /// `StreamCallService._onCallStateChanged`). Same audio routing as
+  /// [playConnectBeep].
+  Future<void> playDisconnectBeep() =>
+      _playOneShot('assets/sounds/call_disconnected_beep.mp3');
+
+  Future<void> _playOneShot(String asset) async {
+    // Fire-and-forget; failures (e.g. iOS, where no handler is registered)
+    // are swallowed so the call flow can't be derailed by a missing beep.
+    try {
+      await _channel.invokeMethod('playOneShot', {'asset': asset});
+    } catch (e) {
+      debugPrint('[STREAM-RING] playOneShot($asset) failed: $e');
+    }
+  }
+
   Future<void> _setMode(_RingMode target) {
     // Chain onto the prior in-flight transition so the channel calls
     // execute in the order they were requested. Without this, two
