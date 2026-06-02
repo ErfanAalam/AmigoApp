@@ -105,7 +105,6 @@ class _CallEndedOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = _label(reason);
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -144,14 +143,21 @@ class _CallEndedOverlay extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  label,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.78),
-                    fontSize: 15,
-                    fontWeight: FontWeight.w500,
-                    letterSpacing: 0.4,
+                // The timeout flag can flip a beat after this overlay first
+                // paints (the Stream `Rejected` event can beat our WS
+                // `timeout` signal to the peer), so listen reactively and
+                // prefer "Call timeout" whenever the watchdog ended the call.
+                ValueListenableBuilder<bool>(
+                  valueListenable: StreamCallService().endedByTimeout,
+                  builder: (context, timedOut, _) => Text(
+                    timedOut ? 'Call timeout' : _label(reason),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.78),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 0.4,
+                    ),
                   ),
                 ),
               ],
@@ -284,6 +290,12 @@ class _StreamCallScreenState extends State<StreamCallScreen> {
   void _maybeJoinAsOutgoing(CallState s) {
     if (_outgoingJoined) return;
     final status = s.status;
+    // Don't even consider joining a terminal call. Same reasoning as the
+    // initState guard: prevents a getUserMedia()-induced mic leak when the
+    // disconnect race ends up here.
+    if (status is CallStatusDisconnected || status is CallStatusReconnectionFailed) {
+      return;
+    }
     final shouldJoin =
         // Caller path: only join after the callee has actually accepted.
         (status is CallStatusOutgoing && status.acceptedByCallee) ||
@@ -764,9 +776,9 @@ class _IncomingActionRow extends StatelessWidget {
           onTap: () async {
             debugPrint('[STREAM-UI] 🔘 in-app DECLINE tapped  '
                 'cid=${call.callCid.value}  status=${call.state.value.status.runtimeType}');
-            final res = await call.reject();
-            debugPrint('[STREAM-UI]   reject() → success=${res.isSuccess}  '
-                'postStatus=${call.state.value.status.runtimeType}');
+            // Route through the service so we get the Amigo `call:terminate`
+            // WS dispatch alongside Stream's `reject()`.
+            await StreamCallService().declineCall(reason: 'user_declined');
             if (context.mounted) Navigator.of(context).maybePop();
           },
         ),
@@ -804,8 +816,12 @@ class _OutgoingActionRow extends StatelessWidget {
         onTap: () async {
           debugPrint('[STREAM-UI] 🔘 outgoing CANCEL tapped  '
               'cid=${call.callCid.value}  status=${call.state.value.status.runtimeType}');
-          final res = await call.leave();
-          debugPrint('[STREAM-UI]   leave() → success=${res.isSuccess}');
+          // Route through the service so we (a) dispatch Amigo's
+          // `call:terminate` WS event and (b) use `call.end()` instead of
+          // `call.leave()` — without `end()`, the callee's Stream client
+          // keeps ringing until timeout because `leave()` only exits our
+          // own session.
+          await StreamCallService().endCall(reason: 'caller_cancelled');
           if (context.mounted) Navigator.of(context).maybePop();
         },
       ),
@@ -941,10 +957,22 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
     // Belt-and-braces: if we're already past the ringing phase but the call
     // was never joined (e.g. we got here via consumeAndAcceptActiveCall on
     // cold-start, which only calls accept()), fire the join now.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      // ignore: unawaited_futures
-      StreamCallService().ensureJoined(widget.call);
-    });
+    //
+    // Skip when the call is already terminal — the screen lingers for 2s
+    // after a cancel/reject before popping, and during that window the
+    // build/state cycle would otherwise drive a fresh join() into a dead
+    // call, capturing the mic via getUserMedia and never releasing it.
+    // `ensureJoined` has its own guard for this, but bailing here avoids
+    // the wasted SDK round-trip entirely.
+    final status = widget.call.state.value.status;
+    if (status is CallStatusDisconnected || status is CallStatusReconnectionFailed) {
+      debugPrint('[STREAM-CALL]   screen init: $status — skip ensureJoined');
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        // ignore: unawaited_futures
+        StreamCallService().ensureJoined(widget.call);
+      });
+    }
   }
 
   @override

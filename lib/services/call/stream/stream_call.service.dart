@@ -13,9 +13,12 @@ import 'package:uuid/uuid.dart';
 import '../../../env.dart';
 import '../../../models/call.model.dart' as app_call;
 import '../../../models/user.model.dart' as app_user;
+import '../../../types/socket.types.dart';
 import '../../../utils/navigation-helper.util.dart';
 import '../../../utils/user.utils.dart';
 import '../../cookies.service.dart';
+import '../../socket/transport.manager.dart';
+import '../../socket/ws-message.handler.dart';
 import '../i_call_backend.dart';
 import 'stream_call_logger.dart';
 import 'stream_call_push_config.dart';
@@ -50,6 +53,10 @@ class StreamCallService implements ICallBackend {
 
   final CookieService _cookieService = CookieService();
   final Dio _dio = Dio();
+  // Singleton handle on Amigo's authenticated WS. Used to fire `call:terminate`
+  // alongside the Stream-side end/leave/reject so the backend can update its
+  // call_history row and reach the other party via FCM if they're offline.
+  final TransportManager _transportManager = TransportManager();
 
   StreamVideo? _client;
   app_user.UserModel? _currentUser;
@@ -80,6 +87,25 @@ class StreamCallService implements ICallBackend {
   /// after 8s and pins the anchor anyway so the timer can't sit on
   /// "Connecting…" forever.
   Timer? _audioReadyFallbackTimer;
+  /// Hard cap on how long a call may ring before we force-terminate it.
+  /// Stream's built-in outgoing auto-cancel only arms inside the join flow,
+  /// but this app defers `join()` until the callee accepts (fast-join on the
+  /// accept event), so the SDK timer never runs during the ring phase and the
+  /// caller would otherwise ring ("turr turr") indefinitely. This client
+  /// watchdog backstops BOTH ends — the caller (outgoing ring) and the callee
+  /// (incoming ring) — and terminates the call with reason "timeout" at 30s.
+  static const Duration _ringTimeout = Duration(seconds: 30);
+  Timer? _ringWatchdogTimer;
+
+  /// True for the current/just-ended call when it was torn down by the ring
+  /// watchdog (or a peer's `timeout` terminate) rather than an active decline
+  /// or hang-up. Drives the "Call timeout" overlay copy on BOTH ends. A
+  /// `ValueNotifier` (not a plain bool) so the disconnect overlay can flip its
+  /// label reactively if the WS `timeout` signal lands a beat after the Stream
+  /// `Rejected` event that first paints the overlay. Reset when a new call
+  /// begins, NOT in `_clearMirror` — the overlay reads it during its 2s linger
+  /// after the mirror is already gone.
+  final ValueNotifier<bool> endedByTimeout = ValueNotifier<bool>(false);
   /// Last name passed to the CallStyle notification. Lets us avoid spamming
   /// the native channel with a refresh on every state change unless the
   /// resolved name actually changed (e.g. SFU finally pushed participant
@@ -103,6 +129,15 @@ class StreamCallService implements ICallBackend {
   // self-reject, …). Re-bound in `_attachCallEventLogging` whenever the
   // active call changes.
   StreamSubscription? _callEventsSub;
+  // Subscription to Amigo's own WS `call:terminate` stream. We listen here
+  // (in addition to the in-house `CallService`) because the legacy listener
+  // gates on its own `_activeCall` field, which is always null while
+  // StreamCallService owns the call — so it silently drops every Stream
+  // termination broadcast. Without this subscription the callee keeps
+  // ringing whenever Stream's coordinator-side cancel doesn't reach the
+  // device's Stream SDK in time (e.g. WS not yet connected, app cold-
+  // started via FCM, push-but-no-WS race).
+  StreamSubscription<CallPayload>? _amigoTerminateSub;
 
   bool _isInitialized = false;
   bool _isTerminating = false;
@@ -233,6 +268,7 @@ class StreamCallService implements ICallBackend {
       debugPrint('[STREAM-CALL]   pushNotificationManager=${_client!.pushNotificationManager == null ? "NULL" : "ok"}');
 
       _bindStateSubscriptions();
+      _bindAmigoTerminateSubscription();
       debugPrint('[STREAM-CALL]   subscriptions wired');
 
       // Wire ONLY the app-swipe-from-recents handler — we deliberately skip
@@ -421,11 +457,18 @@ class StreamCallService implements ICallBackend {
         debugPrint('[STREAM-CALL] onPlatformUiLayerDestroyed — '
             'app removed from recents, ending call ${call.callCid.value}');
         try {
-          // For the call creator, `end()` terminates the call for everyone.
-          // For a regular participant, `leave()` is the right action; calling
-          // `end()` returns a permission-denied result which we silently
-          // swallow and fall through to leave().
-          if (call.state.value.createdByMe) {
+          // Match `endCall`'s dispatch: `reject(cancel|decline)` during the
+          // ringing phase (end() is a no-op pre-join); `end()` for the
+          // creator of a live call; `leave()` everywhere else.
+          final status = call.state.value.status;
+          final createdByMe = call.state.value.createdByMe;
+          if (status is CallStatusOutgoing || status is CallStatusIncoming) {
+            await call.reject(
+              reason: createdByMe
+                  ? CallRejectReason.cancel()
+                  : CallRejectReason.decline(),
+            );
+          } else if (createdByMe && status.isAlreadyJoined) {
             await call.end();
           } else {
             await call.leave();
@@ -474,6 +517,24 @@ class StreamCallService implements ICallBackend {
           '(${status.runtimeType}) — flag synced');
       return;
     }
+    // Hard guard against joining a terminal call. Without this, the screen's
+    // 2-second-linger rebuild after a reject(cancel) calls ensureJoined,
+    // which then calls `call.join()` → `getUserMedia(audio)` → mic captured
+    // → 3 failed attempts (the call is dead at Stream's side) → the
+    // captured MediaStream is never disposed because the SDK's join path
+    // owned it and never reached the cleanup branch. Net result: mic
+    // remains held by our process even after the call screen pops, which
+    // is the "I can't play music until I close Amigo" symptom.
+    //
+    // `CallStatusDisconnected` covers Rejected / Cancelled / Ended /
+    // Failure / Replaced / Timeout — none of which should ever trigger
+    // a join. `CallStatusReconnectionFailed` is also terminal.
+    if (status is CallStatusDisconnected || status is CallStatusReconnectionFailed) {
+      debugPrint('[STREAM-CALL]   ensureJoined: $cid is terminal '
+          '(${status.runtimeType}) — refusing to join');
+      _joinedCid = null;
+      return;
+    }
     // Pick the right connect-options based on whether the call was placed
     // as a video call. We read `amigo_video_call` from the call's custom
     // data — stamped by the caller's `initiateCall` (see above). We do
@@ -498,6 +559,21 @@ class StreamCallService implements ICallBackend {
     );
     if (res.isFailure) {
       _joinedCid = null;
+      // `call.join()` may have partially set up the SFU session — including
+      // calling `getUserMedia`, which captures the device mic. The SDK
+      // generally tears that down on its own failure path, but the
+      // "failed to join after 3 attempts" code path observed in the wild
+      // can leave the MediaStream/audio track owned by our process if the
+      // call transitioned to Disconnected mid-attempt. Force a `leave()`
+      // here to drive the SDK through its session-dispose path — it's
+      // a no-op if the SDK already cleaned up, and releases the mic if
+      // it didn't.
+      try {
+        await call.leave();
+      } catch (e) {
+        debugPrint('[STREAM-CALL]   ensureJoined: post-failure leave() '
+            'threw: $e');
+      }
       return;
     }
     // Do NOT call setMicrophoneEnabled/setCameraEnabled here. `audioOnlyConnect`
@@ -590,8 +666,41 @@ class StreamCallService implements ICallBackend {
     _incomingCallSub = client.state.incomingCall.listen((Call? call) {
       debugPrint('[STREAM-CALL] ★ state.incomingCall fired  call=${call?.callCid.value}');
       if (call == null) return;
+
+      // Busy-on-another safety net (paired with the backend precheck gate).
+      // The webhook-driven busy registry on the server *should* block this
+      // call from ever being placed, but webhook-vs-coordinator races can
+      // still let a second ring slip through (backend hasn't processed the
+      // first `call.ring` yet when a third party dials us). Auto-reject
+      // with `busy()` so the caller hears the busy tone immediately rather
+      // than a 30-second ring-no-answer.
+      final existing = _streamCall;
+      final newCid = call.callCid.value;
+      if (existing != null && existing.callCid.value != newCid) {
+        final existingStatus = existing.state.value.status;
+        // Don't auto-reject if the prior call is already terminal — the
+        // 2-second linger keeps `_streamCall` around for the disconnect
+        // animation, and during that window a brand-new incoming call is
+        // legitimate.
+        final isTerminal = existingStatus is CallStatusDisconnected
+            || existingStatus is CallStatusReconnectionFailed;
+        if (!isTerminal) {
+          debugPrint('[STREAM-CALL] 🚧 busy: incoming $newCid arrived while '
+              '${existing.callCid.value} is ${existingStatus.runtimeType} — '
+              'auto-rejecting with CallRejectReason.busy()');
+          // ignore: unawaited_futures
+          call.reject(reason: CallRejectReason.busy());
+          return;
+        }
+        debugPrint('[STREAM-CALL]   incoming $newCid arrived during terminal '
+            'linger of ${existing.callCid.value} (${existingStatus.runtimeType}) — '
+            'allowing through');
+      }
+
       _streamCall = call;
       _callerHint ??= _hintFromCall(call);
+      // Fresh incoming call — clear any leftover timeout flag.
+      endedByTimeout.value = false;
       _attachCallEventLogging(call);
       // Subscribe to the call's state stream directly — Stream only flips
       // `state.activeCall` after we accept+join, so without this hook
@@ -605,6 +714,11 @@ class StreamCallService implements ICallBackend {
       // FCM-driven flutter_callkit_incoming notification plays the ringtone,
       // and letting the in-app driver also play results in two ringtones.
       _maybePlayIncomingRingtone('incomingCall');
+      // Cap the incoming ring at 30s — see [_ringTimeout]. Backstops the
+      // SDK's own auto-reject (which only arms on the CallKit/push path, not
+      // this foreground `state.incomingCall` route) so the callee never rings
+      // forever when the caller's cancel doesn't reach this device.
+      _startRingWatchdog(call, outgoing: false);
       _maybePushCallScreen(call);
     });
 
@@ -625,53 +739,65 @@ class StreamCallService implements ICallBackend {
       },
     );
 
-    // Decline-from-notification handler. The package's own subscriber
-    // ignores ActionCallDecline (it only cancels its event subscriptions),
-    // so without this the caller keeps ringing until call_timeout fires.
+    // Diagnostic-only listener on `pushManager.onCallEvent`. The actual
+    // decline → reject path lives inside the SDK: `observeCoreRingingEvents`
+    // above already bundles `observeCallDeclinedRingingEvent`, which runs
+    // `_onCallDecline` → `consumeIncomingCall(uuid, cid)` → `call.reject(
+    // reason: CallRejectReason.decline())` — the canonical primitive Stream's
+    // coordinator uses to fan out the rejection to the caller.
+    //
+    // An earlier iteration of this code ran its own listener that called
+    // `client.makeCall(type, id).reject()` on a freshly-made stateless Call.
+    // That raced the SDK's own handler: by the time we tried to reject, the
+    // broadcast receiver's `removeCall` had already nudged the cached entry,
+    // so `consumeIncomingCall` on the SDK side returned null and the SDK's
+    // reject got skipped — yet our stateless `reject()` also silently fizzled
+    // because the Call had no loaded state. End result: decline-from-
+    // notification did nothing, the caller stayed in ringing limbo.
+    //
+    // Killed/cold state is covered by the Kotlin-side AmigoColdDeclineBridge
+    // (vendor/stream_video_push_notification/.../AmigoColdDeclineBridge.kt),
+    // which HTTP-POSTs the cid + cached user_id to `/call/stream/decline-cold`
+    // — that endpoint then re-signs a one-shot JWT and calls Stream's reject
+    // API server-side. So the Dart side only needs to handle warm-path here.
     final pushManager = client.pushNotificationManager;
     if (pushManager != null) {
-      debugPrint('[STREAM-CALL]   wiring ActionCallDecline listener on '
-          'pushManager.onCallEvent…');
+      debugPrint('[STREAM-CALL]   attaching diagnostic onCallEvent tap '
+          '(reject path is owned by observeCoreRingingEvents)');
       _ringingEventsSub?.cancel();
-      _ringingEventsSub = pushManager.onCallEvent.listen((event) async {
-        // Trace EVERY event so it's obvious from logs whether the listener is
-        // firing at all when the user reports decline-from-notification not
-        // notifying the caller.
-        debugPrint('[STREAM-CALL] ⮕ pushManager.onCallEvent: '
-            '${event.runtimeType}');
-        if (event is! ActionCallDecline) return;
-        final cid = event.data.callCid;
-        debugPrint('[STREAM-CALL] ★ ActionCallDecline received cid=$cid');
-        if (cid == null || !cid.contains(':')) {
-          debugPrint('[STREAM-CALL]   ✗ cid missing/invalid — cannot reject');
-          return;
+      _ringingEventsSub = pushManager.onCallEvent.listen((event) {
+        // `RingingEvent` is the union supertype — the per-action subclasses
+        // (ActionCallAccept/Decline/Ended/…) carry the `data.callCid`. We
+        // log the runtime type unconditionally to verify the broadcast
+        // pipeline is alive; cid logging is best-effort.
+        String? cid;
+        if (event is ActionCallDecline) {
+          cid = event.data.callCid;
+        } else if (event is ActionCallAccept) {
+          cid = event.data.callCid;
+        } else if (event is ActionCallEnded) {
+          cid = event.data.callCid;
+        } else if (event is ActionCallIncoming) {
+          cid = event.data.callCid;
+        } else if (event is ActionCallCallback) {
+          cid = event.data.callCid;
         }
-        final colon = cid.indexOf(':');
-        final type = StreamCallType.fromString(cid.substring(0, colon));
-        final id = cid.substring(colon + 1);
-        debugPrint('[STREAM-CALL]   parsed cid → type=${type.value} id=$id');
-        try {
-          final call = client.makeCall(callType: type, id: id);
-          debugPrint('[STREAM-CALL]   calling call.reject()…');
-          final res = await call.reject();
-          debugPrint('[STREAM-CALL]   reject() returned success=${res.isSuccess}'
-              '${res.isSuccess ? "" : " err=${res.toString()}"}');
-          // Belt-and-braces: drop the lock-screen launcher notification too.
-          // Stream's call.ended/missed FCM normally clears it, but on a clean
-          // local decline we don't want to wait for that round-trip.
-          try {
-            await pushManager.endCallByCid(cid);
-            debugPrint('[STREAM-CALL]   endCallByCid($cid) ok');
-          } catch (e) {
-            debugPrint('[STREAM-CALL]   endCallByCid threw: $e');
-          }
-        } catch (e, st) {
-          debugPrint('[STREAM-CALL] ✗ reject from notification failed: $e\n$st');
+        debugPrint('[STREAM-CALL] ⮕ pushManager.onCallEvent: '
+            '${event.runtimeType}${cid != null ? "  cid=$cid" : ""}');
+
+        // Tap-to-callback from a missed-call notification. The SDK delivers
+        // this when the user taps the "Call back" button (or the body, when
+        // wired via getCallbackPendingIntent). The original caller's id is
+        // in `data.handle` because `handleStreamVideoBackgroundPush` set
+        // `handle: createdById` when posting `showMissedCall`.
+        if (event is ActionCallCallback) {
+          // ignore: unawaited_futures
+          _handleMissedCallCallback(event);
         }
       });
     } else {
       debugPrint('[STREAM-CALL]   ⚠ pushManager is null — '
-          'ActionCallDecline cannot be wired');
+          'SDK ringing-event observers cannot fire');
     }
 
     // Visibility into the coordinator WS. If we never see `connected` here,
@@ -772,6 +898,9 @@ class StreamCallService implements ICallBackend {
       // ignore: unawaited_futures
       StreamCallRingtones.instance.playOutgoing();
     } else {
+      // Left the ring phase (answered/joined or terminal) — the 30s ring cap
+      // no longer applies.
+      _cancelRingWatchdog();
       // ignore: unawaited_futures
       StreamCallRingtones.instance.stopAll();
     }
@@ -797,6 +926,20 @@ class StreamCallService implements ICallBackend {
         refined = app_call.CallStatus.missed;
       } else {
         refined = app_call.CallStatus.ended;
+      }
+      // Caller-side busy tone for the Stream-coordinator-driven reject path.
+      // When the callee's auto-reject (busy-on-another safety net above)
+      // fires, Stream propagates `CallRejectedEvent{reason: busy}` to us as
+      // `DisconnectReasonRejected` carrying the reason string. Playing the
+      // tone here covers the case where the backend precheck didn't catch
+      // the busy state (e.g. the webhook for the callee's first ring
+      // hadn't landed when the precheck ran), so the caller still gets the
+      // expected audible cue.
+      if (reasonStr.contains('busy')
+          && _activeCall?.callType == app_call.CallType.outgoing) {
+        debugPrint('[STREAM-CALL]   caller-side busy reject — playing busy tone');
+        // ignore: unawaited_futures
+        StreamCallRingtones.instance.playBusy();
       }
     }
 
@@ -1062,6 +1205,7 @@ class StreamCallService implements ICallBackend {
     _terminalLingerTimer = null;
     _audioReadyFallbackTimer?.cancel();
     _audioReadyFallbackTimer = null;
+    _cancelRingWatchdog();
     _activeCall = null;
     _streamCall = null;
     _callerHint = null;
@@ -1126,6 +1270,8 @@ class StreamCallService implements ICallBackend {
   }) async {
     debugPrint('[STREAM-CALL] ▶ initiateCall(calleeId=$calleeId, '
         'name=$calleeName, video=$video)');
+    // Fresh call — clear any leftover timeout flag from the previous one.
+    endedByTimeout.value = false;
 
     if (!_isInitialized) {
       debugPrint('[STREAM-CALL]   not initialised yet — calling initialize() first');
@@ -1150,8 +1296,18 @@ class StreamCallService implements ICallBackend {
       );
       debugPrint('[STREAM-CALL]   precheck → ${res.statusCode}');
     } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      final code = e.response?.data?['code']?.toString();
       final msg = e.response?.data?['message']?.toString() ?? 'Cannot place call';
-      debugPrint('[STREAM-CALL] ✗ precheck failed: ${e.response?.statusCode} $msg');
+      debugPrint('[STREAM-CALL] ✗ precheck failed: $statusCode code=$code msg=$msg');
+      // Busy responses (callee on another call OR caller already engaged):
+      // play the telephony busy tone so the user gets the audible cue they
+      // expect from a phone, then surface the error to the UI which renders
+      // a snackbar. The tone is fire-and-forget — we don't block on it.
+      if (statusCode == 409 && (code == 'busy' || code == 'self_busy')) {
+        // ignore: unawaited_futures
+        StreamCallRingtones.instance.playBusy();
+      }
       throw StateError(msg);
     }
 
@@ -1236,6 +1392,10 @@ class StreamCallService implements ICallBackend {
         _callStateSub = call.state.listen(_onCallStateChanged);
         // ignore: unawaited_futures
         StreamCallRingtones.instance.playOutgoing();
+        // Cap the outgoing ring at 30s — see [_ringTimeout]. The caller has
+        // no SDK auto-cancel during the ring phase (join is deferred until
+        // accept), so without this the ringback never stops on no-answer.
+        _startRingWatchdog(call, outgoing: true);
         _maybePushCallScreen(call);
       },
       failure: (failure) {
@@ -1272,6 +1432,8 @@ class StreamCallService implements ICallBackend {
     // ringtone kept playing after I picked up".
     // ignore: unawaited_futures
     StreamCallRingtones.instance.stopAll();
+    // User answered — kill the 30s ring cap before it can fire.
+    _cancelRingWatchdog();
 
     final accept = await call.accept();
     final dt = DateTime.now().difference(t0).inMilliseconds;
@@ -1295,6 +1457,227 @@ class StreamCallService implements ICallBackend {
     );
   }
 
+  /// Subscribe to Amigo's WS `call:terminate` broadcasts and tear down our
+  /// Stream call when one arrives that matches our active or incoming call.
+  ///
+  /// This is belt-and-braces alongside Stream's coordinator-driven cancel
+  /// (which the caller triggers via `call.reject(CallRejectReason.cancel())`
+  /// in `endCall`). The Amigo broadcast reaches us reliably the moment the
+  /// caller's WS send completes; Stream's CallRejectedEvent depends on the
+  /// callee being WS-connected to Stream's coordinator at that exact moment,
+  /// which isn't always true on the callee side (FCM cold-start race, brief
+  /// WS reconnects, etc.). Having both paths means whichever one wins
+  /// stops the ring.
+  void _bindAmigoTerminateSubscription() {
+    _amigoTerminateSub?.cancel();
+    _amigoTerminateSub =
+        WebSocketMessageHandler().callTerminateStream.listen(_handleAmigoTerminate);
+  }
+
+  Future<void> _handleAmigoTerminate(CallPayload payload) async {
+    final incomingCid = payload.callId;
+    final call = _streamCall
+        ?? _client?.state.activeCall.valueOrNull
+        ?? _client?.state.incomingCall.valueOrNull;
+    if (call == null) {
+      debugPrint('[STREAM-CALL] ↘ Amigo call:terminate ignored '
+          '(no Stream call mounted)  payloadCid=$incomingCid');
+      return;
+    }
+    final ourCid = call.callCid.value;
+    if (incomingCid != null && incomingCid.isNotEmpty && incomingCid != ourCid) {
+      debugPrint('[STREAM-CALL] ↘ Amigo call:terminate ignored — cid mismatch  '
+          'ours=$ourCid  payload=$incomingCid');
+      return;
+    }
+    // Don't bounce our own outbound terminate back through this handler:
+    // when we cancel locally we already drove `call.reject/end/leave`.
+    // `_isTerminating` is set by endCall(); for declineCall there's no
+    // equivalent guard but the SDK's idempotent reject() handles re-entry.
+    final terminatedBy = (payload.data is Map)
+        ? (payload.data as Map)['terminated_by']?.toString()
+        : null;
+    if (terminatedBy != null && terminatedBy == _currentUser?.id) {
+      debugPrint('[STREAM-CALL] ↘ Amigo call:terminate is our own echo — skip  '
+          'cid=$ourCid');
+      return;
+    }
+    final reason = (payload.data is Map)
+        ? (payload.data as Map)['reason']?.toString()
+        : null;
+    debugPrint('[STREAM-CALL] ↙ Amigo call:terminate accepted  cid=$ourCid  '
+        'terminatedBy=$terminatedBy  reason=$reason  '
+        'status=${call.state.value.status.runtimeType}');
+    // Peer timed out (their watchdog fired and broadcast `timeout`). Flag it
+    // so this device's disconnect overlay shows "Call timeout" instead of the
+    // generic "Call declined" the Stream `Rejected` event would otherwise map
+    // to. The overlay listens reactively, so flipping this even slightly after
+    // the Stream event paints still updates the copy within the 2s linger.
+    if (reason == 'timeout') endedByTimeout.value = true;
+    // ignore: unawaited_futures
+    StreamCallRingtones.instance.stopAll();
+    try {
+      final status = call.state.value.status;
+      // `CallRejectReason.callEnded` is the SDK's own "ended externally"
+      // reason (see call_reject_reason.dart). For pre-join states reject()
+      // is the right teardown; for joined calls leave() exits our session.
+      if (status is CallStatusOutgoing || status is CallStatusIncoming) {
+        await call.reject(reason: CallRejectReason.callEnded());
+      } else {
+        await call.leave();
+      }
+    } catch (e) {
+      debugPrint('[STREAM-CALL]   teardown threw on Amigo terminate: $e — '
+          'falling back to leave()');
+      try {
+        await call.leave();
+      } catch (_) {}
+    }
+    _clearMirror();
+  }
+
+  /// Handles a tap on the "Call back" action of a missed-call notification.
+  ///
+  /// Re-initiates an outgoing call to the original caller using the same
+  /// `initiateCall` path the in-app call button uses, so all the usual
+  /// guards (precheck, busy detection, screen push, ringtone start) apply.
+  ///
+  /// Limitations:
+  ///  - Warm-only. If the user taps "Call back" while the app is killed,
+  ///    the SDK plugin spawns a background isolate which has no main
+  ///    Riverpod state and can't drive the call screen. A cold-state
+  ///    fallback would need an analogous bridge to `AmigoColdDeclineBridge`
+  ///    (launch the activity with a deeplink, init the engine, then call
+  ///    initiateCall). Not in scope for this pass.
+  ///  - We don't have the caller's avatar in the event payload, so the
+  ///    outgoing-call screen shows the name only until Stream's
+  ///    coordinator pushes participant metadata.
+  Future<void> _handleMissedCallCallback(ActionCallCallback event) async {
+    final callerId = event.data.handle;
+    final callerName = event.data.callerName ?? 'Unknown';
+    debugPrint('[STREAM-CALL] ★ ActionCallCallback  callerId=$callerId  '
+        'callerName=$callerName  cid=${event.data.callCid}');
+    if (callerId == null || callerId.isEmpty) {
+      debugPrint('[STREAM-CALL]   callback bailing — no caller id in event data');
+      return;
+    }
+    // hasVideo round-trips through CallData; we honour it so a video call
+    // is returned with video on, audio with audio.
+    final isVideo = event.data.hasVideo == true;
+    try {
+      await initiateCall(callerId, callerName, null, video: isVideo);
+    } catch (e, st) {
+      debugPrint('[STREAM-CALL] ✗ missed-call callback initiate failed: $e\n$st');
+    }
+  }
+
+  /// Arm the 30s ring cap for [call]. [outgoing] selects the correct teardown
+  /// primitive when it fires (caller cancels, callee times out). Idempotent —
+  /// re-arming cancels any prior watchdog first.
+  void _startRingWatchdog(Call call, {required bool outgoing}) {
+    _ringWatchdogTimer?.cancel();
+    final cid = call.callCid.value;
+    debugPrint('[STREAM-CALL]   ⏱ ring watchdog armed '
+        '(${_ringTimeout.inSeconds}s) cid=$cid outgoing=$outgoing');
+    _ringWatchdogTimer = Timer(_ringTimeout, () {
+      _ringWatchdogTimer = null;
+      // ignore: unawaited_futures
+      _onRingTimeout(call, outgoing: outgoing);
+    });
+  }
+
+  /// Cancel a pending ring watchdog (call answered, declined, or torn down).
+  void _cancelRingWatchdog() {
+    if (_ringWatchdogTimer != null) {
+      debugPrint('[STREAM-CALL]   ⏱ ring watchdog cancelled');
+      _ringWatchdogTimer!.cancel();
+      _ringWatchdogTimer = null;
+    }
+  }
+
+  /// Fired when a call has rung for [_ringTimeout] without being answered.
+  /// Force-terminates BOTH ends with reason "timeout": stops the local
+  /// ringback, notifies our backend over WS, and rejects on the Stream
+  /// coordinator so the peer's ring is torn down too.
+  Future<void> _onRingTimeout(Call call, {required bool outgoing}) async {
+    // Bail if the call already moved past the ring phase (answered) or was
+    // torn down while the timer was pending — only an unanswered ring times
+    // out.
+    final status = call.state.value.status;
+    final stillRinging =
+        status is CallStatusOutgoing || status is CallStatusIncoming;
+    if (!stillRinging || _streamCall?.callCid.value != call.callCid.value) {
+      debugPrint('[STREAM-CALL]   ⏱ ring timeout ignored — '
+          'status=${status.runtimeType} stillRinging=$stillRinging');
+      return;
+    }
+    debugPrint('[STREAM-CALL] ⏱ ring timeout (${_ringTimeout.inSeconds}s) — '
+        'terminating cid=${call.callCid.value} outgoing=$outgoing '
+        'reason=timeout');
+
+    // Flag the timeout BEFORE rejecting so the disconnect overlay this
+    // reject triggers reads "Call timeout" on the first paint.
+    endedByTimeout.value = true;
+    // ignore: unawaited_futures
+    StreamCallRingtones.instance.stopAll();
+    // Tell our backend first so the call_history row is finalised as a
+    // timeout (and an offline peer's FCM ring is cancelled) even if the
+    // Stream reject below hangs.
+    _sendCallTerminateWs('timeout');
+
+    // Reject on the coordinator so the peer stops ringing. The caller
+    // (creator) cancels the outgoing ring; the callee times out the incoming
+    // one — `CallRejectReason.timeout()` is the same primitive Stream's own
+    // incoming-ring timer uses, and neither reason is read by the peer as an
+    // active "declined" so both ends log it as a no-answer.
+    try {
+      await call.reject(
+        reason:
+            outgoing ? CallRejectReason.cancel() : CallRejectReason.timeout(),
+      );
+    } catch (e) {
+      debugPrint('[STREAM-CALL]   ⏱ ring-timeout reject threw: $e');
+    }
+    _clearMirror();
+  }
+
+  /// Fire `call:terminate` on Amigo's WS so the backend can finalise the
+  /// call_history row and (when the recipient is offline) push an FCM
+  /// fallback. The Stream coordinator handles ring-cancel on the callee side
+  /// for created-by-me calls via `call.end()` below — this WS message is for
+  /// our own backend bookkeeping, not the cross-device ring teardown.
+  void _sendCallTerminateWs(String reason) {
+    final active = _activeCall;
+    final me = _currentUser;
+    if (active == null || me == null) {
+      debugPrint('[STREAM-CALL]   skip call:terminate WS — '
+          'activeCall=${active != null} currentUser=${me != null}');
+      return;
+    }
+    final isOutgoing = active.callType == app_call.CallType.outgoing;
+    final callerId = isOutgoing ? me.id : active.userId;
+    final calleeId = isOutgoing ? active.userId : me.id;
+    final wsmsg = WSMessage(
+      type: WSMessageType.callTerminate,
+      payload: CallPayload(
+        callId: active.callId,
+        callerId: callerId,
+        calleeId: calleeId,
+        data: {'reason': reason},
+        timestamp: DateTime.now(),
+      ),
+      wsTimestamp: DateTime.now(),
+    ).toJson();
+    debugPrint('[STREAM-CALL]   ⇡ WS call:terminate  cid=${active.callId}  '
+        'caller=$callerId  callee=$calleeId  reason=$reason');
+    // Fire-and-forget. The Stream-side cancel is independent and must run
+    // even if the WS is wedged.
+    _transportManager.sendMessage(wsmsg).catchError((e) {
+      debugPrint('[STREAM-CALL]   ⚠ WS call:terminate send failed: $e');
+      return false;
+    });
+  }
+
   @override
   Future<void> declineCall({String? reason, String? callId}) async {
     debugPrint('[STREAM-CALL] ▶ declineCall(reason=$reason, callId=$callId)  '
@@ -1303,6 +1686,9 @@ class StreamCallService implements ICallBackend {
     // SDK's status transition can lag the tap.
     // ignore: unawaited_futures
     StreamCallRingtones.instance.stopAll();
+    // Notify our backend before handing off to Stream — if the SDK call
+    // throws or hangs, the backend still gets the terminate signal.
+    _sendCallTerminateWs(reason ?? 'user_declined');
     final call = _streamCall ?? _client?.state.activeCall.valueOrNull;
     if (call == null) {
       debugPrint('[STREAM-CALL]   no active call to decline');
@@ -1326,12 +1712,71 @@ class StreamCallService implements ICallBackend {
     // before-pickup path where the outgoing ringback is still pulsing.
     // ignore: unawaited_futures
     StreamCallRingtones.instance.stopAll();
+    // Dispatch our own WS event first — Stream's SDK calls below propagate
+    // the cancel over Stream's coordinator, but the backend also needs to
+    // know so it can persist the call_history row.
+    _sendCallTerminateWs(reason ?? 'user_hangup');
     final call = _streamCall ?? _client?.state.activeCall.valueOrNull;
     if (call != null) {
-      debugPrint('[STREAM-CALL]   leave() on cid=${call.callCid.value}  '
-          'preStatus=${call.state.value.status.runtimeType}');
-      final res = await call.leave();
-      debugPrint('[STREAM-CALL]   leave() → success=${res.isSuccess}');
+      // Pick the right Stream API based on call phase:
+      //
+      //   • Ringing (CallStatusOutgoing / CallStatusIncoming) — the SDK has
+      //     not joined the SFU yet, so `end()` is a no-op for the callee
+      //     even though it returns success: the coordinator won't fan out
+      //     a CallEndedEvent to a call that never reached `joined`. The
+      //     correct primitive is `reject(reason: cancel|decline)`, which
+      //     emits a CallRejectedEvent the callee's SDK acts on to stop
+      //     the ring. (Stream's own SDK uses this exact call internally
+      //     when accepting one call cancels another outgoing — see
+      //     `Call.accept` in stream_video/lib/src/call/call.dart.)
+      //
+      //   • Joined / Connected — `end()` (for the creator) terminates the
+      //     live call for all participants; everyone else uses `leave()`
+      //     to exit their own session.
+      //
+      //   • Anything else (Idle / Disconnected / Joining for non-creators)
+      //     — fall back to `leave()`.
+      final status = call.state.value.status;
+      final createdByMe = call.state.value.createdByMe;
+      final bool isRingingPhase = status is CallStatusOutgoing
+          || status is CallStatusIncoming;
+      final String op;
+      Future<Result<None>> action;
+      if (isRingingPhase) {
+        op = createdByMe
+            ? 'reject(cancel)'
+            : 'reject(decline)';
+        action = call.reject(
+          reason: createdByMe
+              ? CallRejectReason.cancel()
+              : CallRejectReason.decline(),
+        );
+      } else if (createdByMe && status.isAlreadyJoined) {
+        op = 'end()';
+        action = call.end();
+      } else {
+        op = 'leave()';
+        action = call.leave();
+      }
+      debugPrint('[STREAM-CALL]   $op on cid=${call.callCid.value}  '
+          'createdByMe=$createdByMe  '
+          'preStatus=${status.runtimeType}');
+      try {
+        final res = await action;
+        debugPrint('[STREAM-CALL]   $op → success=${res.isSuccess}');
+        // Belt-and-braces: if `end()` / `reject()` reports failure (perm
+        // denied, race with auto-cancel, etc.), still exit our own session
+        // so the SDK doesn't leave a dangling joined participant.
+        if (!res.isSuccess) {
+          debugPrint('[STREAM-CALL]   $op unsuccessful — falling back to leave()');
+          await call.leave();
+        }
+      } catch (e) {
+        debugPrint('[STREAM-CALL]   $op threw: $e — falling back to leave()');
+        try {
+          await call.leave();
+        } catch (_) {}
+      }
     }
     _clearMirror();
   }
@@ -1382,6 +1827,7 @@ class StreamCallService implements ICallBackend {
     await _connectionSub?.cancel();
     await _callEventsSub?.cancel();
     await _ringingEventsSub?.cancel();
+    await _amigoTerminateSub?.cancel();
     _activeCallSub = null;
     _incomingCallSub = null;
     _callStateSub = null;
@@ -1389,6 +1835,7 @@ class StreamCallService implements ICallBackend {
     _connectionSub = null;
     _callEventsSub = null;
     _ringingEventsSub = null;
+    _amigoTerminateSub = null;
     try {
       await _client?.disconnect();
     } catch (_) {}

@@ -84,10 +84,20 @@ class IncomingCallNotificationManager(
         smallViews: RemoteViews?
     ): SafeTarget {
         return object : SafeTarget(notificationId, onLoaded = { bitmap ->
-            bigViews?.setImageViewBitmap(R.id.ivAvatar, bitmap)
-            bigViews?.setViewVisibility(R.id.ivAvatar, View.VISIBLE)
-            smallViews?.setImageViewBitmap(R.id.ivAvatar, bitmap)
-            smallViews?.setViewVisibility(R.id.ivAvatar, View.VISIBLE)
+            // [AMIGO-PATCH] When called from the standard-layout missed-call
+            // path, both views are null and we instead surface the avatar
+            // via the builder's large-icon slot — that's the right-hand
+            // contact-photo position in the Material notification layout.
+            // The legacy custom-RemoteViews path remains intact below for
+            // any other surface still using it.
+            if (bigViews == null && smallViews == null) {
+                builder.setLargeIcon(bitmap)
+            } else {
+                bigViews?.setImageViewBitmap(R.id.ivAvatar, bitmap)
+                bigViews?.setViewVisibility(R.id.ivAvatar, View.VISIBLE)
+                smallViews?.setImageViewBitmap(R.id.ivAvatar, bitmap)
+                smallViews?.setViewVisibility(R.id.ivAvatar, View.VISIBLE)
+            }
             getNotificationManager().notify(notificationId, builder.build())
         }) {}
     }
@@ -328,115 +338,91 @@ class IncomingCallNotificationManager(
         }
 
         builder.setWhen(System.currentTimeMillis())
+        builder.setShowWhen(true)
 
         val textMissedCall = data.getString(IncomingCallConstants.EXTRA_CALL_MISSED_CALL_SUBTITLE, "")
-        builder.setSubText(
-            if (TextUtils.isEmpty(textMissedCall)) context.getString(
-                R.string.text_missed_call
-            ) else textMissedCall
-        )
+        val callerName = data.getString(IncomingCallConstants.EXTRA_CALL_NAME_CALLER, "")
+        val resolvedSubtitle =
+            if (TextUtils.isEmpty(textMissedCall)) context.getString(R.string.text_missed_call)
+            else textMissedCall
 
         builder.setSmallIcon(smallIcon)
         builder.setOnlyAlertOnce(true)
+        builder.setAutoCancel(true)
 
-        notificationMissingViews =
-            RemoteViews(context.packageName, R.layout.layout_custom_miss_notification)
-        notificationMissingSmallViews =
-            RemoteViews(context.packageName, R.layout.layout_custom_miss_small_notification)
-            
-        notificationMissingViews?.setTextViewText(
-            R.id.tvCallerName, data.getString(IncomingCallConstants.EXTRA_CALL_NAME_CALLER, "")
-        )
-        notificationMissingSmallViews?.setTextViewText(
-            R.id.tvCallerName, data.getString(IncomingCallConstants.EXTRA_CALL_NAME_CALLER, "")
-        )
-        
-        notificationMissingSmallViews?.setTextViewText(
-            R.id.tvTime, getSystemFormattedTime(context)
-        )
-        val showCallHandle =
-            data.getBoolean(IncomingCallConstants.EXTRA_CALL_SHOW_CALL_HANDLE, false)
-        if (showCallHandle) {
-            notificationMissingViews?.setTextViewText(
-                R.id.tvNumber, data.getString(IncomingCallConstants.EXTRA_CALL_HANDLE, "")
-            )
-            notificationMissingSmallViews?.setTextViewText(
-                R.id.tvNumber, data.getString(IncomingCallConstants.EXTRA_CALL_HANDLE, "")
-            )
-        }
+        // [AMIGO-PATCH] Drop the custom RemoteViews layout.
+        //
+        // The SDK's `layout_custom_miss_notification` / its `_small` variant
+        // render an avatar column + a vertical text stack inside a fixed-
+        // height container. On most OEMs the resulting collapsed view leaves
+        // an ugly empty band below the caller name (visible in the user's
+        // screenshot of the missed-call notification). Falling back to the
+        // standard NotificationCompat layout — icon + title + body + action —
+        // matches the phone-app aesthetic and inherits OEM-specific
+        // typography automatically.
+        //
+        // Body-tap PendingIntent is also rewired to the callback action
+        // (was `getAppPendingIntent` which just launched MainActivity); now
+        // tapping ANYWHERE on the notification triggers the same callback
+        // flow as the "Call back" button, so users don't have to expand the
+        // notification first.
+        builder.setContentTitle(callerName)
+        builder.setContentText(resolvedSubtitle)
+        builder.setGroup(MISSED_GROUP_KEY)
+        builder.priority = NotificationCompat.PRIORITY_HIGH
+        builder.setSound(missedCallSound)
 
-        notificationMissingViews?.setOnClickPendingIntent(
-            R.id.llCallback, getCallbackPendingIntent(missedNotificationId, data)
-        )
+        val callbackPi = getCallbackPendingIntent(missedNotificationId, data)
+        builder.setContentIntent(callbackPi)
 
         val showCallbackButton = data.getBoolean(
             IncomingCallConstants.EXTRA_CALL_MISSED_CALL_CALLBACK_SHOW, true
         )
-        notificationMissingViews?.setViewVisibility(
-            R.id.llCallback, if (showCallbackButton) View.VISIBLE else View.GONE
-        )
         val textCallback =
             data.getString(IncomingCallConstants.EXTRA_CALL_MISSED_CALL_CALLBACK_TEXT, "")
-        notificationMissingViews?.setTextViewText(
-            R.id.tvCallback,
-            if (TextUtils.isEmpty(textCallback)) context.getString(R.string.text_call_back) else textCallback
-        )
-
-        var defaultAvatar = data.getString(
-            IncomingCallConstants.EXTRA_CALL_DEFAULT_AVATAR, ""
-        )
-        var avatarUrl = data.getString(IncomingCallConstants.EXTRA_CALL_AVATAR, "")
-
-        if(avatarUrl.isNullOrEmpty() && !defaultAvatar.isNullOrEmpty()) {
-            avatarUrl = defaultAvatar
+        if (showCallbackButton) {
+            builder.addAction(
+                NotificationCompat.Action.Builder(
+                    smallIcon,
+                    if (TextUtils.isEmpty(textCallback)) context.getString(R.string.text_call_back) else textCallback,
+                    callbackPi,
+                ).build()
+            )
         }
 
+        // Avatar: surface as `setLargeIcon` so it appears on the right-hand
+        // side of the standard notification layout (where most messaging
+        // apps put the contact photo). Loaded async — if the load fails we
+        // simply post without an avatar rather than blocking the
+        // notification.
+        var defaultAvatar = data.getString(IncomingCallConstants.EXTRA_CALL_DEFAULT_AVATAR, "")
+        var avatarUrl = data.getString(IncomingCallConstants.EXTRA_CALL_AVATAR, "")
+        if (avatarUrl.isNullOrEmpty() && !defaultAvatar.isNullOrEmpty()) {
+            avatarUrl = defaultAvatar
+        }
         if (!avatarUrl.isNullOrEmpty()) {
-            if (!avatarUrl.startsWith("http://", true) && !avatarUrl.startsWith(
-                    "https://",
-                    true
-                )
-            ) {
+            if (!avatarUrl.startsWith("http://", true) && !avatarUrl.startsWith("https://", true)) {
                 avatarUrl = String.format("file:///android_asset/flutter_assets/%s", avatarUrl)
             }
+            @Suppress("UNCHECKED_CAST")
             val headers =
-                data.getSerializable(IncomingCallConstants.EXTRA_CALL_HEADERS) as HashMap<String, Any?>
-
+                (data.getSerializable(IncomingCallConstants.EXTRA_CALL_HEADERS) as? HashMap<String, Any?>)
+                    ?: HashMap()
             targetMissingAvatarCustom =
                 createMissingAvatarTargetCustom(
                     missedNotificationId,
                     builder,
-                    notificationMissingViews,
-                    notificationMissingSmallViews
+                    /* big = */ null,
+                    /* small = */ null,
                 )
             ImageLoaderProvider.loadImage(
                 context,
                 avatarUrl,
                 headers,
-                targetMissingAvatarCustom
+                targetMissingAvatarCustom,
             )
         }
 
-        // Ensure collapsed (system) view also shows content when the custom view isn't used
-        val callerName = data.getString(IncomingCallConstants.EXTRA_CALL_NAME_CALLER, "")
-        builder.setContentTitle(callerName)
-        builder.setContentText(
-            if (TextUtils.isEmpty(textMissedCall)) context.getString(R.string.text_missed_call) else textMissedCall
-        )
-        builder.setStyle(NotificationCompat.DecoratedCustomViewStyle())
-        builder.setCustomContentView(notificationMissingSmallViews)
-        builder.setCustomBigContentView(notificationMissingViews)
-        builder.setGroup(MISSED_GROUP_KEY)
-
-        builder.priority = NotificationCompat.PRIORITY_HIGH
-
-        builder.setSound(missedCallSound)
-        builder.setContentIntent(
-            getAppPendingIntent(
-                missedNotificationId, data
-            )
-        )
-       
         val notification = builder.build()
         if (notification != null) {
             getNotificationManager().notify(missedNotificationId, notification)

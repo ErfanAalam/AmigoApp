@@ -28,6 +28,17 @@ StreamVideoPushConfiguration get amigoStreamPushConfiguration =>
           fullScreenTextColor: '#FFFFFF',
         ),
 
+        // Missed-call notification UX:
+        //  - Subtitle is the row body the user reads at a glance — keep it
+        //    short and active.
+        //  - `callbackText` is the action button label. Material guidelines
+        //    keep these to one short verb phrase.
+        //  - `id: null` means the SDK derives a stable id per-call from the
+        //    call cid, so multiple missed calls stack as separate
+        //    notifications instead of replacing each other (the previous
+        //    behaviour was a single "Missed call" entry that overwrote
+        //    every prior one — users only saw the most recent missed call
+        //    when they finally checked the tray).
         missedCallNotification: MissedCallNotificationParams(
           showNotification: true,
           showCallbackButton: true,

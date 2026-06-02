@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.util.Log
+import android.view.KeyEvent
 import android.view.WindowManager
 import com.aiexch.amigo.call.AmigoCallPlugin
 import com.aiexch.amigo.call.AmigoRingtoneManager
@@ -138,6 +139,10 @@ class MainActivity : FlutterActivity() {
                         AmigoRingtoneManager.stop()
                         result.success(true)
                     }
+                    "playBusy" -> {
+                        AmigoRingtoneManager.playBusy()
+                        result.success(true)
+                    }
                     "playOneShot" -> {
                         // Transient signaling sound (connect / disconnect
                         // beep). The flutter asset path comes through as
@@ -191,6 +196,37 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             Log.w("MainActivity", "Audio mode reset failed: ${e.message}")
         }
+    }
+
+    /**
+     * Intercept volume-up / volume-down key presses while a call ringtone is
+     * playing and treat them as "silence the ringer" instead of letting the
+     * OS adjust stream volume. Standard phone-app behaviour — first press of
+     * either volume button mutes the ring without rejecting the call.
+     *
+     * We consume only the DOWN event of the keypress when ringing; the UP
+     * event is also consumed so the OS doesn't deliver a stray half-press
+     * (which on some OEMs surfaces a volume HUD slider on a now-silent ring).
+     * When no ringtone is active we return super so the OS handles volume
+     * normally — e.g. during a connected call, volume keys still adjust the
+     * in-call audio stream as expected.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val code = event.keyCode
+        if (code == KeyEvent.KEYCODE_VOLUME_DOWN || code == KeyEvent.KEYCODE_VOLUME_UP) {
+            if (AmigoRingtoneManager.isRinging()) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    Log.i(TAG, "volume key while ringing — silencing ringtone")
+                    try {
+                        AmigoRingtoneManager.stop()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "stop ringtone failed: ${e.message}")
+                    }
+                }
+                return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onDestroy() {

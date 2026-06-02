@@ -177,6 +177,53 @@ object AmigoRingtoneManager {
     }
 
     /**
+     * Returns true if either the incoming-ringtone MediaPlayer or the
+     * outgoing-ringback ToneGenerator is currently playing.
+     *
+     * Used by [MainActivity.dispatchKeyEvent] to decide whether a volume-key
+     * press should be reinterpreted as "silence the ringer" rather than the
+     * usual stream-volume adjustment. We read the underlying objects with
+     * `synchronized(lock)` because they're allocated/disposed under the
+     * same lock by play/stop transitions.
+     */
+    fun isRinging(): Boolean {
+        synchronized(lock) {
+            val mp = mediaPlayer
+            if (mp != null) {
+                return try { mp.isPlaying } catch (_: Exception) { false }
+            }
+            return toneGenerator != null
+        }
+    }
+
+    /**
+     * Telephony busy signal — the classic fast tri-beep that plays when
+     * the recipient (or caller) is on another call. Self-releasing
+     * one-shot via its own ToneGenerator instance, so it doesn't touch
+     * the looping ringtone state (mediaPlayer / toneGenerator) and is
+     * safe to call at any time. Lasts ~3 seconds then releases.
+     */
+    fun playBusy() {
+        try {
+            // STREAM_MUSIC for the same reason as the outgoing ringback —
+            // ToneGenerator on STREAM_VOICE_CALL only produces audio in
+            // MODE_IN_COMMUNICATION, but we're in MODE_NORMAL pre-call.
+            val tg = ToneGenerator(AudioManager.STREAM_MUSIC, 80)
+            tg.startTone(ToneGenerator.TONE_SUP_BUSY, 3_000)
+            Log.i(TAG, "playBusy started (TONE_SUP_BUSY, 3s)")
+            // Release after the tone naturally finishes so we don't leak
+            // the native resource. ToneGenerator doesn't have a completion
+            // callback, so use a delayed runnable.
+            mainHandler.postDelayed({
+                try { tg.release() } catch (_: Exception) {}
+                Log.i(TAG, "playBusy released")
+            }, 3_200L)
+        } catch (e: Exception) {
+            Log.w(TAG, "playBusy failed: ${e.message}")
+        }
+    }
+
+    /**
      * Self-releasing one-shot for short signaling sounds (call-connected and
      * call-disconnected beeps).
      *

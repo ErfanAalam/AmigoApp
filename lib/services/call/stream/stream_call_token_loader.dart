@@ -46,18 +46,24 @@ Future<String?> loadStreamToken() async {
     if (token != null) {
       try {
         final prefs = await SharedPreferences.getInstance();
-        // `flutter.` prefix matches Flutter's shared_preferences package
-        // convention so Kotlin's getSharedPreferences("FlutterSharedPreferences", …)
-        // can read the same keys our Dart code wrote.
-        await prefs.setString('flutter.stream_user_token', token);
+        // Important: do NOT manually prepend `flutter.` to these keys.
+        // Flutter's `shared_preferences` package already prepends that
+        // prefix when persisting to Android's `FlutterSharedPreferences`
+        // store. Doing it ourselves produced `flutter.flutter.stream_user_id`,
+        // which the Kotlin AmigoColdDeclineBridge — reading the canonical
+        // single-prefix key — never matched, so every killed-state decline
+        // bailed with `missing prefs (user_id=null base=null)`.
+        await prefs.setString('stream_user_token', token);
         if (apiKey != null) {
-          await prefs.setString('flutter.stream_api_key', apiKey);
+          await prefs.setString('stream_api_key', apiKey);
         }
         final user = await UserUtils().getUserDetails();
         if (user != null) {
-          await prefs.setString('flutter.stream_user_id', user.id);
+          await prefs.setString('stream_user_id', user.id);
         }
-        await prefs.setString('flutter.stream_backend_base', Environment.baseUrl);
+        await prefs.setString('stream_backend_base', Environment.baseUrl);
+        debugPrint('[STREAM-TOKEN]   cached creds for native decline: '
+            'user=${user?.id}  base=${Environment.baseUrl}');
       } catch (e) {
         debugPrint('[STREAM-TOKEN]   ✗ failed to cache creds for native decline: $e');
       }

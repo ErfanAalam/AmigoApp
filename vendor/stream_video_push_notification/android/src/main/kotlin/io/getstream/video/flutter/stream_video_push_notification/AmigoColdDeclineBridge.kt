@@ -35,19 +35,44 @@ object AmigoColdDeclineBridge {
     private val executor = Executors.newSingleThreadExecutor()
 
     fun notifyDecline(context: Context, data: Bundle) {
-        val callCid = (data.getString("callCid") ?: data.getString("call_cid"))
-        if (callCid.isNullOrBlank()) {
-            // Stream's notification data uses "extra.callCid" — pull from
-            // the inner extras Bundle if present.
-            val extras = data.getBundle("extra")
-            val nestedCid = extras?.getString("callCid")
-            if (nestedCid.isNullOrBlank()) {
-                Log.w(TAG, "no call_cid in decline data; cannot notify backend")
-                return
-            }
-            return notifyDeclineWithCid(context, nestedCid)
+        // The cid travels inside a HashMap<String, Any?> serialized under
+        // `IncomingCallConstants.EXTRA_CALL_EXTRA` (see Call.toBundle:
+        // `bundle.putSerializable(EXTRA_CALL_EXTRA, extra)` where `extra`
+        // is the Dart-side `{'callCid': callCid}` map). It is NOT a plain
+        // string key on the bundle. Old code tried `getString("callCid")`
+        // / `getBundle("extra")` and silently bailed every time.
+        val cid = extractCallCid(data)
+        if (cid.isNullOrBlank()) {
+            // Help the next bug-hunt: dump every key so we can see what
+            // the SDK actually delivered.
+            val keys = data.keySet().joinToString(",")
+            Log.w(TAG, "no call_cid in decline data; cannot notify backend (bundle keys=[$keys])")
+            return
         }
-        notifyDeclineWithCid(context, callCid)
+        notifyDeclineWithCid(context, cid)
+    }
+
+    @Suppress("UNCHECKED_CAST", "DEPRECATION")
+    private fun extractCallCid(data: Bundle): String? {
+        // 1) Canonical path: HashMap under EXTRA_CALL_EXTRA → "callCid".
+        try {
+            val extras = data.getSerializable(IncomingCallConstants.EXTRA_CALL_EXTRA)
+            if (extras is HashMap<*, *>) {
+                val v = extras["callCid"]
+                if (v is String && v.isNotBlank()) return v
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "extras serializable read failed: ${e.message}")
+        }
+        // 2) Fallbacks for older payloads / belt-and-braces in case the
+        //    SDK shape changes.
+        data.getString("callCid")?.takeIf { it.isNotBlank() }?.let { return it }
+        data.getString("call_cid")?.takeIf { it.isNotBlank() }?.let { return it }
+        // The handle field gets populated from `created_by_id` on the Dart
+        // side — not the cid, but log it so the bug-hunt is easier next time.
+        val handle = data.getString(IncomingCallConstants.EXTRA_CALL_HANDLE)
+        Log.d(TAG, "no canonical cid; EXTRA_CALL_HANDLE=$handle")
+        return null
     }
 
     private fun notifyDeclineWithCid(context: Context, callCid: String) {

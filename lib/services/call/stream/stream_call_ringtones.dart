@@ -43,6 +43,20 @@ class StreamCallRingtones {
   /// Stop both incoming and outgoing tones. Always safe to call.
   Future<void> stopAll() => _setMode(_RingMode.none);
 
+  /// Play the telephony busy signal (the classic fast "beep–beep–beep")
+  /// for ~3 seconds. Fired when the precheck reports the callee is on
+  /// another call (or the caller themselves is already engaged). Does
+  /// NOT serialise onto the `_setMode` chain — it's a self-releasing
+  /// one-shot, like the connect/disconnect beeps, so it doesn't disturb
+  /// any other ring state.
+  Future<void> playBusy() async {
+    try {
+      await _channel.invokeMethod('playBusy');
+    } catch (e) {
+      debugPrint('[STREAM-RING] playBusy failed: $e');
+    }
+  }
+
   /// Plays the connect beep — fires once when remote audio actually starts
   /// flowing (i.e. when [StreamCallService.callConnectedAt] is first
   /// pinned). Transient, self-releasing one-shot — routes through the
