@@ -882,6 +882,73 @@ class _RoundActionButton extends StatelessWidget {
 // Active in-call view
 // ───────────────────────────────────────────────────────────────────────────
 
+/// In-call banner for ghost-call recovery. Shows "Reconnecting…" while the
+/// peer is gone (the service is holding a 10s rejoin window), then a brief
+/// "Call reconnected" flash when they return. Listens to the service's
+/// `reconnectingPeerName` / `reconnectedFlash` notifiers so it updates without
+/// any screen state plumbing.
+class _ReconnectBanner extends StatelessWidget {
+  const _ReconnectBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final svc = StreamCallService();
+    return ValueListenableBuilder<String?>(
+      valueListenable: svc.reconnectingPeerName,
+      builder: (context, peerName, _) {
+        if (peerName != null) {
+          return _pill(
+            icon: Icons.sync_rounded,
+            color: const Color(0xFFFFA000),
+            text: 'Reconnecting…',
+          );
+        }
+        return ValueListenableBuilder<bool>(
+          valueListenable: svc.reconnectedFlash,
+          builder: (context, flash, __) => flash
+              ? _pill(
+                  icon: Icons.check_circle_rounded,
+                  color: const Color(0xFF2E7D32),
+                  text: 'Call reconnected',
+                )
+              : const SizedBox.shrink(),
+        );
+      },
+    );
+  }
+
+  Widget _pill({
+    required IconData icon,
+    required Color color,
+    required String text,
+  }) {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white, size: 16),
+            const SizedBox(width: 8),
+            Text(
+              text,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ActiveCallView extends StatefulWidget {
   final Call call;
   const _ActiveCallView({required this.call});
@@ -1105,6 +1172,18 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
                 showBackPill: !isAudioMode,
               ),
             ),
+
+            // Ghost-call recovery banner — "Reconnecting…" while the peer is
+            // gone, then a brief "Call reconnected" flash. Non-terminal: driven
+            // by the service's ValueNotifiers, it does NOT pop the screen the
+            // way `_disconnectReason` does.
+            if (!isPip)
+              Positioned(
+                top: MediaQuery.of(context).padding.top + 72,
+                left: 0,
+                right: 0,
+                child: const _ReconnectBanner(),
+              ),
 
             // Bottom controls — hidden entirely in PiP. The PiP tile is
             // too small to host any touch target; the user returns to

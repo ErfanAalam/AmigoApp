@@ -106,6 +106,34 @@ class StreamCallService implements ICallBackend {
   /// begins, NOT in `_clearMirror` — the overlay reads it during its 2s linger
   /// after the mirror is already gone.
   final ValueNotifier<bool> endedByTimeout = ValueNotifier<bool>(false);
+
+  // ── Ghost-call recovery (G-side: we're the party still in the call) ───────
+  /// How long the peer has to come back before we end the call for ourselves.
+  /// 30s (not 10s) so a peer whose app was KILLED has time to cold-restart
+  /// (which takes >10s) and rejoin from the call-logs dot.
+  static const Duration _rejoinWindow = Duration(seconds: 30);
+  /// The cid we're currently holding a rejoin window open for (null = none).
+  String? _rejoinWindowCid;
+  /// Fires at [_rejoinWindow]; ends the call if the peer never returned.
+  Timer? _rejoinHoldTimer;
+  /// Short delay before bothering the backend/peer with `call:rejoin:open`,
+  /// to absorb the race where a clean hangup's Amigo `call:terminate` is still
+  /// in flight when the SFU participant-left lands (avoids a spurious dot).
+  Timer? _rejoinSignalTimer;
+  /// Last observed remote-participant count while connected — a drop from
+  /// >0 to 0 (without a terminate) is how we detect the peer vanished.
+  int _lastRemoteCount = 0;
+  /// cids for which an Amigo `call:terminate` was received — distinguishes a
+  /// clean hangup (skip drop detection) from a silent drop (open the window).
+  /// In this app every clean hangup sends `call:terminate` BEFORE leaving, so
+  /// its presence here is the reliable "this was intentional" signal.
+  final Set<String> _terminateReceivedForCid = <String>{};
+  /// Drives the in-call "Reconnecting…" banner (peer name, or null = hidden).
+  final ValueNotifier<String?> reconnectingPeerName = ValueNotifier<String?>(null);
+  /// Briefly true after the peer returns → drives a "Call reconnected" flash.
+  final ValueNotifier<bool> reconnectedFlash = ValueNotifier<bool>(false);
+  Timer? _reconnectedFlashTimer;
+
   /// Last name passed to the CallStyle notification. Lets us avoid spamming
   /// the native channel with a refresh on every state change unless the
   /// resolved name actually changed (e.g. SFU finally pushed participant
@@ -138,9 +166,21 @@ class StreamCallService implements ICallBackend {
   // device's Stream SDK in time (e.g. WS not yet connected, app cold-
   // started via FCM, push-but-no-WS race).
   StreamSubscription<CallPayload>? _amigoTerminateSub;
+  // Ghost-call recovery — drive the waiter's "Reconnecting…" banner from prompt
+  // out-of-band signals (backend peer-dropped push + peer presence-offline),
+  // not just the slow SFU participant-left event.
+  StreamSubscription<CallPayload>? _amigoPeerDroppedSub;
+  StreamSubscription<ConnectionStatusPayload>? _peerPresenceSub;
 
   bool _isInitialized = false;
   bool _isTerminating = false;
+
+  /// True while we're actively answering a call (from the accept button or the
+  /// CallKit/notification accept). Cheap guard for the app-swipe teardown:
+  /// answering over the lockscreen recreates the Android FlutterActivity, which
+  /// fires `onPlatformUiLayerDestroyed` (activity detach) — this flag stops
+  /// that teardown from killing the call being answered.
+  bool _answering = false;
 
   /// Whether the Flutter app is currently in the foreground.
   ///
@@ -335,16 +375,24 @@ class StreamCallService implements ICallBackend {
               debugPrint('[STREAM-CALL]   ✓ cold-start accepted call: '
                   '${call.callCid.value}  status=${call.state.value.status.runtimeType}  '
                   'acceptedByMe=${(call.state.value.status is CallStatusIncoming) ? (call.state.value.status as CallStatusIncoming).acceptedByMe : "n/a"}');
+              _answering = true;
               _streamCall = call;
               _callerHint = _hintFromCall(call);
               // Attach the events logger immediately — the activeCall stream
               // may not have fired yet, and this is the path most likely to
               // surface the WS-vs-HTTP race we patched in vendor/.
               _attachCallEventLogging(call);
+              // Drive the service mirror from this path too: the activeCall
+              // stream may not fire promptly on cold-start, and without this
+              // _onCallStateChanged never runs so the answer/disconnect
+              // refinement (and our drop detection) is blind.
+              _callStateSub?.cancel();
+              _callStateSub = call.state.listen(_onCallStateChanged);
               // CRITICAL: Stream's consume helper accepts but never joins.
               // Without this the SFU connection is never established and mic
               // stays dead even though the UI shows "Connected".
               await ensureJoined(call);
+              _answering = false;
               _maybePushCallScreen(call);
             },
           );
@@ -454,42 +502,81 @@ class StreamCallService implements ICallBackend {
           debugPrint('[STREAM-CALL] onPlatformUiLayerDestroyed — no active call, nothing to tear down');
           return;
         }
-        debugPrint('[STREAM-CALL] onPlatformUiLayerDestroyed — '
-            'app removed from recents, ending call ${call.callCid.value}');
+        // Cheap insurance: if we're mid-answer this detach is an activity swap
+        // (e.g. answering over the lockscreen recreates the activity), not a
+        // swipe-from-recents — don't tear down the call being answered.
+        if (_answering) {
+          debugPrint('[STREAM-CALL] onPlatformUiLayerDestroyed — answering in '
+              'progress, ignoring (activity swap, not a swipe-away)');
+          return;
+        }
+        // A genuine swipe-from-recents kills the process moments after this
+        // fires, so we act SYNCHRONOUSLY here (a deferred timer would die with
+        // the process before signalling anything).
+        final status = call.state.value.status;
+        final createdByMe = call.state.value.createdByMe;
+        final cid = call.callCid.value;
+        // Was this a live, connected call? If so it's RECOVERABLE: keep the
+        // Stream session alive (leave, never end) and open a rejoin window so
+        // we can come back from the call-logs dot after restarting.
+        final wasConnected = _callConnectedAt != null;
+        debugPrint('[STREAM-CALL] onPlatformUiLayerDestroyed — app removed from '
+            'recents (cid=$cid wasConnected=$wasConnected) — '
+            '${wasConnected ? "leaving + opening rejoin window" : "cancelling"}');
         try {
-          // Match `endCall`'s dispatch: `reject(cancel|decline)` during the
-          // ringing phase (end() is a no-op pre-join); `end()` for the
-          // creator of a live call; `leave()` everywhere else.
-          final status = call.state.value.status;
-          final createdByMe = call.state.value.createdByMe;
-          if (status is CallStatusOutgoing || status is CallStatusIncoming) {
+          if (wasConnected) {
+            // Tell the backend WE are the dropper but may return — opens the
+            // rejoin window for us regardless of whether the peer's SFU
+            // participant-left detection fires in time. Fire-and-forget over
+            // the already-open WS (flushes before the process is reaped).
+            _sendRejoinWs(WSMessageType.callRejoinOpen, cid, {
+              'initiated_by': 'leaver',
+              'window_ms': _rejoinWindow.inMilliseconds,
+              // peer_* describe the party still in the call (who we'd rejoin).
+              'peer_id': _activeCall?.userId,
+              'peer_name': _activeCall?.userName,
+              'peer_pfp': _activeCall?.userProfilePic,
+            });
+            // leave() (NOT end()) even if we created the call — ending would
+            // tear it down for the peer and there'd be nothing to rejoin.
+            await call.leave();
+          } else if (status is CallStatusOutgoing ||
+              status is CallStatusIncoming) {
+            // Pre-connect (still ringing) — not recoverable; cancel cleanly so
+            // the backend clears busy and the peer stops ringing.
+            _sendCallTerminateWs('backgrounded');
             await call.reject(
               reason: createdByMe
                   ? CallRejectReason.cancel()
                   : CallRejectReason.decline(),
             );
-          } else if (createdByMe && status.isAlreadyJoined) {
-            await call.end();
           } else {
+            _sendCallTerminateWs('backgrounded');
             await call.leave();
           }
         } catch (e) {
-          debugPrint('[STREAM-CALL]   end/leave threw: $e — falling back to leave');
+          debugPrint('[STREAM-CALL]   swipe teardown threw: $e — falling back to leave');
           try {
             await call.leave();
           } catch (_) {}
         }
-        // Force-close our WS too so the coordinator sees the disconnect
-        // before our process is killed. Without this the WS is reaped by the
-        // OS asynchronously and the other side waits.
-        try {
-          await _client?.disconnect();
-        } catch (_) {}
+        // NOTE: deliberately NOT calling `_client.disconnect()` here. The
+        // vendored SDK's disconnect() calls pushNotificationManager
+        // .unregisterDevice() → deleteDevice(<FCM token>), which DELETES this
+        // device's push registration at Stream — after which Stream sends NO
+        // `call.ring` FCM until a cold restart re-registers it, so the user
+        // gets NO incoming-call notification. The process death closes the WS
+        // on its own; the coordinator detects the dropped socket. Keeping the
+        // device registered is what lets the very next call still ring.
         // Drop the CallStyle notification deterministically — without
         // StreamBackgroundService managing the call lifecycle, we own
         // dismissal end-to-end.
         // ignore: unawaited_futures
         StreamCallStyleNotifier.instance.hide();
+        // Wipe the mirror synchronously (consistent with every other teardown
+        // path) so no stale _streamCall/_activeCall lingers if the process
+        // isn't killed immediately.
+        _clearMirror();
       },
     );
   }
@@ -549,19 +636,39 @@ class StreamCallService implements ICallBackend {
         'connection=${_client?.state.connection.value}');
     _joinedCid = cid;
     final res = await call.join(connectOptions: connectOpts);
+    String joinErrMsg = '';
     res.fold(
       success: (_) => debugPrint('[STREAM-CALL]   ensureJoined: join SUCCESS'),
-      failure: (f) => debugPrint('[STREAM-CALL]   ensureJoined: join FAILED — '
-          'type=${f.error.runtimeType} '
-          'message="${f.error.message}" '
-          'full=${f.error}\n'
-          'stack=${f.error.stackTrace}'),
+      failure: (f) {
+        joinErrMsg = f.error.message;
+        debugPrint('[STREAM-CALL]   ensureJoined: join FAILED — '
+            'type=${f.error.runtimeType} '
+            'message="${f.error.message}" '
+            'full=${f.error}\n'
+            'stack=${f.error.stackTrace}');
+      },
     );
     if (res.isFailure) {
+      // CRITICAL: a notification/CallKit accept makes the SDK's own accept
+      // handler call accept()+join() FIRST; our `observeCoreRingingEvents.
+      // onCallAccepted` then calls ensureJoined → a SECOND join() that fails
+      // with "a call with the same cid is in progress". That is NOT a real
+      // failure — the SDK's in-flight join owns the call and will complete.
+      // We must NOT leave() here: leaving cancels the in-flight join
+      // (`Cancelled{byUserId: <self>}`), which kills the callee's call and
+      // strands the caller in a ghost call. Defer to the winning join.
+      final lower = joinErrMsg.toLowerCase();
+      if (lower.contains('in progress') || lower.contains('already')) {
+        debugPrint('[STREAM-CALL]   ensureJoined: a join for $cid is already '
+            'in progress — deferring to it, NOT leaving (avoids cancelling '
+            'the live call)');
+        _joinedCid = cid; // the in-flight join will bring us to joined
+        return;
+      }
       _joinedCid = null;
-      // `call.join()` may have partially set up the SFU session — including
-      // calling `getUserMedia`, which captures the device mic. The SDK
-      // generally tears that down on its own failure path, but the
+      // Genuine failure. `call.join()` may have partially set up the SFU
+      // session — including `getUserMedia`, which captures the device mic.
+      // The SDK generally tears that down on its own failure path, but the
       // "failed to join after 3 attempts" code path observed in the wild
       // can leave the MediaStream/audio track owned by our process if the
       // call transitioned to Disconnected mid-attempt. Force a `leave()`
@@ -731,10 +838,21 @@ class StreamCallService implements ICallBackend {
             'cid=${call.callCid.value}  '
             'status=${call.state.value.status.runtimeType}  '
             'createdByMe=${call.state.value.createdByMe}');
+        // Mark answering BEFORE join: this is the background/lockscreen accept,
+        // which recreates the activity and fires onPlatformUiLayerDestroyed —
+        // the `_answering` guard stops that from tearing down the call.
+        _answering = true;
         _streamCall = call;
         _callerHint ??= _hintFromCall(call);
         _attachCallEventLogging(call);
+        // Bind the state mirror on THIS path too. Unlike the foreground
+        // incomingCall/activeCall listeners, the core-ringing accept path
+        // never bound it — so _onCallStateChanged (answer refinement, drop
+        // detection, ringtone stop) was blind on background answers.
+        _callStateSub?.cancel();
+        _callStateSub = call.state.listen(_onCallStateChanged);
         await ensureJoined(call);
+        _answering = false;
         _maybePushCallScreen(call);
       },
     );
@@ -1116,6 +1234,29 @@ class StreamCallService implements ICallBackend {
       }
     }
 
+    // ── Ghost-call (peer-drop) detection ─────────────────────────────────
+    // Only meaningful once we were actually connected (remote audio flowed).
+    // When OUR OWN connection drops the SDK reports `CallStatusReconnecting`
+    // (→ mapped `connecting`, not `answered`), so this block is naturally
+    // skipped for that case — it fires only when the PEER vanished while we
+    // stayed connected. A clean hangup always arrives as a terminate (which
+    // sets `_terminateReceivedForCid`) or a Disconnected status, so those
+    // skip here too; only a SILENT drop opens the rejoin window.
+    if (refined == app_call.CallStatus.answered && _callConnectedAt != null) {
+      final cid = state.callCid.value;
+      final remoteCount =
+          state.callParticipants.where((p) => !p.isLocal).length;
+      if (remoteCount == 0 &&
+          _lastRemoteCount > 0 &&
+          _rejoinWindowCid == null &&
+          !_terminateReceivedForCid.contains(cid)) {
+        _onPeerDropped(cid);
+      } else if (remoteCount > 0 && _rejoinWindowCid == cid) {
+        _onPeerReturned(cid);
+      }
+      _lastRemoteCount = remoteCount;
+    }
+
     final isTerminal = refined == app_call.CallStatus.ended ||
         refined == app_call.CallStatus.declined ||
         refined == app_call.CallStatus.missed;
@@ -1206,6 +1347,10 @@ class StreamCallService implements ICallBackend {
     _audioReadyFallbackTimer?.cancel();
     _audioReadyFallbackTimer = null;
     _cancelRingWatchdog();
+    _cancelRejoinWindow();
+    _lastRemoteCount = 0;
+    _terminateReceivedForCid.clear();
+    _answering = false;
     _activeCall = null;
     _streamCall = null;
     _callerHint = null;
@@ -1434,6 +1579,9 @@ class StreamCallService implements ICallBackend {
     StreamCallRingtones.instance.stopAll();
     // User answered — kill the 30s ring cap before it can fire.
     _cancelRingWatchdog();
+    // Guard the swipe teardown across the accept→join transition (this tap can
+    // also recreate the activity when accepted from the lockscreen UI).
+    _answering = true;
 
     final accept = await call.accept();
     final dt = DateTime.now().difference(t0).inMilliseconds;
@@ -1443,6 +1591,7 @@ class StreamCallService implements ICallBackend {
         debugPrint('[STREAM-CALL]   ✓ accept() ok in ${dt}ms — '
             'postStatus=${postStatus.runtimeType} — joining…');
         final join = await call.join();
+        _answering = false;
         join.fold(
           success: (_) {
             debugPrint('[STREAM-CALL]   ✓ join() ok — pushing call screen');
@@ -1452,9 +1601,88 @@ class StreamCallService implements ICallBackend {
               'type=${f.error.runtimeType}  message="${f.error.message}"  full=${f.error}'),
         );
       },
-      failure: (f) => debugPrint('[STREAM-CALL] ✗ accept failed in ${dt}ms — '
-          'type=${f.error.runtimeType}  message="${f.error.message}"  full=${f.error}'),
+      failure: (f) {
+        _answering = false;
+        debugPrint('[STREAM-CALL] ✗ accept failed in ${dt}ms — '
+            'type=${f.error.runtimeType}  message="${f.error.message}"  full=${f.error}');
+      },
     );
+  }
+
+  /// Rejoin a call we dropped out of (ghost-call recovery). The peer (G) is
+  /// holding the call open; we re-`get()` the cid and join its existing SFU
+  /// session. [peerId]/[peerName]/[peerPfp] seed the mirror so the call screen
+  /// shows the right person before participant metadata arrives. Returns true
+  /// if the rejoin was initiated, false if the call was already gone.
+  Future<bool> rejoinCall(
+    String cid, {
+    String? peerId,
+    String? peerName,
+    String? peerPfp,
+  }) async {
+    debugPrint('[STREAM-CALL] ▶ rejoinCall(cid=$cid, peer=$peerId)');
+    if (!_isInitialized) await initialize();
+    final client = _client;
+    if (client == null) {
+      debugPrint('[STREAM-CALL] ✗ rejoinCall: client null');
+      return false;
+    }
+    // Don't rejoin while already in a different live call.
+    final existing = _streamCall;
+    if (existing != null && existing.callCid.value != cid) {
+      final st = existing.state.value.status;
+      final terminal =
+          st is CallStatusDisconnected || st is CallStatusReconnectionFailed;
+      if (!terminal) {
+        debugPrint('[STREAM-CALL]   rejoinCall: already in another call — ignoring');
+        return false;
+      }
+    }
+    final parts = cid.split(':');
+    if (parts.length != 2) {
+      debugPrint('[STREAM-CALL] ✗ rejoinCall: malformed cid $cid');
+      return false;
+    }
+    final call = client.makeCall(
+      callType: StreamCallType.fromString(parts[0]),
+      id: parts[1],
+    );
+    final got = await call.get();
+    if (got.isFailure) {
+      debugPrint('[STREAM-CALL]   rejoinCall: call.get() failed — call gone');
+      return false;
+    }
+    final status = call.state.value.status;
+    if (status is CallStatusDisconnected ||
+        status is CallStatusReconnectionFailed) {
+      debugPrint('[STREAM-CALL]   rejoinCall: call already terminal — not rejoining');
+      return false;
+    }
+    _answering = true;
+    _streamCall = call;
+    final resolvedName =
+        (peerName != null && peerName.isNotEmpty) ? peerName : 'Unknown';
+    _callerHint = CallerHint(
+      userId: peerId ?? '',
+      userName: resolvedName,
+      userProfilePic: peerPfp,
+    );
+    _activeCall = app_call.ActiveCallState(
+      callId: call.callCid.value,
+      userId: peerId ?? '',
+      userName: resolvedName,
+      userProfilePic: peerPfp,
+      callType: app_call.CallType.outgoing,
+      status: app_call.CallStatus.connecting,
+      startTime: DateTime.now(),
+    );
+    _attachCallEventLogging(call);
+    _callStateSub?.cancel();
+    _callStateSub = call.state.listen(_onCallStateChanged);
+    await ensureJoined(call);
+    _answering = false;
+    _maybePushCallScreen(call);
+    return true;
   }
 
   /// Subscribe to Amigo's WS `call:terminate` broadcasts and tear down our
@@ -1469,9 +1697,27 @@ class StreamCallService implements ICallBackend {
   /// WS reconnects, etc.). Having both paths means whichever one wins
   /// stops the ring.
   void _bindAmigoTerminateSubscription() {
+    final handler = WebSocketMessageHandler();
     _amigoTerminateSub?.cancel();
-    _amigoTerminateSub =
-        WebSocketMessageHandler().callTerminateStream.listen(_handleAmigoTerminate);
+    _amigoTerminateSub = handler.callTerminateStream.listen(_handleAmigoTerminate);
+    // Waiter-side ghost-call recovery signals (see _onPeerDropped):
+    _amigoPeerDroppedSub?.cancel();
+    _amigoPeerDroppedSub = handler.callRejoinPeerDroppedStream.listen((p) {
+      final cid = p.callId;
+      if (cid != null) _onPeerDropped(cid);
+    });
+    _peerPresenceSub?.cancel();
+    _peerPresenceSub = handler.onlineStatusStream.listen((p) {
+      // The call peer just went offline (chat WS dropped — network loss /
+      // backgrounded). If we're connected to them on a call, treat it as a
+      // drop and show "Reconnecting…". `_onPeerDropped` self-guards and
+      // self-corrects if the SFU shows them still present.
+      if (p.status != 'offline') return;
+      final call = _streamCall;
+      if (call == null) return;
+      if (_activeCall?.userId != p.senderId) return;
+      _onPeerDropped(call.callCid.value);
+    });
   }
 
   Future<void> _handleAmigoTerminate(CallPayload payload) async {
@@ -1489,6 +1735,15 @@ class StreamCallService implements ICallBackend {
       debugPrint('[STREAM-CALL] ↘ Amigo call:terminate ignored — cid mismatch  '
           'ours=$ourCid  payload=$incomingCid');
       return;
+    }
+    // Mark this call as intentionally terminated so the ghost-call drop
+    // detector treats the imminent participant-leave as a clean hangup, not a
+    // silent drop — and tear down any rejoin window already in flight.
+    _terminateReceivedForCid.add(ourCid);
+    if (_rejoinWindowCid == ourCid) {
+      debugPrint('[STREAM-CALL]   terminate arrived during rejoin window — '
+          'cancelling window for $ourCid');
+      _cancelRejoinWindow();
     }
     // Don't bounce our own outbound terminate back through this handler:
     // when we cancel locally we already drove `call.reject/end/leave`.
@@ -1678,6 +1933,138 @@ class StreamCallService implements ICallBackend {
     });
   }
 
+  /// Fire a `call:rejoin:*` message on Amigo's WS. Shares the caller/callee
+  /// derivation with [_sendCallTerminateWs] so the backend's participant gate
+  /// passes. Fire-and-forget.
+  void _sendRejoinWs(WSMessageType type, String cid, Map<String, dynamic> data) {
+    final active = _activeCall;
+    final me = _currentUser;
+    if (active == null || me == null) {
+      debugPrint('[STREAM-CALL]   skip ${type.value} WS — '
+          'activeCall=${active != null} currentUser=${me != null}');
+      return;
+    }
+    final isOutgoing = active.callType == app_call.CallType.outgoing;
+    final callerId = isOutgoing ? me.id : active.userId;
+    final calleeId = isOutgoing ? active.userId : me.id;
+    final wsmsg = WSMessage(
+      type: type,
+      payload: CallPayload(
+        callId: cid,
+        callerId: callerId,
+        calleeId: calleeId,
+        data: data,
+        timestamp: DateTime.now(),
+      ),
+      wsTimestamp: DateTime.now(),
+    ).toJson();
+    debugPrint('[STREAM-CALL]   ⇡ WS ${type.value}  cid=$cid  data=$data');
+    _transportManager.sendMessage(wsmsg).catchError((e) {
+      debugPrint('[STREAM-CALL]   ⚠ WS ${type.value} send failed: $e');
+      return false;
+    });
+  }
+
+  /// The remote participant vanished while we stayed connected. Show
+  /// "Reconnecting…", give them [_rejoinWindow] to come back, and (after a
+  /// short race-absorbing delay) tell the backend to open a rejoin window so
+  /// the peer can rediscover & rejoin the call — even from a killed app.
+  ///
+  /// Idempotent & guarded so it can be driven by ANY of three triggers:
+  ///   • our SFU-side detection (remote participant count → 0),
+  ///   • a backend `call:rejoin:peer_dropped` push (prompt; app-killed case),
+  ///   • a peer `connection:status offline` presence event (went-offline case).
+  /// If the peer is actually still on the SFU (false positive), the next
+  /// `_onCallStateChanged` sees remoteCount>0 and `_onPeerReturned` clears it.
+  void _onPeerDropped(String cid) {
+    if (_rejoinWindowCid == cid) return; // already handling this drop
+    if (_streamCall?.callCid.value != cid) return; // not our current call
+    if (_callConnectedAt == null) return; // never actually connected
+    if (_terminateReceivedForCid.contains(cid)) return; // clean hangup, not a drop
+    final st = _streamCall?.state.value.status;
+    if (st is CallStatusDisconnected || st is CallStatusReconnectionFailed) {
+      return; // call already terminal — not a recoverable drop
+    }
+    final peerName = (_activeCall?.userName.isNotEmpty ?? false)
+        ? _activeCall!.userName
+        : (_callerHint?.userName ?? 'the other person');
+    debugPrint('[STREAM-CALL] ⚠ peer dropped (remote→0) cid=$cid — '
+        'opening ${_rejoinWindow.inSeconds}s rejoin window (peer=$peerName)');
+    _rejoinWindowCid = cid;
+    reconnectedFlash.value = false;
+    reconnectingPeerName.value = peerName;
+    // Delay the backend signal — if a clean hangup's `call:terminate` is still
+    // in flight, it'll land in `_terminateReceivedForCid` before we fire and
+    // we stand down (no spurious rejoin dot on the peer).
+    _rejoinSignalTimer?.cancel();
+    _rejoinSignalTimer = Timer(const Duration(milliseconds: 1200), () {
+      _rejoinSignalTimer = null;
+      if (_rejoinWindowCid != cid) return;
+      if (_terminateReceivedForCid.contains(cid)) {
+        debugPrint('[STREAM-CALL]   rejoin signal stood down — terminate '
+            'arrived for $cid (was a clean hangup)');
+        _cancelRejoinWindow();
+        return;
+      }
+      _sendRejoinWs(WSMessageType.callRejoinOpen, cid, {
+        'peer_id': _activeCall?.userId,
+        'window_ms': _rejoinWindow.inMilliseconds,
+        'peer_name': _currentUser?.name,
+        'peer_pfp': _currentUser?.profilePic,
+      });
+    });
+    _rejoinHoldTimer?.cancel();
+    _rejoinHoldTimer = Timer(_rejoinWindow, () => _onRejoinWindowTimeout(cid));
+  }
+
+  /// The peer rejoined within the window → cancel teardown, close the backend
+  /// window, and flash "Call reconnected".
+  void _onPeerReturned(String cid) {
+    if (_rejoinWindowCid != cid) return;
+    debugPrint('[STREAM-CALL] ✓ peer returned cid=$cid — reconnected');
+    _rejoinSignalTimer?.cancel();
+    _rejoinSignalTimer = null;
+    _rejoinHoldTimer?.cancel();
+    _rejoinHoldTimer = null;
+    _rejoinWindowCid = null;
+    // Harmless no-op on the backend if we never sent `open` (peer returned
+    // within the 1.2s signal delay).
+    _sendRejoinWs(WSMessageType.callRejoinResolved, cid, {'outcome': 'rejoined'});
+    reconnectingPeerName.value = null;
+    reconnectedFlash.value = true;
+    _reconnectedFlashTimer?.cancel();
+    _reconnectedFlashTimer = Timer(const Duration(milliseconds: 2500), () {
+      reconnectedFlash.value = false;
+    });
+  }
+
+  /// The window elapsed without the peer returning → end the call for us too.
+  Future<void> _onRejoinWindowTimeout(String cid) async {
+    if (_rejoinWindowCid != cid) return;
+    debugPrint('[STREAM-CALL] ⏱ rejoin window elapsed cid=$cid — ending call');
+    _rejoinHoldTimer = null;
+    _rejoinWindowCid = null;
+    _sendRejoinWs(WSMessageType.callRejoinResolved, cid, {'outcome': 'ended'});
+    reconnectingPeerName.value = null;
+    await endCall(reason: 'rejoin_timeout');
+  }
+
+  /// Tear down any in-flight rejoin window (timers + banner). Called when a
+  /// terminate arrives mid-window and from `_clearMirror`.
+  void _cancelRejoinWindow({bool clearBanner = true}) {
+    _rejoinSignalTimer?.cancel();
+    _rejoinSignalTimer = null;
+    _rejoinHoldTimer?.cancel();
+    _rejoinHoldTimer = null;
+    _reconnectedFlashTimer?.cancel();
+    _reconnectedFlashTimer = null;
+    _rejoinWindowCid = null;
+    if (clearBanner) {
+      reconnectingPeerName.value = null;
+      reconnectedFlash.value = false;
+    }
+  }
+
   @override
   Future<void> declineCall({String? reason, String? callId}) async {
     debugPrint('[STREAM-CALL] ▶ declineCall(reason=$reason, callId=$callId)  '
@@ -1828,6 +2215,8 @@ class StreamCallService implements ICallBackend {
     await _callEventsSub?.cancel();
     await _ringingEventsSub?.cancel();
     await _amigoTerminateSub?.cancel();
+    await _amigoPeerDroppedSub?.cancel();
+    await _peerPresenceSub?.cancel();
     _activeCallSub = null;
     _incomingCallSub = null;
     _callStateSub = null;
@@ -1836,6 +2225,8 @@ class StreamCallService implements ICallBackend {
     _callEventsSub = null;
     _ringingEventsSub = null;
     _amigoTerminateSub = null;
+    _amigoPeerDroppedSub = null;
+    _peerPresenceSub = null;
     try {
       await _client?.disconnect();
     } catch (_) {}

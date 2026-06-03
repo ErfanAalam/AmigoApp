@@ -89,6 +89,15 @@ class WebSocketMessageHandler {
   final StreamController<CallPayload> _callMissedController =
       StreamController<CallPayload>.broadcast();
 
+  // Ghost-call recovery (inbound, for the dropped party L):
+  final StreamController<CallPayload> _callRejoinAvailableController =
+      StreamController<CallPayload>.broadcast();
+  final StreamController<CallPayload> _callRejoinExpiredController =
+      StreamController<CallPayload>.broadcast();
+  // Ghost-call recovery (inbound, for the still-connected waiter G):
+  final StreamController<CallPayload> _callRejoinPeerDroppedController =
+      StreamController<CallPayload>.broadcast();
+
   // Emoji reactions controller
   final StreamController<MessageReactPayload> _messageReactController =
       StreamController<MessageReactPayload>.broadcast();
@@ -179,6 +188,21 @@ class WebSocketMessageHandler {
 
   /// Get stream for call missed events (type: 'call:missed')
   Stream<CallPayload> get callMissedStream => _callMissedController.stream;
+
+  /// Ghost-call recovery: the peer dropped and this call is rejoinable
+  /// (type: 'call:rejoin:available').
+  Stream<CallPayload> get callRejoinAvailableStream =>
+      _callRejoinAvailableController.stream;
+
+  /// Ghost-call recovery: the rejoin window closed — clear the dot
+  /// (type: 'call:rejoin:expired').
+  Stream<CallPayload> get callRejoinExpiredStream =>
+      _callRejoinExpiredController.stream;
+
+  /// Ghost-call recovery: the OTHER party dropped — the still-connected waiter
+  /// should show "Reconnecting…" (type: 'call:rejoin:peer_dropped').
+  Stream<CallPayload> get callRejoinPeerDroppedStream =>
+      _callRejoinPeerDroppedController.stream;
 
   /// Get stream for emoji reactions (type: 'message:react')
   Stream<MessageReactPayload> get messageReactStream =>
@@ -443,6 +467,32 @@ class WebSocketMessageHandler {
           if (missedPayload != null) {
             _callMissedController.add(missedPayload);
           }
+          break;
+
+        case WSMessageType.callRejoinAvailable:
+          final payload = message.callPayload;
+          if (payload != null) {
+            _callRejoinAvailableController.add(payload);
+          }
+          break;
+
+        case WSMessageType.callRejoinExpired:
+          final payload = message.callPayload;
+          if (payload != null) {
+            _callRejoinExpiredController.add(payload);
+          }
+          break;
+
+        case WSMessageType.callRejoinPeerDropped:
+          final payload = message.callPayload;
+          if (payload != null) {
+            _callRejoinPeerDroppedController.add(payload);
+          }
+          break;
+
+        case WSMessageType.callRejoinOpen:
+        case WSMessageType.callRejoinResolved:
+          // Outbound-only (this client sends these); never received here.
           break;
 
         case WSMessageType.messageForward:
@@ -751,6 +801,9 @@ class WebSocketMessageHandler {
     _callErrorController.close();
     _callHoldController.close();
     _callMissedController.close();
+    _callRejoinAvailableController.close();
+    _callRejoinExpiredController.close();
+    _callRejoinPeerDroppedController.close();
     _messageReactController.close();
     _userUpdateController.close();
     _conversationDisappearingController.close();

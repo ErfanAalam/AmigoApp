@@ -150,6 +150,14 @@ enum WSMessageType {
   callHold('call:hold'),
   callMissed('call:missed'),
   callError('call:error'),
+  // Ghost-call recovery / rejoin window (see RejoinableCall feature):
+  // G→backend "peer dropped, open 10s window"; backend→L "you can rejoin";
+  // G→backend "window resolved"; backend→L "window closed, clear the dot".
+  callRejoinOpen('call:rejoin:open'),
+  callRejoinAvailable('call:rejoin:available'),
+  callRejoinResolved('call:rejoin:resolved'),
+  callRejoinExpired('call:rejoin:expired'),
+  callRejoinPeerDropped('call:rejoin:peer_dropped'),
   socketHealthCheck('socket:health_check'),
   socketPing('socket:ping'),
   socketPong('socket:pong'),
@@ -649,6 +657,11 @@ class WSMessage {
       case WSMessageType.callHold:
       case WSMessageType.callMissed:
       case WSMessageType.callError:
+      case WSMessageType.callRejoinOpen:
+      case WSMessageType.callRejoinAvailable:
+      case WSMessageType.callRejoinResolved:
+      case WSMessageType.callRejoinExpired:
+      case WSMessageType.callRejoinPeerDropped:
         try {
           return CallPayload.fromJson(json);
         } catch (_) {

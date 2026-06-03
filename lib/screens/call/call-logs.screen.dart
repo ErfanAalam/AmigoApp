@@ -8,8 +8,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/api_service.dart';
 import '../../models/call.model.dart';
 import '../../providers/call.provider.dart';
+import '../../providers/rejoinable-call.provider.dart';
 import '../../providers/theme-color.provider.dart';
+import '../../services/call/stream/stream_call.service.dart';
 import '../../ui/app-bar.widget.dart';
+import '../../ui/pulsing-dot.widget.dart';
 import '../../ui/snackbar.dart';
 
 class CallsPage extends ConsumerStatefulWidget {
@@ -361,21 +364,39 @@ class CallsPageState extends ConsumerState<CallsPage>
   }
 
   Widget _buildCallHistoryItem(CallHistoryItem call) {
+    // Ghost-call recovery: if this call is still active and rejoinable (the
+    // peer is holding it open), flag it with a pulsing green dot and turn the
+    // whole row into a "tap to rejoin" affordance.
+    final rejoinable = ref.watch(rejoinableCallProvider);
+    final isRejoinable = rejoinable != null && rejoinable.cid == call.id;
+
     return Card(
       color: Colors.white,
       shadowColor: Colors.grey.withAlpha(20),
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: call.contactProfilePic != null
-              ? Colors.transparent
-              : _getCallStatusColor(call.status),
-          backgroundImage: call.contactProfilePic != null
-              ? CachedNetworkImageProvider(call.contactProfilePic!)
-              : null,
-          child: call.contactProfilePic == null
-              ? Icon(_getCallIcon(call), color: Colors.white, size: 20)
-              : null,
+        onTap: isRejoinable ? () => _rejoinFromLog(call, rejoinable) : null,
+        leading: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            CircleAvatar(
+              backgroundColor: call.contactProfilePic != null
+                  ? Colors.transparent
+                  : _getCallStatusColor(call.status),
+              backgroundImage: call.contactProfilePic != null
+                  ? CachedNetworkImageProvider(call.contactProfilePic!)
+                  : null,
+              child: call.contactProfilePic == null
+                  ? Icon(_getCallIcon(call), color: Colors.white, size: 20)
+                  : null,
+            ),
+            if (isRejoinable)
+              const Positioned(
+                right: -1,
+                bottom: -1,
+                child: PulsingDot(size: 13),
+              ),
+          ],
         ),
         title: Text(
           call.contactName,
@@ -384,30 +405,47 @@ class CallsPageState extends ConsumerState<CallsPage>
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(
-                  _getCallDirectionIcon(call.type),
-                  size: 16,
-                  color: _getCallStatusColor(call.status),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  _getCallStatusText(call.status),
-                  style: TextStyle(
-                    color: _getCallStatusColor(call.status),
-                    fontSize: 12,
+            isRejoinable
+                ? const Row(
+                    children: [
+                      Icon(Icons.podcasts_rounded,
+                          size: 16, color: Color(0xFF22C55E)),
+                      SizedBox(width: 4),
+                      Text(
+                        'Active · tap to rejoin',
+                        style: TextStyle(
+                          color: Color(0xFF15803D),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Icon(
+                        _getCallDirectionIcon(call.type),
+                        size: 16,
+                        color: _getCallStatusColor(call.status),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _getCallStatusText(call.status),
+                        style: TextStyle(
+                          color: _getCallStatusColor(call.status),
+                          fontSize: 12,
+                        ),
+                      ),
+                      if (call.durationSeconds > 0) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          '• ${_formatDuration(call.durationSeconds)}',
+                          style:
+                              TextStyle(color: Colors.grey[600], fontSize: 12),
+                        ),
+                      ],
+                    ],
                   ),
-                ),
-                if (call.durationSeconds > 0) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    '• ${_formatDuration(call.durationSeconds)}',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                  ),
-                ],
-              ],
-            ),
             const SizedBox(height: 2),
             Text(
               _formatDateTime(call.startedAt.toLocal()),
@@ -415,25 +453,56 @@ class CallsPageState extends ConsumerState<CallsPage>
             ),
           ],
         ),
-        trailing: Consumer(
-          builder: (context, ref, child) {
-            final callServiceState = ref.watch(callServiceProvider);
-            final bool canCall = !callServiceState.hasActiveCall;
-            final themeColor = ref.watch(themeColorProvider);
+        trailing: isRejoinable
+            ? FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF22C55E),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: () => _rejoinFromLog(call, rejoinable),
+                icon: const Icon(Icons.call_rounded, size: 16),
+                label: const Text('Rejoin'),
+              )
+            : Consumer(
+                builder: (context, ref, child) {
+                  final callServiceState = ref.watch(callServiceProvider);
+                  final bool canCall = !callServiceState.hasActiveCall;
+                  final themeColor = ref.watch(themeColorProvider);
 
-            return IconButton(
-              icon: Icon(
-                Icons.call,
-                color: canCall ? themeColor.primary : Colors.grey,
+                  return IconButton(
+                    icon: Icon(
+                      Icons.call,
+                      color: canCall ? themeColor.primary : Colors.grey,
+                    ),
+                    onPressed: canCall
+                        ? () => _initiateCall(call.contactId, call.contactName)
+                        : null,
+                  );
+                },
               ),
-              onPressed: canCall
-                  ? () => _initiateCall(call.contactId, call.contactName)
-                  : null,
-            );
-          },
-        ),
       ),
     );
+  }
+
+  /// Rejoin an active call straight from its Call-Logs row. Clears the dot and
+  /// warns if the call turns out to have already ended.
+  Future<void> _rejoinFromLog(
+    CallHistoryItem call,
+    RejoinableCall rejoinable,
+  ) async {
+    final ok = await StreamCallService().rejoinCall(
+      rejoinable.cid,
+      peerId: rejoinable.peerId,
+      peerName: rejoinable.peerName.isNotEmpty
+          ? rejoinable.peerName
+          : call.contactName,
+      peerPfp: rejoinable.peerPfp ?? call.contactProfilePic,
+    );
+    // Clear the dot either way: on success we're back in the call (the call
+    // screen takes over), on failure the call is gone.
+    ref.read(rejoinableCallProvider.notifier).clear(cid: rejoinable.cid);
+    if (!ok && mounted) Snack.error('That call has already ended');
   }
 
   IconData _getCallIcon(CallHistoryItem call) {

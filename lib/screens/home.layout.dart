@@ -8,7 +8,10 @@ import '../api/api_service.dart';
 import '../models/user.model.dart';
 import '../providers/chat.provider.dart';
 import '../providers/notification-badge.provider.dart';
+import '../providers/rejoinable-call.provider.dart';
 import '../providers/theme-color.provider.dart';
+import '../services/socket/ws-message.handler.dart';
+import '../ui/pulsing-dot.widget.dart';
 import '../utils/user.utils.dart';
 import 'call/call-logs.screen.dart';
 import 'chat/dm/dm-list.screen.dart';
@@ -22,7 +25,8 @@ class MainScreen extends ConsumerStatefulWidget {
   ConsumerState<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends ConsumerState<MainScreen> {
+class _MainScreenState extends ConsumerState<MainScreen>
+    with WidgetsBindingObserver {
   int _currentPageIndex = 0;
   final GlobalKey<ChatsPageState> _chatsPageKey = GlobalKey<ChatsPageState>();
   final GlobalKey<GroupsPageState> _groupsPageKey =
@@ -33,9 +37,15 @@ class _MainScreenState extends ConsumerState<MainScreen> {
   late final PageController _pageController;
   late final List<Widget> _pages;
 
+  // Ghost-call recovery: keep the rejoinable-call provider in sync with the
+  // backend's rejoin-window signals (live over WS) + hydrate on open/resume.
+  StreamSubscription? _rejoinAvailableSub;
+  StreamSubscription? _rejoinExpiredSub;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _pageController = PageController(initialPage: _currentPageIndex);
 
     _pages = [
@@ -53,7 +63,56 @@ class _MainScreenState extends ConsumerState<MainScreen> {
       }
     });
 
+    _wireRejoinSignals();
     _loadUserDetails();
+  }
+
+  /// Subscribe to the backend's rejoin-window WS signals and feed them into
+  /// the provider; hydrate once now to catch a window opened while we were
+  /// away (e.g. killed app reopened within the 10s).
+  void _wireRejoinSignals() {
+    final handler = WebSocketMessageHandler();
+    _rejoinAvailableSub = handler.callRejoinAvailableStream.listen((p) {
+      final cid = p.callId;
+      final data = p.data;
+      if (cid == null || data is! Map) return;
+      final peerId = data['peer_id']?.toString();
+      final expiresAt = DateTime.tryParse(data['expires_at']?.toString() ?? '');
+      if (peerId == null || expiresAt == null) return;
+      final peerName = data['peer_name']?.toString();
+      ref.read(rejoinableCallProvider.notifier).set(RejoinableCall(
+            cid: cid,
+            peerId: peerId,
+            peerName:
+                (peerName != null && peerName.isNotEmpty) ? peerName : 'Unknown',
+            peerPfp: data['peer_pfp']?.toString(),
+            expiresAt: expiresAt,
+          ));
+    });
+    _rejoinExpiredSub = handler.callRejoinExpiredStream.listen((p) {
+      ref.read(rejoinableCallProvider.notifier).clear(cid: p.callId);
+    });
+    // Cover the missed-push / killed-app case.
+    ref.read(rejoinableCallProvider.notifier).hydrateFromBackend();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      // Re-hydrate on resume: a rejoin window may have opened (or closed)
+      // while we were backgrounded and the live WS push could have been missed.
+      ref.read(rejoinableCallProvider.notifier).hydrateFromBackend();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _rejoinAvailableSub?.cancel();
+    _rejoinExpiredSub?.cancel();
+    _pageController.dispose();
+    super.dispose();
   }
 
   void _loadUserDetails() async {
@@ -93,6 +152,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     final badgeState = ref.watch(notificationBadgeProvider);
     final unreadDMs = ref.watch(chatProvider).unreadDmCount;
     final unreadGroups = ref.watch(chatProvider).unreadGroupCount;
+    final hasRejoinableCall = ref.watch(rejoinableCallProvider) != null;
 
     return Scaffold(
       extendBody: true,
@@ -131,6 +191,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
             selectedIcon: Icons.call_rounded,
             label: 'Calls',
             badgeCount: badgeState.callCount,
+            showDot: hasRejoinableCall,
           ),
           const FloatingPillNavItem(
             icon: Icons.settings_outlined,
@@ -214,11 +275,16 @@ class FloatingPillNavItem {
   final String label;
   final int? badgeCount;
 
+  /// When true, show a pulsing green dot (no number) instead of/alongside the
+  /// count badge — used to flag a rejoinable active call on the Calls tab.
+  final bool showDot;
+
   const FloatingPillNavItem({
     required this.icon,
     required this.selectedIcon,
     required this.label,
     this.badgeCount,
+    this.showDot = false,
   });
 }
 
@@ -343,6 +409,13 @@ class _FloatingPillNavButtonState extends State<_FloatingPillNavButton> {
                           ),
                         ),
                       ),
+                    )
+                  // Pulsing green dot for a rejoinable active call (no count).
+                  else if (widget.item.showDot)
+                    const Positioned(
+                      right: -6,
+                      top: -2,
+                      child: PulsingDot(size: 10),
                     ),
                 ],
               ),
