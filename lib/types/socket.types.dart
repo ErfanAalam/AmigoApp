@@ -25,7 +25,9 @@ enum ChatType {
 enum ConnectionStatusType {
   online('online'),
   offline('offline'),
-  stale('stale');
+  // App is backgrounded: WS may still be alive, but the user is also reachable
+  // via FCM push. Peers render this as online (they're still reachable).
+  background('background');
 
   final String value;
   const ConnectionStatusType(this.value);

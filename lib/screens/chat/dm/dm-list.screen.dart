@@ -218,12 +218,11 @@ class ChatsPageState extends ConsumerState<ChatsPage>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
 
+    // Foreground/background presence + resume sync are driven app-wide from
+    // main.dart (so they fire from any screen, not just this one). Here we only
+    // clear the active conversation when returning to the list on resume.
     if (state == AppLifecycleState.resumed) {
       ref.read(chatProvider.notifier).setActiveConversation(null, null);
-      // Pull any messages missed while in background and refresh WS if needed
-      ref.read(chatProvider.notifier).syncOnResume();
-    } else if (state == AppLifecycleState.paused) {
-      ref.read(chatProvider.notifier).onAppBackground();
     }
   }
 

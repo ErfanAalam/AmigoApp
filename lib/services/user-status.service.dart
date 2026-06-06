@@ -33,12 +33,15 @@ class UserStatusService {
   }
 
   /// Handle connection:status WebSocket message.
-  /// Backend sends 'online' | 'offline' | 'stale' (not 'foreground'/'background').
+  /// Backend sends 'online' | 'offline' | 'background'. A backgrounded peer is
+  /// still reachable (WS may be alive, and they get FCM), so we render them as
+  /// online — only an explicit 'offline' counts as offline.
   void handleUserOnlineMessage(ConnectionStatusPayload payload) {
     try {
       setUserOnlineStatus(
         payload.senderId,
-        isOnline: payload.status == 'online',
+        isOnline: payload.status == ConnectionStatusType.online.value ||
+            payload.status == ConnectionStatusType.background.value,
       );
     } catch (e) {
       debugPrint('❌ Error handling connection:status message: $e');

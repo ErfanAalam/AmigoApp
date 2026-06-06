@@ -549,20 +549,26 @@ class NotificationService {
         expiresAt: chatPayload.expiresAt?.toIso8601String(),
       );
 
-      // Store in local database
-      await _messageRepo.insertMessage(messageModel);
-      debugPrint('✅ Stored message from FCM notification: ${chatPayload.id}');
-
-      // update the conversation unread count
-      final conversation = await _conversationRepo.getConversationById(
-        chatPayload.convId,
+      // Store in local database. Only bump unread if the row was actually new —
+      // the same message may already have been inserted (and counted) via the
+      // WS path under background dual-delivery, and we must not double-count.
+      final wasInserted = await _messageRepo.insertMessageReturningInserted(
+        messageModel,
       );
-      await _conversationRepo.updateUnreadCount(
-        chatPayload.convId,
-        (conversation?.unreadCount ?? 0) + 1,
-      );
+      debugPrint('✅ Stored message from FCM notification: ${chatPayload.id} (new=$wasInserted)');
 
-      // Send delivery receipt to backend
+      if (wasInserted) {
+        // update the conversation unread count
+        final conversation = await _conversationRepo.getConversationById(
+          chatPayload.convId,
+        );
+        await _conversationRepo.updateUnreadCount(
+          chatPayload.convId,
+          (conversation?.unreadCount ?? 0) + 1,
+        );
+      }
+
+      // Send delivery receipt to backend (idempotent — safe even on a dup)
       await sendDeliveryReceipt(chatPayload);
     } catch (e) {
       debugPrint('❌ Error storing message from FCM notification: $e');
@@ -720,8 +726,16 @@ class NotificationService {
     final isGroup =
         convType == ChatType.group || convType == ChatType.communityGroup;
 
-    // 1. Accumulate messages (persisted via SharedPreferences for cross-isolate support)
+    // 1. Accumulate messages (persisted via SharedPreferences for cross-isolate support).
+    //    Returns null when this message id was already accumulated — i.e. a
+    //    notification was already raised for it (the same message can arrive via
+    //    both WS and FCM under background dual-delivery). Skip the re-show so the
+    //    user is never double-notified.
     final messages = await _accumulateMessage(convId, chatPayload);
+    if (messages == null) {
+      debugPrint('[NOTIF] Duplicate message ${chatPayload.id} — skipping notification');
+      return;
+    }
 
     // Look up sender name from local DB
     final senderUser = await UserInfoCache.instance.getUser(
@@ -836,9 +850,13 @@ class NotificationService {
     await _updateSummaryNotification();
   }
 
-  /// Accumulate messages per conversation using SharedPreferences
-  /// Returns the list of accumulated messages (max 5) for the conversation
-  Future<List<ChatMessagePayload>> _accumulateMessage(
+  /// Accumulate messages per conversation using SharedPreferences.
+  /// Returns the list of accumulated messages (max 5) for the conversation, or
+  /// `null` if this message id was already accumulated (a notification was
+  /// already shown for it) — the caller should then skip re-notifying. This is
+  /// the single dedup point that makes [showMessageNotification] idempotent per
+  /// message id, which is what keeps WS+FCM dual-delivery from double-pinging.
+  Future<List<ChatMessagePayload>?> _accumulateMessage(
     String convId,
     ChatMessagePayload newMessage,
   ) async {
@@ -854,6 +872,11 @@ class NotificationService {
         final List<dynamic> decoded = jsonDecode(existing);
         messages = decoded.map((e) => ChatMessagePayload.fromJson(e)).toList();
       } catch (_) {}
+    }
+
+    // Dedup: already notified for this id (e.g. it arrived via both transports).
+    if (messages.any((m) => m.id == newMessage.id)) {
+      return null;
     }
 
     // Append new message

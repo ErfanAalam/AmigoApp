@@ -309,7 +309,6 @@ Future<void> _handleMessageNotificationBatchBackground(
 
   // Collect IDs for batch delivery receipt
   final List<Map<String, dynamic>> deliveries = [];
-  final messageRepo = MessageRepository();
 
   for (final wsMessage in wsMessages) {
     try {
@@ -317,11 +316,18 @@ Future<void> _handleMessageNotificationBatchBackground(
         case WSMessageType.messageNew:
           final chatPayload = wsMessage.chatMessagePayload;
           if (chatPayload != null) {
-            final alreadyExists = await messageRepo.messageExists(
-              chatPayload.id,
+            // Store first (atomic row dedupe + unread gating happens inside).
+            await _storeMessageFromPayloadBackground(
+              chatPayload,
+              sendReceipt: false,
             );
 
-            if (!alreadyExists && !isSilent) {
+            // Then notify. We do NOT gate on message-row existence: under
+            // background dual-delivery the WS may have already inserted the row
+            // silently (no notification), so a row that "exists" still needs a
+            // ping. Duplicate notifications are deduped inside
+            // showMessageNotification (idempotent per message id).
+            if (!isSilent) {
               final msgBody =
                   chatPayload.body ??
                   ((chatPayload.msgType != MessageType.text)
@@ -339,16 +345,9 @@ Future<void> _handleMessageNotificationBatchBackground(
               } catch (e, st) {
                 debugPrint('[FCM-BG] ❌ showMessageNotification failed: $e\n$st');
               }
-            } else if (isSilent) {
-              debugPrint('[FCM-BG] silent=1 — storing msg ${chatPayload.id} without notification');
             } else {
-              debugPrint('[FCM-BG] Message ${chatPayload.id} already exists, skipping notification');
+              debugPrint('[FCM-BG] silent=1 — stored msg ${chatPayload.id} without notification');
             }
-
-            await _storeMessageFromPayloadBackground(
-              chatPayload,
-              sendReceipt: false,
-            );
 
             deliveries.add({
               'message_id': chatPayload.id.toString(),
@@ -594,38 +593,49 @@ Future<void> _storeMessageFromPayloadBackground(
       expiresAt: chatPayload.expiresAt?.toIso8601String(),
     );
 
-    // Store in local database
+    // Store in local database. Only treat as a new arrival (bump unread / move
+    // last-message) if the row was actually inserted — the same message may have
+    // already landed via the WS path under background dual-delivery, and we must
+    // not double-count unread.
     final messageRepo = MessageRepository();
-    await messageRepo.insertMessage(messageModel);
+    final wasInserted = await messageRepo.insertMessageReturningInserted(
+      messageModel,
+    );
 
     // Update conversation's last message and unread count
     final conversationRepo = ConversationRepository();
     final conversationId = chatPayload.convId;
     final messageId = chatPayload.id;
 
-    // Get current conversation to check unread count
-    final conversation = await conversationRepo.getConversationById(
-      conversationId,
-    );
-
-    if (conversation != null) {
-      // Increment unread count (messages from notifications are unread)
-      final currentUnreadCount = conversation.unreadCount ?? 0;
-      final newUnreadCount = currentUnreadCount + 1;
-
-      // Update last message ID
-      await conversationRepo.updateLastMessage(conversationId, messageId);
-
-      // Update unread count
-      await conversationRepo.updateUnreadCount(conversationId, newUnreadCount);
-
+    if (!wasInserted) {
       debugPrint(
-        '✅ [BACKGROUND] Updated conversation $conversationId: lastMessageId=$messageId, unreadCount=$newUnreadCount',
+        'ℹ️ [BACKGROUND] Message ${chatPayload.id} already stored — skipping unread bump',
       );
     } else {
-      debugPrint(
-        '⚠️ [BACKGROUND] Conversation $conversationId not found in database',
+      // Get current conversation to check unread count
+      final conversation = await conversationRepo.getConversationById(
+        conversationId,
       );
+
+      if (conversation != null) {
+        // Increment unread count (messages from notifications are unread)
+        final currentUnreadCount = conversation.unreadCount ?? 0;
+        final newUnreadCount = currentUnreadCount + 1;
+
+        // Update last message ID
+        await conversationRepo.updateLastMessage(conversationId, messageId);
+
+        // Update unread count
+        await conversationRepo.updateUnreadCount(conversationId, newUnreadCount);
+
+        debugPrint(
+          '✅ [BACKGROUND] Updated conversation $conversationId: lastMessageId=$messageId, unreadCount=$newUnreadCount',
+        );
+      } else {
+        debugPrint(
+          '⚠️ [BACKGROUND] Conversation $conversationId not found in database',
+        );
+      }
     }
 
     debugPrint(

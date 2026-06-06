@@ -247,11 +247,36 @@ class ChatNotifier extends Notifier<ChatState> {
     }
   }
 
+  /// Emit a foreground/background presence signal to the backend over the WS.
+  /// `background` keeps the socket alive but tells the server to ALSO push via
+  /// FCM; `online` reverts to WS-only. A no-op (returns false) if the socket is
+  /// down — in which case the user is already offline server-side and the FCM
+  /// offline path covers them, so there is nothing to signal.
+  Future<void> _emitPresence(ConnectionStatusType status) async {
+    String? senderId = StatusAckService.instance.currentUserId;
+    if (senderId == null || senderId.isEmpty) {
+      senderId = (await UserUtils().getUserDetails())?.id;
+    }
+    if (senderId == null || senderId.isEmpty) return;
+
+    final message = {
+      'type': WSMessageType.connectionStatus.value,
+      'payload': {'sender_id': senderId, 'status': status.value},
+      'ws_timestamp': DateTime.now().toUtc().toIso8601String(),
+    };
+    await _transportManager.sendMessage(message);
+  }
+
   /// Called when the app comes back to the foreground.
-  /// Re-attempts WS connection and pulls any messages missed while in background.
+  /// Clears the backend's background flag (stops the parallel FCM pushes),
+  /// re-attempts WS connection, and pulls any messages missed while in background.
   Future<void> syncOnResume() async {
-    debugPrint('[CHAT-PROVIDER] App resumed — syncing missed messages');
+    debugPrint('[CHAT-PROVIDER] App resumed — clearing background presence & syncing');
     state = state.copyWith(lastSyncedAt: DateTime.now());
+
+    // Tell the backend we're foreground again. No-ops if the socket died; the
+    // reconnect below then registers a fresh foreground connection anyway.
+    await _emitPresence(ConnectionStatusType.online);
 
     // Attempt WS reconnect; poll immediately for gap-fill regardless
     if (!_transportManager.isConnected) {
@@ -268,9 +293,12 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   /// Called when the app goes to background.
+  /// Keeps the WS connected and signals the backend we're backgrounded so it
+  /// ALSO sends FCM pushes — a frozen socket won't wake the app, so the push is
+  /// the reliable delivery path. The client dedupes the WS/FCM overlap by id.
   void onAppBackground() {
-    debugPrint('[CHAT-PROVIDER] App backgrounded');
-    state = state.copyWith(transportStatus: TransportStatus.disconnected);
+    debugPrint('[CHAT-PROVIDER] App backgrounded — keeping WS alive, signalling background');
+    unawaited(_emitPresence(ConnectionStatusType.background));
   }
 
   /// Load conversations from server
@@ -1513,14 +1541,15 @@ class ChatNotifier extends Notifier<ChatState> {
       final convTypeStr = await _conversationsRepo.getConversationTypeById(convId);
       final convType = ChatType.fromString(convTypeStr) ?? ChatType.dm;
 
-      // Idempotency guard: if this message id is already in local DB, this is a
-      // replay (WS reconnect after FCM delivered it, or a re-join flush).
-      // Skipping the unread-count increment here prevents double-counting on
-      // app restarts when the server re-delivers unacked messages.
-      final isReplay = await _messageRepo.getMessageById(payload.id) != null;
-
-      // Insert message into local DB (upsert — safe on replay)
-      await _messageRepo.insertMessage(
+      // Insert with the atomic "was newly inserted" signal. Under background
+      // dual-delivery the same id arrives via BOTH the WS and an FCM push (and
+      // each runs in its own isolate with its own DB connection), so a
+      // non-atomic getMessageById check-then-act would let both writers decide
+      // "new arrival" and double-count unread. insertReturningInserted is a
+      // single INSERT OR IGNORE ... RETURNING, so exactly one writer sees the
+      // row as new. This also subsumes the old replay guard (reconnect/re-join
+      // flushes re-deliver an existing id -> wasInserted=false -> skip).
+      final wasInserted = await _messageRepo.insertMessageReturningInserted(
         MessageModel(
           id: payload.id,
           chatId: payload.convId,
@@ -1534,96 +1563,71 @@ class ChatNotifier extends Notifier<ChatState> {
         ),
       );
 
-      if (isReplay) {
-        debugPrint('[ChatProvider] Skipping unread increment for replayed message ${payload.id}');
+      if (!wasInserted) {
+        debugPrint('[ChatProvider] Message ${payload.id} already stored — skipping unread/last-message update');
         return;
       }
 
-      int newDmUnreadCount = 0, newGrpUnreadCount = 0;
+      final bool isActiveConv = state.activeConvId == convId;
+      final bool isOwnMessage = payload.senderId == currentUser?.id;
 
-      // Handle DM messages
+      // Compute the new unread count from the PERSISTED conversation row (same
+      // source the FCM paths use), so it's consistent regardless of which
+      // transport delivered the message and whether the conversation is
+      // currently materialized in the in-memory list.
+      final dbConv = await _conversationsRepo.getConversationById(convId);
+      final int baseUnread = dbConv?.unreadCount ?? 0;
+      final int newUnreadCount =
+          isActiveConv ? 0 : (isOwnMessage ? baseUnread : baseUnread + 1);
+
+      // Update the in-memory list (for display) only when the conversation is
+      // loaded; the Drift-backed list stream is refreshed by the DB writes below
+      // regardless, so an un-materialized conversation is not skipped anymore.
       if (convType == ChatType.dm) {
         final convIndex = state.dmList.indexWhere(
           (conv) => conv.chatId == convId,
         );
-
-        if (convIndex == -1) return;
-
-        final dm = state.dmList[convIndex];
-
-        newDmUnreadCount = state.activeConvId == convId
-            ? 0
-            : payload.senderId == currentUser?.id
-            ? dm.unreadCount ?? 0
-            : (dm.unreadCount ?? 0) + 1;
-
-        final updatedConversation = dm.copyWith(
-          lastMsgId: payload.id,
-          lastMsgType: payload.msgType.value,
-          lastMsgBody: payload.body,
-          lastMsgAt: payload.sentAt.toIso8601String(),
-          unreadCount: newDmUnreadCount,
-        );
-
-        final updatedConversations = List<DmModel>.from(state.dmList);
-        updatedConversations[convIndex] = updatedConversation;
-
-        // Sort conversations
-        final sortedConversations = await filterAndSortConversations(
-          updatedConversations,
-        );
-
-        state = state.copyWith(dmList: sortedConversations);
-      }
-      // Handle group messages
-      else if (convType == ChatType.group) {
+        if (convIndex != -1) {
+          final dm = state.dmList[convIndex];
+          final updatedConversation = dm.copyWith(
+            lastMsgId: payload.id,
+            lastMsgType: payload.msgType.value,
+            lastMsgBody: payload.body,
+            lastMsgAt: payload.sentAt.toIso8601String(),
+            unreadCount: newUnreadCount,
+          );
+          final updatedConversations = List<DmModel>.from(state.dmList);
+          updatedConversations[convIndex] = updatedConversation;
+          state = state.copyWith(
+            dmList: await filterAndSortConversations(updatedConversations),
+          );
+        }
+      } else if (convType == ChatType.group) {
         final convIndex = state.groupList.indexWhere(
           (group) => group.chatId == convId,
         );
-
-        if (convIndex == -1) return;
-
-        final group = state.groupList[convIndex];
-
-        // Update group's last message
-        newGrpUnreadCount = state.activeConvId == convId
-            ? 0
-            : payload.senderId == currentUser?.id
-            ? group.unreadCount
-            : (group.unreadCount) + 1;
-
-        final updatedGroup = group.copyWith(
-          lastMsgId: payload.id,
-          lastMsgType: payload.msgType.value,
-          lastMsgBody: payload.body,
-          lastMsgAt: payload.sentAt.toIso8601String(),
-          unreadCount: newGrpUnreadCount,
-        );
-
-        final updatedGroups = List<GroupModel>.from(state.groupList);
-        updatedGroups[convIndex] = updatedGroup;
-
-        // Sort groups
-        final sortedGroups = await filterAndSortGroupConversations(
-          updatedGroups,
-        );
-
-        state = state.copyWith(groupList: sortedGroups);
+        if (convIndex != -1) {
+          final group = state.groupList[convIndex];
+          final updatedGroup = group.copyWith(
+            lastMsgId: payload.id,
+            lastMsgType: payload.msgType.value,
+            lastMsgBody: payload.body,
+            lastMsgAt: payload.sentAt.toIso8601String(),
+            unreadCount: newUnreadCount,
+          );
+          final updatedGroups = List<GroupModel>.from(state.groupList);
+          updatedGroups[convIndex] = updatedGroup;
+          state = state.copyWith(
+            groupList: await filterAndSortGroupConversations(updatedGroups),
+          );
+        }
       }
 
-      // Update unreadCount and lastmessageID in DB
-      await _conversationsRepo.updateUnreadCount(
-        convId,
-        convType == ChatType.dm ? newDmUnreadCount : newGrpUnreadCount,
-      );
-
-      // if (payload.canonicalId != null) {
+      // Persist unread + last-message to DB regardless of in-memory list
+      // materialization (previously this was skipped for conversations not yet
+      // loaded, leaving a stale badge/last-message when WS won the insert race).
+      await _conversationsRepo.updateUnreadCount(convId, newUnreadCount);
       await _conversationsRepo.updateLastMessage(convId, payload.id);
-      // } else {
-      //   debugPrint(
-      //     '❌ canonicalId is null, skipping last message update in DB for: \n opt message id: ${payload.optimisticId}, msg body : ${payload.body}',
-      //   );
-      // }
     } catch (e) {
       debugPrint('❌ Error handling new message: $e');
     }
@@ -2027,8 +2031,10 @@ class ChatNotifier extends Notifier<ChatState> {
   Future<void> _handleOnlineStatus(ConnectionStatusPayload payload) async {
     try {
       final userId = payload.senderId;
-      // Backend now emits 'online' | 'offline' | 'stale'
-      final isOnline = payload.status == 'online';
+      // Backend emits 'online' | 'offline' | 'background'. A backgrounded peer
+      // is still reachable (WS may be alive + FCM), so treat it as online.
+      final isOnline = payload.status == ConnectionStatusType.online.value ||
+          payload.status == ConnectionStatusType.background.value;
       debugPrint('[OnlineStatus] user=$userId status=${payload.status} isOnline=$isOnline');
 
       // Update user online status in database

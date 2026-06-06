@@ -135,6 +135,46 @@ class MessageRepository {
     }
   }
 
+  /// Insert a message and report whether the MAIN message row was newly
+  /// inserted (false = it already existed and the insert was ignored).
+  ///
+  /// Callers use this to count unread at most once per message id across the
+  /// WS + FCM dual-delivery overlap (a backgrounded user receives the same
+  /// message over both transports). The existence check and the insert run in
+  /// one transaction so concurrent writers (e.g. the background FCM isolate and
+  /// the foreground WS isolate during the resume window) can't both report
+  /// "newly inserted" for the same id.
+  Future<bool> insertMessageReturningInserted(MessageModel message) async {
+    final db = sqliteDatabase.database;
+    try {
+      return await db.transaction(() async {
+        final preview = _previewToModel(message);
+        if (preview != null) {
+          await db.into(db.messages).insert(
+                _modelToCompanion(preview),
+                mode: InsertMode.insertOrIgnore,
+              );
+        }
+        // Atomic: `INSERT OR IGNORE ... RETURNING` — returns null iff the row
+        // already existed (conflict ignored). A single statement holding the
+        // write lock, so it's race-free even when the foreground WS isolate and
+        // the background FCM isolate insert the same id concurrently: exactly
+        // one of them gets a non-null row back.
+        final inserted = await db.into(db.messages).insertReturningOrNull(
+              _modelToCompanion(message),
+              mode: InsertMode.insertOrIgnore,
+            );
+        return inserted != null;
+      });
+    } catch (e) {
+      debugPrint(
+        "Error inserting message (returning inserted) ID ${message.id}: $e",
+      );
+      // Conservative: report "not newly inserted" so callers don't over-count.
+      return false;
+    }
+  }
+
   /// Insert multiple messages (bulk insert)
   /// Uses INSERT OR IGNORE so duplicates are silently skipped.
   Future<void> insertMessages(List<MessageModel> messages) async {

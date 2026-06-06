@@ -28,6 +28,10 @@ class StatusAckService {
     _currentUserId = userId;
   }
 
+  /// Current authenticated user id, if known. Set early during chat init, so
+  /// it's a cheap synchronous source for presence/ack payloads.
+  String? get currentUserId => _currentUserId;
+
   void ackMessage(String chatId, String msgId, {required bool isRead}) {
     debugPrint(
       '[StatusAck] Buffering msgId=$msgId chat=$chatId isRead=$isRead userId=$_currentUserId',

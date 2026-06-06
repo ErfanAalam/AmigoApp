@@ -27,6 +27,7 @@ import 'screens/home.layout.dart';
 import 'screens/share/external-share.screen.dart';
 import 'screens/version-gate.screen.dart';
 import 'services/auth/auth.service.dart';
+import 'providers/chat.provider.dart';
 import 'services/call/call-foreground.service.dart';
 import 'services/call/call.service.dart';
 import 'services/call/stream/stream_call.service.dart';
@@ -310,6 +311,14 @@ class _MyAppState extends material.State<MyApp>
             '[APP_LIFECYCLE] App going to background - keeping wakelock (active call in progress)',
           );
         }
+
+        // Signal background presence ONLY on `paused` (the canonical
+        // backgrounded state). `inactive`/`detached` are transient/teardown
+        // and would cause presence flapping. Keeps the WS alive; the backend
+        // starts pushing FCM in parallel so messages still arrive.
+        if (state == material.AppLifecycleState.paused) {
+          _notifyChatLifecycle(background: true);
+        }
         break;
 
       case material.AppLifecycleState.resumed:
@@ -335,6 +344,9 @@ class _MyAppState extends material.State<MyApp>
         // NOTE: Do NOT re-open the native call screen here.
         // Doing so causes it to reopen every time the user presses back.
         // The call pill overlay gives the user a way to tap back into the call.
+
+        // Back to foreground: clear background presence, reconnect & gap-fill.
+        _notifyChatLifecycle(background: false);
         break;
 
       case material.AppLifecycleState.hidden:
@@ -347,6 +359,25 @@ class _MyAppState extends material.State<MyApp>
           );
         }
         break;
+    }
+  }
+
+  /// App-level driver for chat foreground/background presence. Lives here (not
+  /// on a single screen) so it fires no matter which screen is on top — the
+  /// per-screen observers only covered the DM list, so backgrounding from a
+  /// group chat or any other tab previously emitted nothing.
+  void _notifyChatLifecycle({required bool background}) {
+    if (!_isAuthenticated) return;
+    try {
+      final notifier = ProviderScope.containerOf(context, listen: false)
+          .read(chatProvider.notifier);
+      if (background) {
+        notifier.onAppBackground();
+      } else {
+        notifier.syncOnResume();
+      }
+    } catch (e) {
+      debugPrint('[APP_LIFECYCLE] chat presence notify failed: $e');
     }
   }
 
