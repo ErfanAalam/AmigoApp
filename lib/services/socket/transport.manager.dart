@@ -3,12 +3,12 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:dio/dio.dart';
 
 import '../../db/repositories/missed-ws-messages.repo.dart';
 import '../../utils/network.utils.dart';
 import '../../types/network.types.dart';
 import '../../api/api_service.dart';
+import '../../api/core/token_refresh_coordinator.dart';
 import '../../services/cookies.service.dart';
 import '../../utils/navigation-helper.util.dart';
 import '../message/message_gc.service.dart';
@@ -339,19 +339,12 @@ class TransportManager {
     try {
       debugPrint('[TRANSPORT-MGR] Attempting to refresh token...');
 
-      // Refresh token using the API client
+      // Single-flight refresh shared with the HTTP interceptor so the two
+      // paths never stampede the rotating refresh-token endpoint.
       final dio = _apiService.client.dio;
-      final response = await dio.post(
-        '${dio.options.baseUrl}/auth/refresh-mobile',
-        options: Options(
-          headers: {'Content-Type': 'application/json'},
-          validateStatus: (status) =>
-              status != null &&
-              (status >= 200 && status < 300 || status == 401 || status == 404),
-        ),
-      );
+      final refreshed = await TokenRefreshCoordinator.instance.refresh(dio);
 
-      if (response.statusCode == 200) {
+      if (refreshed) {
         debugPrint('[TRANSPORT-MGR] ✅ Token refreshed successfully');
 
         // Get new access token from cookies
@@ -388,9 +381,7 @@ class TransportManager {
           _errorController.add('Failed to get new access token after refresh');
         }
       } else {
-        debugPrint(
-          '[TRANSPORT-MGR] ❌ Token refresh failed (Status: ${response.statusCode})',
-        );
+        debugPrint('[TRANSPORT-MGR] ❌ Token refresh failed');
         _errorController.add('Token refresh failed - please login again');
       }
     } catch (e) {
@@ -427,9 +418,15 @@ class TransportManager {
 
     _connectionStateController.add(TransportConnectionState.reconnecting);
 
-    _reconnectTimer = Timer(delay, () {
-      if (_allowReconnect && _authToken != null) {
-        connect(_authToken!);
+    _reconnectTimer = Timer(delay, () async {
+      if (!_allowReconnect) return;
+      // Reconnect with the freshest access token from the cookie jar — a
+      // background refresh may have rotated it — instead of replaying the
+      // possibly-stale cached token (which would force a needless auth-fail
+      // round-trip before recovering).
+      final token = await _cookieService.getAccessToken() ?? _authToken;
+      if (token != null) {
+        connect(token);
       }
     });
   }

@@ -1,4 +1,3 @@
-import 'package:amigo/env.dart';
 import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +6,7 @@ import '../../services/auth/auth.service.dart';
 import '../../services/cookies.service.dart';
 import 'api_result.dart';
 import 'base_api_client.dart';
+import 'token_refresh_coordinator.dart';
 
 /// Main API client that handles initialization and token refresh
 /// This is a singleton that manages the Dio instance
@@ -59,17 +59,46 @@ class ApiClient extends BaseApiClient {
       InterceptorsWrapper(
         onRequest: (options, handler) => handler.next(options),
         onResponse: (response, handler) async {
-          // Handle token expiry (498, 499)
-          if (response.statusCode == 498 || response.statusCode == 499) {
-            final refreshSuccess = await _refreshToken(dio, authService);
+          final requestOptions = response.requestOptions;
+
+          // Handle token expiry (498, 499).
+          // `skip_refresh` guards the refresh request itself; `refresh_retried`
+          // guards against re-refreshing an already-replayed request.
+          if ((response.statusCode == 498 || response.statusCode == 499) &&
+              requestOptions.extra['skip_refresh'] != true &&
+              requestOptions.extra['refresh_retried'] != true) {
+            // Single-flight refresh shared with the transport manager — only one
+            // /auth/refresh-mobile is ever in flight, so concurrent 498/499s no
+            // longer stampede the rotating refresh token into a forced logout.
+            final refreshSuccess =
+                await TokenRefreshCoordinator.instance.refresh(dio);
+
             if (!refreshSuccess) {
               authService.logout();
+              return handler.next(response);
+            }
+
+            // Refresh succeeded — replay the original request once with the new
+            // cookies so the caller gets real data instead of the 498/499.
+            // A 498/499 is produced by the auth middleware BEFORE the route
+            // handler runs, so the original request had no side effects and is
+            // safe to replay.
+            try {
+              requestOptions.extra['refresh_retried'] = true;
+              final retried = await dio.fetch(requestOptions);
+              return handler.resolve(retried);
+            } catch (e) {
+              if (e is DioException && e.response != null) {
+                return handler.resolve(e.response!);
+              }
+              // Non-replayable request (e.g. consumed multipart) — fall back to
+              // returning the original response rather than crashing.
               return handler.next(response);
             }
           }
 
           // Handle authentication success
-          final path = response.requestOptions.path;
+          final path = requestOptions.path;
           if ((path.contains('verify-login-otp') ||
                   path.contains('verify-signup-otp')) &&
               response.statusCode == 200) {
@@ -96,39 +125,6 @@ class ApiClient extends BaseApiClient {
     );
 
     _isInitialized = true;
-  }
-
-  /// Refresh the access token
-  static Future<bool> _refreshToken(Dio dio, AuthService authService) async {
-    try {
-      final response = await dio.post(
-        '${Environment.baseUrl}/auth/refresh-mobile',
-        options: Options(
-          headers: {'Content-Type': 'application/json'},
-          validateStatus: (status) =>
-              status != null &&
-              (status >= 200 && status < 300 || status == 401 || status == 404),
-        ),
-      );
-
-      if (response.statusCode == 200) {
-        final cookies = response.headers['set-cookie'];
-        if (cookies != null && cookies.isNotEmpty) {
-          debugPrint('✅ Received new cookies in refresh response');
-        } else {
-          debugPrint('⚠️ Warning: No set-cookie headers in refresh response');
-        }
-        return true;
-      }
-
-      debugPrint(
-        '❌ Refresh token expired or invalid (Status: ${response.statusCode})',
-      );
-      return false;
-    } catch (e) {
-      debugPrint('❌ Token refresh error: $e');
-      return false;
-    }
   }
 
   /// Update user location and IP in background
