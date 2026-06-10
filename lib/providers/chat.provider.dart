@@ -418,6 +418,13 @@ class ChatNotifier extends Notifier<ChatState> {
                   dm.chatId,
                   dm.unreadCount ?? 0,
                 );
+                // Reconcile which message is pinned from the authoritative
+                // server sync — insertConversations only touches new rows, so
+                // an offline pin/unpin on an existing chat lands only here.
+                await _conversationsRepo.setPinnedMsgIdFromSync(
+                  dm.chatId,
+                  dm.pinnedMsgId,
+                );
               }
             });
             if (deletedDmIds.isNotEmpty) {
@@ -500,6 +507,16 @@ class ChatNotifier extends Notifier<ChatState> {
                 ));
               }
 
+              // Full pinned message rides in the chat-list payload; persist it
+              // so the pinned pill resolves an old pin locally (see DM path).
+              final pinned = _pinnedJsonToMessage(
+                group['pinnedMessage'] is Map<String, dynamic>
+                    ? group['pinnedMessage'] as Map<String, dynamic>
+                    : null,
+                groupModel.chatId,
+              );
+              if (pinned != null) groupLastMessagesToInsert.add(pinned);
+
               final enrichedGroup = groupModel.copyWith(
                 lastMsgId: lastMsg?['id']?.toString() ?? groupModel.lastMsgId,
                 lastMsgBody: lastMsg?['body']?.toString() ?? groupModel.lastMsgBody,
@@ -569,6 +586,10 @@ class ChatNotifier extends Notifier<ChatState> {
                 group.chatId,
                 group.unreadCount,
               );
+              await _conversationsRepo.setPinnedMsgIdFromSync(
+                group.chatId,
+                group.pinnedMsgId,
+              );
             }
           });
           if (deletedGroupIds.isNotEmpty) {
@@ -632,6 +653,43 @@ class ChatNotifier extends Notifier<ChatState> {
     state = state.copyWith(groupList: updatedGroupList);
   }
 
+  /// Build a [MessageModel] from the full pinned-message object the chat-list
+  /// payload now ships alongside each conversation. The backend sends the whole
+  /// message (not just its id) so a fresh-login client can render the pinned
+  /// pill for an *old* pin that predates its synced message window — previously
+  /// the client only had the id and silently dropped the pill when the body
+  /// wasn't in the local store. Guards attachments against the jsonb-array
+  /// shape the client's Map-typed field can't hold (mirrors lastMessage).
+  MessageModel? _pinnedJsonToMessage(
+    Map<String, dynamic>? pinnedMsg,
+    String fallbackChatId,
+  ) {
+    if (pinnedMsg == null || pinnedMsg['id'] == null) return null;
+    return MessageModel(
+      id: pinnedMsg['id'].toString(),
+      chatId:
+          (pinnedMsg['conversation_id'] ??
+                  pinnedMsg['chat_id'] ??
+                  fallbackChatId)
+              .toString(),
+      senderId: pinnedMsg['sender_id']?.toString(),
+      senderName: pinnedMsg['sender_name']?.toString(),
+      senderProfilePic: pinnedMsg['sender_profile_pic']?.toString(),
+      repliedTo: pinnedMsg['replied_to']?.toString(),
+      type:
+          MessageType.fromString(pinnedMsg['type']?.toString()) ??
+          MessageType.text,
+      body: pinnedMsg['body']?.toString(),
+      attachments: pinnedMsg['attachments'] is Map<String, dynamic>
+          ? pinnedMsg['attachments'] as Map<String, dynamic>
+          : null,
+      sentAt:
+          pinnedMsg['sent_at']?.toString() ??
+          DateTime.now().toIso8601String(),
+      deletedAt: pinnedMsg['deleted_at']?.toString(),
+    );
+  }
+
   /// Process conversations asynchronously
   Future<List<DmModel>> _convertToDmListTypeAsync(
     List<dynamic> conversationsList,
@@ -681,6 +739,18 @@ class ChatNotifier extends Notifier<ChatState> {
                     sentAt: lastMsg['sent_at']?.toString() ?? DateTime.now().toIso8601String(),
                   ));
                 }
+
+                // Full pinned message now rides in the chat-list payload.
+                // Insert it into the messages table (same batch) so the pinned
+                // pill's getMessageById lookup resolves an old pin that
+                // predates this client's synced history window.
+                final pinned = _pinnedJsonToMessage(
+                  json['pinnedMessage'] is Map<String, dynamic>
+                      ? json['pinnedMessage'] as Map<String, dynamic>
+                      : null,
+                  json['conversationId']?.toString() ?? '',
+                );
+                if (pinned != null) lastMessagesToInsert.add(pinned);
 
                 return DmModel(
                   chatId: json['conversationId']?.toString() ?? '',

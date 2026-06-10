@@ -151,9 +151,15 @@ Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
     final callerName = (callDisplayName != null && callDisplayName.isNotEmpty)
         ? callDisplayName
         : createdByName;
+    // Prefer the saved device-contact name over Stream's push-provided display
+    // name, so the incoming/missed-call notification shows the name the user
+    // saved the caller under. Falls back to the push name when not a contact.
+    final displayCallerName =
+        await UserUtils().preferredContactName(createdById, callerName);
 
     debugPrint('[STREAM-FCM]   parsed payload: type=$type  callCid=$callCid  '
-        'createdById=$createdById  callerName="$callerName"  hasVideo=$hasVideo  '
+        'createdById=$createdById  callerName="$callerName"  '
+        'displayCallerName="$displayCallerName"  hasVideo=$hasVideo  '
         'warmStart=$warmStart');
 
     if (type == 'call.missed') {
@@ -188,7 +194,7 @@ Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
       await manager.showMissedCall(
         uuid: const Uuid().v4(),
         handle: createdById,
-        callerName: callerName,
+        callerName: displayCallerName,
         callCid: callCid,
         hasVideo: hasVideo,
       );
@@ -233,7 +239,7 @@ Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
     await manager.showIncomingCall(
       uuid: const Uuid().v4(),
       handle: createdById,
-      callerName: callerName,
+      callerName: displayCallerName,
       callCid: callCid,
       hasVideo: hasVideo,
     );

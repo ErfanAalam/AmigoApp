@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 // FlutterCallkitIncoming - commented out, replaced by native call screen
 // import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'services/call/native_call_screen.service.dart';
-import 'services/contact-sync.service.dart';
+import 'services/contact-permission.service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart'
     show Permission, PermissionActions;
@@ -269,9 +269,11 @@ class _MyAppState extends material.State<MyApp>
       // Background contact-name sync: matches device address-book names
       // against users we already know about and writes any renames into the
       // local contacts table. Pure offline; the 3-second delay keeps it
-      // off the launch critical path.
+      // off the launch critical path. Routed through ContactPermissionService
+      // so a user who hasn't granted contacts access gets nudged (8s re-ask,
+      // then a one-time warning popup) instead of silently seeing no names.
       Future.delayed(const Duration(seconds: 3), () {
-        ContactSyncService().sync(force: true);
+        ContactPermissionService().ensure(force: true);
       });
     } catch (e) {
       debugPrint('❌ Failed to establish WebSocket connection: $e');
@@ -336,10 +338,12 @@ class _MyAppState extends material.State<MyApp>
         VersionGateService().check();
         // Reconcile contact names whenever we come back to the foreground —
         // catches renames the user made in the system contacts app while
-        // ours was backgrounded. The service throttles itself to once per
-        // 30 seconds so app-switching doesn't cause repeated scans.
+        // ours was backgrounded. The sync throttles itself to once per 30
+        // seconds so app-switching doesn't cause repeated scans; the
+        // permission service short-circuits to that sync when access is
+        // already granted, and otherwise runs the grant-nudge flow.
         if (_isAuthenticated) {
-          ContactSyncService().sync();
+          ContactPermissionService().ensure();
         }
         // NOTE: Do NOT re-open the native call screen here.
         // Doing so causes it to reopen every time the user presses back.

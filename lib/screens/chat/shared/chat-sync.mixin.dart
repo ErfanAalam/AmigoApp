@@ -190,8 +190,14 @@ mixin ChatSyncMixin<T extends ConsumerStatefulWidget>
         }
       });
     } else {
-      // Pinned message no longer exists or isn't valid — clear it.
-      await conversationsRepo.updatePinnedMessage(conversationId, null);
+      // Body isn't in the local store yet — an old pin can predate this
+      // client's synced message window. Do NOT clear pinnedMsgId here: the
+      // server is authoritative for "unpinned" (it nulls the column on
+      // unpin/delete, and the chat-list sync now ships the full pinned-message
+      // body and reconciles the id). Clearing on a mere local-cache miss would
+      // destroy that server truth and permanently hide a recoverable pin.
+      // Render nothing this pass; the next chat-list sync inserts the body and
+      // a subsequent loadPinnedMessage resolves it.
       safeSetState(() => setPinnedMessage(null));
     }
   }

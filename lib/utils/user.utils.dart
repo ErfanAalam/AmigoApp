@@ -88,6 +88,25 @@ class UserUtils {
     }
   }
 
+  /// Prefer a saved device-contact name over a server/push-provided username.
+  /// Returns the local contact name when [userId] is a saved contact (with a
+  /// non-empty name), otherwise [fallback] — typically the username carried in
+  /// the push/WS payload. Used by notification builders so an arriving message
+  /// or call shows the name the user actually knows the sender by.
+  Future<String?> preferredContactName(String? userId, String? fallback) async {
+    if (userId == null || userId.isEmpty) return fallback;
+    try {
+      final user = await UserRepository().getUserById(userId);
+      final contactName = user?.contactName;
+      if (contactName != null && contactName.trim().isNotEmpty) {
+        return contactName;
+      }
+    } catch (e) {
+      debugPrint('❌ Error resolving contact name for $userId: $e');
+    }
+    return fallback;
+  }
+
   /// Enrich DMs with display names from local users table
   /// This ensures contact names (username) are preserved instead of server names
   Future<List<DmModel>> enrichDmsWithDisplayNames(List<DmModel> dmList) async {

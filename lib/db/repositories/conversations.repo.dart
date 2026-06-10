@@ -327,6 +327,26 @@ class ConversationRepository {
     );
   }
 
+  /// Reconcile the in-chat pinned-message id from an authoritative server
+  /// sync. insertConversations uses insertOrIgnore + a new-rows-only filter, so
+  /// an *existing* chat's pinnedMsgId is never refreshed there — a pin/unpin
+  /// that happened while this client was offline (or whose WS event was missed)
+  /// would otherwise never surface. Like updateUnreadCount, this deliberately
+  /// does NOT touch updatedAt: pinnedMsgId is the message pinned *inside* the
+  /// chat, unrelated to chat-list sort, and bumping updatedAt would reshuffle
+  /// the list on every sync.
+  Future<void> setPinnedMsgIdFromSync(
+    String conversationId,
+    String? pinnedMsgId,
+  ) async {
+    final db = sqliteDatabase.database;
+    await (db.update(
+      db.chats,
+    )..where((t) => t.id.equals(conversationId))).write(
+      ChatsCompanion(pinnedMsgId: Value(pinnedMsgId)),
+    );
+  }
+
   /// Mark conversation as read (set unread count to 0)
   Future<void> markAsRead(String conversationId) async {
     await updateUnreadCount(conversationId, 0);

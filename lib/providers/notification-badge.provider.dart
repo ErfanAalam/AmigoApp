@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'package:amigo/db/repositories/call.repo.dart';
 import 'package:amigo/db/repositories/conversations.repo.dart';
+import 'package:amigo/services/call/call-seen.store.dart';
 import 'package:amigo/types/socket.types.dart';
+import 'package:amigo/utils/user.utils.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -39,6 +41,7 @@ final notificationBadgeProvider =
 class NotificationBadgeNotifier extends Notifier<NotificationBadgeState> {
   final ConversationRepository _conversationsRepo = ConversationRepository();
   final CallRepository _callRepo = CallRepository();
+  final CallSeenStore _callSeenStore = CallSeenStore();
 
   Timer? _refreshTimer;
   StreamSubscription? _subscription;
@@ -67,12 +70,12 @@ class NotificationBadgeNotifier extends Notifier<NotificationBadgeState> {
     try {
       final chatCount = await _getUnreadChatCount();
       final groupCount = await _getUnreadGroupCount();
-      // final callCount = await _getUnseenMissedCallCount();
+      final callCount = await _getUnseenMissedCallCount();
 
       state = NotificationBadgeState(
         chatCount: chatCount,
         groupCount: groupCount,
-        // callCount: callCount,
+        callCount: callCount,
       );
     } catch (e) {
       // Silently handle errors
@@ -116,49 +119,51 @@ class NotificationBadgeNotifier extends Notifier<NotificationBadgeState> {
     }
   }
 
-  /// Get count of unseen missed calls
-  // Future<int> _getUnseenMissedCallCount() async {
-  //   try {
-  //     final currentUser = await UserUtils().getUserDetails();
-  //     final calls = await _callRepo.getAllCalls(currentUser?.id ?? 0);
-  //     final seenCallIds = await _callSeenService.getSeenCallIds();
-  //
-  //     return calls.where((call) {
-  //       return call.status == CallStatus.missed &&
-  //           !seenCallIds.contains(call.id);
-  //     }).length;
-  //   } catch (e) {
-  //     return 0;
-  //   }
-  // }
+  /// Get count of unseen missed calls — incoming missed calls in the local DB
+  /// (the single source of truth, incl. background/killed-app misses) whose IDs
+  /// aren't yet in the SharedPreferences-backed seen set.
+  Future<int> _getUnseenMissedCallCount() async {
+    try {
+      final currentUser = await UserUtils().getUserDetails();
+      final userId = currentUser?.id ?? '';
+      if (userId.isEmpty) return 0;
+
+      final missedIds = await _callRepo.getIncomingMissedCallIds(userId);
+      if (missedIds.isEmpty) return 0;
+
+      final seenCallIds = await _callSeenStore.getSeenCallIds();
+      return missedIds.where((id) => !seenCallIds.contains(id)).length;
+    } catch (e) {
+      return 0;
+    }
+  }
 
   /// Manually refresh counts (call this when needed)
   Future<void> refresh() async {
     await _refreshCounts();
   }
 
-  /// Mark calls as seen (call this when call screen is viewed)
-  // Future<void> markCallsAsSeen() async {
-  //   try {
-  //     final currentUser = await UserUtils().getUserDetails();
-  //
-  //     final calls = await _callRepo.getAllCalls(currentUser?.id ?? 0);
-  //     final missedCallIds = calls
-  //         .where((call) => call.status == CallStatus.missed)
-  //         .map((call) => call.id)
-  //         .toList();
-  //
-  //     if (missedCallIds.isNotEmpty) {
-  //       await _callSeenService.markCallsAsSeen(missedCallIds);
-  //       await _refreshCounts();
-  //     }
-  //   } catch (e) {
-  //     debugPrint('Error marking calls as seen: $e');
-  //   }
-  // }
+  /// Mark all current missed calls as seen — call this when the user views the
+  /// Calls tab. Persists the full set of current incoming-missed IDs (which both
+  /// acknowledges them and prunes stale entries), then refreshes the badge to 0.
+  Future<void> markCallsAsSeen() async {
+    try {
+      final currentUser = await UserUtils().getUserDetails();
+      final userId = currentUser?.id ?? '';
+      if (userId.isEmpty) return;
 
-  /// Clear all badge counts (used during logout)
+      final missedIds = await _callRepo.getIncomingMissedCallIds(userId);
+      await _callSeenStore.setSeenCallIds(missedIds.toSet());
+      await _refreshCounts();
+    } catch (e) {
+      debugPrint('Error marking calls as seen: $e');
+    }
+  }
+
+  /// Clear all badge counts (used during logout). Also drops the persisted
+  /// seen-set so the next user doesn't inherit this user's acknowledgements.
   void clearAllCounts() {
     state = const NotificationBadgeState();
+    unawaited(_callSeenStore.clear());
   }
 }

@@ -955,7 +955,10 @@ class CallService implements ICallBackend {
   /// Handle missed-call notification from server
   void _handleCallMissed(CallPayload payload) async {
     debugPrint('[CALL] Missed call from callerId=${payload.callerId}');
-    final callerName = payload.callerName ?? 'Unknown';
+    // Prefer the saved contact name over the server-provided username.
+    final callerName = await UserUtils()
+            .preferredContactName(payload.callerId, payload.callerName) ??
+        'Unknown';
     await NativeCallScreen.showMissedCallNotification(
       callId: payload.callId ?? '',
       callerName: callerName,
@@ -1587,11 +1590,17 @@ class CallService implements ICallBackend {
     final storageCallStatus = existingCallDetails?.callStatus;
     final storageCallId = existingCallDetails?.callId;
 
+    // Prefer the saved contact name over the server-provided username across
+    // every incoming-call surface (stored details, in-app UI, native screen).
+    final resolvedCallerName = await UserUtils()
+            .preferredContactName(payload.callerId, payload.callerName) ??
+        'Unknown';
+
     // Store call info in SharedPreferences for CallKit
     final callDetails = CallDetails(
       callId: payload.callId,
       callerId: payload.callerId,
-      callerName: payload.callerName ?? 'Unknown',
+      callerName: resolvedCallerName,
       callerProfilePic: payload.callerPfp,
       callStatus: 'ringing',
     );
@@ -1601,7 +1610,7 @@ class CallService implements ICallBackend {
     _activeCall = ActiveCallState(
       callId: payload.callId!,
       userId: payload.callerId,
-      userName: payload.callerName ?? 'Unknown',
+      userName: resolvedCallerName,
       userProfilePic: payload.callerPfp,
       callType: CallType.incoming,
       status: CallStatus.ringing,
@@ -1629,7 +1638,7 @@ class CallService implements ICallBackend {
     // Note: ringtone is handled by the CHANNEL_INCOMING notification channel on Android
     await NativeCallScreen.showIncomingCall(
       callId: payload.callId!,
-      callerName: payload.callerName ?? 'Unknown',
+      callerName: resolvedCallerName,
       callerPhoto: payload.callerPfp,
     );
 

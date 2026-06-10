@@ -512,9 +512,9 @@ class NotificationService {
     ChatMessagePayload chatPayload,
   ) async {
     // Look up sender name from local DB since ChatMessagePayload
-    // no longer carries senderName.
+    // no longer carries senderName. Prefer the saved contact name.
     final sender = await UserInfoCache.instance.getUser(chatPayload.senderId);
-    final senderName = sender?.name ?? chatPayload.senderId;
+    final senderName = sender?.displayName ?? chatPayload.senderId;
 
     // Show local notification for new message
     showMessageNotification(
@@ -737,11 +737,11 @@ class NotificationService {
       return;
     }
 
-    // Look up sender name from local DB
-    final senderUser = await UserInfoCache.instance.getUser(
-      chatPayload.senderId,
-    );
-    final senderName = senderUser?.name;
+    // Look up sender name from local DB. Use the repo (not the cache) so the
+    // contacts join is always applied and we prefer the saved contact name —
+    // the in-memory cache can hold member rows that were primed without it.
+    final senderUser = await UserRepository().getUserById(chatPayload.senderId);
+    final senderName = senderUser?.displayName;
 
     // 2. Resolve conversation title
     String conversationTitle;
@@ -784,8 +784,10 @@ class NotificationService {
     final nameCache = <String, String>{};
     Future<String> getSenderName(String senderId) async {
       if (nameCache.containsKey(senderId)) return nameCache[senderId]!;
-      final u = await UserInfoCache.instance.getUser(senderId);
-      final name = u?.name ?? 'Unknown';
+      // Prefer the saved contact name over the server username. Use the repo
+      // so the contacts join is applied (the cache may omit contactName).
+      final u = await userRepo.getUserById(senderId);
+      final name = u?.displayName ?? 'Unknown';
       nameCache[senderId] = name;
       return name;
     }
@@ -1000,11 +1002,12 @@ class NotificationService {
           final isGroup =
               cType == ChatType.group || cType == ChatType.communityGroup;
 
-          // Look up sender name from local DB
-          final latestSender = await UserInfoCache.instance.getUser(
+          // Look up sender name from local DB — prefer the saved contact name
+          // (repo applies the contacts join; the cache may omit it).
+          final latestSender = await UserRepository().getUserById(
             latest.senderId,
           );
-          final latestSenderName = latestSender?.name;
+          final latestSenderName = latestSender?.displayName;
 
           // Resolve conversation title
           String convTitle;

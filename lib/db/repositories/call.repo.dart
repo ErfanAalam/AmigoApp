@@ -452,6 +452,23 @@ class CallRepository {
     return getCallCountByStatus(userId, CallStatus.missed);
   }
 
+  /// Lightweight: IDs of *incoming* missed calls (calls where this user was the
+  /// callee). Skips the contact/user joins that [getCallsByStatus] does, so it's
+  /// cheap enough for the Calls-tab badge to poll. Outgoing calls that ended
+  /// while still ringing are also flagged `missed`, so we filter on calleeId to
+  /// count only calls the user actually missed.
+  Future<List<String>> getIncomingMissedCallIds(String userId) async {
+    final db = sqliteDatabase.database;
+    final rows = await (db.selectOnly(db.calls)
+          ..addColumns([db.calls.id])
+          ..where(
+            db.calls.calleeId.equals(userId) &
+                db.calls.status.equals(CallStatus.missed.value),
+          ))
+        .get();
+    return rows.map((r) => r.read(db.calls.id)).whereType<String>().toList();
+  }
+
   /// Delete a call
   Future<bool> deleteCall(String callId) async {
     final db = sqliteDatabase.database;

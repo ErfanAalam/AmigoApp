@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../api/api_service.dart';
 import '../../models/call.model.dart';
 import '../../providers/call.provider.dart';
+import '../../providers/notification-badge.provider.dart';
 import '../../providers/rejoinable-call.provider.dart';
 import '../../providers/theme-color.provider.dart';
 import '../../services/call/stream/stream_call.service.dart';
@@ -190,6 +191,14 @@ class CallsPageState extends ConsumerState<CallsPage>
       // If we have local data, silently fail the background update
     } finally {
       _isLoadingInProgress = false;
+      // The user is now viewing the call log, so acknowledge every current
+      // missed call — this clears the Calls-tab badge and persists the
+      // acknowledgement (seen IDs in SharedPreferences) across restarts.
+      if (mounted) {
+        unawaited(
+          ref.read(notificationBadgeProvider.notifier).markCallsAsSeen(),
+        );
+      }
     }
   }
 
