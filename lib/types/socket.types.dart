@@ -152,6 +152,10 @@ enum WSMessageType {
   callHold('call:hold'),
   callMissed('call:missed'),
   callError('call:error'),
+  // Tells the backend a Stream call reached CONNECTED so it can record the
+  // in-call pairing and self-open a rejoin window on a later socket drop
+  // (webhook-independent — see StreamCallService.markCallConnected).
+  callConnected('call:connected'),
   // Ghost-call recovery / rejoin window (see RejoinableCall feature):
   // G→backend "peer dropped, open 10s window"; backend→L "you can rejoin";
   // G→backend "window resolved"; backend→L "window closed, clear the dot".
@@ -659,6 +663,7 @@ class WSMessage {
       case WSMessageType.callHold:
       case WSMessageType.callMissed:
       case WSMessageType.callError:
+      case WSMessageType.callConnected:
       case WSMessageType.callRejoinOpen:
       case WSMessageType.callRejoinAvailable:
       case WSMessageType.callRejoinResolved:

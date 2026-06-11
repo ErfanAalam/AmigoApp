@@ -6,6 +6,7 @@ import 'package:stream_video_push_notification/stream_video_push_notification.da
 import 'package:uuid/uuid.dart';
 
 import '../../../env.dart';
+import '../../../utils/call.utils.dart';
 import '../../../utils/user.utils.dart';
 import '../../cookies.service.dart';
 import 'stream_call_logger.dart';
@@ -228,6 +229,22 @@ Future<void> handleStreamVideoBackgroundPush(RemoteMessage message) async {
     if (type != 'call.ring') {
       debugPrint('[STREAM-FCM]   non-ring type "$type" — ignoring');
       return;
+    }
+
+    // Seed the cold-start accept with the already-resolved caller name so the
+    // call screen shows the contact name from its first frame instead of
+    // flashing the SFU username while the DB lookup runs. Keyed by cid so a
+    // stale record can't seed the wrong call. (Separate from current_call_details.)
+    if (createdById != null && createdById.isNotEmpty) {
+      try {
+        await CallUtils().saveIncomingCallSeed(
+          cid: callCid,
+          callerId: createdById,
+          name: displayCallerName,
+        );
+      } catch (e) {
+        debugPrint('[STREAM-FCM]   saveIncomingCallSeed failed: $e');
+      }
     }
 
     // call.ring → show incoming-call notification. NO ws connect, NO

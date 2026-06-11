@@ -58,7 +58,34 @@ class CallerHint {
   final String? userId;
   final String? userName;
   final String? userProfilePic;
-  const CallerHint({this.userId, this.userName, this.userProfilePic});
+
+  /// Saved device-contact name for [userId], when the remote party is in the
+  /// user's address book. Authoritative over the SFU/server username — the
+  /// ringing/active screens and the ongoing-call notification show this when
+  /// present. Resolved asynchronously by [StreamCallService] before the screen
+  /// is pushed (see `_enrichCallerHintWithContact`).
+  final String? contactName;
+
+  const CallerHint({
+    this.userId,
+    this.userName,
+    this.userProfilePic,
+    this.contactName,
+  });
+
+  CallerHint copyWith({
+    String? userId,
+    String? userName,
+    String? userProfilePic,
+    String? contactName,
+  }) {
+    return CallerHint(
+      userId: userId ?? this.userId,
+      userName: userName ?? this.userName,
+      userProfilePic: userProfilePic ?? this.userProfilePic,
+      contactName: contactName ?? this.contactName,
+    );
+  }
 }
 
 class _CallerHintScope extends InheritedWidget {
@@ -207,6 +234,11 @@ class _StreamCallScreenState extends State<StreamCallScreen> {
       StreamCallScreen.isMountedNotifier.value = true;
     });
     StreamCallService().enableLockScreenFlags();
+    // Rebuild when the peer's saved-contact name resolves (it can land after
+    // this screen is already mounted on a cold-start accept) so the displayed
+    // name flips from the server username to the contact name.
+    _lastResolvedContactName = StreamCallService().peerContactName.value;
+    StreamCallService().peerContactName.addListener(_onPeerContactNameChanged);
 
     // Drive the call state machine ourselves. We deliberately do NOT use
     // `StreamCallContainer` because it auto-calls `call.join()` in initState
@@ -216,10 +248,23 @@ class _StreamCallScreenState extends State<StreamCallScreen> {
     _bindStateMachine();
   }
 
+  /// Last non-empty resolved contact name for this call. Sticky: once a contact
+  /// name has been displayed we never fall back to the username (e.g. when the
+  /// service clears peerContactName during the 2s call-end linger).
+  String? _lastResolvedContactName;
+
+  void _onPeerContactNameChanged() {
+    final v = StreamCallService().peerContactName.value;
+    if (v != null && v.isNotEmpty) _lastResolvedContactName = v;
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
     _stateSub?.cancel();
     _disconnectPopTimer?.cancel();
+    StreamCallService().peerContactName
+        .removeListener(_onPeerContactNameChanged);
     if (_pipArmed) {
       _floating?.cancelOnLeavePiP();
     }
@@ -335,8 +380,20 @@ class _StreamCallScreenState extends State<StreamCallScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Merge in the reactively-resolved saved-contact name so a late cold-start
+    // resolution updates this already-pushed screen, and keep it sticky so the
+    // name never reverts to the username once shown. When no contact name has
+    // resolved we pass the original hint through unchanged.
+    final base = widget.callerHint;
+    final live = StreamCallService().peerContactName.value;
+    final resolved = (live != null && live.isNotEmpty)
+        ? live
+        : (_lastResolvedContactName ?? base?.contactName);
+    final effectiveHint = resolved == null
+        ? base
+        : (base ?? const CallerHint()).copyWith(contactName: resolved);
     return _CallerHintScope(
-      hint: widget.callerHint,
+      hint: effectiveHint,
       child: WillPopScope(
         // Don't tear the call down on system-back; leave the screen but keep
         // the call running. The pill brings the screen back.
@@ -461,7 +518,10 @@ String? _remoteAvatar(CallState state) {
 /// the call's member list (populated as soon as the call is created), then a
 /// caller-provided fallback (e.g. "Calling Riya" → name from the chat row),
 /// before giving up with "Unknown".
-String _remoteName(CallState state, [String? fallback]) {
+String _remoteName(CallState state, [String? fallback, String? contactName]) {
+  // A saved device-contact name is authoritative — show it over the live
+  // SFU/server-provided username.
+  if (contactName != null && contactName.isNotEmpty) return contactName;
   for (final p in state.callParticipants) {
     if (p.userId != state.currentUserId) {
       if (p.name.isNotEmpty) return p.name;
@@ -506,7 +566,7 @@ class _RingingView extends StatelessWidget {
         final s = snap.data ?? call.state.value;
         final fallback = StreamCallScreen.fallbackOf(context);
         final avatarUrl = _remoteAvatar(s) ?? fallback?.userProfilePic;
-        final name = _remoteName(s, fallback?.userName);
+        final name = _remoteName(s, fallback?.userName, fallback?.contactName);
         final subtitle = mode == _RingingMode.incoming
             ? 'Incoming voice call'
             : 'Calling…';
@@ -1106,7 +1166,8 @@ class _ActiveCallViewState extends State<_ActiveCallView> {
         // ringing) so we never have to show "Unknown" while we wait for the
         // first participant join event.
         final fallback = StreamCallScreen.fallbackOf(context);
-        final remoteName = _remoteName(state, fallback?.userName);
+        final remoteName =
+            _remoteName(state, fallback?.userName, fallback?.contactName);
         final remoteAvatar = _remoteAvatar(state) ?? fallback?.userProfilePic;
 
         // PiP state comes from the Floating package's status stream — see

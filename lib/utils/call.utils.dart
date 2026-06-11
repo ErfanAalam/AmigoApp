@@ -57,6 +57,59 @@ class CallUtils {
     );
   }
 
+  // ── Incoming-call name seed ────────────────────────────────────────────
+  // A dedicated, collision-free record (separate from `current_call_details`,
+  // which main.dart and the WebRTC path also use) that bridges the FCM
+  // background isolate → the cold-started main isolate. The Stream FCM handler
+  // writes the caller id + already-resolved display name here when it shows the
+  // incoming-call notification; the cold-start accept reads it to seed the call
+  // screen's name BEFORE the first paint, so the contact name resolves up front
+  // instead of flickering in after the SFU/DB round-trip.
+  static const String _incomingCallSeedKey = 'incoming_call_name_seed';
+
+  Future<void> saveIncomingCallSeed({
+    required String cid,
+    required String callerId,
+    String? name,
+    String? profilePic,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _incomingCallSeedKey,
+      jsonEncode({
+        'cid': cid,
+        'callerId': callerId,
+        'name': name,
+        'profilePic': profilePic,
+      }),
+    );
+  }
+
+  /// Returns the seed only when it matches [cid] (guards against a stale record
+  /// from a previous call seeding the wrong name). Keys: callerId, name,
+  /// profilePic.
+  Future<Map<String, String?>?> getIncomingCallSeed(String cid) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_incomingCallSeedKey);
+    if (raw == null) return null;
+    try {
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      if (m['cid']?.toString() != cid) return null;
+      return {
+        'callerId': m['callerId']?.toString(),
+        'name': m['name']?.toString(),
+        'profilePic': m['profilePic']?.toString(),
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> clearIncomingCallSeed() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_incomingCallSeedKey);
+  }
+
   // Clear call details from shared preferences
   Future<void> clearCallDetails() async {
     final prefs = await SharedPreferences.getInstance();

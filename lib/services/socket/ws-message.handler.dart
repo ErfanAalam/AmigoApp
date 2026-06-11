@@ -490,6 +490,7 @@ class WebSocketMessageHandler {
           }
           break;
 
+        case WSMessageType.callConnected:
         case WSMessageType.callRejoinOpen:
         case WSMessageType.callRejoinResolved:
           // Outbound-only (this client sends these); never received here.

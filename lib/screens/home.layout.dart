@@ -10,8 +10,11 @@ import '../providers/chat.provider.dart';
 import '../providers/notification-badge.provider.dart';
 import '../providers/rejoinable-call.provider.dart';
 import '../providers/theme-color.provider.dart';
+import '../services/call/stream/stream_call.service.dart';
 import '../services/socket/ws-message.handler.dart';
+import '../ui/blurred-dialog.widget.dart';
 import '../ui/pulsing-dot.widget.dart';
+import '../ui/snackbar.dart';
 import '../utils/user.utils.dart';
 import 'call/call-logs.screen.dart';
 import 'chat/dm/dm-list.screen.dart';
@@ -67,33 +70,100 @@ class _MainScreenState extends ConsumerState<MainScreen>
     _loadUserDetails();
   }
 
+  // cid we've already shown the rejoin dialog for, so we don't re-prompt on
+  // every resume while the user is deciding / has declined.
+  String? _rejoinPromptedCid;
+
   /// Subscribe to the backend's rejoin-window WS signals and feed them into
   /// the provider; hydrate once now to catch a window opened while we were
-  /// away (e.g. killed app reopened within the 10s).
+  /// away (e.g. killed app reopened within the 30s).
   void _wireRejoinSignals() {
     final handler = WebSocketMessageHandler();
     _rejoinAvailableSub = handler.callRejoinAvailableStream.listen((p) {
-      final cid = p.callId;
-      final data = p.data;
-      if (cid == null || data is! Map) return;
-      final peerId = data['peer_id']?.toString();
-      final expiresAt = DateTime.tryParse(data['expires_at']?.toString() ?? '');
-      if (peerId == null || expiresAt == null) return;
-      final peerName = data['peer_name']?.toString();
-      ref.read(rejoinableCallProvider.notifier).set(RejoinableCall(
-            cid: cid,
-            peerId: peerId,
-            peerName:
-                (peerName != null && peerName.isNotEmpty) ? peerName : 'Unknown',
-            peerPfp: data['peer_pfp']?.toString(),
-            expiresAt: expiresAt,
-          ));
+      final w = _windowFromPayload(p);
+      if (w == null) return;
+      ref.read(rejoinableCallProvider.notifier).set(w);
+      _promptRejoin(w);
     });
     _rejoinExpiredSub = handler.callRejoinExpiredStream.listen((p) {
       ref.read(rejoinableCallProvider.notifier).clear(cid: p.callId);
+      // Window's gone — allow a fresh prompt if a new one opens later.
+      if (_rejoinPromptedCid == p.callId) _rejoinPromptedCid = null;
     });
     // Cover the missed-push / killed-app case.
-    ref.read(rejoinableCallProvider.notifier).hydrateFromBackend();
+    _hydrateAndMaybePrompt();
+  }
+
+  RejoinableCall? _windowFromPayload(dynamic p) {
+    final cid = p.callId;
+    final data = p.data;
+    if (cid == null || data is! Map) return null;
+    final peerId = data['peer_id']?.toString();
+    final expiresAt = DateTime.tryParse(data['expires_at']?.toString() ?? '');
+    if (peerId == null || expiresAt == null) return null;
+    final peerName = data['peer_name']?.toString();
+    return RejoinableCall(
+      cid: cid,
+      peerId: peerId,
+      peerName: (peerName != null && peerName.isNotEmpty) ? peerName : 'Unknown',
+      peerPfp: data['peer_pfp']?.toString(),
+      expiresAt: expiresAt,
+    );
+  }
+
+  /// Hydrate the rejoin window from the backend (covers cold-start / killed
+  /// app), then prompt if there's a live one.
+  Future<void> _hydrateAndMaybePrompt() async {
+    await ref.read(rejoinableCallProvider.notifier).hydrateFromBackend();
+    final w = ref.read(rejoinableCallProvider);
+    if (w != null) _promptRejoin(w);
+  }
+
+  /// The local user (L) has a call they dropped from that the peer (G) is still
+  /// holding open. Decide what to do:
+  ///  • If we're STILL in that Stream call (a brief WS blip, not a real drop) →
+  ///    just tell the backend we're back; no dialog, no dot.
+  ///  • Otherwise → ask via the blurred confirm dialog. Rejoin → join + screen.
+  ///    Not now → keep the pulsing dot in Call Logs + navbar so the user can
+  ///    change their mind while the peer is still waiting.
+  Future<void> _promptRejoin(RejoinableCall w) async {
+    if (_rejoinPromptedCid == w.cid) return; // already handled this window
+    _rejoinPromptedCid = w.cid;
+
+    final svc = StreamCallService();
+    if (svc.isActivelyInCall(w.cid)) {
+      svc.notifyStillConnected(w.cid);
+      ref.read(rejoinableCallProvider.notifier).clear(cid: w.cid);
+      return;
+    }
+
+    // Don't auto-surface the call screen while the user decides.
+    svc.markAwaitingRejoinDecision(w.cid);
+    if (!mounted) return;
+    final yes = await showBlurredConfirm(
+      context: context,
+      title: 'Rejoin call?',
+      message: '${w.peerName} is still waiting for you. Rejoin the call?',
+      confirmLabel: 'Rejoin',
+      cancelLabel: 'Not now',
+      confirmIcon: Icons.call,
+    );
+    if (yes == true) {
+      final ok = await svc.rejoinCall(
+        w.cid,
+        peerId: w.peerId,
+        peerName: w.peerName,
+        peerPfp: w.peerPfp,
+      );
+      ref.read(rejoinableCallProvider.notifier).clear(cid: w.cid);
+      if (!ok && mounted) {
+        Snack.error('Call already ended');
+      }
+    } else {
+      // Declined for now — stop suppressing the (non-existent) auto-push and
+      // leave the dot up so they can rejoin from Call Logs.
+      svc.clearAwaitingRejoinDecision(w.cid);
+    }
   }
 
   @override
@@ -102,7 +172,7 @@ class _MainScreenState extends ConsumerState<MainScreen>
     if (state == AppLifecycleState.resumed) {
       // Re-hydrate on resume: a rejoin window may have opened (or closed)
       // while we were backgrounded and the live WS push could have been missed.
-      ref.read(rejoinableCallProvider.notifier).hydrateFromBackend();
+      _hydrateAndMaybePrompt();
     }
   }
 
